@@ -1,6 +1,20 @@
-import { DOCK_OFFSET, Sim, SHIP_RADIUS, STATION_HALF, type SimEvent } from "./sim";
+import type { DronePilot } from "./pilot";
+import {
+  DOCK_OFFSET,
+  Sim,
+  SHIP_RADIUS,
+  STATION_HALF,
+  type PoiReading,
+  type Ship,
+  type SimEvent,
+} from "./sim";
 
 const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
+const DRONE_COLOR = [180, 200, 120];
+/** The hollow marker shows the distance this many seconds ahead at the current closing speed. */
+const MARKER_LOOK_SECONDS = 3;
+const MARKER_SCALE = 14;
+const MARKER_MAX_OFFSET = 90;
 
 interface Particle {
   x: number;
@@ -61,11 +75,11 @@ export class Renderer {
           break;
         case "impact":
           this.burst(event.x, event.y, 10, "#ff7a5c", 200, 0.4, 2);
-          this.flash = Math.min(0.5, this.flash + event.damage / 50);
+          if (event.player) this.flash = Math.min(0.5, this.flash + event.damage / 50);
           break;
         case "wreck":
           this.burst(event.x, event.y, 50, "#ffb36b", 320, 1, 3);
-          this.flash = 0.7;
+          if (event.player) this.flash = 0.7;
           break;
         case "shot":
           break;
@@ -133,10 +147,11 @@ export class Renderer {
     this.drawOres(sim, alpha, visible);
     this.drawShots(sim, alpha);
     this.updateParticles(frameSeconds);
-    this.drawShip(sim, shipX, shipY, alpha);
+    for (const drone of sim.drones) this.drawDrone(sim, drone, alpha);
+    this.drawShip(ship, shipX, shipY, alpha, [200, 215, 235]);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.drawPointers(sim, alpha, shipX, shipY, width, height, scale, dpr);
+    this.drawPointers(sim, width, height, scale, dpr);
     if (this.flash > 0) {
       ctx.fillStyle = `rgba(255, 70, 50, ${this.flash * 0.35})`;
       ctx.fillRect(0, 0, width, height);
@@ -163,8 +178,12 @@ export class Renderer {
     const y = lerp(station.py, station.y, alpha);
     const size = STATION_HALF * 2;
 
-    const dockX = x + DOCK_OFFSET - STATION_HALF;
-    const dockY = y - STATION_HALF;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(lerp(station.prevRotation, station.rotation, alpha));
+
+    const dockX = DOCK_OFFSET - STATION_HALF;
+    const dockY = -STATION_HALF;
     ctx.fillStyle = sim.isDocked() ? "rgba(143, 227, 161, 0.2)" : "rgba(143, 227, 161, 0.07)";
     ctx.fillRect(dockX, dockY, size, size);
     ctx.strokeStyle = "#8fe3a1";
@@ -174,10 +193,11 @@ export class Renderer {
     ctx.setLineDash([]);
 
     ctx.fillStyle = "#6b7280";
-    ctx.fillRect(x - STATION_HALF, y - STATION_HALF, size, size);
+    ctx.fillRect(-STATION_HALF, -STATION_HALF, size, size);
     ctx.strokeStyle = "#aab1bd";
     ctx.lineWidth = 3;
-    ctx.strokeRect(x - STATION_HALF, y - STATION_HALF, size, size);
+    ctx.strokeRect(-STATION_HALF, -STATION_HALF, size, size);
+    ctx.restore();
   }
 
   private drawRocks(
@@ -254,9 +274,26 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
-  private drawShip(sim: Sim, x: number, y: number, alpha: number): void {
+  private drawDrone(sim: Sim, drone: DronePilot, alpha: number): void {
     const { ctx } = this;
-    const { ship } = sim;
+    const { ship } = drone;
+    const x = lerp(ship.px, ship.x, alpha);
+    const y = lerp(ship.py, ship.y, alpha);
+    this.drawShip(ship, x, y, alpha, DRONE_COLOR);
+    ctx.fillStyle = "#f2c572";
+    ctx.font = "14px Consolas, monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(`${drone.task} ${ship.ore}/${sim.tuning.droneCargo}`, x, y + SHIP_RADIUS + 22);
+  }
+
+  private drawShip(
+    ship: Ship,
+    x: number,
+    y: number,
+    alpha: number,
+    [red, green, blue]: number[],
+  ): void {
+    const { ctx } = this;
     const angle = lerp(ship.prevAngle, ship.angle, alpha);
 
     // Direction of travel, since with inertia it often differs from the nose.
@@ -292,7 +329,7 @@ export class Renderer {
     }
 
     const damage = 1 - ship.hull / 100;
-    ctx.fillStyle = `rgb(${200 + damage * 55}, ${215 - damage * 120}, ${235 - damage * 150})`;
+    ctx.fillStyle = `rgb(${red + damage * 55}, ${green - damage * 120}, ${blue - damage * 150})`;
     ctx.beginPath();
     ctx.moveTo(SHIP_RADIUS * 1.25, 0);
     ctx.lineTo(-SHIP_RADIUS, -SHIP_RADIUS * 0.8);
@@ -318,66 +355,83 @@ export class Renderer {
     ctx.fill();
   }
 
-  /** Arrows to the field when outside it, and to the station when it's off screen. */
-  private drawPointers(
-    sim: Sim,
-    alpha: number,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    scale: number,
-    dpr: number,
-  ): void {
-    const fieldDist = Math.hypot(x, y);
-    if (fieldDist > sim.tuning.fieldRadius) {
-      const label = `field ${Math.round(fieldDist - sim.tuning.fieldRadius)}`;
-      this.drawPointer(-x, -y, "#8fb4ff", label, 0.38, width, height, dpr);
+  /** A marker for each POI, until it comes into view. */
+  private drawPointers(sim: Sim, width: number, height: number, scale: number, dpr: number): void {
+    const viewHalfWidth = width / 2 / scale;
+    const viewHalfHeight = height / 2 / scale;
+    const field = sim.readPoi(sim.field, viewHalfWidth, viewHalfHeight);
+    if (field.distance > 0) this.drawPointer(field, "#8fb4ff", "field", 0.34, width, height, dpr);
+    const station = sim.readPoi(sim.station, viewHalfWidth, viewHalfHeight);
+    if (station.distance > 0) {
+      this.drawPointer(station, "#8fe3a1", "station", 0.22, width, height, dpr);
     }
-
-    const { station } = sim;
-    const dx = lerp(station.px, station.x, alpha) - x;
-    const dy = lerp(station.py, station.y, alpha) - y;
-    const onScreen =
-      (Math.abs(dx) - STATION_HALF) * scale < width / 2 &&
-      (Math.abs(dy) - STATION_HALF) * scale < height / 2;
-    if (!onScreen) {
-      const label = `station ${Math.round(Math.hypot(dx, dy))}`;
-      this.drawPointer(dx, dy, "#8fe3a1", label, 0.28, width, height, dpr);
+    for (const drone of sim.drones) {
+      const reading = sim.readShip(drone.ship, viewHalfWidth, viewHalfHeight);
+      if (reading.distance > 0) {
+        this.drawPointer(reading, "#f2c572", "drone", 0.28, width, height, dpr);
+      }
     }
   }
 
+  /**
+   * Past the arrow's tip, the solid marker sits further out the greater the
+   * distance, and reaches the tip as the POI comes into view. The hollow marker is the distance
+   * a few seconds ahead: inside the solid one when closing, outside when not.
+   */
   private drawPointer(
-    dx: number,
-    dy: number,
+    reading: PoiReading,
     color: string,
-    label: string,
+    name: string,
     ring: number,
     width: number,
     height: number,
     dpr: number,
   ): void {
     const { ctx } = this;
-    const dir = Math.atan2(dy, dx);
+    const dir = Math.atan2(reading.dy, reading.dx);
     const radius = Math.min(width, height) * ring;
+    const tip = 14 * dpr;
+    const offset = (distance: number) =>
+      Math.min(MARKER_MAX_OFFSET, MARKER_SCALE * Math.log1p(distance / 100)) * dpr;
+    const ahead = Math.max(0, reading.distance - reading.closing * MARKER_LOOK_SECONDS);
+
     ctx.save();
     ctx.translate(width / 2 + Math.cos(dir) * radius, height / 2 + Math.sin(dir) * radius);
     ctx.rotate(dir);
     ctx.fillStyle = color;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5 * dpr;
     ctx.beginPath();
-    ctx.moveTo(14 * dpr, 0);
+    ctx.moveTo(tip, 0);
     ctx.lineTo(-8 * dpr, -9 * dpr);
     ctx.lineTo(-8 * dpr, 9 * dpr);
     ctx.closePath();
     ctx.fill();
+
+    this.tracePointerMark(tip + offset(reading.distance), dpr);
+    ctx.fill();
+    this.tracePointerMark(tip + offset(ahead), dpr);
+    ctx.stroke();
     ctx.restore();
+
+    const speed = Math.round(Math.abs(reading.closing));
+    const trend = speed === 0 ? "" : ` ${reading.closing > 0 ? "\u2193" : "\u2191"}${speed}`;
     ctx.fillStyle = color;
     ctx.font = `${12 * dpr}px Consolas, monospace`;
     ctx.textAlign = "center";
     ctx.fillText(
-      label,
+      `${name} ${Math.round(reading.distance)}${trend}`,
       width / 2 + Math.cos(dir) * (radius - 52 * dpr),
       height / 2 + Math.sin(dir) * (radius - 52 * dpr),
     );
+  }
+
+  private tracePointerMark(x: number, dpr: number): void {
+    const { ctx } = this;
+    ctx.beginPath();
+    ctx.moveTo(x + 6 * dpr, 0);
+    ctx.lineTo(x - 3 * dpr, -5 * dpr);
+    ctx.lineTo(x - 3 * dpr, 5 * dpr);
+    ctx.closePath();
   }
 }

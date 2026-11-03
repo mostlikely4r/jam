@@ -5,6 +5,8 @@ import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
 const STORAGE_KEY = "flight-test-tuning";
 const MAX_FRAME_SECONDS = 0.1;
+/** Beyond this, other ships' work can't be heard. */
+const HEARING_DISTANCE = 1500;
 
 function loadTuning(): Tuning {
   try {
@@ -193,7 +195,11 @@ function frame(now: number): void {
   }
 
   renderer.addEvents(sim.events);
-  audio.play(sim.events);
+  audio.play(
+    sim.events.filter(
+      (event) => Math.hypot(event.x - sim.ship.x, event.y - sim.ship.y) < HEARING_DISTANCE,
+    ),
+  );
   sim.events.length = 0;
   audio.setThrust(!paused && sim.ship.firing.size > 0);
   renderer.draw(sim, paused ? 1 : accumulator / TICK, paused ? 0 : seconds);
@@ -207,9 +213,16 @@ function frame(now: number): void {
       `Speed ${Math.round(speed)}  (top ${Math.round(sim.stats.topSpeed)})`,
       `Spin  ${Math.round((sim.ship.spin * 180) / Math.PI)} deg/s  Retro ${tuning.retro ? "ON" : "off"}`,
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
-      `Ore   ${sim.stats.ore}  (best ${sim.stats.bestOre})  Credits ${sim.stats.credits}`,
-      `Station rel speed ${Math.round(Math.hypot(sim.ship.vx - sim.station.vx, sim.ship.vy - sim.station.vy))}${sim.isDocked() ? "  DOCKED" : ""}`,
+      `Ore   ${sim.ship.ore}  (best ${sim.stats.bestOre})  Credits ${sim.stats.credits}`,
+      `Moving relative to ${sim.ship.frame.name}${sim.isDocked() ? "  DOCKED" : ""}`,
       `Rocks ${sim.rocks.length}  Wrecks ${sim.stats.wrecks}`,
+      ...sim.drones.map((drone) => {
+        const hull = Math.round((drone.ship.hull / MAX_HULL) * 100);
+        return `Drone ${drone.task} ${drone.ship.ore}/${tuning.droneCargo}  Hull ${hull}%`;
+      }),
+      ...(sim.drones.length > 0
+        ? [`Drone trips ${sim.stats.droneTrips}  Wrecks ${sim.stats.droneWrecks}`]
+        : []),
       `FPS   ${Math.round(fps)}${paused ? "  PAUSED" : ""}`,
     ].join("\n");
   }

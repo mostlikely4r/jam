@@ -1,3 +1,4 @@
+import { DronePilot } from "./pilot";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
 export const TICK = 1 / 120;
@@ -10,7 +11,19 @@ const ORE_KINDS = 3;
 export const STATION_HALF = 150;
 /** The dock box sits directly beside the solid box. */
 export const DOCK_OFFSET = STATION_HALF * 2;
+/** Far enough from the station's center to clear both boxes at any rotation. */
+export const STATION_REACH = 450;
+/** The station and dock together, along the station's own x axis. */
+const STATION_SHAPE_CENTER = DOCK_OFFSET / 2;
+const STATION_SHAPE_HALF = STATION_HALF + DOCK_OFFSET / 2;
+const STILL = { vx: 0, vy: 0 };
 const UNLOAD_SECONDS = 0.1;
+/** The bare minimum: one engine, turning, and a gun. */
+const DRONE_THRUSTERS: ReadonlySet<ThrusterId> = new Set<ThrusterId>([
+  "thrusterMain",
+  "thrusterRotateLeft",
+  "thrusterRotateRight",
+]);
 
 export interface Controls {
   /** -1 (reverse) to 1 (forward). */
@@ -25,6 +38,7 @@ export interface Controls {
 interface Body {
   x: number;
   y: number;
+  /** Velocity relative to the nearest POI, which also carries the body along. */
   vx: number;
   vy: number;
   /** Position at the previous tick, for render interpolation. */
@@ -33,6 +47,13 @@ interface Body {
 }
 
 export interface Ship extends Body {
+  controls: Controls;
+  /** Null for the player, whose fit comes from the tuning panel. */
+  fit: ReadonlySet<ThrusterId> | null;
+  /** The POI this ship currently moves relative to. */
+  frame: Poi;
+  ore: number;
+  unloadTimer: number;
   angle: number;
   prevAngle: number;
   spin: number;
@@ -53,9 +74,32 @@ export interface Rock extends Body {
   shape: number[];
 }
 
-export interface Station extends Body {
+/** A point of interest: it orbits on a fixed path, spins, and carries nearby objects. */
+export interface Poi {
+  name: "field" | "station";
+  parent: Poi | null;
+  x: number;
+  y: number;
+  px: number;
+  py: number;
   orbitAngle: number;
   orbitRadius: number;
+  rotation: number;
+  prevRotation: number;
+  /** Size used when working out which POI is nearest. */
+  reach: number;
+  /** Rotation made on the current tick. */
+  turn: number;
+}
+
+export interface PoiReading {
+  /** Direction from the ship to the marker's target. */
+  dx: number;
+  dy: number;
+  /** How far until the POI comes into view. Zero when it's in view. */
+  distance: number;
+  /** Positive when the distance is shrinking. */
+  closing: number;
 }
 
 export interface Shot extends Body {
@@ -72,15 +116,16 @@ export type SimEvent =
   | { type: "break"; x: number; y: number; radius: number }
   | { type: "pickup"; x: number; y: number; kind: number }
   | { type: "sale"; x: number; y: number }
-  | { type: "impact"; x: number; y: number; damage: number }
-  | { type: "wreck"; x: number; y: number };
+  | { type: "impact"; x: number; y: number; damage: number; player: boolean }
+  | { type: "wreck"; x: number; y: number; player: boolean };
 
 export interface Stats {
-  ore: number;
   bestOre: number;
   credits: number;
   wrecks: number;
   topSpeed: number;
+  droneWrecks: number;
+  droneTrips: number;
 }
 
 /** Small seeded generator, so a given seed always builds the same field. */
@@ -174,14 +219,16 @@ export class Sim {
   tuning: Tuning;
   controls: Controls = { thrust: 0, strafe: 0, turn: 0, fire: false };
   ship!: Ship;
+  /** Other ships, flying by the same rules as the player's. */
+  drones: DronePilot[] = [];
   rocks: Rock[] = [];
   shots: Shot[] = [];
   ores: Ore[] = [];
-  station!: Station;
+  field!: Poi;
+  station!: Poi;
   events: SimEvent[] = [];
-  stats: Stats = { ore: 0, bestOre: 0, credits: 0, wrecks: 0, topSpeed: 0 };
+  stats: Stats = { bestOre: 0, credits: 0, wrecks: 0, topSpeed: 0, droneWrecks: 0, droneTrips: 0 };
   private random: () => number = Math.random;
-  private unloadTimer = 0;
 
   constructor(seed = 1, tuning: Tuning = { ...DEFAULTS }) {
     this.tuning = tuning;
@@ -194,16 +241,29 @@ export class Sim {
     this.shots = [];
     this.ores = [];
     this.events = [];
-    this.stats = { ore: 0, bestOre: this.stats.bestOre, credits: 0, wrecks: 0, topSpeed: 0 };
-    this.unloadTimer = 0;
-    this.placeStation();
-    this.placeShip();
+    this.stats = {
+      bestOre: this.stats.bestOre,
+      credits: 0,
+      wrecks: 0,
+      topSpeed: 0,
+      droneWrecks: 0,
+      droneTrips: 0,
+    };
+    this.placePois();
+    this.ship = this.makeShip(this.startX(), this.field.y, this.controls, null);
+    this.drones = [];
+    for (let i = 0; i < this.tuning.droneCount; i++) {
+      const y = this.field.y + (i + 1) * 70 * (i % 2 === 0 ? 1 : -1);
+      const controls = { thrust: 0, strafe: 0, turn: 0, fire: false };
+      const ship = this.makeShip(this.startX(), y, controls, DRONE_THRUSTERS);
+      this.drones.push(new DronePilot(ship));
+    }
     const clear = 260;
     for (let i = 0; i < this.tuning.rockCount; i++) {
       const dist = this.tuning.fieldRadius * Math.sqrt(this.random());
       const dir = this.random() * Math.PI * 2;
-      const x = Math.cos(dir) * dist;
-      const y = Math.sin(dir) * dist;
+      const x = this.field.x + Math.cos(dir) * dist;
+      const y = this.field.y + Math.sin(dir) * dist;
       if (Math.hypot(x - this.ship.x, y - this.ship.y) < clear) continue;
       const roll = this.random();
       const tier = roll < 0.3 ? 2 : roll < 0.7 ? 1 : 0;
@@ -215,31 +275,102 @@ export class Sim {
     }
   }
 
-  private placeStation(): void {
-    const orbitRadius = this.tuning.fieldRadius + this.tuning.stationDistance;
+  private placePois(): void {
+    const { tuning } = this;
+    this.field = this.makePoi("field", null, tuning.fieldOrbitRadius, 0, tuning.fieldRadius);
     // Starts behind the ship's starting point, on the far side from the rocks.
-    const orbitAngle = Math.PI;
-    const x = Math.cos(orbitAngle) * orbitRadius;
-    const y = Math.sin(orbitAngle) * orbitRadius;
-    this.station = { x, y, px: x, py: y, vx: 0, vy: 0, orbitAngle, orbitRadius };
-    this.moveStation(0);
+    this.station = this.makePoi(
+      "station",
+      this.field,
+      tuning.fieldRadius + tuning.stationDistance,
+      Math.PI,
+      STATION_REACH,
+    );
   }
 
-  private placeShip(): void {
-    const x = -this.tuning.fieldRadius - 200;
-    this.ship = {
+  private makePoi(
+    name: Poi["name"],
+    parent: Poi | null,
+    orbitRadius: number,
+    orbitAngle: number,
+    reach: number,
+  ): Poi {
+    const x = (parent?.x ?? 0) + Math.cos(orbitAngle) * orbitRadius;
+    const y = (parent?.y ?? 0) + Math.sin(orbitAngle) * orbitRadius;
+    return {
+      name,
+      parent,
       x,
-      y: 0,
+      y,
       px: x,
-      py: 0,
+      py: y,
+      orbitAngle,
+      orbitRadius,
+      rotation: 0,
+      prevRotation: 0,
+      reach,
+      turn: 0,
+    };
+  }
+
+  private startX(): number {
+    return this.field.x - this.tuning.fieldRadius - 200;
+  }
+
+  private makeShip(
+    x: number,
+    y: number,
+    controls: Controls,
+    fit: ReadonlySet<ThrusterId> | null,
+  ): Ship {
+    return {
+      x,
+      y,
+      px: x,
+      py: y,
       vx: 0,
       vy: 0,
+      controls,
+      fit,
+      frame: this.field,
+      ore: 0,
+      unloadTimer: 0,
       angle: 0,
       prevAngle: 0,
       spin: 0,
       hull: MAX_HULL,
       cooldown: 0,
       firing: new Set(),
+    };
+  }
+
+  /** The player restarts by the field. A drone restarts in the dock, where it would be rebuilt. */
+  private respawn(ship: Ship): void {
+    const dock = this.dockPoint();
+    const isPlayer = ship === this.ship;
+    ship.x = isPlayer ? this.startX() : dock.x;
+    ship.y = isPlayer ? this.field.y : dock.y;
+    ship.px = ship.x;
+    ship.py = ship.y;
+    ship.vx = 0;
+    ship.vy = 0;
+    ship.angle = 0;
+    ship.prevAngle = 0;
+    ship.spin = 0;
+    ship.hull = MAX_HULL;
+    ship.cooldown = 0;
+    ship.ore = 0;
+    ship.unloadTimer = 0;
+    ship.firing.clear();
+  }
+
+  /** Center of the dock, now or as of the previous tick. */
+  dockPoint(previous = false): { x: number; y: number } {
+    const { station } = this;
+    const rotation = previous ? station.prevRotation : station.rotation;
+    return {
+      x: (previous ? station.px : station.x) + Math.cos(rotation) * DOCK_OFFSET,
+      y: (previous ? station.py : station.y) + Math.sin(rotation) * DOCK_OFFSET,
     };
   }
 
@@ -269,46 +400,166 @@ export class Sim {
   /** Advance one fixed tick. Display rate and time speedup never change its size. */
   step(): void {
     const dt = TICK;
-    this.moveStation(dt);
+    for (const drone of this.drones) drone.update(this);
+    this.movePois(dt);
+    this.carryBodies();
     this.moveRocks(dt);
     this.moveOres(dt);
-    this.moveShip(dt);
+    this.moveShip(this.ship, dt);
+    for (const drone of this.drones) this.moveShip(drone.ship, dt);
     this.moveShots(dt);
-    this.fireShots(dt);
-    this.collectOre();
-    this.unloadOre(dt);
+    this.fireShots(this.ship);
+    this.collectOre(this.ship);
+    this.unloadOre(this.ship, dt);
+    for (const drone of this.drones) {
+      this.fireShots(drone.ship);
+      this.collectOre(drone.ship);
+      this.unloadOre(drone.ship, dt);
+    }
   }
 
-  /** The station follows a fixed circular path around the field's center. */
-  private moveStation(dt: number): void {
-    const { station, tuning } = this;
-    const angularSpeed = (Math.PI * 2) / tuning.orbitPeriod;
-    station.orbitAngle += angularSpeed * dt;
-    station.px = station.x;
-    station.py = station.y;
-    station.x = Math.cos(station.orbitAngle) * station.orbitRadius;
-    station.y = Math.sin(station.orbitAngle) * station.orbitRadius;
-    station.vx = -Math.sin(station.orbitAngle) * station.orbitRadius * angularSpeed;
-    station.vy = Math.cos(station.orbitAngle) * station.orbitRadius * angularSpeed;
+  /** Each POI follows a fixed circle around its parent, or the system's center. */
+  private movePois(dt: number): void {
+    const { tuning, field, station } = this;
+    this.movePoi(field, tuning.fieldOrbitPeriod, tuning.fieldRotationPeriod, dt);
+    this.movePoi(station, tuning.orbitPeriod, tuning.stationRotationPeriod, dt);
   }
 
-  isDocked(): boolean {
-    const { ship, station } = this;
-    return (
-      Math.abs(ship.x - (station.x + DOCK_OFFSET)) < STATION_HALF &&
-      Math.abs(ship.y - station.y) < STATION_HALF
-    );
+  private movePoi(poi: Poi, orbitPeriod: number, rotationPeriod: number, dt: number): void {
+    const rate = (period: number) => (period > 0 ? (Math.PI * 2) / period : 0);
+    poi.px = poi.x;
+    poi.py = poi.y;
+    poi.prevRotation = poi.rotation;
+    poi.orbitAngle += rate(orbitPeriod) * dt;
+    poi.turn = rate(rotationPeriod) * dt;
+    poi.rotation += poi.turn;
+    poi.x = (poi.parent?.x ?? 0) + Math.cos(poi.orbitAngle) * poi.orbitRadius;
+    poi.y = (poi.parent?.y ?? 0) + Math.sin(poi.orbitAngle) * poi.orbitRadius;
+  }
+
+  /** Nearest by distance from each POI's edge, so a large field claims more space. */
+  nearestPoi(x: number, y: number): Poi {
+    const { field, station } = this;
+    const toField = Math.hypot(x - field.px, y - field.py) - field.reach;
+    const toStation = Math.hypot(x - station.px, y - station.py) - station.reach;
+    return toStation < toField ? station : field;
+  }
+
+  /**
+   * Moves everything rigidly with its nearest POI. Velocities stay relative to
+   * that POI, so crossing to another POI's zone keeps the ship's relative speed.
+   */
+  private carryBodies(): void {
+    this.carryShip(this.ship);
+    for (const drone of this.drones) this.carryShip(drone.ship);
+    for (const rock of this.rocks) {
+      const frame = this.carry(rock);
+      rock.prevAngle = rock.angle;
+      rock.angle += frame.turn;
+    }
+    for (const ore of this.ores) this.carry(ore);
+    for (const shot of this.shots) this.carry(shot);
+  }
+
+  private carryShip(ship: Ship): void {
+    ship.frame = this.carry(ship);
+    ship.prevAngle = ship.angle;
+    ship.angle += ship.frame.turn;
+  }
+
+  private carry(body: Body): Poi {
+    const poi = this.nearestPoi(body.x, body.y);
+    const cos = Math.cos(poi.turn);
+    const sin = Math.sin(poi.turn);
+    const dx = body.x - poi.px;
+    const dy = body.y - poi.py;
+    body.px = body.x;
+    body.py = body.y;
+    body.x = poi.x + dx * cos - dy * sin;
+    body.y = poi.y + dx * sin + dy * cos;
+    const { vx, vy } = body;
+    body.vx = vx * cos - vy * sin;
+    body.vy = vx * sin + vy * cos;
+    return poi;
+  }
+
+  /**
+   * Where a POI's marker should lead, how far until the POI's edge enters a view of
+   * the given half size in world units, and how fast that distance is closing.
+   * Closing speed comes from real positions, so it includes all carrying by POIs.
+   */
+  readPoi(poi: Poi, viewHalfWidth: number, viewHalfHeight: number): PoiReading {
+    const { ship, station, tuning } = this;
+    const gapToView = (shipX: number, shipY: number, x: number, y: number, rotation: number) => {
+      const cos = Math.cos(rotation);
+      const sin = Math.sin(rotation);
+      // The field is a circle. The station and its dock are a box, measured by its current extents.
+      const isStation = poi === station;
+      const centerX = isStation ? x + cos * STATION_SHAPE_CENTER : x;
+      const centerY = isStation ? y + sin * STATION_SHAPE_CENTER : y;
+      const extentX = isStation ? Math.abs(cos) * STATION_SHAPE_HALF + Math.abs(sin) * STATION_HALF : 0;
+      const extentY = isStation ? Math.abs(sin) * STATION_SHAPE_HALF + Math.abs(cos) * STATION_HALF : 0;
+      const radius = isStation ? 0 : tuning.fieldRadius;
+      const viewX = shipX + ship.vx * tuning.lookahead;
+      const viewY = shipY + ship.vy * tuning.lookahead;
+      const outX = Math.max(0, Math.abs(centerX - viewX) - viewHalfWidth - extentX);
+      const outY = Math.max(0, Math.abs(centerY - viewY) - viewHalfHeight - extentY);
+      return Math.hypot(outX, outY) - radius;
+    };
+    const gap = gapToView(ship.x, ship.y, poi.x, poi.y, poi.rotation);
+    const previousGap = gapToView(ship.px, ship.py, poi.px, poi.py, poi.prevRotation);
+    const leadX = poi === station ? Math.cos(poi.rotation) * DOCK_OFFSET : 0;
+    const leadY = poi === station ? Math.sin(poi.rotation) * DOCK_OFFSET : 0;
+    return {
+      dx: poi.x + leadX - ship.x,
+      dy: poi.y + leadY - ship.y,
+      distance: Math.max(0, gap),
+      closing: (previousGap - gap) / TICK,
+    };
+  }
+
+  /** Direction to another ship, how far until it comes into view, and how fast that's closing. */
+  readShip(other: Ship, viewHalfWidth: number, viewHalfHeight: number): PoiReading {
+    const { ship, tuning } = this;
+    const gapToView = (fromX: number, fromY: number, x: number, y: number) =>
+      Math.hypot(
+        Math.max(0, Math.abs(x - fromX - ship.vx * tuning.lookahead) - viewHalfWidth),
+        Math.max(0, Math.abs(y - fromY - ship.vy * tuning.lookahead) - viewHalfHeight),
+      );
+    const gap = gapToView(ship.x, ship.y, other.x, other.y);
+    return {
+      dx: other.x - ship.x,
+      dy: other.y - ship.y,
+      distance: gap,
+      closing: (gapToView(ship.px, ship.py, other.px, other.py) - gap) / TICK,
+    };
+  }
+
+  /** Converts a world position's offset from the station into the station's own axes. */
+  private toStationAxes(dx: number, dy: number): { x: number; y: number } {
+    const cos = Math.cos(this.station.rotation);
+    const sin = Math.sin(this.station.rotation);
+    return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
+  }
+
+  private fromStationAxes(x: number, y: number): { x: number; y: number } {
+    const cos = Math.cos(this.station.rotation);
+    const sin = Math.sin(this.station.rotation);
+    return { x: x * cos - y * sin, y: x * sin + y * cos };
+  }
+
+  isDocked(ship: Ship = this.ship): boolean {
+    const { station } = this;
+    const local = this.toStationAxes(ship.x - station.x, ship.y - station.y);
+    return Math.abs(local.x - DOCK_OFFSET) < STATION_HALF && Math.abs(local.y) < STATION_HALF;
   }
 
   private moveRocks(dt: number): void {
     const edge = this.tuning.fieldRadius;
     for (const rock of this.rocks) {
       this.containInField(rock, edge, dt);
-      rock.px = rock.x;
-      rock.py = rock.y;
       rock.x += rock.vx * dt;
       rock.y += rock.vy * dt;
-      rock.prevAngle = rock.angle;
       rock.angle += rock.spin * dt;
     }
   }
@@ -317,8 +568,6 @@ export class Sim {
     const edge = this.tuning.fieldRadius;
     for (const ore of this.ores) {
       this.containInField(ore, edge, dt);
-      ore.px = ore.x;
-      ore.py = ore.y;
       ore.x += ore.vx * dt;
       ore.y += ore.vy * dt;
     }
@@ -326,21 +575,25 @@ export class Sim {
 
   /** Gentle pull so drifting pieces stay in the field during long sessions. */
   private containInField(body: Body, edge: number, dt: number): void {
-    const dist = Math.hypot(body.x, body.y);
+    const dx = body.x - this.field.x;
+    const dy = body.y - this.field.y;
+    const dist = Math.hypot(dx, dy);
     if (dist <= edge) return;
     const pull = 6 * dt;
-    body.vx -= (body.x / dist) * pull;
-    body.vy -= (body.y / dist) * pull;
+    body.vx -= (dx / dist) * pull;
+    body.vy -= (dy / dist) * pull;
   }
 
-  private moveShip(dt: number): void {
-    const { ship, controls, tuning } = this;
+  private moveShip(ship: Ship, dt: number): void {
+    const { tuning } = this;
+    const { controls } = ship;
 
     const perTick = dt / tuning.weight;
     ship.firing.clear();
 
     const spinChange = ((tuning.rotationThrust * Math.PI) / 180) * perTick;
     ship.spin += this.fireAxis(
+      ship,
       controls.turn,
       ship.spin,
       "thrusterRotateRight",
@@ -348,28 +601,23 @@ export class Sim {
       spinChange,
       spinChange,
     );
-    ship.prevAngle = ship.angle;
     ship.angle += ship.spin * dt;
 
-    // Inside the dock, retro brakes relative to the station rather than the field.
-    const docked = this.isDocked();
-    const frameVx = docked ? this.station.vx : 0;
-    const frameVy = docked ? this.station.vy : 0;
-    const relVx = ship.vx - frameVx;
-    const relVy = ship.vy - frameVy;
     const cos = Math.cos(ship.angle);
     const sin = Math.sin(ship.angle);
     const forwardChange = this.fireAxis(
+      ship,
       controls.thrust,
-      relVx * cos + relVy * sin,
+      ship.vx * cos + ship.vy * sin,
       "thrusterMain",
       "thrusterReverse",
       tuning.thrust * perTick,
       tuning.reverseThrust * perTick,
     );
     const sideChange = this.fireAxis(
+      ship,
       controls.strafe,
-      -relVx * sin + relVy * cos,
+      -ship.vx * sin + ship.vy * cos,
       "thrusterStrafeRight",
       "thrusterStrafeLeft",
       tuning.sideThrust * perTick,
@@ -378,18 +626,17 @@ export class Sim {
     ship.vx += cos * forwardChange - sin * sideChange;
     ship.vy += sin * forwardChange + cos * sideChange;
 
-    if (docked) {
+    if (this.isDocked(ship)) {
       const keep = Math.exp(-tuning.dockDrag * dt);
-      ship.vx = frameVx + (ship.vx - frameVx) * keep;
-      ship.vy = frameVy + (ship.vy - frameVy) * keep;
+      ship.vx *= keep;
+      ship.vy *= keep;
     }
 
-    ship.px = ship.x;
-    ship.py = ship.y;
-    this.moveShipWithCollision(dt);
+    this.moveShipWithCollision(ship, dt);
 
-    const speed = Math.hypot(ship.vx, ship.vy);
-    if (speed > this.stats.topSpeed) this.stats.topSpeed = speed;
+    if (ship === this.ship) {
+      this.stats.topSpeed = Math.max(this.stats.topSpeed, Math.hypot(ship.vx, ship.vy));
+    }
     ship.cooldown = Math.max(0, ship.cooldown - dt);
   }
 
@@ -397,8 +644,10 @@ export class Sim {
    * The velocity change one pair of opposed thrusters makes this tick. With no
    * pilot input on this axis, retro fires whichever thruster opposes the motion.
    * Retro uses the real thrusters, so a disabled one leaves that motion uncorrected.
+   * Only the player's ship has retro. Each ship can only fire what it's fitted with.
    */
   private fireAxis(
+    ship: Ship,
     command: number,
     velocity: number,
     positive: ThrusterId,
@@ -409,18 +658,17 @@ export class Sim {
     let direction = Math.sign(command);
     let limit = Infinity;
     if (direction === 0) {
-      if (!this.tuning.retro || Math.abs(velocity) < 1e-6) return 0;
+      if (ship.fit || !this.tuning.retro || Math.abs(velocity) < 1e-6) return 0;
       direction = velocity < 0 ? 1 : -1;
       limit = Math.abs(velocity);
     }
     const thruster = direction > 0 ? positive : negative;
-    if (!this.tuning[thruster]) return 0;
-    this.ship.firing.add(thruster);
+    if (!(ship.fit ? ship.fit.has(thruster) : this.tuning[thruster])) return 0;
+    ship.firing.add(thruster);
     return direction * Math.min(direction > 0 ? positiveChange : negativeChange, limit);
   }
 
-  private moveShipWithCollision(dt: number): void {
-    const { ship } = this;
+  private moveShipWithCollision(ship: Ship, dt: number): void {
     let hit: Rock | null = null;
     let hitT = Infinity;
 
@@ -431,7 +679,10 @@ export class Sim {
       const dy = (ship.vy - rock.vy) * dt;
       const reach = rock.radius + SHIP_RADIUS;
       const t = sweepCircle(relX, relY, dx, dy, reach);
-      if (t !== null && t < hitT) {
+      // Already overlapping and moving out: let it leave. Holding it here while
+      // two overlapping rocks trade it back and forth would let thrust build unseen.
+      const leaving = t === 0 && relX * dx + relY * dy > dt * reach;
+      if (t !== null && t < hitT && !leaving) {
         hitT = t;
         hit = rock;
       }
@@ -439,21 +690,22 @@ export class Sim {
 
     const { station } = this;
     const stationReach = STATION_HALF + SHIP_RADIUS;
-    const stationHit = sweepBox(
-      ship.x - station.x,
-      ship.y - station.y,
-      (ship.vx - station.vx) * dt,
-      (ship.vy - station.vy) * dt,
-      stationReach,
-      stationReach,
-    );
+    const from = this.toStationAxes(ship.x - station.x, ship.y - station.y);
+    const move = this.toStationAxes(ship.vx * dt, ship.vy * dt);
+    const stationHit = sweepBox(from.x, from.y, move.x, move.y, stationReach, stationReach);
     if (stationHit && stationHit.t < hitT) {
-      ship.x += ship.vx * dt * stationHit.t;
-      ship.y += ship.vy * dt * stationHit.t;
       // Rest on the surface, so a ship never stays stuck inside the station.
-      if (stationHit.nx !== 0) ship.x = station.x + stationHit.nx * (stationReach + 0.01);
-      if (stationHit.ny !== 0) ship.y = station.y + stationHit.ny * (stationReach + 0.01);
-      this.bounceOff(stationHit.nx, stationHit.ny, station, 0);
+      const restX = stationHit.nx !== 0
+        ? stationHit.nx * (stationReach + 0.01)
+        : from.x + move.x * stationHit.t;
+      const restY = stationHit.ny !== 0
+        ? stationHit.ny * (stationReach + 0.01)
+        : from.y + move.y * stationHit.t;
+      const rest = this.fromStationAxes(restX, restY);
+      ship.x = station.x + rest.x;
+      ship.y = station.y + rest.y;
+      const normal = this.fromStationAxes(stationHit.nx, stationHit.ny);
+      this.bounceOff(ship, normal.x, normal.y, STILL, 0);
       return;
     }
 
@@ -465,11 +717,10 @@ export class Sim {
 
     ship.x += ship.vx * dt * hitT;
     ship.y += ship.vy * dt * hitT;
-    this.resolveImpact(hit);
+    this.resolveImpact(ship, hit);
   }
 
-  private resolveImpact(rock: Rock): void {
-    const { ship } = this;
+  private resolveImpact(ship: Ship, rock: Rock): void {
     let nx = ship.x - rock.x;
     let ny = ship.y - rock.y;
     const dist = Math.hypot(nx, ny) || 1;
@@ -482,12 +733,18 @@ export class Sim {
     ship.y = rock.y + ny * reach;
 
     const rockMass = (rock.radius * rock.radius) / 400;
-    this.bounceOff(nx, ny, rock, 1 / rockMass);
+    this.bounceOff(ship, nx, ny, rock, 1 / rockMass);
   }
 
   /** `otherInverseMass` of 0 means the other body can't be pushed. The ship's mass is 1. */
-  private bounceOff(nx: number, ny: number, other: Body, otherInverseMass: number): void {
-    const { ship, tuning } = this;
+  private bounceOff(
+    ship: Ship,
+    nx: number,
+    ny: number,
+    other: { vx: number; vy: number },
+    otherInverseMass: number,
+  ): void {
+    const { tuning } = this;
     const closing = (ship.vx - other.vx) * nx + (ship.vy - other.vy) * ny;
     if (closing >= 0) return;
 
@@ -500,16 +757,18 @@ export class Sim {
     const damage = Math.max(0, -closing - tuning.safeImpactSpeed) * tuning.damagePerSpeed;
     if (damage > 0) {
       ship.hull -= damage;
-      this.events.push({ type: "impact", x: ship.x, y: ship.y, damage });
-      if (ship.hull <= 0) this.wreckShip();
+      const player = ship === this.ship;
+      this.events.push({ type: "impact", x: ship.x, y: ship.y, damage, player });
+      if (ship.hull <= 0) this.wreckShip(ship);
     }
   }
 
-  private wreckShip(): void {
-    this.events.push({ type: "wreck", x: this.ship.x, y: this.ship.y });
-    this.stats.wrecks++;
-    this.stats.ore = 0;
-    this.placeShip();
+  private wreckShip(ship: Ship): void {
+    const player = ship === this.ship;
+    this.events.push({ type: "wreck", x: ship.x, y: ship.y, player });
+    if (player) this.stats.wrecks++;
+    else this.stats.droneWrecks++;
+    this.respawn(ship);
   }
 
   private moveShots(dt: number): void {
@@ -517,17 +776,10 @@ export class Sim {
     for (const shot of this.shots) {
       shot.life -= dt;
       if (shot.life <= 0) continue;
-      shot.px = shot.x;
-      shot.py = shot.y;
 
-      const stationHit = sweepBox(
-        shot.x - this.station.x,
-        shot.y - this.station.y,
-        (shot.vx - this.station.vx) * dt,
-        (shot.vy - this.station.vy) * dt,
-        STATION_HALF,
-        STATION_HALF,
-      );
+      const from = this.toStationAxes(shot.x - this.station.x, shot.y - this.station.y);
+      const move = this.toStationAxes(shot.vx * dt, shot.vy * dt);
+      const stationHit = sweepBox(from.x, from.y, move.x, move.y, STATION_HALF, STATION_HALF);
 
       let hit: Rock | null = null;
       let hitT = Infinity;
@@ -568,9 +820,9 @@ export class Sim {
     this.shots = remaining;
   }
 
-  private fireShots(_dt: number): void {
-    const { ship, controls, tuning } = this;
-    if (!controls.fire || ship.cooldown > 0) return;
+  private fireShots(ship: Ship): void {
+    const { tuning } = this;
+    if (!ship.controls.fire || ship.cooldown > 0) return;
     ship.cooldown = 1 / tuning.shotsPerSecond;
     const cos = Math.cos(ship.angle);
     const sin = Math.sin(ship.angle);
@@ -630,23 +882,23 @@ export class Sim {
   }
 
   /** Ore turns into credits one piece at a time while in the dock. */
-  private unloadOre(dt: number): void {
-    const { stats, ship } = this;
-    if (stats.ore <= 0 || !this.isDocked()) {
-      this.unloadTimer = 0;
+  private unloadOre(ship: Ship, dt: number): void {
+    const { stats } = this;
+    if (ship.ore <= 0 || !this.isDocked(ship)) {
+      ship.unloadTimer = 0;
       return;
     }
-    this.unloadTimer += dt;
-    while (this.unloadTimer >= UNLOAD_SECONDS && stats.ore > 0) {
-      this.unloadTimer -= UNLOAD_SECONDS;
-      stats.ore--;
+    ship.unloadTimer += dt;
+    while (ship.unloadTimer >= UNLOAD_SECONDS && ship.ore > 0) {
+      ship.unloadTimer -= UNLOAD_SECONDS;
+      ship.ore--;
       stats.credits += this.tuning.creditsPerOre;
       this.events.push({ type: "sale", x: ship.x, y: ship.y });
+      if (ship.ore === 0 && ship !== this.ship) stats.droneTrips++;
     }
   }
 
-  private collectOre(): void {
-    const { ship } = this;
+  private collectOre(ship: Ship): void {
     const reach = SHIP_RADIUS + ORE_RADIUS + PICKUP_MARGIN;
     this.ores = this.ores.filter((ore) => {
       const segment = sweepCircle(
@@ -657,8 +909,8 @@ export class Sim {
         reach,
       );
       if (segment === null) return true;
-      this.stats.ore++;
-      this.stats.bestOre = Math.max(this.stats.bestOre, this.stats.ore);
+      ship.ore++;
+      if (ship === this.ship) this.stats.bestOre = Math.max(this.stats.bestOre, ship.ore);
       this.events.push({ type: "pickup", x: ore.x, y: ore.y, kind: ore.kind });
       return false;
     });

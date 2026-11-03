@@ -258,9 +258,7 @@ export class Sim {
     this.drones = [];
     for (let i = 0; i < this.tuning.droneCount; i++) {
       const y = this.field.y + (i + 1) * 70 * (i % 2 === 0 ? 1 : -1);
-      const controls = { thrust: 0, strafe: 0, turn: 0, fire: false, retro: false, stabilize: false };
-      const ship = this.makeShip(this.startX(), y, controls);
-      this.drones.push(new DronePilot(ship));
+      this.addDrone(this.startX(), y);
     }
     const clear = 260;
     for (let i = 0; i < this.tuning.rockCount; i++) {
@@ -315,6 +313,13 @@ export class Sim {
       reach,
       turn: 0,
     };
+  }
+
+  private addDrone(x: number, y: number): DronePilot {
+    const controls = { thrust: 0, strafe: 0, turn: 0, fire: false, retro: false, stabilize: false };
+    const drone = new DronePilot(this.makeShip(x, y, controls));
+    this.drones.push(drone);
+    return drone;
   }
 
   private startX(): number {
@@ -399,6 +404,17 @@ export class Sim {
     ship.parts.delete(id);
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     return true;
+  }
+
+  /** Any ship in the dock can pay for a new drone, which starts there and earns for itself. */
+  buyDrone(buyer: Ship): DronePilot | null {
+    const { tuning } = this;
+    if (!this.isDocked(buyer) || buyer.credits < tuning.dronePrice) return null;
+    if (this.drones.length >= tuning.droneLimit) return null;
+    buyer.credits -= tuning.dronePrice;
+    const dock = this.dockPoint();
+    this.events.push({ type: "sale", x: dock.x, y: dock.y });
+    return this.addDrone(dock.x, dock.y);
   }
 
   /** Center of the dock, now or as of the previous tick. */

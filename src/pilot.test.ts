@@ -4,7 +4,7 @@ import { DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, MAX_HULL, Sim, TICK } from "./sim";
 
 /** One drone that stays bare unless a test says otherwise. */
-const SOLO = { ...DEFAULTS, droneCount: 1, droneParts: 0 };
+const SOLO = { ...DEFAULTS, droneCount: 1, droneParts: 0, droneLimit: 1 };
 
 function run(sim: Sim, seconds: number, each?: () => void): void {
   const ticks = Math.round(seconds / TICK);
@@ -103,6 +103,53 @@ describe("drone", () => {
     run(sim, 0.1);
     expect([...ship.parts]).toEqual(["spinStabilizer"]);
   });
+
+  it("sells a new drone only in the dock, for the price, and up to the limit", () => {
+    const sim = new Sim(1, { ...SOLO, rockCount: 0, droneCount: 0, droneLimit: 1 });
+    sim.ship.credits = DEFAULTS.dronePrice;
+    expect(sim.buyDrone(sim.ship)).toBeNull();
+    placeInDock(sim, sim.ship);
+    sim.ship.credits = DEFAULTS.dronePrice - 1;
+    expect(sim.buyDrone(sim.ship)).toBeNull();
+    sim.ship.credits = DEFAULTS.dronePrice * 2;
+    const drone = sim.buyDrone(sim.ship);
+    expect(drone).not.toBeNull();
+    expect(sim.drones).toHaveLength(1);
+    expect(sim.ship.credits).toBe(DEFAULTS.dronePrice);
+    expect(sim.isDocked(drone!.ship)).toBe(true);
+    expect(drone!.ship.credits).toBe(0);
+    expect(drone!.ship.parts.size).toBe(0);
+    expect(sim.buyDrone(sim.ship)).toBeNull();
+  });
+
+  it("buys a drone only after everything on its parts list", () => {
+    const sim = new Sim(1, { ...SOLO, rockCount: 0, droneParts: 1, droneLimit: 5 });
+    const { ship } = sim.drones[0];
+    placeInDock(sim, ship);
+    ship.credits = DEFAULTS.dronePrice;
+    sim.drones[0].update(sim);
+    expect(ship.parts.has("spinStabilizer")).toBe(true);
+    expect(sim.drones).toHaveLength(1);
+    ship.credits = DEFAULTS.dronePrice;
+    sim.drones[0].update(sim);
+    expect(sim.drones).toHaveLength(2);
+    expect(ship.credits).toBe(0);
+  });
+
+  it("flies a bought drone through the same loop", () => {
+    const sim = new Sim(1, { ...SOLO, droneCount: 0, droneLimit: 1 });
+    placeInDock(sim, sim.ship);
+    sim.ship.credits = DEFAULTS.dronePrice;
+    const drone = sim.buyDrone(sim.ship)!;
+    run(sim, 420);
+    expect(drone.ship.trips).toBeGreaterThanOrEqual(1);
+  }, 30000);
+
+  it("stays at the drone limit on its own earnings", () => {
+    const sim = new Sim(1, { ...SOLO, droneCount: 1, droneLimit: 2, dronePrice: 50 });
+    run(sim, 420);
+    expect(sim.drones).toHaveLength(2);
+  }, 30000);
 
   it.each([
     ["spin stabilizer", ["spinStabilizer"]],

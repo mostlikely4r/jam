@@ -55,7 +55,7 @@ let shopState = "";
 function updateShop(): void {
   const { ship } = sim;
   const docked = sim.isDocked();
-  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${tuning.partPriceScale} ${tuning.partWeightScale}`;
+  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked;
@@ -80,6 +80,18 @@ function updateShop(): void {
     });
     shop.append(button);
   });
+
+  const full = sim.drones.length >= tuning.droneLimit;
+  const drone = document.createElement("button");
+  drone.disabled = full || ship.credits < tuning.dronePrice;
+  drone.textContent = full
+    ? `${PARTS.length + 1} New drone: at the limit of ${tuning.droneLimit}`
+    : `${PARTS.length + 1} New drone: ${tuning.dronePrice} credits. Earns and spends for itself (${sim.drones.length}/${tuning.droneLimit})`;
+  drone.addEventListener("click", () => {
+    sim.buyDrone(ship);
+    drone.blur();
+  });
+  shop.append(drone);
 }
 
 function saveTuning(): void {
@@ -217,8 +229,11 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "KeyM") audio.toggleMute();
   if (event.code === "KeyX") setRetro(!tuning.retro);
   const digit = /^Digit([1-9])$/.exec(event.code);
-  const part = digit ? PARTS[Number(digit[1]) - 1] : undefined;
-  if (part && sim.isDocked()) tradePart(part);
+  const choice = digit ? Number(digit[1]) - 1 : -1;
+  if (choice >= 0 && sim.isDocked()) {
+    if (choice < PARTS.length) tradePart(PARTS[choice]);
+    else if (choice === PARTS.length) sim.buyDrone(sim.ship);
+  }
   keys.add(event.code);
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));

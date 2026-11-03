@@ -40,6 +40,8 @@ export const DEFAULTS = {
   partWeightScale: 1,
 
   droneCount: 2,
+  dronePrice: 500,
+  droneLimit: 5,
   droneParts: 5,
   droneCargo: 10,
   droneCruiseSpeed: 350,
@@ -140,7 +142,9 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
     title: "Drones",
     sliders: [
       { key: "droneParts", label: "Parts each drone may buy", min: 0, max: 5, step: 1 },
-      { key: "droneCount", label: "Drones (on restart)", min: 0, max: 5, step: 1 },
+      { key: "droneCount", label: "Starting drones (on restart)", min: 0, max: 5, step: 1 },
+      { key: "dronePrice", label: "Price of a new drone", min: 0, max: 5000, step: 50 },
+      { key: "droneLimit", label: "Most drones allowed", min: 0, max: 10, step: 1 },
       { key: "droneCargo", label: "Ore per trip", min: 1, max: 50, step: 1 },
       { key: "droneCruiseSpeed", label: "Cruise speed", min: 100, max: 1000, step: 10 },
       { key: "droneFieldSpeed", label: "Speed in the field", min: 30, max: 300, step: 5 },

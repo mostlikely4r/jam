@@ -103,12 +103,13 @@ export class DronePilot {
     else this.mine(sim);
   }
 
-  /** Buys the next thing on its list, if it has the money. */
+  /** Buys the next thing on its list if it has the money. Once that's done, a new drone. */
   private shop(sim: Sim): void {
     const { ship } = this;
     const allowed = this.wishlist.slice(0, sim.tuning.droneParts);
     const next = allowed.find((part) => !ship.parts.has(part));
     if (next) sim.buyPart(ship, next);
+    else sim.buyDrone(ship);
   }
 
   private haul(sim: Sim): void {

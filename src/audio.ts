@@ -62,6 +62,9 @@ export class Audio {
         case "pickup":
           this.tone(620 + event.kind * 110, 1180 + event.kind * 110, 0.1, 0.16, "triangle");
           break;
+        case "sale":
+          this.tone(980, 1460, 0.08, 0.14, "sine");
+          break;
         case "impact":
           this.burst(240, 0.22, Math.min(0.9, 0.3 + event.damage / 25));
           break;

@@ -1,8 +1,17 @@
 export const DEFAULTS = {
+  weight: 1,
   thrust: 420,
   reverseThrust: 220,
-  turnRate: 200,
-  turnAccel: 1400,
+  sideThrust: 200,
+  rotationThrust: 400,
+
+  retro: false,
+  thrusterMain: true,
+  thrusterReverse: true,
+  thrusterStrafeLeft: true,
+  thrusterStrafeRight: true,
+  thrusterRotateLeft: true,
+  thrusterRotateRight: true,
 
   shotSpeed: 1100,
   shotsPerSecond: 7,
@@ -14,6 +23,11 @@ export const DEFAULTS = {
   fieldRadius: 2600,
   rockDrift: 12,
 
+  stationDistance: 5000,
+  orbitPeriod: 900,
+  dockDrag: 0.25,
+  creditsPerOre: 10,
+
   safeImpactSpeed: 90,
   damagePerSpeed: 0.12,
   bounce: 0.45,
@@ -23,7 +37,26 @@ export const DEFAULTS = {
 };
 
 export type Tuning = typeof DEFAULTS;
-export type TuningKey = keyof Tuning;
+export type TuningKey = {
+  [K in keyof Tuning]: Tuning[K] extends number ? K : never;
+}[keyof Tuning];
+
+export type ThrusterId =
+  | "thrusterMain"
+  | "thrusterReverse"
+  | "thrusterStrafeLeft"
+  | "thrusterStrafeRight"
+  | "thrusterRotateLeft"
+  | "thrusterRotateRight";
+
+export const THRUSTERS: { id: ThrusterId; label: string }[] = [
+  { id: "thrusterMain", label: "Main (W)" },
+  { id: "thrusterReverse", label: "Reverse (S)" },
+  { id: "thrusterStrafeLeft", label: "Strafe left (A)" },
+  { id: "thrusterStrafeRight", label: "Strafe right (D)" },
+  { id: "thrusterRotateLeft", label: "Rotate left (Q)" },
+  { id: "thrusterRotateRight", label: "Rotate right (E)" },
+];
 
 export interface Slider {
   key: TuningKey;
@@ -35,12 +68,13 @@ export interface Slider {
 
 export const GROUPS: { title: string; sliders: Slider[] }[] = [
   {
-    title: "Flight",
+    title: "Thrusters",
     sliders: [
-      { key: "thrust", label: "Forward thrust", min: 100, max: 1500, step: 10 },
+      { key: "weight", label: "Weight", min: 0.25, max: 5, step: 0.05 },
+      { key: "thrust", label: "Main thrust", min: 100, max: 1500, step: 10 },
       { key: "reverseThrust", label: "Reverse thrust", min: 0, max: 1000, step: 10 },
-      { key: "turnRate", label: "Turn rate (deg/s)", min: 60, max: 600, step: 5 },
-      { key: "turnAccel", label: "Turn response", min: 200, max: 6000, step: 50 },
+      { key: "sideThrust", label: "Side thrust", min: 0, max: 1000, step: 10 },
+      { key: "rotationThrust", label: "Rotation thrust", min: 30, max: 1500, step: 10 },
     ],
   },
   {
@@ -59,6 +93,15 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
       { key: "rockCount", label: "Rocks", min: 20, max: 1500, step: 10 },
       { key: "fieldRadius", label: "Field radius", min: 800, max: 8000, step: 100 },
       { key: "rockDrift", label: "Rock drift", min: 0, max: 80, step: 1 },
+    ],
+  },
+  {
+    title: "Station",
+    sliders: [
+      { key: "stationDistance", label: "Distance (on restart)", min: 1000, max: 15000, step: 100 },
+      { key: "orbitPeriod", label: "Orbit time (s)", min: 60, max: 3600, step: 30 },
+      { key: "dockDrag", label: "Dock slowdown", min: 0, max: 3, step: 0.05 },
+      { key: "creditsPerOre", label: "Credits per ore", min: 1, max: 100, step: 1 },
     ],
   },
   {

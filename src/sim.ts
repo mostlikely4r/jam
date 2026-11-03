@@ -1,4 +1,4 @@
-import { DEFAULTS, type Tuning } from "./tuning";
+import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
 export const TICK = 1 / 120;
 export const SHIP_RADIUS = 12;
@@ -7,10 +7,16 @@ const ORE_RADIUS = 5;
 const PICKUP_MARGIN = 10;
 const TIER_RADIUS = [18, 34, 60];
 const ORE_KINDS = 3;
+export const STATION_HALF = 150;
+/** The dock box sits directly beside the solid box. */
+export const DOCK_OFFSET = STATION_HALF * 2;
+const UNLOAD_SECONDS = 0.1;
 
 export interface Controls {
   /** -1 (reverse) to 1 (forward). */
   thrust: number;
+  /** -1 (left) to 1 (right), without turning. */
+  strafe: number;
   /** -1 (left) to 1 (right). */
   turn: number;
   fire: boolean;
@@ -32,6 +38,8 @@ export interface Ship extends Body {
   spin: number;
   hull: number;
   cooldown: number;
+  /** Thrusters that fired on the last tick. */
+  firing: Set<ThrusterId>;
 }
 
 export interface Rock extends Body {
@@ -43,6 +51,11 @@ export interface Rock extends Body {
   spin: number;
   /** Radius multipliers around the outline. */
   shape: number[];
+}
+
+export interface Station extends Body {
+  orbitAngle: number;
+  orbitRadius: number;
 }
 
 export interface Shot extends Body {
@@ -58,12 +71,14 @@ export type SimEvent =
   | { type: "hit"; x: number; y: number }
   | { type: "break"; x: number; y: number; radius: number }
   | { type: "pickup"; x: number; y: number; kind: number }
+  | { type: "sale"; x: number; y: number }
   | { type: "impact"; x: number; y: number; damage: number }
   | { type: "wreck"; x: number; y: number };
 
 export interface Stats {
   ore: number;
   bestOre: number;
+  credits: number;
   wrecks: number;
   topSpeed: number;
 }
@@ -103,16 +118,70 @@ export function sweepCircle(
   return t <= 1 ? t : null;
 }
 
+/**
+ * Where a moving point first enters a box centered on the origin, and the face
+ * it entered through, or null. A point already inside exits by the nearest face.
+ */
+export function sweepBox(
+  ax: number,
+  ay: number,
+  dx: number,
+  dy: number,
+  halfWidth: number,
+  halfHeight: number,
+): { t: number; nx: number; ny: number } | null {
+  if (Math.abs(ax) < halfWidth && Math.abs(ay) < halfHeight) {
+    return halfWidth - Math.abs(ax) < halfHeight - Math.abs(ay)
+      ? { t: 0, nx: Math.sign(ax) || 1, ny: 0 }
+      : { t: 0, nx: 0, ny: Math.sign(ay) || 1 };
+  }
+
+  let enter = 0;
+  let exit = 1;
+  let nx = 0;
+  let ny = 0;
+
+  if (dx === 0) {
+    if (Math.abs(ax) >= halfWidth) return null;
+  } else {
+    const near = ((dx > 0 ? -halfWidth : halfWidth) - ax) / dx;
+    const far = ((dx > 0 ? halfWidth : -halfWidth) - ax) / dx;
+    if (near >= enter) {
+      enter = near;
+      nx = -Math.sign(dx);
+    }
+    exit = Math.min(exit, far);
+  }
+
+  if (dy === 0) {
+    if (Math.abs(ay) >= halfHeight) return null;
+  } else {
+    const near = ((dy > 0 ? -halfHeight : halfHeight) - ay) / dy;
+    const far = ((dy > 0 ? halfHeight : -halfHeight) - ay) / dy;
+    if (near >= enter) {
+      enter = near;
+      nx = 0;
+      ny = -Math.sign(dy);
+    }
+    exit = Math.min(exit, far);
+  }
+
+  if (enter > exit || (nx === 0 && ny === 0)) return null;
+  return { t: enter, nx, ny };
+}
+
 export class Sim {
   tuning: Tuning;
-  controls: Controls = { thrust: 0, turn: 0, fire: false };
+  controls: Controls = { thrust: 0, strafe: 0, turn: 0, fire: false };
   ship!: Ship;
   rocks: Rock[] = [];
   shots: Shot[] = [];
   ores: Ore[] = [];
+  station!: Station;
   events: SimEvent[] = [];
-  stats: Stats = { ore: 0, bestOre: 0, wrecks: 0, topSpeed: 0 };
+  stats: Stats = { ore: 0, bestOre: 0, credits: 0, wrecks: 0, topSpeed: 0 };
   private random: () => number = Math.random;
+  private unloadTimer = 0;
 
   constructor(seed = 1, tuning: Tuning = { ...DEFAULTS }) {
     this.tuning = tuning;
@@ -125,7 +194,9 @@ export class Sim {
     this.shots = [];
     this.ores = [];
     this.events = [];
-    this.stats = { ore: 0, bestOre: this.stats.bestOre, wrecks: 0, topSpeed: 0 };
+    this.stats = { ore: 0, bestOre: this.stats.bestOre, credits: 0, wrecks: 0, topSpeed: 0 };
+    this.unloadTimer = 0;
+    this.placeStation();
     this.placeShip();
     const clear = 260;
     for (let i = 0; i < this.tuning.rockCount; i++) {
@@ -144,6 +215,16 @@ export class Sim {
     }
   }
 
+  private placeStation(): void {
+    const orbitRadius = this.tuning.fieldRadius + this.tuning.stationDistance;
+    // Starts behind the ship's starting point, on the far side from the rocks.
+    const orbitAngle = Math.PI;
+    const x = Math.cos(orbitAngle) * orbitRadius;
+    const y = Math.sin(orbitAngle) * orbitRadius;
+    this.station = { x, y, px: x, py: y, vx: 0, vy: 0, orbitAngle, orbitRadius };
+    this.moveStation(0);
+  }
+
   private placeShip(): void {
     const x = -this.tuning.fieldRadius - 200;
     this.ship = {
@@ -158,6 +239,7 @@ export class Sim {
       spin: 0,
       hull: MAX_HULL,
       cooldown: 0,
+      firing: new Set(),
     };
   }
 
@@ -187,12 +269,35 @@ export class Sim {
   /** Advance one fixed tick. Display rate and time speedup never change its size. */
   step(): void {
     const dt = TICK;
+    this.moveStation(dt);
     this.moveRocks(dt);
     this.moveOres(dt);
     this.moveShip(dt);
     this.moveShots(dt);
     this.fireShots(dt);
     this.collectOre();
+    this.unloadOre(dt);
+  }
+
+  /** The station follows a fixed circular path around the field's center. */
+  private moveStation(dt: number): void {
+    const { station, tuning } = this;
+    const angularSpeed = (Math.PI * 2) / tuning.orbitPeriod;
+    station.orbitAngle += angularSpeed * dt;
+    station.px = station.x;
+    station.py = station.y;
+    station.x = Math.cos(station.orbitAngle) * station.orbitRadius;
+    station.y = Math.sin(station.orbitAngle) * station.orbitRadius;
+    station.vx = -Math.sin(station.orbitAngle) * station.orbitRadius * angularSpeed;
+    station.vy = Math.cos(station.orbitAngle) * station.orbitRadius * angularSpeed;
+  }
+
+  isDocked(): boolean {
+    const { ship, station } = this;
+    return (
+      Math.abs(ship.x - (station.x + DOCK_OFFSET)) < STATION_HALF &&
+      Math.abs(ship.y - station.y) < STATION_HALF
+    );
   }
 
   private moveRocks(dt: number): void {
@@ -231,16 +336,53 @@ export class Sim {
   private moveShip(dt: number): void {
     const { ship, controls, tuning } = this;
 
-    const targetSpin = (controls.turn * tuning.turnRate * Math.PI) / 180;
-    const maxChange = ((tuning.turnAccel * Math.PI) / 180) * dt;
-    const change = Math.max(-maxChange, Math.min(maxChange, targetSpin - ship.spin));
-    ship.spin += change;
+    const perTick = dt / tuning.weight;
+    ship.firing.clear();
+
+    const spinChange = ((tuning.rotationThrust * Math.PI) / 180) * perTick;
+    ship.spin += this.fireAxis(
+      controls.turn,
+      ship.spin,
+      "thrusterRotateRight",
+      "thrusterRotateLeft",
+      spinChange,
+      spinChange,
+    );
     ship.prevAngle = ship.angle;
     ship.angle += ship.spin * dt;
 
-    const force = controls.thrust >= 0 ? tuning.thrust : tuning.reverseThrust;
-    ship.vx += Math.cos(ship.angle) * controls.thrust * force * dt;
-    ship.vy += Math.sin(ship.angle) * controls.thrust * force * dt;
+    // Inside the dock, retro brakes relative to the station rather than the field.
+    const docked = this.isDocked();
+    const frameVx = docked ? this.station.vx : 0;
+    const frameVy = docked ? this.station.vy : 0;
+    const relVx = ship.vx - frameVx;
+    const relVy = ship.vy - frameVy;
+    const cos = Math.cos(ship.angle);
+    const sin = Math.sin(ship.angle);
+    const forwardChange = this.fireAxis(
+      controls.thrust,
+      relVx * cos + relVy * sin,
+      "thrusterMain",
+      "thrusterReverse",
+      tuning.thrust * perTick,
+      tuning.reverseThrust * perTick,
+    );
+    const sideChange = this.fireAxis(
+      controls.strafe,
+      -relVx * sin + relVy * cos,
+      "thrusterStrafeRight",
+      "thrusterStrafeLeft",
+      tuning.sideThrust * perTick,
+      tuning.sideThrust * perTick,
+    );
+    ship.vx += cos * forwardChange - sin * sideChange;
+    ship.vy += sin * forwardChange + cos * sideChange;
+
+    if (docked) {
+      const keep = Math.exp(-tuning.dockDrag * dt);
+      ship.vx = frameVx + (ship.vx - frameVx) * keep;
+      ship.vy = frameVy + (ship.vy - frameVy) * keep;
+    }
 
     ship.px = ship.x;
     ship.py = ship.y;
@@ -249,6 +391,32 @@ export class Sim {
     const speed = Math.hypot(ship.vx, ship.vy);
     if (speed > this.stats.topSpeed) this.stats.topSpeed = speed;
     ship.cooldown = Math.max(0, ship.cooldown - dt);
+  }
+
+  /**
+   * The velocity change one pair of opposed thrusters makes this tick. With no
+   * pilot input on this axis, retro fires whichever thruster opposes the motion.
+   * Retro uses the real thrusters, so a disabled one leaves that motion uncorrected.
+   */
+  private fireAxis(
+    command: number,
+    velocity: number,
+    positive: ThrusterId,
+    negative: ThrusterId,
+    positiveChange: number,
+    negativeChange: number,
+  ): number {
+    let direction = Math.sign(command);
+    let limit = Infinity;
+    if (direction === 0) {
+      if (!this.tuning.retro || Math.abs(velocity) < 1e-6) return 0;
+      direction = velocity < 0 ? 1 : -1;
+      limit = Math.abs(velocity);
+    }
+    const thruster = direction > 0 ? positive : negative;
+    if (!this.tuning[thruster]) return 0;
+    this.ship.firing.add(thruster);
+    return direction * Math.min(direction > 0 ? positiveChange : negativeChange, limit);
   }
 
   private moveShipWithCollision(dt: number): void {
@@ -269,6 +437,26 @@ export class Sim {
       }
     }
 
+    const { station } = this;
+    const stationReach = STATION_HALF + SHIP_RADIUS;
+    const stationHit = sweepBox(
+      ship.x - station.x,
+      ship.y - station.y,
+      (ship.vx - station.vx) * dt,
+      (ship.vy - station.vy) * dt,
+      stationReach,
+      stationReach,
+    );
+    if (stationHit && stationHit.t < hitT) {
+      ship.x += ship.vx * dt * stationHit.t;
+      ship.y += ship.vy * dt * stationHit.t;
+      // Rest on the surface, so a ship never stays stuck inside the station.
+      if (stationHit.nx !== 0) ship.x = station.x + stationHit.nx * (stationReach + 0.01);
+      if (stationHit.ny !== 0) ship.y = station.y + stationHit.ny * (stationReach + 0.01);
+      this.bounceOff(stationHit.nx, stationHit.ny, station, 0);
+      return;
+    }
+
     if (!hit) {
       ship.x += ship.vx * dt;
       ship.y += ship.vy * dt;
@@ -281,7 +469,7 @@ export class Sim {
   }
 
   private resolveImpact(rock: Rock): void {
-    const { ship, tuning } = this;
+    const { ship } = this;
     let nx = ship.x - rock.x;
     let ny = ship.y - rock.y;
     const dist = Math.hypot(nx, ny) || 1;
@@ -293,16 +481,21 @@ export class Sim {
     ship.x = rock.x + nx * reach;
     ship.y = rock.y + ny * reach;
 
-    const closing = (ship.vx - rock.vx) * nx + (ship.vy - rock.vy) * ny;
+    const rockMass = (rock.radius * rock.radius) / 400;
+    this.bounceOff(nx, ny, rock, 1 / rockMass);
+  }
+
+  /** `otherInverseMass` of 0 means the other body can't be pushed. The ship's mass is 1. */
+  private bounceOff(nx: number, ny: number, other: Body, otherInverseMass: number): void {
+    const { ship, tuning } = this;
+    const closing = (ship.vx - other.vx) * nx + (ship.vy - other.vy) * ny;
     if (closing >= 0) return;
 
-    const shipMass = 1;
-    const rockMass = (rock.radius * rock.radius) / 400;
-    const impulse = (-(1 + tuning.bounce) * closing) / (1 / shipMass + 1 / rockMass);
-    ship.vx += (impulse / shipMass) * nx;
-    ship.vy += (impulse / shipMass) * ny;
-    rock.vx -= (impulse / rockMass) * nx;
-    rock.vy -= (impulse / rockMass) * ny;
+    const impulse = (-(1 + tuning.bounce) * closing) / (1 + otherInverseMass);
+    ship.vx += impulse * nx;
+    ship.vy += impulse * ny;
+    other.vx -= impulse * otherInverseMass * nx;
+    other.vy -= impulse * otherInverseMass * ny;
 
     const damage = Math.max(0, -closing - tuning.safeImpactSpeed) * tuning.damagePerSpeed;
     if (damage > 0) {
@@ -327,6 +520,15 @@ export class Sim {
       shot.px = shot.x;
       shot.py = shot.y;
 
+      const stationHit = sweepBox(
+        shot.x - this.station.x,
+        shot.y - this.station.y,
+        (shot.vx - this.station.vx) * dt,
+        (shot.vy - this.station.vy) * dt,
+        STATION_HALF,
+        STATION_HALF,
+      );
+
       let hit: Rock | null = null;
       let hitT = Infinity;
       for (const rock of this.rocks) {
@@ -341,6 +543,13 @@ export class Sim {
           hitT = t;
           hit = rock;
         }
+      }
+
+      if (stationHit && stationHit.t < hitT) {
+        const x = shot.x + shot.vx * dt * stationHit.t;
+        const y = shot.y + shot.vy * dt * stationHit.t;
+        this.events.push({ type: "hit", x, y });
+        continue;
       }
 
       if (hit) {
@@ -417,6 +626,22 @@ export class Sim {
         vy: rock.vy + Math.sin(dir) * kick,
         kind: Math.floor(this.random() * ORE_KINDS),
       });
+    }
+  }
+
+  /** Ore turns into credits one piece at a time while in the dock. */
+  private unloadOre(dt: number): void {
+    const { stats, ship } = this;
+    if (stats.ore <= 0 || !this.isDocked()) {
+      this.unloadTimer = 0;
+      return;
+    }
+    this.unloadTimer += dt;
+    while (this.unloadTimer >= UNLOAD_SECONDS && stats.ore > 0) {
+      this.unloadTimer -= UNLOAD_SECONDS;
+      stats.ore--;
+      stats.credits += this.tuning.creditsPerOre;
+      this.events.push({ type: "sale", x: ship.x, y: ship.y });
     }
   }
 

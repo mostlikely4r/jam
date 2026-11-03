@@ -1,4 +1,4 @@
-import { Sim, SHIP_RADIUS, type SimEvent } from "./sim";
+import { DOCK_OFFSET, Sim, SHIP_RADIUS, STATION_HALF, type SimEvent } from "./sim";
 
 const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
 
@@ -55,6 +55,9 @@ export class Renderer {
           break;
         case "pickup":
           this.burst(event.x, event.y, 6, ORE_COLORS[event.kind], 90, 0.3, 2);
+          break;
+        case "sale":
+          this.burst(event.x, event.y, 5, "#8fe3a1", 110, 0.35, 2);
           break;
         case "impact":
           this.burst(event.x, event.y, 10, "#ff7a5c", 200, 0.4, 2);
@@ -125,6 +128,7 @@ export class Renderer {
     const visible = (x: number, y: number, r: number) =>
       Math.abs(x - camX) < halfW + r && Math.abs(y - camY) < halfH + r;
 
+    this.drawStation(sim, alpha);
     this.drawRocks(sim, alpha, visible);
     this.drawOres(sim, alpha, visible);
     this.drawShots(sim, alpha);
@@ -132,7 +136,7 @@ export class Renderer {
     this.drawShip(sim, shipX, shipY, alpha);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.drawFieldPointer(sim, shipX, shipY, width, height, dpr);
+    this.drawPointers(sim, alpha, shipX, shipY, width, height, scale, dpr);
     if (this.flash > 0) {
       ctx.fillStyle = `rgba(255, 70, 50, ${this.flash * 0.35})`;
       ctx.fillRect(0, 0, width, height);
@@ -150,6 +154,30 @@ export class Renderer {
       const size = (star.depth > 0.3 ? 2 : 1) * dpr;
       ctx.fillRect(x, y, size, size);
     }
+  }
+
+  private drawStation(sim: Sim, alpha: number): void {
+    const { ctx } = this;
+    const { station } = sim;
+    const x = lerp(station.px, station.x, alpha);
+    const y = lerp(station.py, station.y, alpha);
+    const size = STATION_HALF * 2;
+
+    const dockX = x + DOCK_OFFSET - STATION_HALF;
+    const dockY = y - STATION_HALF;
+    ctx.fillStyle = sim.isDocked() ? "rgba(143, 227, 161, 0.2)" : "rgba(143, 227, 161, 0.07)";
+    ctx.fillRect(dockX, dockY, size, size);
+    ctx.strokeStyle = "#8fe3a1";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([14, 10]);
+    ctx.strokeRect(dockX, dockY, size, size);
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = "#6b7280";
+    ctx.fillRect(x - STATION_HALF, y - STATION_HALF, size, size);
+    ctx.strokeStyle = "#aab1bd";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x - STATION_HALF, y - STATION_HALF, size, size);
   }
 
   private drawRocks(
@@ -228,7 +256,7 @@ export class Renderer {
 
   private drawShip(sim: Sim, x: number, y: number, alpha: number): void {
     const { ctx } = this;
-    const { ship, controls } = sim;
+    const { ship } = sim;
     const angle = lerp(ship.prevAngle, ship.angle, alpha);
 
     // Direction of travel, since with inertia it often differs from the nose.
@@ -247,21 +275,20 @@ export class Renderer {
     ctx.translate(x, y);
     ctx.rotate(angle);
 
-    if (controls.thrust !== 0) {
-      const flicker = 0.75 + Math.random() * 0.5;
-      ctx.fillStyle = "#ffae57";
-      ctx.beginPath();
-      if (controls.thrust > 0) {
-        ctx.moveTo(-SHIP_RADIUS * 0.8, -4);
-        ctx.lineTo(-SHIP_RADIUS * (1.1 + flicker), 0);
-        ctx.lineTo(-SHIP_RADIUS * 0.8, 4);
-      } else {
-        ctx.moveTo(SHIP_RADIUS * 0.9, -3);
-        ctx.lineTo(SHIP_RADIUS * (1.2 + flicker * 0.5), 0);
-        ctx.lineTo(SHIP_RADIUS * 0.9, 3);
-      }
-      ctx.closePath();
-      ctx.fill();
+    const r = SHIP_RADIUS;
+    const up = -Math.PI / 2;
+    const down = Math.PI / 2;
+    if (ship.firing.has("thrusterMain")) this.drawFlame(-r * 0.8, 0, Math.PI, 2, 4);
+    if (ship.firing.has("thrusterReverse")) this.drawFlame(r * 0.9, 0, 0, 1, 3);
+    if (ship.firing.has("thrusterStrafeLeft")) this.drawFlame(0, r * 0.45, down, 1, 3);
+    if (ship.firing.has("thrusterStrafeRight")) this.drawFlame(0, -r * 0.45, up, 1, 3);
+    if (ship.firing.has("thrusterRotateRight")) {
+      this.drawFlame(r * 0.6, -r * 0.2, up, 0.7, 2);
+      this.drawFlame(-r * 0.7, r * 0.55, down, 0.7, 2);
+    }
+    if (ship.firing.has("thrusterRotateLeft")) {
+      this.drawFlame(r * 0.6, r * 0.2, down, 0.7, 2);
+      this.drawFlame(-r * 0.7, -r * 0.55, up, 0.7, 2);
     }
 
     const damage = 1 - ship.hull / 100;
@@ -276,24 +303,67 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** When outside the field, point back to it so a long overshoot isn't a dead end. */
-  private drawFieldPointer(
+  /** Exhaust in the ship's local space: `direction` is where the flame points. */
+  private drawFlame(x: number, y: number, direction: number, length: number, width: number): void {
+    const { ctx } = this;
+    const reach = SHIP_RADIUS * length * (0.75 + Math.random() * 0.5);
+    const cos = Math.cos(direction);
+    const sin = Math.sin(direction);
+    ctx.fillStyle = "#ffae57";
+    ctx.beginPath();
+    ctx.moveTo(x - sin * width, y + cos * width);
+    ctx.lineTo(x + cos * reach, y + sin * reach);
+    ctx.lineTo(x + sin * width, y - cos * width);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  /** Arrows to the field when outside it, and to the station when it's off screen. */
+  private drawPointers(
     sim: Sim,
+    alpha: number,
     x: number,
     y: number,
     width: number,
     height: number,
+    scale: number,
     dpr: number,
   ): void {
-    const dist = Math.hypot(x, y);
-    if (dist <= sim.tuning.fieldRadius) return;
+    const fieldDist = Math.hypot(x, y);
+    if (fieldDist > sim.tuning.fieldRadius) {
+      const label = `field ${Math.round(fieldDist - sim.tuning.fieldRadius)}`;
+      this.drawPointer(-x, -y, "#8fb4ff", label, 0.38, width, height, dpr);
+    }
+
+    const { station } = sim;
+    const dx = lerp(station.px, station.x, alpha) - x;
+    const dy = lerp(station.py, station.y, alpha) - y;
+    const onScreen =
+      (Math.abs(dx) - STATION_HALF) * scale < width / 2 &&
+      (Math.abs(dy) - STATION_HALF) * scale < height / 2;
+    if (!onScreen) {
+      const label = `station ${Math.round(Math.hypot(dx, dy))}`;
+      this.drawPointer(dx, dy, "#8fe3a1", label, 0.28, width, height, dpr);
+    }
+  }
+
+  private drawPointer(
+    dx: number,
+    dy: number,
+    color: string,
+    label: string,
+    ring: number,
+    width: number,
+    height: number,
+    dpr: number,
+  ): void {
     const { ctx } = this;
-    const dir = Math.atan2(-y, -x);
-    const radius = Math.min(width, height) * 0.38;
+    const dir = Math.atan2(dy, dx);
+    const radius = Math.min(width, height) * ring;
     ctx.save();
     ctx.translate(width / 2 + Math.cos(dir) * radius, height / 2 + Math.sin(dir) * radius);
     ctx.rotate(dir);
-    ctx.fillStyle = "#8fb4ff";
+    ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(14 * dpr, 0);
     ctx.lineTo(-8 * dpr, -9 * dpr);
@@ -301,14 +371,13 @@ export class Renderer {
     ctx.closePath();
     ctx.fill();
     ctx.restore();
-    ctx.fillStyle = "#8fb4ff";
+    ctx.fillStyle = color;
     ctx.font = `${12 * dpr}px Consolas, monospace`;
     ctx.textAlign = "center";
-    const label = `field ${Math.round(dist - sim.tuning.fieldRadius)}`;
     ctx.fillText(
       label,
-      width / 2 + Math.cos(dir) * (radius - 28 * dpr),
-      height / 2 + Math.sin(dir) * (radius - 28 * dpr),
+      width / 2 + Math.cos(dir) * (radius - 52 * dpr),
+      height / 2 + Math.sin(dir) * (radius - 52 * dpr),
     );
   }
 }

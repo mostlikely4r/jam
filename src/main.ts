@@ -1,14 +1,19 @@
 import { Audio } from "./audio";
 import { Renderer } from "./render";
 import { MAX_HULL, Sim, TICK } from "./sim";
-import { DEFAULTS, GROUPS, type Tuning } from "./tuning";
+import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
 const STORAGE_KEY = "flight-test-tuning";
 const MAX_FRAME_SECONDS = 0.1;
 
 function loadTuning(): Tuning {
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") };
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+    const tuning: Tuning = { ...DEFAULTS };
+    for (const key of Object.keys(DEFAULTS) as (keyof Tuning)[]) {
+      if (key in saved) Object.assign(tuning, { [key]: saved[key] });
+    }
+    return tuning;
   } catch {
     return { ...DEFAULTS };
   }
@@ -37,8 +42,21 @@ function saveTuning(): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(tuning));
 }
 
+function setRetro(on: boolean): void {
+  tuning.retro = on;
+  saveTuning();
+  buildPanel();
+}
+
 function buildPanel(): void {
   panel.replaceChildren();
+
+  const retro = document.createElement("button");
+  retro.className = tuning.retro ? "retro on" : "retro";
+  retro.textContent = `Retro thrust: ${tuning.retro ? "ON" : "OFF"} (X)`;
+  retro.addEventListener("click", () => setRetro(!tuning.retro));
+  panel.append(retro);
+
   for (const group of GROUPS) {
     const heading = document.createElement("h2");
     heading.textContent = group.title;
@@ -70,6 +88,23 @@ function buildPanel(): void {
       label.append(row, input);
       panel.append(label);
     }
+
+    if (group.title === "Thrusters") {
+      for (const thruster of THRUSTERS) {
+        const toggle = document.createElement("label");
+        toggle.className = "toggle";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = tuning[thruster.id];
+        box.addEventListener("change", () => {
+          tuning[thruster.id] = box.checked;
+          saveTuning();
+          box.blur();
+        });
+        toggle.append(box, ` ${thruster.label}`);
+        panel.append(toggle);
+      }
+    }
   }
 
   const reset = document.createElement("button");
@@ -92,10 +127,11 @@ function buildPanel(): void {
 function readControls(): void {
   const forward = keys.has("KeyW") || keys.has("ArrowUp");
   const back = keys.has("KeyS") || keys.has("ArrowDown");
-  const left = keys.has("KeyA") || keys.has("ArrowLeft");
-  const right = keys.has("KeyD") || keys.has("ArrowRight");
+  const turnLeft = keys.has("KeyQ") || keys.has("ArrowLeft");
+  const turnRight = keys.has("KeyE") || keys.has("ArrowRight");
   sim.controls.thrust = (forward ? 1 : 0) - (back ? 1 : 0);
-  sim.controls.turn = (right ? 1 : 0) - (left ? 1 : 0);
+  sim.controls.strafe = (keys.has("KeyD") ? 1 : 0) - (keys.has("KeyA") ? 1 : 0);
+  sim.controls.turn = (turnRight ? 1 : 0) - (turnLeft ? 1 : 0);
   sim.controls.fire = keys.has("Space") || mouseFire;
 }
 
@@ -111,6 +147,7 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "KeyR") restart();
   if (event.code === "KeyP") paused = !paused;
   if (event.code === "KeyM") audio.toggleMute();
+  if (event.code === "KeyX") setRetro(!tuning.retro);
   keys.add(event.code);
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));
@@ -158,7 +195,7 @@ function frame(now: number): void {
   renderer.addEvents(sim.events);
   audio.play(sim.events);
   sim.events.length = 0;
-  audio.setThrust(!paused && sim.controls.thrust !== 0);
+  audio.setThrust(!paused && sim.ship.firing.size > 0);
   renderer.draw(sim, paused ? 1 : accumulator / TICK, paused ? 0 : seconds);
 
   hudTimer -= seconds;
@@ -168,8 +205,10 @@ function frame(now: number): void {
     const hullBars = Math.max(0, Math.ceil((sim.ship.hull / MAX_HULL) * 10));
     hud.textContent = [
       `Speed ${Math.round(speed)}  (top ${Math.round(sim.stats.topSpeed)})`,
+      `Spin  ${Math.round((sim.ship.spin * 180) / Math.PI)} deg/s  Retro ${tuning.retro ? "ON" : "off"}`,
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
-      `Ore   ${sim.stats.ore}  (best ${sim.stats.bestOre})`,
+      `Ore   ${sim.stats.ore}  (best ${sim.stats.bestOre})  Credits ${sim.stats.credits}`,
+      `Station rel speed ${Math.round(Math.hypot(sim.ship.vx - sim.station.vx, sim.ship.vy - sim.station.vy))}${sim.isDocked() ? "  DOCKED" : ""}`,
       `Rocks ${sim.rocks.length}  Wrecks ${sim.stats.wrecks}`,
       `FPS   ${Math.round(fps)}${paused ? "  PAUSED" : ""}`,
     ].join("\n");

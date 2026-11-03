@@ -22,12 +22,15 @@
       #panel button { background: #1a2233; color: #cfd8e6; border: 1px solid #33405a; padding: 5px 8px; margin: 10px 6px 0 0;
                       font: inherit; cursor: pointer; }
       #panel button:hover { background: #26324a; }
+      #panel button.retro { display: block; width: 100%; margin: 0 0 12px; }
+      #panel button.retro.on { background: #2f5a34; border-color: #5fae66; }
+      #panel label.toggle { margin-bottom: 3px; cursor: pointer; }
     </style>
   </head>
   <body>
     <canvas id="view"></canvas>
     <div id="hud"></div>
-    <div id="help">W/S thrust  A/D turn  Space or left mouse fire  Wheel zoom  R restart  Tab tuning  P pause  M mute</div>
+    <div id="help">W/S thrust  A/D strafe  Q/E or arrows rotate  X retro  Space or left mouse fire  Wheel zoom  R restart  Tab tuning  P pause  M mute</div>
     <div id="panel" hidden></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

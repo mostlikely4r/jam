@@ -1,3 +1,4 @@
+import { DRONE_BUY_ORDER, type PartId } from "./parts";
 import {
   type Ore,
   type Rock,
@@ -16,6 +17,10 @@ const BRAKE_MARGIN = 0.5;
 const BURN_START_ANGLE = 0.12;
 /** Keeps an ongoing burn going within this angle, so it's one burn and not a flicker. */
 const BURN_KEEP_ANGLE = 0.6;
+/** Corrections up to this size are made without turning, if the thrusters allow it. */
+const DIRECT_LIMIT = 80;
+/** Time to bring the nose to bear when braking with the reverse thruster. */
+const REVERSE_BRAKE_SECONDS = 0.3;
 const ORE_SIGHT = 800;
 const PASS_THROUGH_ORE_SPEED = 45;
 const FIRING_DISTANCE = 300;
@@ -62,6 +67,8 @@ function wrapAngle(angle: number): number {
 export class DronePilot {
   /** What the drone is doing, in words for the display. */
   task = "starting";
+  /** What it will buy with its earnings, in order. */
+  wishlist: PartId[] = DRONE_BUY_ORDER;
   private hauling = false;
   private rock: Rock | null = null;
   private ore: Ore | null = null;
@@ -71,6 +78,8 @@ export class DronePilot {
   /** Keeps a small speed error from causing a flip and burn until it's worth correcting. */
   private burning = false;
   private thrusting = false;
+  /** The current correction doesn't need the nose, so the gun stays usable. */
+  private correctingDirectly = false;
 
   constructor(readonly ship: Ship) {}
 
@@ -78,15 +87,28 @@ export class DronePilot {
     const { ship } = this;
     const { controls } = ship;
     controls.thrust = 0;
+    controls.strafe = 0;
     controls.turn = 0;
     controls.fire = false;
+    controls.retro = false;
+    controls.stabilize = false;
+    this.correctingDirectly = false;
 
     // Empty means delivered or wrecked. Either way, this load is over.
     if (ship.ore === 0) this.hauling = false;
     if (ship.ore >= sim.tuning.droneCargo) this.hauling = true;
+    if (ship.ore === 0 && sim.isDocked(ship)) this.shop(sim);
 
     if (this.hauling) this.haul(sim);
     else this.mine(sim);
+  }
+
+  /** Buys the next thing on its list, if it has the money. */
+  private shop(sim: Sim): void {
+    const { ship } = this;
+    const allowed = this.wishlist.slice(0, sim.tuning.droneParts);
+    const next = allowed.find((part) => !ship.parts.has(part));
+    if (next) sim.buyPart(ship, next);
   }
 
   private haul(sim: Sim): void {
@@ -120,7 +142,7 @@ export class DronePilot {
       return;
     }
     this.task = "idle";
-    this.steer(sim, -ship.vx, -ship.vy, NEAR_TOLERANCE, null);
+    this.brake(sim, -ship.vx, -ship.vy, NEAR_TOLERANCE, null);
   }
 
   private chooseTargets(sim: Sim): void {
@@ -203,7 +225,7 @@ export class DronePilot {
         aim,
       );
     } else if (closing * COLLISION_WARNING_SECONDS > clearance - TOO_CLOSE_DISTANCE) {
-      this.steer(sim, -vx, -vy, SETTLE_SPEED, aim);
+      this.brake(sim, -vx, -vy, SETTLE_SPEED, aim);
     } else {
       // Coasting past is fine. The gun leads the rock.
       this.steer(sim, 0, 0, SETTLE_SPEED, aim);
@@ -212,13 +234,33 @@ export class DronePilot {
     const spread = Math.atan2(rock.radius * 0.7, distance);
     const aimed = Math.abs(wrapAngle(aim - ship.angle)) < spread;
     const inRange = distance < tuning.shotSpeed * tuning.shotLife * 0.9;
-    ship.controls.fire = aimed && !this.burning && inRange;
+    ship.controls.fire = aimed && inRange && (!this.burning || this.correctingDirectly);
   }
 
   /** Stays put relative to a moving point. */
   private hold(sim: Sim, now: { x: number; y: number }, before: { x: number; y: number }): void {
     const { vx, vy } = this.relativeVelocity({ x: now.x, y: now.y, px: before.x, py: before.y });
-    this.steer(sim, -vx, -vy, NEAR_TOLERANCE, null);
+    this.brake(sim, -vx, -vy, NEAR_TOLERANCE, null);
+  }
+
+  /** Comes to a stop: with retro when the thrusters cover every direction, or by hand. */
+  private brake(
+    sim: Sim,
+    needX: number,
+    needY: number,
+    tolerance: number,
+    hold: number | null,
+  ): void {
+    const { parts } = this.ship;
+    if (parts.has("retro") && parts.has("reverse") && parts.has("strafe")) {
+      this.ship.controls.retro = true;
+      this.burning = false;
+      this.thrusting = false;
+      this.correctingDirectly = true;
+      if (hold !== null) this.turnTo(sim, hold);
+      return;
+    }
+    this.steer(sim, needX, needY, tolerance, hold);
   }
 
   /**
@@ -258,11 +300,14 @@ export class DronePilot {
     return Math.min(tuning.droneCruiseSpeed, nearField);
   }
 
-  /** The fastest speed from which the ship can still flip and stop within a distance. */
+  /** The fastest speed from which the ship can still turn and stop within a distance. */
   private stoppingSpeed(sim: Sim, distance: number): number {
+    const { ship } = this;
     const { tuning } = sim;
-    const accel = (tuning.thrust / tuning.weight) * BRAKE_MARGIN;
-    const flipSeconds = Math.PI / SPIN_LIMIT + 0.5;
+    const hasReverse = ship.parts.has("reverse");
+    const thrust = hasReverse ? tuning.reverseThrust : tuning.thrust;
+    const accel = (thrust / sim.shipWeight(ship)) * BRAKE_MARGIN;
+    const flipSeconds = hasReverse ? REVERSE_BRAKE_SECONDS : Math.PI / SPIN_LIMIT + 0.5;
     const lead = accel * flipSeconds;
     return -lead + Math.sqrt(lead * lead + 2 * accel * distance);
   }
@@ -326,8 +371,11 @@ export class DronePilot {
   }
 
   /**
-   * Applies a needed velocity change with the only engine it has: turn toward it,
-   * then burn. Otherwise it coasts, with the nose on `hold` if there's somewhere to look.
+   * Applies a needed velocity change. Small ones go straight to the thrusters if
+   * they cover that direction. Otherwise it turns the nose and burns. With a reverse
+   * thruster it may turn the nose away from the need and burn backward, if that's
+   * the shorter turn. When there's nothing to correct it coasts, with the nose on
+   * `hold` if there's somewhere to look.
    */
   private steer(
     sim: Sim,
@@ -342,26 +390,59 @@ export class DronePilot {
     else if (need < tolerance * SETTLED_SHARE) this.burning = false;
 
     if (this.burning) {
-      const burnAngle = Math.atan2(needY, needX);
+      if (this.correctDirectly(sim, needX, needY, need, tolerance, hold)) return;
+      const needAngle = Math.atan2(needY, needX);
+      const backward = needAngle + Math.PI;
+      const useReverse =
+        ship.parts.has("reverse") &&
+        Math.abs(wrapAngle(backward - ship.angle)) < Math.abs(wrapAngle(needAngle - ship.angle));
+      const burnAngle = useReverse ? backward : needAngle;
       this.turnTo(sim, burnAngle);
       const off = Math.abs(wrapAngle(burnAngle - ship.angle));
       this.thrusting = off < (this.thrusting ? BURN_KEEP_ANGLE : BURN_START_ANGLE);
-      if (this.thrusting) ship.controls.thrust = 1;
+      if (this.thrusting) ship.controls.thrust = useReverse ? -1 : 1;
       return;
     }
     this.thrusting = false;
     this.turnTo(sim, hold ?? ship.angle);
   }
 
+  /** Makes a correction without turning. Returns false if the thrusters can't cover it. */
+  private correctDirectly(
+    sim: Sim,
+    needX: number,
+    needY: number,
+    need: number,
+    tolerance: number,
+    hold: number | null,
+  ): boolean {
+    const { ship } = this;
+    if (!ship.parts.has("strafe") || (need > DIRECT_LIMIT && hold === null)) return false;
+    const cos = Math.cos(ship.angle);
+    const sin = Math.sin(ship.angle);
+    const forward = needX * cos + needY * sin;
+    const side = -needX * sin + needY * cos;
+    const small = tolerance * SETTLED_SHARE;
+    if (forward < -small && !ship.parts.has("reverse")) return false;
+
+    if (Math.abs(forward) > small) ship.controls.thrust = Math.sign(forward);
+    if (Math.abs(side) > small) ship.controls.strafe = Math.sign(side);
+    this.thrusting = false;
+    this.correctingDirectly = true;
+    this.turnTo(sim, hold ?? ship.angle);
+    return true;
+  }
+
   private turnTo(sim: Sim, angle: number): void {
     const { ship } = this;
     const { tuning } = sim;
-    const accel = ((tuning.rotationThrust * Math.PI) / 180) / tuning.weight;
+    const accel = ((tuning.rotationThrust * Math.PI) / 180) / sim.shipWeight(ship);
     const error = wrapAngle(angle - ship.angle);
     const size = Math.abs(error);
     const braking = Math.sqrt(2 * accel * 0.7 * size);
     const wanted = Math.sign(error) * Math.min(SPIN_LIMIT, braking, size * SETTLE_RATE);
     const change = wanted - ship.spin;
     if (Math.abs(change) > QUIET_SPIN) ship.controls.turn = Math.sign(change);
+    else if (Math.abs(wanted) < QUIET_SPIN) ship.controls.stabilize = true;
   }
 }

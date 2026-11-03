@@ -1,3 +1,4 @@
+import { PARTS, type PartId } from "./parts";
 import { DronePilot } from "./pilot";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
@@ -18,12 +19,12 @@ const STATION_SHAPE_CENTER = DOCK_OFFSET / 2;
 const STATION_SHAPE_HALF = STATION_HALF + DOCK_OFFSET / 2;
 const STILL = { vx: 0, vy: 0 };
 const UNLOAD_SECONDS = 0.1;
-/** The bare minimum: one engine, turning, and a gun. */
-const DRONE_THRUSTERS: ReadonlySet<ThrusterId> = new Set<ThrusterId>([
-  "thrusterMain",
-  "thrusterRotateLeft",
-  "thrusterRotateRight",
-]);
+/** Parts that add thrusters. Every ship has the main engine, rotation, and a gun. */
+const THRUSTER_PARTS: Partial<Record<ThrusterId, PartId>> = {
+  thrusterReverse: "reverse",
+  thrusterStrafeLeft: "strafe",
+  thrusterStrafeRight: "strafe",
+};
 
 export interface Controls {
   /** -1 (reverse) to 1 (forward). */
@@ -33,6 +34,10 @@ export interface Controls {
   /** -1 (left) to 1 (right). */
   turn: number;
   fire: boolean;
+  /** Used by drones. The player's retro is the switch in the tuning panel. */
+  retro: boolean;
+  /** Whether a spin stabilizer, if fitted, may act when not turning. */
+  stabilize: boolean;
 }
 
 interface Body {
@@ -48,8 +53,11 @@ interface Body {
 
 export interface Ship extends Body {
   controls: Controls;
-  /** Null for the player, whose fit comes from the tuning panel. */
-  fit: ReadonlySet<ThrusterId> | null;
+  parts: Set<PartId>;
+  credits: number;
+  trips: number;
+  wrecks: number;
+  damageTaken: number;
   /** The POI this ship currently moves relative to. */
   frame: Poi;
   ore: number;
@@ -121,11 +129,7 @@ export type SimEvent =
 
 export interface Stats {
   bestOre: number;
-  credits: number;
-  wrecks: number;
   topSpeed: number;
-  droneWrecks: number;
-  droneTrips: number;
 }
 
 /** Small seeded generator, so a given seed always builds the same field. */
@@ -217,7 +221,14 @@ export function sweepBox(
 
 export class Sim {
   tuning: Tuning;
-  controls: Controls = { thrust: 0, strafe: 0, turn: 0, fire: false };
+  controls: Controls = {
+    thrust: 0,
+    strafe: 0,
+    turn: 0,
+    fire: false,
+    retro: false,
+    stabilize: true,
+  };
   ship!: Ship;
   /** Other ships, flying by the same rules as the player's. */
   drones: DronePilot[] = [];
@@ -227,7 +238,7 @@ export class Sim {
   field!: Poi;
   station!: Poi;
   events: SimEvent[] = [];
-  stats: Stats = { bestOre: 0, credits: 0, wrecks: 0, topSpeed: 0, droneWrecks: 0, droneTrips: 0 };
+  stats: Stats = { bestOre: 0, topSpeed: 0 };
   private random: () => number = Math.random;
 
   constructor(seed = 1, tuning: Tuning = { ...DEFAULTS }) {
@@ -241,21 +252,14 @@ export class Sim {
     this.shots = [];
     this.ores = [];
     this.events = [];
-    this.stats = {
-      bestOre: this.stats.bestOre,
-      credits: 0,
-      wrecks: 0,
-      topSpeed: 0,
-      droneWrecks: 0,
-      droneTrips: 0,
-    };
+    this.stats = { bestOre: this.stats.bestOre, topSpeed: 0 };
     this.placePois();
-    this.ship = this.makeShip(this.startX(), this.field.y, this.controls, null);
+    this.ship = this.makeShip(this.startX(), this.field.y, this.controls);
     this.drones = [];
     for (let i = 0; i < this.tuning.droneCount; i++) {
       const y = this.field.y + (i + 1) * 70 * (i % 2 === 0 ? 1 : -1);
-      const controls = { thrust: 0, strafe: 0, turn: 0, fire: false };
-      const ship = this.makeShip(this.startX(), y, controls, DRONE_THRUSTERS);
+      const controls = { thrust: 0, strafe: 0, turn: 0, fire: false, retro: false, stabilize: false };
+      const ship = this.makeShip(this.startX(), y, controls);
       this.drones.push(new DronePilot(ship));
     }
     const clear = 260;
@@ -317,12 +321,7 @@ export class Sim {
     return this.field.x - this.tuning.fieldRadius - 200;
   }
 
-  private makeShip(
-    x: number,
-    y: number,
-    controls: Controls,
-    fit: ReadonlySet<ThrusterId> | null,
-  ): Ship {
+  private makeShip(x: number, y: number, controls: Controls): Ship {
     return {
       x,
       y,
@@ -331,7 +330,11 @@ export class Sim {
       vx: 0,
       vy: 0,
       controls,
-      fit,
+      parts: new Set(),
+      credits: 0,
+      trips: 0,
+      wrecks: 0,
+      damageTaken: 0,
       frame: this.field,
       ore: 0,
       unloadTimer: 0,
@@ -362,6 +365,40 @@ export class Sim {
     ship.ore = 0;
     ship.unloadTimer = 0;
     ship.firing.clear();
+  }
+
+  /** Every part adds weight, which divides all of the ship's thrust. */
+  shipWeight(ship: Ship): number {
+    let weight = this.tuning.weight;
+    for (const part of PARTS) {
+      if (ship.parts.has(part.id)) weight += part.weight * this.tuning.partWeightScale;
+    }
+    return weight;
+  }
+
+  partPrice(id: PartId): number {
+    const part = PARTS.find((candidate) => candidate.id === id)!;
+    return Math.round(part.price * this.tuning.partPriceScale);
+  }
+
+  /** Parts are only sold in the dock. Returns whether the sale went through. */
+  buyPart(ship: Ship, id: PartId): boolean {
+    const price = this.partPrice(id);
+    if (!this.isDocked(ship) || ship.parts.has(id) || ship.credits < price) return false;
+    ship.credits -= price;
+    ship.parts.add(id);
+    if (id === "retro" && ship === this.ship) this.tuning.retro = true;
+    this.events.push({ type: "sale", x: ship.x, y: ship.y });
+    return true;
+  }
+
+  /** Sells a part back at full price, so a ship can go back to being light. */
+  sellPart(ship: Ship, id: PartId): boolean {
+    if (!this.isDocked(ship) || !ship.parts.has(id)) return false;
+    ship.credits += this.partPrice(id);
+    ship.parts.delete(id);
+    this.events.push({ type: "sale", x: ship.x, y: ship.y });
+    return true;
   }
 
   /** Center of the dock, now or as of the previous tick. */
@@ -588,8 +625,10 @@ export class Sim {
     const { tuning } = this;
     const { controls } = ship;
 
-    const perTick = dt / tuning.weight;
+    const perTick = dt / this.shipWeight(ship);
     ship.firing.clear();
+    const retro = ship.parts.has("retro") && (ship === this.ship ? tuning.retro : controls.retro);
+    const spinAssist = retro || (ship.parts.has("spinStabilizer") && controls.stabilize);
 
     const spinChange = ((tuning.rotationThrust * Math.PI) / 180) * perTick;
     ship.spin += this.fireAxis(
@@ -600,6 +639,7 @@ export class Sim {
       "thrusterRotateLeft",
       spinChange,
       spinChange,
+      spinAssist,
     );
     ship.angle += ship.spin * dt;
 
@@ -613,6 +653,7 @@ export class Sim {
       "thrusterReverse",
       tuning.thrust * perTick,
       tuning.reverseThrust * perTick,
+      retro,
     );
     const sideChange = this.fireAxis(
       ship,
@@ -622,6 +663,7 @@ export class Sim {
       "thrusterStrafeLeft",
       tuning.sideThrust * perTick,
       tuning.sideThrust * perTick,
+      retro,
     );
     ship.vx += cos * forwardChange - sin * sideChange;
     ship.vy += sin * forwardChange + cos * sideChange;
@@ -642,9 +684,8 @@ export class Sim {
 
   /**
    * The velocity change one pair of opposed thrusters makes this tick. With no
-   * pilot input on this axis, retro fires whichever thruster opposes the motion.
-   * Retro uses the real thrusters, so a disabled one leaves that motion uncorrected.
-   * Only the player's ship has retro. Each ship can only fire what it's fitted with.
+   * pilot input on this axis, `assist` fires whichever thruster opposes the motion.
+   * It uses the real thrusters, so a missing one leaves that motion uncorrected.
    */
   private fireAxis(
     ship: Ship,
@@ -654,18 +695,26 @@ export class Sim {
     negative: ThrusterId,
     positiveChange: number,
     negativeChange: number,
+    assist: boolean,
   ): number {
     let direction = Math.sign(command);
     let limit = Infinity;
     if (direction === 0) {
-      if (ship.fit || !this.tuning.retro || Math.abs(velocity) < 1e-6) return 0;
+      if (!assist || Math.abs(velocity) < 1e-6) return 0;
       direction = velocity < 0 ? 1 : -1;
       limit = Math.abs(velocity);
     }
     const thruster = direction > 0 ? positive : negative;
-    if (!(ship.fit ? ship.fit.has(thruster) : this.tuning[thruster])) return 0;
+    if (!this.canFire(ship, thruster)) return 0;
     ship.firing.add(thruster);
     return direction * Math.min(direction > 0 ? positiveChange : negativeChange, limit);
+  }
+
+  /** A thruster needs its part. The panel's switches can also turn off the player's. */
+  private canFire(ship: Ship, thruster: ThrusterId): boolean {
+    if (ship === this.ship && !this.tuning[thruster]) return false;
+    const part = THRUSTER_PARTS[thruster];
+    return part === undefined || ship.parts.has(part);
   }
 
   private moveShipWithCollision(ship: Ship, dt: number): void {
@@ -757,6 +806,7 @@ export class Sim {
     const damage = Math.max(0, -closing - tuning.safeImpactSpeed) * tuning.damagePerSpeed;
     if (damage > 0) {
       ship.hull -= damage;
+      ship.damageTaken += damage;
       const player = ship === this.ship;
       this.events.push({ type: "impact", x: ship.x, y: ship.y, damage, player });
       if (ship.hull <= 0) this.wreckShip(ship);
@@ -766,8 +816,7 @@ export class Sim {
   private wreckShip(ship: Ship): void {
     const player = ship === this.ship;
     this.events.push({ type: "wreck", x: ship.x, y: ship.y, player });
-    if (player) this.stats.wrecks++;
-    else this.stats.droneWrecks++;
+    ship.wrecks++;
     this.respawn(ship);
   }
 
@@ -883,7 +932,6 @@ export class Sim {
 
   /** Ore turns into credits one piece at a time while in the dock. */
   private unloadOre(ship: Ship, dt: number): void {
-    const { stats } = this;
     if (ship.ore <= 0 || !this.isDocked(ship)) {
       ship.unloadTimer = 0;
       return;
@@ -892,9 +940,9 @@ export class Sim {
     while (ship.unloadTimer >= UNLOAD_SECONDS && ship.ore > 0) {
       ship.unloadTimer -= UNLOAD_SECONDS;
       ship.ore--;
-      stats.credits += this.tuning.creditsPerOre;
+      ship.credits += this.tuning.creditsPerOre;
       this.events.push({ type: "sale", x: ship.x, y: ship.y });
-      if (ship.ore === 0 && ship !== this.ship) stats.droneTrips++;
+      if (ship.ore === 0) ship.trips++;
     }
   }
 

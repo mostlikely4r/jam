@@ -1,6 +1,7 @@
 import { Audio } from "./audio";
 import { Renderer } from "./render";
-import { MAX_HULL, Sim, TICK } from "./sim";
+import { MAX_HULL, type Ship, Sim, TICK } from "./sim";
+import { PARTS, type Part } from "./parts";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
 const STORAGE_KEY = "flight-test-tuning";
@@ -27,6 +28,7 @@ const sim = new Sim(seed, tuning);
 const canvas = document.getElementById("view") as HTMLCanvasElement;
 const hud = document.getElementById("hud") as HTMLDivElement;
 const panel = document.getElementById("panel") as HTMLDivElement;
+const shop = document.getElementById("shop") as HTMLDivElement;
 const renderer = new Renderer(canvas);
 const audio = new Audio();
 
@@ -38,6 +40,46 @@ let timeScale = 1;
 function restart(): void {
   seed++;
   sim.reset(seed);
+  buildPanel();
+}
+
+/** Buys a part, or sells it back if the ship already has it. */
+function tradePart(part: Part): void {
+  if (sim.ship.parts.has(part.id)) sim.sellPart(sim.ship, part.id);
+  else sim.buyPart(sim.ship, part.id);
+  if (!panel.hidden) buildPanel();
+}
+
+let shopState = "";
+
+function updateShop(): void {
+  const { ship } = sim;
+  const docked = sim.isDocked();
+  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${tuning.partPriceScale} ${tuning.partWeightScale}`;
+  if (state === shopState) return;
+  shopState = state;
+  shop.hidden = !docked;
+  if (!docked) return;
+
+  const heading = document.createElement("h2");
+  heading.textContent = `Dock shop - ${ship.credits} credits - weight ${sim.shipWeight(ship).toFixed(2)}`;
+  shop.replaceChildren(heading);
+  PARTS.forEach((part, index) => {
+    const owned = ship.parts.has(part.id);
+    const price = sim.partPrice(part.id);
+    const weight = (part.weight * tuning.partWeightScale).toFixed(2);
+    const button = document.createElement("button");
+    button.className = owned ? "owned" : "";
+    button.disabled = !owned && ship.credits < price;
+    button.textContent = owned
+      ? `${index + 1} SELL ${part.label} for ${price}, -${weight} weight`
+      : `${index + 1} ${part.label}: ${price} credits, +${weight} weight. ${part.description}`;
+    button.addEventListener("click", () => {
+      tradePart(part);
+      button.blur();
+    });
+    shop.append(button);
+  });
 }
 
 function saveTuning(): void {
@@ -55,7 +97,8 @@ function buildPanel(): void {
 
   const retro = document.createElement("button");
   retro.className = tuning.retro ? "retro on" : "retro";
-  retro.textContent = `Retro thrust: ${tuning.retro ? "ON" : "OFF"} (X)`;
+  const hasRetro = sim.ship.parts.has("retro");
+  retro.textContent = `Retro thrust: ${tuning.retro ? "ON" : "OFF"} (X)${hasRetro ? "" : " - needs the part"}`;
   retro.addEventListener("click", () => setRetro(!tuning.retro));
   panel.append(retro);
 
@@ -91,7 +134,30 @@ function buildPanel(): void {
       panel.append(label);
     }
 
+    if (group.title === "Parts") {
+      const note = document.createElement("p");
+      note.textContent = "Your ship's parts, free for testing:";
+      panel.append(note);
+      for (const part of PARTS) {
+        const toggle = document.createElement("label");
+        toggle.className = "toggle";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = sim.ship.parts.has(part.id);
+        box.addEventListener("change", () => {
+          if (box.checked) sim.ship.parts.add(part.id);
+          else sim.ship.parts.delete(part.id);
+          box.blur();
+        });
+        toggle.append(box, ` ${part.label}`);
+        panel.append(toggle);
+      }
+    }
+
     if (group.title === "Thrusters") {
+      const note = document.createElement("p");
+      note.textContent = "Switches for your ship. Reverse and strafe also need their parts.";
+      panel.append(note);
       for (const thruster of THRUSTERS) {
         const toggle = document.createElement("label");
         toggle.className = "toggle";
@@ -150,6 +216,9 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "KeyP") paused = !paused;
   if (event.code === "KeyM") audio.toggleMute();
   if (event.code === "KeyX") setRetro(!tuning.retro);
+  const digit = /^Digit([1-9])$/.exec(event.code);
+  const part = digit ? PARTS[Number(digit[1]) - 1] : undefined;
+  if (part && sim.isDocked()) tradePart(part);
   keys.add(event.code);
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));
@@ -174,6 +243,11 @@ canvas.addEventListener(
   },
   { passive: false },
 );
+
+function partList(ship: Ship): string {
+  const owned = PARTS.filter((part) => ship.parts.has(part.id));
+  return owned.length > 0 ? owned.map((part) => part.short).join(" ") : "none";
+}
 
 let lastTime = performance.now();
 let accumulator = 0;
@@ -202,6 +276,7 @@ function frame(now: number): void {
   );
   sim.events.length = 0;
   audio.setThrust(!paused && sim.ship.firing.size > 0);
+  updateShop();
   renderer.draw(sim, paused ? 1 : accumulator / TICK, paused ? 0 : seconds);
 
   hudTimer -= seconds;
@@ -211,18 +286,20 @@ function frame(now: number): void {
     const hullBars = Math.max(0, Math.ceil((sim.ship.hull / MAX_HULL) * 10));
     hud.textContent = [
       `Speed ${Math.round(speed)}  (top ${Math.round(sim.stats.topSpeed)})`,
-      `Spin  ${Math.round((sim.ship.spin * 180) / Math.PI)} deg/s  Retro ${tuning.retro ? "ON" : "off"}`,
+      `Spin  ${Math.round((sim.ship.spin * 180) / Math.PI)} deg/s  Retro ${sim.ship.parts.has("retro") ? (tuning.retro ? "ON" : "off") : "none"}`,
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
-      `Ore   ${sim.ship.ore}  (best ${sim.stats.bestOre})  Credits ${sim.stats.credits}`,
+      `Ore   ${sim.ship.ore}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}`,
+      `Parts ${partList(sim.ship)}  Weight ${sim.shipWeight(sim.ship).toFixed(2)}`,
       `Moving relative to ${sim.ship.frame.name}${sim.isDocked() ? "  DOCKED" : ""}`,
-      `Rocks ${sim.rocks.length}  Wrecks ${sim.stats.wrecks}`,
-      ...sim.drones.map((drone) => {
-        const hull = Math.round((drone.ship.hull / MAX_HULL) * 100);
-        return `Drone ${drone.task} ${drone.ship.ore}/${tuning.droneCargo}  Hull ${hull}%`;
+      `Rocks ${sim.rocks.length}  Wrecks ${sim.ship.wrecks}`,
+      ...sim.drones.flatMap((drone, index) => {
+        const { ship } = drone;
+        const hull = Math.round((ship.hull / MAX_HULL) * 100);
+        return [
+          `Drone ${index + 1} ${drone.task} ${ship.ore}/${tuning.droneCargo}  Hull ${hull}%  Credits ${ship.credits}  Trips ${ship.trips}  Wrecks ${ship.wrecks}`,
+          `  Parts ${partList(ship)}  Weight ${sim.shipWeight(ship).toFixed(2)}`,
+        ];
       }),
-      ...(sim.drones.length > 0
-        ? [`Drone trips ${sim.stats.droneTrips}  Wrecks ${sim.stats.droneWrecks}`]
-        : []),
       `FPS   ${Math.round(fps)}${paused ? "  PAUSED" : ""}`,
     ].join("\n");
   }

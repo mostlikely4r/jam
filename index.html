@@ -25,12 +25,23 @@
       #panel button.retro { display: block; width: 100%; margin: 0 0 12px; }
       #panel button.retro.on { background: #2f5a34; border-color: #5fae66; }
       #panel label.toggle { margin-bottom: 3px; cursor: pointer; }
+      #panel p { margin: 0 0 6px; color: #7f8ba0; }
+      #shop { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); width: 560px; padding: 10px 12px;
+              background: #0b0f18e8; border: 1px solid #5fae66; }
+      #shop[hidden] { display: none; }
+      #shop h2 { font-size: 12px; margin: 0 0 8px; color: #8fe3a1; text-transform: uppercase; letter-spacing: 1px; }
+      #shop button { display: block; width: 100%; text-align: left; background: #1a2233; color: #cfd8e6; border: 1px solid #33405a;
+                     padding: 4px 8px; margin-top: 4px; font: inherit; cursor: pointer; }
+      #shop button:hover:enabled { background: #26324a; }
+      #shop button:disabled { color: #6a7486; cursor: default; }
+      #shop button.owned { border-color: #5fae66; }
     </style>
   </head>
   <body>
     <canvas id="view"></canvas>
     <div id="hud"></div>
-    <div id="help">W/S thrust  A/D strafe  Q/E or arrows rotate  X retro  Space or left mouse fire  Wheel zoom  R restart  Tab tuning  P pause  M mute</div>
+    <div id="help">W/S thrust  A/D strafe  Q/E or arrows rotate  X retro  1-5 dock shop  Space or left mouse fire  Wheel zoom  R restart  Tab tuning  P pause  M mute</div>
+    <div id="shop" hidden></div>
     <div id="panel" hidden></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

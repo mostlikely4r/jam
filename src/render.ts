@@ -359,16 +359,20 @@ export class Renderer {
   private drawPointers(sim: Sim, width: number, height: number, scale: number, dpr: number): void {
     const viewHalfWidth = width / 2 / scale;
     const viewHalfHeight = height / 2 / scale;
+    const meters = sim.ship.parts.has("meters");
     const field = sim.readPoi(sim.field, viewHalfWidth, viewHalfHeight);
-    if (field.distance > 0) this.drawPointer(field, "#8fb4ff", "field", 0.34, width, height, dpr);
+    if (field.distance > 0) {
+      this.drawPointer(field, "#8fb4ff", "field", 0.34, meters, width, height, dpr);
+    }
     const station = sim.readPoi(sim.station, viewHalfWidth, viewHalfHeight);
     if (station.distance > 0) {
-      this.drawPointer(station, "#8fe3a1", "station", 0.22, width, height, dpr);
+      this.drawPointer(station, "#8fe3a1", "station", 0.22, meters, width, height, dpr);
     }
-    for (const drone of sim.drones) {
+    for (let i = 0; i < sim.drones.length; i++) {
+      const drone = sim.drones[i];
       const reading = sim.readShip(drone.ship, viewHalfWidth, viewHalfHeight);
       if (reading.distance > 0) {
-        this.drawPointer(reading, "#f2c572", "drone", 0.28, width, height, dpr);
+        this.drawPointer(reading, "#f2c572", `drone ${i + 1}`, 0.28, meters, width, height, dpr);
       }
     }
   }
@@ -377,12 +381,14 @@ export class Renderer {
    * Past the arrow's tip, the solid marker sits further out the greater the
    * distance, and reaches the tip as the POI comes into view. The hollow marker is the distance
    * a few seconds ahead: inside the solid one when closing, outside when not.
+   * Those marks and the numbers need the meters part. The arrow and name don't.
    */
   private drawPointer(
     reading: PoiReading,
     color: string,
     name: string,
     ring: number,
+    meters: boolean,
     width: number,
     height: number,
     dpr: number,
@@ -408,10 +414,12 @@ export class Renderer {
     ctx.closePath();
     ctx.fill();
 
-    this.tracePointerMark(tip + offset(reading.distance), dpr);
-    ctx.fill();
-    this.tracePointerMark(tip + offset(ahead), dpr);
-    ctx.stroke();
+    if (meters) {
+      this.tracePointerMark(tip + offset(reading.distance), dpr);
+      ctx.fill();
+      this.tracePointerMark(tip + offset(ahead), dpr);
+      ctx.stroke();
+    }
     ctx.restore();
 
     const speed = Math.round(Math.abs(reading.closing));
@@ -420,7 +428,7 @@ export class Renderer {
     ctx.font = `${12 * dpr}px Consolas, monospace`;
     ctx.textAlign = "center";
     ctx.fillText(
-      `${name} ${Math.round(reading.distance)}${trend}`,
+      meters ? `${name} ${Math.round(reading.distance)}${trend}` : name,
       width / 2 + Math.cos(dir) * (radius - 52 * dpr),
       height / 2 + Math.sin(dir) * (radius - 52 * dpr),
     );

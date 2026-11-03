@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { PARTS } from "./parts";
 import { DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, MAX_HULL, type Poi, Sim, STATION_HALF, TICK } from "./sim";
+
+/** Every part, weighing nothing, so tests of the thrusters themselves see plain numbers. */
+function fitAll(sim: Sim): Sim {
+  sim.tuning.partWeightScale = 0;
+  for (const part of PARTS) sim.ship.parts.add(part.id);
+  return sim;
+}
 
 /** No rocks, and the field stays put, so tests can reason in plain coordinates. */
 function emptySim(): Sim {
@@ -14,7 +22,7 @@ function emptySim(): Sim {
   });
   sim.ship.x = 0;
   sim.ship.y = 0;
-  return sim;
+  return fitAll(sim);
 }
 
 function run(sim: Sim, seconds: number): void {
@@ -40,6 +48,7 @@ describe("thrusters", () => {
 
   it("rotation accelerates and keeps spinning after input stops", () => {
     const sim = emptySim();
+    sim.ship.parts.delete("spinStabilizer");
     sim.controls.turn = 1;
     run(sim, 1);
     expect(degrees(sim.ship.spin)).toBeCloseTo(DEFAULTS.rotationThrust, 3);
@@ -147,7 +156,7 @@ describe("impacts", () => {
     sim.rocks.push(sim.makeRock(2, 100, 0, 0, 0));
     sim.ship.vx = 1000;
     run(sim, 0.2);
-    expect(sim.stats.wrecks).toBe(1);
+    expect(sim.ship.wrecks).toBe(1);
     expect(sim.ship.ore).toBe(0);
     expect(sim.ship.hull).toBe(MAX_HULL);
   });
@@ -232,13 +241,13 @@ describe("station", () => {
     sim.ship.ore = 5;
     run(sim, 1);
     expect(sim.ship.ore).toBe(0);
-    expect(sim.stats.credits).toBe(5 * DEFAULTS.creditsPerOre);
+    expect(sim.ship.credits).toBe(5 * DEFAULTS.creditsPerOre);
 
     const away = emptySim();
     away.ship.ore = 5;
     run(away, 1);
     expect(away.ship.ore).toBe(5);
-    expect(away.stats.credits).toBe(0);
+    expect(away.ship.credits).toBe(0);
   });
 
   it("finds the dock where the station's rotation has put it", () => {
@@ -254,15 +263,15 @@ describe("station", () => {
 
   it("keeps credits when the ship is wrecked", () => {
     const sim = emptySim();
-    sim.stats.credits = 70;
+    sim.ship.credits = 70;
     sim.ship.ore = 3;
     sim.ship.hull = 1;
     sim.rocks.push(sim.makeRock(2, 100, 0, 0, 0));
     sim.ship.vx = 1000;
     run(sim, 0.2);
-    expect(sim.stats.wrecks).toBe(1);
+    expect(sim.ship.wrecks).toBe(1);
     expect(sim.ship.ore).toBe(0);
-    expect(sim.stats.credits).toBe(70);
+    expect(sim.ship.credits).toBe(70);
   });
 });
 
@@ -277,7 +286,7 @@ describe("motion relative to the nearest POI", () => {
   }
 
   function movingSim(): Sim {
-    return new Sim(1, {
+    return fitAll(new Sim(1, {
       ...DEFAULTS,
       rockCount: 0,
       fieldOrbitPeriod: 600,
@@ -285,7 +294,7 @@ describe("motion relative to the nearest POI", () => {
       orbitPeriod: 300,
       stationRotationPeriod: 60,
       droneCount: 0,
-    });
+    }));
   }
 
   it("carries a resting ship with the field's orbit and rotation", () => {
@@ -360,6 +369,117 @@ describe("motion relative to the nearest POI", () => {
     expect(sim.ship.frame).toBe(sim.station);
     expect(sim.ship.vx).toBeCloseTo(-100, 5);
     expect(sim.ship.vy).toBeCloseTo(0, 5);
+  });
+});
+
+describe("parts", () => {
+  /** A ship with no parts, sitting still in the dock. */
+  function bareSim(): Sim {
+    const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, droneCount: 0, stationRotationPeriod: 0 });
+    sim.ship.x = sim.station.x + DOCK_OFFSET;
+    sim.ship.y = sim.station.y;
+    return sim;
+  }
+
+  it("starts with only the main engine and rotation", () => {
+    const sim = bareSim();
+    sim.controls.thrust = -1;
+    sim.controls.strafe = 1;
+    sim.step();
+    expect(sim.ship.firing.size).toBe(0);
+    sim.controls.thrust = 1;
+    sim.controls.strafe = 0;
+    sim.controls.turn = 1;
+    sim.step();
+    expect([...sim.ship.firing].sort()).toEqual(["thrusterMain", "thrusterRotateRight"]);
+  });
+
+  it("buys a part with credits, only in the dock, and only if affordable", () => {
+    const sim = bareSim();
+    const price = sim.partPrice("reverse");
+    sim.ship.credits = price - 1;
+    expect(sim.buyPart(sim.ship, "reverse")).toBe(false);
+    sim.ship.credits = price;
+    sim.ship.x += 2000;
+    expect(sim.buyPart(sim.ship, "reverse")).toBe(false);
+    sim.ship.x -= 2000;
+    expect(sim.buyPart(sim.ship, "reverse")).toBe(true);
+    expect(sim.ship.credits).toBe(0);
+    expect(sim.ship.parts.has("reverse")).toBe(true);
+    expect(sim.buyPart(sim.ship, "reverse")).toBe(false);
+  });
+
+  it("sells a part back at full price", () => {
+    const sim = bareSim();
+    sim.ship.credits = sim.partPrice("strafe");
+    sim.buyPart(sim.ship, "strafe");
+    expect(sim.sellPart(sim.ship, "strafe")).toBe(true);
+    expect(sim.ship.credits).toBe(sim.partPrice("strafe"));
+    expect(sim.ship.parts.has("strafe")).toBe(false);
+  });
+
+  it("adds weight, which divides all thrust", () => {
+    const sim = bareSim();
+    const part = PARTS.find((candidate) => candidate.id === "strafe")!;
+    sim.ship.parts.add("strafe");
+    expect(sim.shipWeight(sim.ship)).toBeCloseTo(DEFAULTS.weight + part.weight, 5);
+    sim.controls.strafe = 1;
+    sim.step();
+    const expected = (DEFAULTS.sideThrust * TICK) / (DEFAULTS.weight + part.weight);
+    expect(Math.abs(sim.ship.vy)).toBeCloseTo(expected, 1);
+  });
+
+  it("makes reverse and strafe work once owned", () => {
+    const sim = bareSim();
+    sim.ship.parts.add("reverse");
+    sim.controls.thrust = -1;
+    sim.step();
+    expect(sim.ship.firing.has("thrusterReverse")).toBe(true);
+    sim.ship.parts.add("strafe");
+    sim.controls.strafe = 1;
+    sim.step();
+    expect(sim.ship.firing.has("thrusterStrafeRight")).toBe(true);
+  });
+
+  it("stabilizer stops rotation and leaves drift alone", () => {
+    const sim = bareSim();
+    sim.ship.x += 3000;
+    sim.ship.parts.add("spinStabilizer");
+    sim.ship.spin = 2;
+    sim.ship.vx = 50;
+    run(sim, 1);
+    expect(sim.ship.spin).toBe(0);
+    expect(Math.hypot(sim.ship.vx, sim.ship.vy)).toBeCloseTo(50, 3);
+  });
+
+  it("without a stabilizer, rotation keeps going", () => {
+    const sim = bareSim();
+    sim.ship.spin = 2;
+    run(sim, 1);
+    expect(sim.ship.spin).toBe(2);
+  });
+
+  it("retro does nothing without the part, even when switched on", () => {
+    const sim = bareSim();
+    sim.ship.x += 3000;
+    sim.tuning.retro = true;
+    sim.ship.vx = -50;
+    run(sim, 1);
+    expect(Math.hypot(sim.ship.vx, sim.ship.vy)).toBeCloseTo(50, 3);
+  });
+
+  it("retro can only brake with the thrusters the ship owns", () => {
+    const sim = bareSim();
+    sim.ship.x += 3000;
+    sim.ship.parts.add("retro");
+    sim.tuning.retro = true;
+    sim.ship.vy = 0;
+    sim.ship.vx = 100; // Forward, which only a reverse thruster could slow.
+    run(sim, 1);
+    expect(sim.ship.vx).toBeCloseTo(100, 1);
+    sim.ship.parts.add("reverse");
+    run(sim, 2);
+    expect(sim.ship.vx).toBeCloseTo(0, 3);
   });
 });
 

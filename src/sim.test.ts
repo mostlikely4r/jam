@@ -483,6 +483,88 @@ describe("parts", () => {
   });
 });
 
+describe("rocks drifting in", () => {
+  /** A small field target with one rock, so the field always wants more. */
+  function inflowSim(rockInflow: number): Sim {
+    return new Sim(1, {
+      ...DEFAULTS,
+      rockCount: 50,
+      rockInflow,
+      droneCount: 0,
+    });
+  }
+
+  function clearRocks(sim: Sim): void {
+    sim.rocks.length = 0;
+  }
+
+  it("arrives at about the set rate, starting outside the field and away from the player", () => {
+    const sim = inflowSim(6);
+    clearRocks(sim);
+    run(sim, 60);
+    expect(sim.rocks.length).toBeGreaterThanOrEqual(5);
+    expect(sim.rocks.length).toBeLessThanOrEqual(7);
+    const newest = sim.rocks[sim.rocks.length - 1];
+    expect(newest.tier).toBe(2);
+    expect(newest.arriving).toBe(true);
+    expect(Math.hypot(newest.x - sim.field.x, newest.y - sim.field.y)).toBeGreaterThan(
+      DEFAULTS.fieldRadius,
+    );
+  });
+
+  it("never starts a rock close to the player", () => {
+    const sim = inflowSim(10);
+    clearRocks(sim);
+    sim.ship.x = sim.field.x + DEFAULTS.fieldRadius + 1500;
+    sim.ship.y = sim.field.y;
+    const seen = new Set<object>();
+    const ticks = Math.round(120 / TICK);
+    for (let i = 0; i < ticks; i++) {
+      sim.ship.vx = 0;
+      sim.ship.vy = 0;
+      sim.step();
+      for (const rock of sim.rocks) {
+        if (seen.has(rock)) continue;
+        seen.add(rock);
+        expect(Math.hypot(rock.x - sim.ship.x, rock.y - sim.ship.y)).toBeGreaterThan(1900);
+      }
+    }
+    expect(seen.size).toBeGreaterThan(5);
+  });
+
+  it("stops once the field is full", () => {
+    const sim = inflowSim(10);
+    clearRocks(sim);
+    sim.tuning.rockCount = 3;
+    run(sim, 120);
+    expect(sim.rocks.length).toBe(3);
+  });
+
+  it("can be turned off", () => {
+    const sim = inflowSim(0);
+    clearRocks(sim);
+    run(sim, 60);
+    expect(sim.rocks.length).toBe(0);
+  });
+
+  it("drifts in at a steady speed and joins the field", () => {
+    const sim = inflowSim(10);
+    clearRocks(sim);
+    sim.tuning.rockCount = 1;
+    run(sim, 10);
+    const rock = sim.rocks[0];
+    const speed = Math.hypot(rock.vx, rock.vy);
+    expect(speed).toBeCloseTo(25, 0);
+    let ticks = 0;
+    while (rock.arriving && ticks < 12000) {
+      sim.step();
+      ticks++;
+    }
+    expect(rock.arriving).toBe(false);
+    expect(Math.hypot(rock.vx, rock.vy)).toBeCloseTo(speed, 0);
+  });
+});
+
 describe("overlapping rocks", () => {
   it("doesn't build up speed while wedged between them", () => {
     const sim = emptySim();

@@ -19,6 +19,12 @@ const STATION_SHAPE_CENTER = DOCK_OFFSET / 2;
 const STATION_SHAPE_HALF = STATION_HALF + DOCK_OFFSET / 2;
 const STILL = { vx: 0, vy: 0 };
 const UNLOAD_SECONDS = 0.1;
+/** How far outside the field a drifting-in rock starts, and how fast it comes. */
+const INFLOW_START_DISTANCE = 1500;
+const INFLOW_SPEED = 25;
+/** A rock doesn't start closer to the player than this, so none appears on screen. */
+const INFLOW_CLEAR_OF_PLAYER = 2000;
+const INFLOW_TIER = 2;
 /** Parts that add thrusters. Every ship has the main engine, rotation, and a gun. */
 const THRUSTER_PARTS: Partial<Record<ThrusterId, PartId>> = {
   thrusterReverse: "reverse",
@@ -72,6 +78,8 @@ export interface Ship extends Body {
 }
 
 export interface Rock extends Body {
+  /** Still on its way in from outside the field. */
+  arriving: boolean;
   tier: number;
   radius: number;
   hp: number;
@@ -240,6 +248,8 @@ export class Sim {
   events: SimEvent[] = [];
   stats: Stats = { bestOre: 0, topSpeed: 0 };
   private random: () => number = Math.random;
+  /** Counts down to the next rock drifting in, in units of the average wait. */
+  private inflowTimer = 1;
 
   constructor(seed = 1, tuning: Tuning = { ...DEFAULTS }) {
     this.tuning = tuning;
@@ -253,6 +263,7 @@ export class Sim {
     this.ores = [];
     this.events = [];
     this.stats = { bestOre: this.stats.bestOre, topSpeed: 0 };
+    this.inflowTimer = 1;
     this.placePois();
     this.ship = this.makeShip(this.startX(), this.field.y, this.controls);
     this.drones = [];
@@ -440,6 +451,7 @@ export class Sim {
       py: y,
       vx,
       vy,
+      arriving: false,
       tier,
       radius,
       hp: Math.ceil((this.tuning.rockToughness * radius) / 60),
@@ -456,6 +468,7 @@ export class Sim {
     for (const drone of this.drones) drone.update(this);
     this.movePois(dt);
     this.carryBodies();
+    this.driftInRocks(dt);
     this.moveRocks(dt);
     this.moveOres(dt);
     this.moveShip(this.ship, dt);
@@ -607,10 +620,45 @@ export class Sim {
     return Math.abs(local.x - DOCK_OFFSET) < STATION_HALF && Math.abs(local.y) < STATION_HALF;
   }
 
+  /**
+   * Stands in for a distant belt that the field slowly gathers rocks from. Rocks
+   * start out of sight and drift in, and stop coming once the field is full.
+   */
+  private driftInRocks(dt: number): void {
+    const { tuning, field, ship } = this;
+    if (tuning.rockInflow <= 0 || this.rocks.length >= tuning.rockCount) return;
+    this.inflowTimer -= (dt * tuning.rockInflow) / 60;
+    if (this.inflowTimer > 0) return;
+
+    const distance = tuning.fieldRadius + INFLOW_START_DISTANCE;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const dir = this.random() * Math.PI * 2;
+      const x = field.x + Math.cos(dir) * distance;
+      const y = field.y + Math.sin(dir) * distance;
+      if (Math.hypot(x - ship.x, y - ship.y) < INFLOW_CLEAR_OF_PLAYER) continue;
+      const rock = this.makeRock(
+        INFLOW_TIER,
+        x,
+        y,
+        -Math.cos(dir) * INFLOW_SPEED,
+        -Math.sin(dir) * INFLOW_SPEED,
+      );
+      rock.arriving = true;
+      this.rocks.push(rock);
+      this.inflowTimer += 0.75 + this.random() * 0.5;
+      return;
+    }
+  }
+
   private moveRocks(dt: number): void {
     const edge = this.tuning.fieldRadius;
     for (const rock of this.rocks) {
-      this.containInField(rock, edge, dt);
+      if (rock.arriving) {
+        // The field's pull would speed it up all the way in.
+        rock.arriving = Math.hypot(rock.x - this.field.x, rock.y - this.field.y) > edge;
+      } else {
+        this.containInField(rock, edge, dt);
+      }
       rock.x += rock.vx * dt;
       rock.y += rock.vy * dt;
       rock.angle += rock.spin * dt;

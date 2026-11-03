@@ -151,6 +151,16 @@ describe("drone", () => {
     expect(sim.drones).toHaveLength(2);
   }, 30000);
 
+  it("goes back to a rock it gave up on when nothing else is left", () => {
+    const sim = new Sim(1, { ...SOLO, rockCount: 0 });
+    const drone = sim.drones[0];
+    const rock = sim.makeRock(1, drone.ship.x + 400, drone.ship.y, 0, 0);
+    sim.rocks.push(rock);
+    (drone as unknown as { ignored: WeakSet<object> }).ignored.add(rock);
+    run(sim, 30);
+    expect(sim.rocks.includes(rock)).toBe(false);
+  }, 30000);
+
   it.each([
     ["spin stabilizer", ["spinStabilizer"]],
     ["reverse", ["reverse"]],

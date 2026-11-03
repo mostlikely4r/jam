@@ -194,6 +194,8 @@ export class DronePilot {
         }
       }
     }
+    // With nothing else left, what it gave up on is worth another try.
+    if (!this.rock && sim.rocks.length > 0) this.ignored = new WeakSet();
     if (this.ore !== previousOre || this.rock !== previousRock) this.targetAge = 0;
   }
 

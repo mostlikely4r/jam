@@ -303,7 +303,7 @@ function frame(now: number): void {
       `Speed ${Math.round(speed)}  (top ${Math.round(sim.stats.topSpeed)})`,
       `Spin  ${Math.round((sim.ship.spin * 180) / Math.PI)} deg/s  Retro ${sim.ship.parts.has("retro") ? (tuning.retro ? "ON" : "off") : "none"}`,
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
-      `Ore   ${sim.ship.ore}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}`,
+      `Ore   ${sim.ship.ore}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
       `Parts ${partList(sim.ship)}  Weight ${sim.shipWeight(sim.ship).toFixed(2)}`,
       `Moving relative to ${sim.ship.frame.name}${sim.isDocked() ? "  DOCKED" : ""}`,
       `Rocks ${sim.rocks.length}  Wrecks ${sim.ship.wrecks}`,
@@ -311,7 +311,7 @@ function frame(now: number): void {
         const { ship } = drone;
         const hull = Math.round((ship.hull / MAX_HULL) * 100);
         return [
-          `Drone ${index + 1} ${drone.task} ${ship.ore}/${tuning.droneCargo}  Hull ${hull}%  Credits ${ship.credits}  Trips ${ship.trips}  Wrecks ${ship.wrecks}`,
+          `Drone ${index + 1} ${drone.task} ${ship.ore}/${tuning.droneCargo}  Hull ${hull}%  Credits ${ship.credits}  Trips ${ship.trips}  Wrecks ${ship.wrecks}  Upkeep ${ship.upkeep}`,
           `  Parts ${partList(ship)}  Weight ${sim.shipWeight(ship).toFixed(2)}`,
         ];
       }),

@@ -60,7 +60,11 @@ interface Body {
 export interface Ship extends Body {
   controls: Controls;
   parts: Set<PartId>;
+  /** Goes below zero when a wreck is rebuilt on credit. Earnings pay it back. */
   credits: number;
+  /** All credits spent on repairs and rebuilds. */
+  upkeep: number;
+  repairTimer: number;
   trips: number;
   wrecks: number;
   damageTaken: number;
@@ -348,6 +352,8 @@ export class Sim {
       controls,
       parts: new Set(),
       credits: 0,
+      upkeep: 0,
+      repairTimer: 0,
       trips: 0,
       wrecks: 0,
       damageTaken: 0,
@@ -477,10 +483,12 @@ export class Sim {
     this.fireShots(this.ship);
     this.collectOre(this.ship);
     this.unloadOre(this.ship, dt);
+    this.repairHull(this.ship, dt);
     for (const drone of this.drones) {
       this.fireShots(drone.ship);
       this.collectOre(drone.ship);
       this.unloadOre(drone.ship, dt);
+      this.repairHull(drone.ship, dt);
     }
   }
 
@@ -881,6 +889,9 @@ export class Sim {
     const player = ship === this.ship;
     this.events.push({ type: "wreck", x: ship.x, y: ship.y, player });
     ship.wrecks++;
+    // A rebuild never waits on money, so a wreck can't leave a ship with no moves.
+    ship.credits -= this.tuning.rebuildCost;
+    ship.upkeep += this.tuning.rebuildCost;
     this.respawn(ship);
   }
 
@@ -1007,6 +1018,29 @@ export class Sim {
       ship.credits += this.tuning.creditsPerOre;
       this.events.push({ type: "sale", x: ship.x, y: ship.y });
       if (ship.ore === 0) ship.trips++;
+    }
+  }
+
+  /** Whether the dock could repair this ship right now, given its hull and credits. */
+  canRepair(ship: Ship): boolean {
+    return (
+      this.isDocked(ship) && ship.hull < MAX_HULL && ship.credits >= this.tuning.repairCost
+    );
+  }
+
+  /** The dock repairs a hull point at a time, for as long as the ship can pay. */
+  private repairHull(ship: Ship, dt: number): void {
+    const { tuning } = this;
+    if (!this.canRepair(ship)) {
+      ship.repairTimer = 0;
+      return;
+    }
+    ship.repairTimer += dt * tuning.repairSpeed;
+    while (ship.repairTimer >= 1 && this.canRepair(ship)) {
+      ship.repairTimer -= 1;
+      ship.hull = Math.min(MAX_HULL, ship.hull + 1);
+      ship.credits -= tuning.repairCost;
+      ship.upkeep += tuning.repairCost;
     }
   }
 

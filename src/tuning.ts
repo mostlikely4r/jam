@@ -33,6 +33,10 @@ export const DEFAULTS = {
   dockDrag: 0.25,
   creditsPerOre: 10,
 
+  repairCost: 2,
+  repairSpeed: 25,
+  rebuildCost: 300,
+
   safeImpactSpeed: 90,
   damagePerSpeed: 0.12,
   bounce: 0.45,
@@ -123,6 +127,14 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
       { key: "stationRotationPeriod", label: "Rotation time (s, 0 = off)", min: 0, max: 3600, step: 30 },
       { key: "dockDrag", label: "Dock slowdown", min: 0, max: 3, step: 0.05 },
       { key: "creditsPerOre", label: "Credits per ore", min: 1, max: 100, step: 1 },
+    ],
+  },
+  {
+    title: "Repairs",
+    sliders: [
+      { key: "repairCost", label: "Credits per hull point", min: 0, max: 20, step: 1 },
+      { key: "repairSpeed", label: "Hull points per second", min: 1, max: 100, step: 1 },
+      { key: "rebuildCost", label: "Credits to rebuild a wreck", min: 0, max: 2000, step: 50 },
     ],
   },
   {

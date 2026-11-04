@@ -4,7 +4,14 @@ import { DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, MAX_HULL, Sim, TICK } from "./sim";
 
 /** One drone that stays bare unless a test says otherwise. */
-const SOLO = { ...DEFAULTS, droneCount: 1, droneParts: 0, droneLimit: 1 };
+const SOLO = {
+  ...DEFAULTS,
+  droneCount: 1,
+  droneParts: 0,
+  droneLimit: 1,
+  repairCost: 0,
+  rebuildCost: 0,
+};
 
 function run(sim: Sim, seconds: number, each?: () => void): void {
   const ticks = Math.round(seconds / TICK);
@@ -149,6 +156,48 @@ describe("drone", () => {
     const sim = new Sim(1, { ...SOLO, droneCount: 1, droneLimit: 2, dronePrice: 50 });
     run(sim, 420);
     expect(sim.drones).toHaveLength(2);
+  }, 30000);
+
+  it("repairs before buying anything", () => {
+    const sim = new Sim(1, { ...SOLO, rockCount: 0, droneParts: 5, repairCost: 2 });
+    const { ship } = sim.drones[0];
+    placeInDock(sim, ship);
+    ship.hull = 50;
+    ship.credits = 150;
+    run(sim, 0.5);
+    expect(sim.drones[0].task).toBe("repairing");
+    expect(ship.parts.size).toBe(0);
+    run(sim, 2);
+    expect(ship.hull).toBe(MAX_HULL);
+    expect(ship.credits).toBe(50);
+    expect(ship.upkeep).toBe(100);
+    expect(ship.parts.size).toBe(0);
+  });
+
+  it("heads home early on a low hull when it can pay", () => {
+    const sim = new Sim(1, { ...SOLO, repairCost: 2 });
+    const { ship } = sim.drones[0];
+    ship.hull = 20;
+    ship.ore = 1;
+    sim.step();
+    expect(sim.drones[0].task).toBe("to station");
+  });
+
+  it("keeps mining on a low hull when it has no way to pay", () => {
+    const sim = new Sim(1, { ...SOLO, repairCost: 2 });
+    const { ship } = sim.drones[0];
+    ship.hull = 20;
+    sim.step();
+    expect(sim.drones[0].task).not.toBe("to station");
+  });
+
+  it("works off a rebuild's debt instead of stopping", () => {
+    const sim = new Sim(1, { ...SOLO, repairCost: 2, rebuildCost: 300 });
+    const { ship } = sim.drones[0];
+    ship.credits = -100;
+    run(sim, 420);
+    expect(ship.trips).toBeGreaterThanOrEqual(2);
+    expect(ship.credits).toBeGreaterThan(-100);
   }, 30000);
 
   it("goes back to a rock it gave up on when nothing else is left", () => {

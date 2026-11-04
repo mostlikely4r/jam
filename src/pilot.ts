@@ -47,6 +47,8 @@ const GIVE_UP_SECONDS = 30;
 const AVOID_LOOK_AHEAD = 500;
 const AVOID_MARGIN = 30;
 const DOCK_ARRIVAL_SLACK = 100;
+/** Below this it heads home early, as long as it can pay for the repair when it gets there. */
+const LOW_HULL = 30;
 
 interface Mover {
   x: number;
@@ -97,6 +99,15 @@ export class DronePilot {
     // Empty means delivered or wrecked. Either way, this load is over.
     if (ship.ore === 0) this.hauling = false;
     if (ship.ore >= sim.tuning.droneCargo) this.hauling = true;
+    const canAffordRepair = ship.ore > 0 || ship.credits >= sim.tuning.repairCost;
+    if (ship.hull < LOW_HULL && canAffordRepair) this.hauling = true;
+
+    // Repairs come before shopping, so it never spends its repair money on parts.
+    if (ship.ore === 0 && sim.canRepair(ship)) {
+      this.task = "repairing";
+      this.hold(sim, sim.dockPoint(), sim.dockPoint(true));
+      return;
+    }
     if (ship.ore === 0 && sim.isDocked(ship)) this.shop(sim);
 
     if (this.hauling) this.haul(sim);

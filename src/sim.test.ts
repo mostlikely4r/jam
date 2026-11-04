@@ -16,6 +16,8 @@ function emptySim(): Sim {
     ...DEFAULTS,
     rockCount: 0,
     droneCount: 0,
+    repairCost: 0,
+    rebuildCost: 0,
     fieldOrbitRadius: 0,
     fieldRotationPeriod: 0,
     stationRotationPeriod: 0,
@@ -562,6 +564,72 @@ describe("rocks drifting in", () => {
     }
     expect(rock.arriving).toBe(false);
     expect(Math.hypot(rock.vx, rock.vy)).toBeCloseTo(speed, 0);
+  });
+});
+
+describe("repairs", () => {
+  function dockedSim(): Sim {
+    const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, droneCount: 0, stationRotationPeriod: 0 });
+    sim.ship.x = sim.station.x + DOCK_OFFSET;
+    sim.ship.y = sim.station.y;
+    return sim;
+  }
+
+  it("repairs in the dock for credits", () => {
+    const sim = dockedSim();
+    sim.ship.hull = 90;
+    sim.ship.credits = 100;
+    run(sim, 2);
+    expect(sim.ship.hull).toBe(MAX_HULL);
+    expect(sim.ship.credits).toBe(100 - 10 * DEFAULTS.repairCost);
+    expect(sim.ship.upkeep).toBe(10 * DEFAULTS.repairCost);
+  });
+
+  it("repairs at the set speed", () => {
+    const sim = dockedSim();
+    sim.ship.hull = 10;
+    sim.ship.credits = 1000;
+    run(sim, 1);
+    expect(sim.ship.hull).toBeCloseTo(10 + DEFAULTS.repairSpeed, 0);
+  });
+
+  it("repairs only as far as the credits go", () => {
+    const sim = dockedSim();
+    sim.ship.hull = 50;
+    sim.ship.credits = 10;
+    run(sim, 3);
+    expect(sim.ship.hull).toBe(55);
+    expect(sim.ship.credits).toBe(0);
+  });
+
+  it("doesn't repair away from the dock", () => {
+    const sim = dockedSim();
+    sim.ship.x += 3000;
+    sim.ship.hull = 50;
+    sim.ship.credits = 100;
+    run(sim, 1);
+    expect(sim.ship.hull).toBe(50);
+    expect(sim.ship.credits).toBe(100);
+  });
+
+  it("charges for a rebuild even without the money, as debt", () => {
+    const sim = dockedSim();
+    sim.ship.x += 3000;
+    sim.ship.credits = 50;
+    sim.ship.hull = 1;
+    sim.rocks.push(sim.makeRock(2, sim.ship.x + 100, sim.ship.y, 0, 0));
+    sim.ship.vx = 1000;
+    run(sim, 0.2);
+    expect(sim.ship.wrecks).toBe(1);
+    expect(sim.ship.credits).toBe(50 - DEFAULTS.rebuildCost);
+    expect(sim.ship.upkeep).toBe(DEFAULTS.rebuildCost);
+  });
+
+  it("can't buy while in debt", () => {
+    const sim = dockedSim();
+    sim.ship.credits = -10;
+    expect(sim.buyPart(sim.ship, "meters")).toBe(false);
+    expect(sim.buyDrone(sim.ship)).toBeNull();
   });
 });
 

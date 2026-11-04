@@ -33,7 +33,6 @@ const renderer = new Renderer(canvas);
 const audio = new Audio();
 
 const keys = new Set<string>();
-let mouseFire = false;
 let paused = false;
 let timeScale = 1;
 
@@ -166,6 +165,27 @@ function buildPanel(): void {
       }
     }
 
+    if (group.title === "New ship") {
+      const switches = [
+        { key: "floaterStart", label: "Start in the new ship (on restart)" },
+        { key: "clickFaceTravel", label: "Click to move ends facing forward" },
+      ] as const;
+      for (const { key, label: text } of switches) {
+        const toggle = document.createElement("label");
+        toggle.className = "toggle";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = tuning[key];
+        box.addEventListener("change", () => {
+          tuning[key] = box.checked;
+          saveTuning();
+          box.blur();
+        });
+        toggle.append(box, ` ${text}`);
+        panel.append(toggle);
+      }
+    }
+
     if (group.title === "Thrusters") {
       const note = document.createElement("p");
       note.textContent = "Switches for your ship. Reverse and strafe also need their parts.";
@@ -209,10 +229,16 @@ function readControls(): void {
   const back = keys.has("KeyS") || keys.has("ArrowDown");
   const turnLeft = keys.has("KeyQ") || keys.has("ArrowLeft");
   const turnRight = keys.has("KeyE") || keys.has("ArrowRight");
-  sim.controls.thrust = (forward ? 1 : 0) - (back ? 1 : 0);
-  sim.controls.strafe = (keys.has("KeyD") ? 1 : 0) - (keys.has("KeyA") ? 1 : 0);
-  sim.controls.turn = (turnRight ? 1 : 0) - (turnLeft ? 1 : 0);
-  sim.controls.fire = keys.has("Space") || mouseFire;
+  sim.controls.fire = keys.has("Space");
+  const thrust = (forward ? 1 : 0) - (back ? 1 : 0);
+  const strafe = (keys.has("KeyD") ? 1 : 0) - (keys.has("KeyA") ? 1 : 0);
+  const turn = (turnRight ? 1 : 0) - (turnLeft ? 1 : 0);
+  // Touching the controls takes over from a click order. Until then, the order flies.
+  if (thrust !== 0 || strafe !== 0 || turn !== 0) sim.clickPilot.cancel();
+  if (sim.clickPilot.active) return;
+  sim.controls.thrust = thrust;
+  sim.controls.strafe = strafe;
+  sim.controls.turn = turn;
 }
 
 window.addEventListener("keydown", (event) => {
@@ -237,15 +263,13 @@ window.addEventListener("keydown", (event) => {
   keys.add(event.code);
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));
-window.addEventListener("blur", () => {
-  keys.clear();
-  mouseFire = false;
-});
+window.addEventListener("blur", () => keys.clear());
 canvas.addEventListener("mousedown", (event) => {
   audio.start();
-  if (event.button === 0) mouseFire = true;
+  if (event.button !== 0) return;
+  const spot = renderer.screenToWorld(event.clientX, event.clientY);
+  sim.orderMove(spot.x, spot.y);
 });
-window.addEventListener("mouseup", () => (mouseFire = false));
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 canvas.addEventListener(
   "wheel",
@@ -305,7 +329,7 @@ function frame(now: number): void {
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
       `Ore   ${sim.ship.ore}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
       `Parts ${partList(sim.ship)}  Weight ${sim.shipWeight(sim.ship).toFixed(2)}`,
-      `Moving relative to ${sim.ship.frame.name}${sim.isDocked() ? "  DOCKED" : ""}`,
+      `Moving relative to ${sim.ship.frame.name}${sim.isDocked() ? "  DOCKED" : ""}${sim.clickPilot.active ? `  Click order: ${sim.clickPilot.task}` : ""}`,
       `Rocks ${sim.rocks.length}  Wrecks ${sim.ship.wrecks}`,
       ...sim.drones.flatMap((drone, index) => {
         const { ship } = drone;

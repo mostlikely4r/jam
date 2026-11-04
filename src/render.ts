@@ -46,6 +46,7 @@ export class Renderer {
   private particles: Particle[] = [];
   private stars: Star[] = [];
   private flash = 0;
+  private view = { camX: 0, camY: 0, scale: 1, dpr: 1, width: 0, height: 0 };
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d")!;
@@ -56,6 +57,15 @@ export class Renderer {
         depth: 0.08 + Math.random() * 0.35,
       });
     }
+  }
+
+  /** The world position under a point on the screen, as of the last drawn frame. */
+  screenToWorld(clientX: number, clientY: number): { x: number; y: number } {
+    const { camX, camY, scale, dpr, width, height } = this.view;
+    return {
+      x: camX + (clientX * dpr - width / 2) / scale,
+      y: camY + (clientY * dpr - height / 2) / scale,
+    };
   }
 
   addEvents(events: SimEvent[]): void {
@@ -130,6 +140,7 @@ export class Renderer {
     const camX = shipX + ship.vx * tuning.lookahead;
     const camY = shipY + ship.vy * tuning.lookahead;
     const scale = tuning.zoom * dpr;
+    this.view = { camX, camY, scale, dpr, width, height };
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = "#05070d";
@@ -143,6 +154,7 @@ export class Renderer {
       Math.abs(x - camX) < halfW + r && Math.abs(y - camY) < halfH + r;
 
     this.drawStation(sim, alpha);
+    this.drawClickTarget(sim, alpha);
     this.drawRocks(sim, alpha, visible);
     this.drawOres(sim, alpha, visible);
     this.drawShots(sim, alpha);
@@ -198,6 +210,23 @@ export class Renderer {
     ctx.lineWidth = 3;
     ctx.strokeRect(-STATION_HALF, -STATION_HALF, size, size);
     ctx.restore();
+  }
+
+  private drawClickTarget(sim: Sim, alpha: number): void {
+    const target = sim.clickPilot.target();
+    if (!target) return;
+    const { ctx } = this;
+    const x = lerp(target.px, target.x, alpha);
+    const y = lerp(target.py, target.y, alpha);
+    ctx.strokeStyle = "rgba(143, 180, 255, 0.8)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(x, y, 12, 0, Math.PI * 2);
+    ctx.moveTo(x - 18, y);
+    ctx.lineTo(x + 18, y);
+    ctx.moveTo(x, y - 18);
+    ctx.lineTo(x, y + 18);
+    ctx.stroke();
   }
 
   private drawRocks(
@@ -331,12 +360,28 @@ export class Renderer {
     const damage = 1 - ship.hull / 100;
     ctx.fillStyle = `rgb(${red + damage * 55}, ${green - damage * 120}, ${blue - damage * 150})`;
     ctx.beginPath();
-    ctx.moveTo(SHIP_RADIUS * 1.25, 0);
-    ctx.lineTo(-SHIP_RADIUS, -SHIP_RADIUS * 0.8);
-    ctx.lineTo(-SHIP_RADIUS * 0.55, 0);
-    ctx.lineTo(-SHIP_RADIUS, SHIP_RADIUS * 0.8);
-    ctx.closePath();
-    ctx.fill();
+    if (ship.model === "floater") {
+      // Square, a little slimmer at the front. A pale front edge shows which way it faces.
+      ctx.moveTo(r, -r * 0.7);
+      ctx.lineTo(-r, -r);
+      ctx.lineTo(-r, r);
+      ctx.lineTo(r, r * 0.7);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#f4f8ff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(r, -r * 0.7);
+      ctx.lineTo(r, r * 0.7);
+      ctx.stroke();
+    } else {
+      ctx.moveTo(SHIP_RADIUS * 1.25, 0);
+      ctx.lineTo(-SHIP_RADIUS, -SHIP_RADIUS * 0.8);
+      ctx.lineTo(-SHIP_RADIUS * 0.55, 0);
+      ctx.lineTo(-SHIP_RADIUS, SHIP_RADIUS * 0.8);
+      ctx.closePath();
+      ctx.fill();
+    }
     ctx.restore();
   }
 

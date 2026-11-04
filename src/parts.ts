@@ -1,4 +1,11 @@
-export type PartId = "spinStabilizer" | "reverse" | "strafe" | "retro" | "meters";
+export type PartId =
+  | "spinStabilizer"
+  | "reverse"
+  | "strafe"
+  | "retro"
+  | "meters"
+  | "gun2"
+  | "clickMove";
 
 export interface Part {
   id: PartId;
@@ -51,6 +58,22 @@ export const PARTS: Part[] = [
     price: 50,
     weight: 0.02,
     description: "Adds readouts to the arrows",
+  },
+  {
+    id: "gun2",
+    label: "Gun 2",
+    short: "gun2",
+    price: 250,
+    weight: 0.05,
+    description: "Replaces your gun. Slower, and precision hits release slow ore",
+  },
+  {
+    id: "clickMove",
+    label: "Click to move",
+    short: "click",
+    price: 400,
+    weight: 0.02,
+    description: "Flies you to where you click",
   },
 ];
 

@@ -6,6 +6,7 @@ import { DOCK_OFFSET, MAX_HULL, Sim, TICK } from "./sim";
 /** One drone that stays bare unless a test says otherwise. */
 const SOLO = {
   ...DEFAULTS,
+  floaterStart: false,
   droneCount: 1,
   droneParts: 0,
   droneLimit: 1,

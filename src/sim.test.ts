@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { PARTS } from "./parts";
-import { DEFAULTS } from "./tuning";
+import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, MAX_HULL, type Poi, Sim, STATION_HALF, TICK } from "./sim";
 
 /** Every part, weighing nothing, so tests of the thrusters themselves see plain numbers. */
+/** The flight tests below are about the quick ship. The new ship has its own tests. */
+const DEFAULTS = { ...GAME_DEFAULTS, floaterStart: false };
+
 function fitAll(sim: Sim): Sim {
   sim.tuning.partWeightScale = 0;
-  for (const part of PARTS) sim.ship.parts.add(part.id);
+  // Gun 2 replaces the gun rather than adding to it, so the shooting tests keep the first one.
+  for (const part of PARTS) if (part.id !== "gun2") sim.ship.parts.add(part.id);
   return sim;
 }
 
@@ -757,8 +761,179 @@ describe("mining", () => {
   });
 
   it("builds the same field from the same seed", () => {
-    const a = new Sim(7);
-    const b = new Sim(7);
+    const a = new Sim(7, { ...DEFAULTS });
+    const b = new Sim(7, { ...DEFAULTS });
     expect(a.rocks.map((r) => [r.x, r.y, r.tier])).toEqual(b.rocks.map((r) => [r.x, r.y, r.tier]));
+  });
+});
+
+describe("the new ship", () => {
+  function floater(extra: Partial<typeof DEFAULTS> = {}): Sim {
+    return new Sim(1, {
+      ...GAME_DEFAULTS,
+      rockCount: 0,
+      rockInflow: 0,
+      droneCount: 0,
+      fieldOrbitRadius: 0,
+      fieldRotationPeriod: 0,
+      ...extra,
+    });
+  }
+
+  it("starts with gun 2 and click to move, and a weak engine", () => {
+    const sim = floater();
+    expect(sim.ship.model).toBe("floater");
+    expect(sim.ship.parts.has("gun2")).toBe(true);
+    expect(sim.ship.parts.has("clickMove")).toBe(true);
+    expect(sim.ship.parts.has("reverse")).toBe(false);
+    sim.controls.thrust = 1;
+    run(sim, 1);
+    expect(sim.ship.vx).toBeCloseTo(
+      (GAME_DEFAULTS.thrust * GAME_DEFAULTS.floaterEngine) / sim.shipWeight(sim.ship),
+      0,
+    );
+  });
+
+  it("can be switched off", () => {
+    const sim = floater({ floaterStart: false });
+    expect(sim.ship.model).toBe("racer");
+    expect(sim.ship.parts.size).toBe(0);
+  });
+
+  it("gun 2 fires slower than the first gun", () => {
+    const sim = floater();
+    sim.controls.fire = true;
+    let shots = 0;
+    for (let i = 0; i < Math.round(3 / TICK); i++) {
+      sim.step();
+      shots += sim.events.filter((event) => event.type === "shot").length;
+      sim.events.length = 0;
+    }
+    expect(shots).toBeLessThanOrEqual(Math.ceil(3 * GAME_DEFAULTS.gun2ShotsPerSecond));
+    expect(shots).toBeGreaterThan(0);
+  });
+
+  function shootRock(preciseChance: number, toughness: number): { sim: Sim; start: number } {
+    const sim = floater({ preciseChance, rockToughness: toughness });
+    sim.ship.angle = 0;
+    sim.rocks.push(sim.makeRock(2, sim.ship.x + 200, sim.ship.y, 0, 0));
+    const start = sim.rocks[0].hp;
+    sim.controls.fire = true;
+    return { sim, start };
+  }
+
+  it("a precision hit releases slow ore near the hit, and the rock stays whole", () => {
+    const { sim, start } = shootRock(1, 20);
+    const rock = sim.rocks[0];
+    let ticks = 0;
+    while (sim.ores.length === 0 && ticks < 1200) {
+      sim.step();
+      ticks++;
+    }
+    expect(sim.ores.length).toBe(1);
+    expect(sim.rocks).toContain(rock);
+    expect(rock.hp).toBe(start - 1);
+    const ore = sim.ores[0];
+    expect(Math.hypot(ore.x - rock.x, ore.y - rock.y)).toBeLessThan(rock.radius + 15);
+    expect(Math.hypot(ore.vx, ore.vy)).toBeLessThanOrEqual(GAME_DEFAULTS.preciseOreSpeed + 0.01);
+  });
+
+  it("every hit wears the rock, so it still breaks in the end", () => {
+    const { sim } = shootRock(1, 2);
+    const rock = sim.rocks[0];
+    run(sim, 5);
+    expect(sim.rocks).not.toContain(rock);
+  });
+
+  it("the first gun never makes a precision hit", () => {
+    const sim = floater({ floaterStart: false, preciseChance: 1, rockToughness: 20 });
+    sim.rocks.push(sim.makeRock(2, sim.ship.x + 200, sim.ship.y, 0, 0));
+    sim.controls.fire = true;
+    run(sim, 2);
+    expect(sim.ores.length).toBe(0);
+  });
+
+  it("flies to a clicked spot, stops there, and faces the way it was going", () => {
+    const sim = floater();
+    const x = sim.ship.x + 300;
+    const y = sim.ship.y + 400;
+    expect(sim.orderMove(x, y)).toBe(true);
+    let top = 0;
+    let ticks = 0;
+    while (sim.clickPilot.active && ticks < Math.round(60 / TICK)) {
+      sim.step();
+      top = Math.max(top, Math.hypot(sim.ship.vx, sim.ship.vy));
+      ticks++;
+    }
+    expect(sim.clickPilot.active).toBe(false);
+    expect(Math.hypot(sim.ship.x - x, sim.ship.y - y)).toBeLessThan(60);
+    expect(Math.hypot(sim.ship.vx, sim.ship.vy)).toBeLessThan(8);
+    expect(top).toBeLessThan(GAME_DEFAULTS.clickSpeed * 1.25);
+    const facing = Math.atan2(400, 300);
+    expect(Math.abs(Math.atan2(Math.sin(sim.ship.angle - facing), Math.cos(sim.ship.angle - facing)))).toBeLessThan(0.15);
+  }, 30000);
+
+  it("uses only the main thruster and rotation when that's all it has", () => {
+    const sim = floater();
+    sim.orderMove(sim.ship.x + 400, sim.ship.y - 300);
+    const used = new Set<string>();
+    for (let i = 0; i < Math.round(30 / TICK); i++) {
+      sim.step();
+      for (const thruster of sim.ship.firing) used.add(thruster);
+    }
+    expect(used.has("thrusterMain")).toBe(true);
+    expect(used.has("thrusterReverse")).toBe(false);
+    expect(used.has("thrusterStrafeLeft")).toBe(false);
+  }, 30000);
+
+  it("can leave the nose where the stop left it", () => {
+    const sim = floater({ clickFaceTravel: false });
+    sim.orderMove(sim.ship.x + 500, sim.ship.y);
+    let ticks = 0;
+    while (sim.clickPilot.active && ticks < Math.round(60 / TICK)) {
+      sim.step();
+      ticks++;
+    }
+    expect(sim.clickPilot.active).toBe(false);
+    expect(Math.abs(sim.ship.angle)).toBeGreaterThan(1);
+  }, 30000);
+
+  it("keeps its spot on a turning field", () => {
+    const sim = floater({ fieldRotationPeriod: 120 });
+    const dx = sim.ship.x - sim.field.x;
+    const dy = sim.ship.y - sim.field.y;
+    sim.orderMove(sim.field.x + dx + 200, sim.field.y + dy);
+    const before = sim.clickPilot.target()!;
+    run(sim, 30);
+    const after = sim.clickPilot.target();
+    if (after) expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeGreaterThan(100);
+    else expect(Math.hypot(sim.ship.x - before.x, sim.ship.y - before.y)).toBeGreaterThan(100);
+  }, 30000);
+
+  it("gives up on a spot it can't reach", () => {
+    const sim = floater();
+    sim.rocks.push(sim.makeRock(2, sim.ship.x + 400, sim.ship.y, 0, 0));
+    sim.orderMove(sim.ship.x + 400, sim.ship.y);
+    run(sim, 120);
+    expect(sim.clickPilot.active).toBe(false);
+    expect(sim.ship.damageTaken).toBe(0);
+  }, 30000);
+
+  it("needs the part", () => {
+    const sim = floater({ floaterStart: false });
+    expect(sim.orderMove(0, 0)).toBe(false);
+    expect(sim.clickPilot.active).toBe(false);
+  });
+
+  it("either ship can buy the systems", () => {
+    const sim = floater({ floaterStart: false });
+    sim.ship.credits = 1000;
+    sim.ship.x = sim.station.x + DOCK_OFFSET;
+    sim.ship.y = sim.station.y;
+    expect(sim.buyPart(sim.ship, "gun2")).toBe(true);
+    expect(sim.buyPart(sim.ship, "clickMove")).toBe(true);
+    expect(sim.orderMove(sim.ship.x + 50, sim.ship.y)).toBe(true);
+    sim.sellPart(sim.ship, "clickMove");
+    expect(sim.clickPilot.active).toBe(false);
   });
 });

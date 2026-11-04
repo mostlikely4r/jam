@@ -1,5 +1,5 @@
 import { PARTS, type PartId } from "./parts";
-import { DronePilot } from "./pilot";
+import { ClickPilot, DronePilot } from "./pilot";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
 export const TICK = 1 / 120;
@@ -57,7 +57,11 @@ interface Body {
   py: number;
 }
 
+/** The racer is the quick ship with an arrow shape. The floater is slow and square. */
+export type ShipModel = "racer" | "floater";
+
 export interface Ship extends Body {
+  model: ShipModel;
   controls: Controls;
   parts: Set<PartId>;
   /** Goes below zero when a wreck is rebuilt on credit. Earnings pay it back. */
@@ -124,6 +128,8 @@ export interface PoiReading {
 
 export interface Shot extends Body {
   life: number;
+  /** Fired by gun 2, so it may be a precision hit. */
+  precise: boolean;
 }
 
 export interface Ore extends Body {
@@ -244,6 +250,8 @@ export class Sim {
   ship!: Ship;
   /** Other ships, flying by the same rules as the player's. */
   drones: DronePilot[] = [];
+  /** Flies the player's ship to a clicked spot, if it has the part. */
+  clickPilot!: ClickPilot;
   rocks: Rock[] = [];
   shots: Shot[] = [];
   ores: Ore[] = [];
@@ -269,7 +277,14 @@ export class Sim {
     this.stats = { bestOre: this.stats.bestOre, topSpeed: 0 };
     this.inflowTimer = 1;
     this.placePois();
-    this.ship = this.makeShip(this.startX(), this.field.y, this.controls);
+    this.resetPlayerControls();
+    const model = this.tuning.floaterStart ? "floater" : "racer";
+    this.ship = this.makeShip(this.startX(), this.field.y, this.controls, model);
+    if (model === "floater") {
+      this.ship.parts.add("gun2");
+      this.ship.parts.add("clickMove");
+    }
+    this.clickPilot = new ClickPilot(this.ship);
     this.drones = [];
     for (let i = 0; i < this.tuning.droneCount; i++) {
       const y = this.field.y + (i + 1) * 70 * (i % 2 === 0 ? 1 : -1);
@@ -337,12 +352,32 @@ export class Sim {
     return drone;
   }
 
+  /** Keeps the same object, since the ship and the input code both hold it. */
+  private resetPlayerControls(): void {
+    Object.assign(this.controls, {
+      thrust: 0,
+      strafe: 0,
+      turn: 0,
+      fire: false,
+      retro: false,
+      stabilize: true,
+    });
+  }
+
+  /** Sends the player's ship to a world position, if it has the part. Returns whether it did. */
+  orderMove(x: number, y: number): boolean {
+    if (!this.ship.parts.has("clickMove")) return false;
+    this.clickPilot.moveTo(this, x, y);
+    return true;
+  }
+
   private startX(): number {
     return this.field.x - this.tuning.fieldRadius - 200;
   }
 
-  private makeShip(x: number, y: number, controls: Controls): Ship {
+  private makeShip(x: number, y: number, controls: Controls, model: ShipModel = "racer"): Ship {
     return {
+      model,
       x,
       y,
       px: x,
@@ -373,6 +408,7 @@ export class Sim {
   private respawn(ship: Ship): void {
     const dock = this.dockPoint();
     const isPlayer = ship === this.ship;
+    if (isPlayer) this.clickPilot.cancel();
     ship.x = isPlayer ? this.startX() : dock.x;
     ship.y = isPlayer ? this.field.y : dock.y;
     ship.px = ship.x;
@@ -398,6 +434,12 @@ export class Sim {
     return weight;
   }
 
+  /** Acceleration per unit of thrust: the ship's engine power divided by its weight. */
+  shipResponse(ship: Ship): number {
+    const engine = ship.model === "floater" ? this.tuning.floaterEngine : 1;
+    return engine / this.shipWeight(ship);
+  }
+
   partPrice(id: PartId): number {
     const part = PARTS.find((candidate) => candidate.id === id)!;
     return Math.round(part.price * this.tuning.partPriceScale);
@@ -419,6 +461,7 @@ export class Sim {
     if (!this.isDocked(ship) || !ship.parts.has(id)) return false;
     ship.credits += this.partPrice(id);
     ship.parts.delete(id);
+    if (id === "clickMove" && ship === this.ship) this.clickPilot.cancel();
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     return true;
   }
@@ -471,6 +514,7 @@ export class Sim {
   /** Advance one fixed tick. Display rate and time speedup never change its size. */
   step(): void {
     const dt = TICK;
+    this.clickPilot.update(this);
     for (const drone of this.drones) drone.update(this);
     this.movePois(dt);
     this.carryBodies();
@@ -697,9 +741,11 @@ export class Sim {
     const { tuning } = this;
     const { controls } = ship;
 
-    const perTick = dt / this.shipWeight(ship);
+    const perTick = dt * this.shipResponse(ship);
     ship.firing.clear();
-    const retro = ship.parts.has("retro") && (ship === this.ship ? tuning.retro : controls.retro);
+    // On a click order the pilot decides, or the retro switch would fight its coasting.
+    const usesSwitch = ship === this.ship && !this.clickPilot.active;
+    const retro = ship.parts.has("retro") && (usesSwitch ? tuning.retro : controls.retro);
     const spinAssist = retro || (ship.parts.has("spinStabilizer") && controls.stabilize);
 
     const spinChange = ((tuning.rotationThrust * Math.PI) / 180) * perTick;
@@ -933,6 +979,9 @@ export class Sim {
         const y = shot.y + shot.vy * dt * hitT;
         this.events.push({ type: "hit", x, y });
         hit.hp -= 1;
+        if (shot.precise && this.random() < this.tuning.preciseChance) {
+          this.releaseOre(x, y, hit);
+        }
         if (hit.hp <= 0) this.breakRock(hit);
         continue;
       }
@@ -947,7 +996,8 @@ export class Sim {
   private fireShots(ship: Ship): void {
     const { tuning } = this;
     if (!ship.controls.fire || ship.cooldown > 0) return;
-    ship.cooldown = 1 / tuning.shotsPerSecond;
+    const precise = ship.parts.has("gun2");
+    ship.cooldown = 1 / (precise ? tuning.gun2ShotsPerSecond : tuning.shotsPerSecond);
     const cos = Math.cos(ship.angle);
     const sin = Math.sin(ship.angle);
     const x = ship.x + cos * (SHIP_RADIUS + 4);
@@ -960,8 +1010,24 @@ export class Sim {
       vx: ship.vx + cos * tuning.shotSpeed,
       vy: ship.vy + sin * tuning.shotSpeed,
       life: tuning.shotLife,
+      precise,
     });
     this.events.push({ type: "shot", x, y });
+  }
+
+  /** A precision hit: ore comes loose where the shot landed, moving slowly in any direction. */
+  private releaseOre(x: number, y: number, rock: Rock): void {
+    const dir = this.random() * Math.PI * 2;
+    const kick = this.tuning.preciseOreSpeed * (0.5 + this.random() * 0.5);
+    this.ores.push({
+      x,
+      y,
+      px: x,
+      py: y,
+      vx: rock.vx + Math.cos(dir) * kick,
+      vy: rock.vy + Math.sin(dir) * kick,
+      kind: Math.floor(this.random() * ORE_KINDS),
+    });
   }
 
   breakRock(rock: Rock): void {

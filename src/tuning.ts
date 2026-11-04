@@ -44,6 +44,14 @@ export const DEFAULTS = {
   partPriceScale: 1,
   partWeightScale: 1,
 
+  floaterStart: true,
+  floaterEngine: 0.2,
+  clickSpeed: 80,
+  clickFaceTravel: true,
+  gun2ShotsPerSecond: 2,
+  preciseChance: 0.25,
+  preciseOreSpeed: 12,
+
   droneCount: 2,
   dronePrice: 500,
   droneLimit: 5,
@@ -150,6 +158,16 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
     sliders: [
       { key: "partPriceScale", label: "Price scale", min: 0, max: 5, step: 0.1 },
       { key: "partWeightScale", label: "Weight scale", min: 0, max: 5, step: 0.1 },
+    ],
+  },
+  {
+    title: "New ship",
+    sliders: [
+      { key: "floaterEngine", label: "Engine power, all thrusters", min: 0.05, max: 1, step: 0.05 },
+      { key: "clickSpeed", label: "Click to move speed", min: 20, max: 400, step: 10 },
+      { key: "gun2ShotsPerSecond", label: "Gun 2 shots per second", min: 0.5, max: 7, step: 0.5 },
+      { key: "preciseChance", label: "Gun 2 precision hit chance", min: 0, max: 1, step: 0.05 },
+      { key: "preciseOreSpeed", label: "Precision ore speed", min: 0, max: 60, step: 1 },
     ],
   },
   {

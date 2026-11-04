@@ -88,7 +88,7 @@ function updateShop(): void {
   drone.disabled = full || ship.credits < tuning.dronePrice;
   drone.textContent = full
     ? `- New drone: at the limit of ${tuning.droneLimit}`
-    : `- New drone: ${tuning.dronePrice} credits. Earns and spends for itself (${sim.drones.length}/${tuning.droneLimit})`;
+    : `- New drone: ${tuning.dronePrice} credits. Earns for you (${sim.drones.length}/${tuning.droneLimit})`;
   drone.addEventListener("click", () => {
     sim.buyDrone(ship);
     drone.blur();
@@ -345,7 +345,7 @@ function frame(now: number): void {
         const { ship } = drone;
         const hull = Math.round((ship.hull / MAX_HULL) * 100);
         return [
-          `Drone ${index + 1} ${drone.task} ${ship.ore}/${tuning.droneCargo}  Hull ${hull}%  Credits ${ship.credits}  Trips ${ship.trips}  Wrecks ${ship.wrecks}  Upkeep ${ship.upkeep}`,
+          `${ship.owner ? "YOURS " : ""}Drone ${index + 1} ${drone.task} ${ship.ore}/${tuning.droneCargo}  Hull ${hull}%  ${ship.owner ? `Earned ${ship.earned}` : `Credits ${ship.credits}`}  Trips ${ship.trips}  Wrecks ${ship.wrecks}  Upkeep ${ship.upkeep}`,
           `  Parts ${partList(ship)}  Weight ${sim.shipWeight(ship).toFixed(2)}`,
         ];
       }),

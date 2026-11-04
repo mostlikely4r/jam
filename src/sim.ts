@@ -61,8 +61,12 @@ export interface Ship extends Body {
   model: ShipModel;
   controls: Controls;
   parts: Set<PartId>;
+  /** The ship whose account this one shares, or null if it keeps its own. */
+  owner: Ship | null;
   /** Goes below zero when a wreck is rebuilt on credit. Earnings pay it back. */
   credits: number;
+  /** All credits this ship has earned, whichever account they went to. */
+  earned: number;
   /** All credits spent on repairs and rebuilds. */
   upkeep: number;
   repairTimer: number;
@@ -391,7 +395,9 @@ export class Sim {
       vy: 0,
       controls,
       parts: new Set(),
+      owner: null,
       credits: 0,
+      earned: 0,
       upkeep: 0,
       repairTimer: 0,
       trips: 0,
@@ -481,7 +487,15 @@ export class Sim {
     buyer.credits -= tuning.dronePrice;
     const dock = this.dockPoint();
     this.events.push({ type: "sale", x: dock.x, y: dock.y });
-    return this.addDrone(dock.x, dock.y);
+    const drone = this.addDrone(dock.x, dock.y);
+    // The player's drones work for the player. Others' drones work for themselves.
+    if (buyer === this.ship) drone.ship.owner = buyer;
+    return drone;
+  }
+
+  /** The ship whose credits this ship earns and spends. */
+  accountOf(ship: Ship): Ship {
+    return ship.owner ?? ship;
   }
 
   /** Center of the dock, now or as of the previous tick. */
@@ -964,7 +978,7 @@ export class Sim {
     this.events.push({ type: "wreck", x: ship.x, y: ship.y, player });
     ship.wrecks++;
     // A rebuild never waits on money, so a wreck can't leave a ship with no moves.
-    ship.credits -= this.tuning.rebuildCost;
+    this.accountOf(ship).credits -= this.tuning.rebuildCost;
     ship.upkeep += this.tuning.rebuildCost;
     this.respawn(ship);
   }
@@ -1109,7 +1123,8 @@ export class Sim {
     while (ship.unloadTimer >= UNLOAD_SECONDS && ship.ore > 0) {
       ship.unloadTimer -= UNLOAD_SECONDS;
       ship.ore--;
-      ship.credits += this.tuning.creditsPerOre;
+      this.accountOf(ship).credits += this.tuning.creditsPerOre;
+      ship.earned += this.tuning.creditsPerOre;
       this.events.push({ type: "sale", x: ship.x, y: ship.y });
       if (ship.ore === 0) ship.trips++;
     }
@@ -1118,7 +1133,9 @@ export class Sim {
   /** Whether the dock could repair this ship right now, given its hull and credits. */
   canRepair(ship: Ship): boolean {
     return (
-      this.isDocked(ship) && ship.hull < MAX_HULL && ship.credits >= this.tuning.repairCost
+      this.isDocked(ship) &&
+      ship.hull < MAX_HULL &&
+      this.accountOf(ship).credits >= this.tuning.repairCost
     );
   }
 
@@ -1133,7 +1150,7 @@ export class Sim {
     while (ship.repairTimer >= 1 && this.canRepair(ship)) {
       ship.repairTimer -= 1;
       ship.hull = Math.min(MAX_HULL, ship.hull + 1);
-      ship.credits -= tuning.repairCost;
+      this.accountOf(ship).credits -= tuning.repairCost;
       ship.upkeep += tuning.repairCost;
     }
   }

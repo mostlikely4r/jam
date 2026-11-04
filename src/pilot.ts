@@ -353,7 +353,8 @@ export class DronePilot extends ShipPilot {
     // Empty means delivered or wrecked. Either way, this load is over.
     if (ship.ore === 0) this.hauling = false;
     if (ship.ore >= sim.tuning.droneCargo) this.hauling = true;
-    const canAffordRepair = ship.ore > 0 || ship.credits >= sim.tuning.repairCost;
+    const canAffordRepair =
+      ship.ore > 0 || sim.accountOf(ship).credits >= sim.tuning.repairCost;
     if (ship.hull < LOW_HULL && canAffordRepair) this.hauling = true;
 
     // Repairs come before shopping, so it never spends its repair money on parts.
@@ -371,6 +372,8 @@ export class DronePilot extends ShipPilot {
   /** Buys the next thing on its list if it has the money. Once that's done, a new drone. */
   private shop(sim: Sim): void {
     const { ship } = this;
+    // It doesn't spend its owner's money without being asked.
+    if (ship.owner) return;
     const allowed = this.wishlist.slice(0, sim.tuning.droneParts);
     const next = allowed.find((part) => !ship.parts.has(part));
     if (next) sim.buyPart(ship, next);

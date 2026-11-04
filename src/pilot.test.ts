@@ -201,6 +201,58 @@ describe("drone", () => {
     expect(ship.credits).toBeGreaterThan(-100);
   }, 30000);
 
+  describe("a drone the player bought", () => {
+    function owned(extra: Partial<typeof SOLO> = {}): Sim {
+      const sim = new Sim(1, { ...SOLO, droneCount: 0, droneLimit: 5, dronePrice: 500, ...extra });
+      placeInDock(sim, sim.ship);
+      sim.ship.credits = 500;
+      expect(sim.buyDrone(sim.ship)).not.toBeNull();
+      return sim;
+    }
+
+    it("earns for the player", () => {
+      const sim = owned();
+      const { ship } = sim.drones[0];
+      expect(ship.owner).toBe(sim.ship);
+      expect(sim.ship.credits).toBe(0);
+      run(sim, 420);
+      expect(ship.trips).toBeGreaterThanOrEqual(1);
+      expect(ship.credits).toBe(0);
+      expect(ship.earned).toBeGreaterThan(0);
+      expect(sim.ship.credits).toBe(ship.earned);
+    }, 30000);
+
+    it("is repaired from the player's account", () => {
+      const sim = owned({ repairCost: 2 });
+      const { ship } = sim.drones[0];
+      sim.ship.credits = 100;
+      ship.hull = 90;
+      run(sim, 1);
+      expect(ship.hull).toBe(MAX_HULL);
+      expect(sim.ship.credits).toBe(80);
+      expect(ship.upkeep).toBe(20);
+    });
+
+    it("doesn't spend the player's money on parts or drones", () => {
+      const sim = owned({ droneParts: 5 });
+      sim.ship.credits = 5000;
+      run(sim, 2);
+      expect(sim.drones[0].ship.parts.size).toBe(0);
+      expect(sim.drones.length).toBe(1);
+      expect(sim.ship.credits).toBe(5000);
+    });
+
+    it("leaves other drones keeping their own money", () => {
+      const sim = new Sim(1, { ...SOLO, droneLimit: 5, dronePrice: 500 });
+      const rival = sim.drones[0].ship;
+      placeInDock(sim, rival);
+      rival.credits = 500;
+      const bought = sim.buyDrone(rival)!;
+      expect(rival.owner).toBeNull();
+      expect(bought.ship.owner).toBeNull();
+    });
+  });
+
   it("goes back to a rock it gave up on when nothing else is left", () => {
     const sim = new Sim(1, { ...SOLO, rockCount: 0 });
     const drone = sim.drones[0];

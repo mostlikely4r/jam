@@ -11,6 +11,7 @@ import {
 
 const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
 const DRONE_COLOR = [180, 200, 120];
+const OWNED_DRONE_COLOR = [120, 190, 255];
 /** The hollow marker shows the distance this many seconds ahead at the current closing speed. */
 const MARKER_LOOK_SECONDS = 3;
 const MARKER_SCALE = 14;
@@ -350,8 +351,8 @@ export class Renderer {
     const { ship } = drone;
     const x = lerp(ship.px, ship.x, alpha);
     const y = lerp(ship.py, ship.y, alpha);
-    this.drawShip(ship, x, y, alpha, DRONE_COLOR);
-    ctx.fillStyle = "#f2c572";
+    this.drawShip(ship, x, y, alpha, ship.owner ? OWNED_DRONE_COLOR : DRONE_COLOR);
+    ctx.fillStyle = ship.owner ? "#8fc8ff" : "#f2c572";
     ctx.font = "14px Consolas, monospace";
     ctx.textAlign = "center";
     ctx.fillText(`${drone.task} ${ship.ore}/${sim.tuning.droneCargo}`, x, y + SHIP_RADIUS + 22);
@@ -459,7 +460,17 @@ export class Renderer {
       const drone = sim.drones[i];
       const reading = sim.readShip(drone.ship, viewHalfWidth, viewHalfHeight);
       if (reading.distance > 0) {
-        this.drawPointer(reading, "#f2c572", `drone ${i + 1}`, 0.28, meters, width, height, dpr);
+        const owned = drone.ship.owner !== null;
+        this.drawPointer(
+          reading,
+          owned ? "#8fc8ff" : "#f2c572",
+          owned ? `your drone ${i + 1}` : `drone ${i + 1}`,
+          0.28,
+          meters,
+          width,
+          height,
+          dpr,
+        );
       }
     }
   }

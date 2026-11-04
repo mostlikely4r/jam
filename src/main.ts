@@ -195,6 +195,21 @@ function buildPanel(): void {
       }
     }
 
+    if (group.title === "Traffic") {
+      const toggle = document.createElement("label");
+      toggle.className = "toggle";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = tuning.showTraffic;
+      box.addEventListener("change", () => {
+        tuning.showTraffic = box.checked;
+        saveTuning();
+        box.blur();
+      });
+      toggle.append(box, " Show traffic readouts and arrows");
+      panel.append(toggle);
+    }
+
     if (group.title === "Thrusters") {
       const note = document.createElement("p");
       note.textContent = "Switches for your ship. Reverse and strafe also need their parts.";
@@ -349,6 +364,12 @@ function frame(now: number): void {
           `  Parts ${partList(ship)}  Weight ${sim.shipWeight(ship).toFixed(2)}`,
         ];
       }),
+      ...(tuning.showTraffic
+        ? sim.traffic.map(
+            ({ ship, task }, index) =>
+              `Traffic ${index + 1} ${ship.model} ${task} ${ship.ore}/${tuning.droneCargo}  Hull ${Math.round((ship.hull / MAX_HULL) * 100)}%  Credits ${ship.credits}  Trips ${ship.trips}  Wrecks ${ship.wrecks}`,
+          )
+        : []),
       `FPS   ${Math.round(fps)}${paused ? "  PAUSED" : ""}`,
     ].join("\n");
   }

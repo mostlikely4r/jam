@@ -5,7 +5,7 @@ import { DOCK_OFFSET, MAX_HULL, type Poi, SHIP_RADIUS, Sim, STATION_HALF, TICK }
 
 /** Every part, weighing nothing, so tests of the thrusters themselves see plain numbers. */
 /** The flight tests below are about the quick ship. The new ship has its own tests. */
-const DEFAULTS = { ...GAME_DEFAULTS, floaterStart: false };
+const DEFAULTS = { ...GAME_DEFAULTS, floaterStart: false, trafficRacers: 0, trafficFloaters: 0 };
 
 function fitAll(sim: Sim): Sim {
   sim.tuning.partWeightScale = 0;
@@ -21,7 +21,7 @@ function emptySim(): Sim {
   const sim = new Sim(1, {
     ...DEFAULTS,
     rockCount: 0,
-    droneCount: 0,
+    testDrones: 0,
     repairCost: 0,
     rebuildCost: 0,
     fieldOrbitRadius: 0,
@@ -301,7 +301,7 @@ describe("motion relative to the nearest POI", () => {
       fieldRotationPeriod: 120,
       orbitPeriod: 300,
       stationRotationPeriod: 60,
-      droneCount: 0,
+      testDrones: 0,
     }));
   }
 
@@ -383,7 +383,7 @@ describe("motion relative to the nearest POI", () => {
 describe("parts", () => {
   /** A ship with no parts, sitting still in the dock. */
   function bareSim(): Sim {
-    const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, droneCount: 0, stationRotationPeriod: 0 });
+    const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, stationRotationPeriod: 0 });
     sim.ship.x = sim.station.x + DOCK_OFFSET;
     sim.ship.y = sim.station.y;
     return sim;
@@ -498,7 +498,7 @@ describe("rocks drifting in", () => {
       ...DEFAULTS,
       rockCount: 50,
       rockInflow,
-      droneCount: 0,
+      testDrones: 0,
     });
   }
 
@@ -575,7 +575,7 @@ describe("rocks drifting in", () => {
 
 describe("repairs", () => {
   function dockedSim(): Sim {
-    const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, droneCount: 0, stationRotationPeriod: 0 });
+    const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, stationRotationPeriod: 0 });
     sim.ship.x = sim.station.x + DOCK_OFFSET;
     sim.ship.y = sim.station.y;
     return sim;
@@ -773,9 +773,11 @@ describe("the new ship", () => {
   function floater(extra: Partial<typeof DEFAULTS> = {}): Sim {
     return new Sim(1, {
       ...GAME_DEFAULTS,
+      trafficRacers: 0,
+      trafficFloaters: 0,
       rockCount: 0,
       rockInflow: 0,
-      droneCount: 0,
+      testDrones: 0,
       fieldOrbitRadius: 0,
       fieldRotationPeriod: 0,
       ...extra,

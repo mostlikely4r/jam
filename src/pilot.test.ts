@@ -7,7 +7,9 @@ import { DOCK_OFFSET, MAX_HULL, Sim, TICK } from "./sim";
 const SOLO = {
   ...DEFAULTS,
   floaterStart: false,
-  droneCount: 1,
+  trafficRacers: 0,
+  trafficFloaters: 0,
+  testDrones: 1,
   droneParts: 0,
   droneLimit: 1,
   repairCost: 0,
@@ -113,7 +115,7 @@ describe("drone", () => {
   });
 
   it("sells a new drone only in the dock, for the price, and up to the limit", () => {
-    const sim = new Sim(1, { ...SOLO, rockCount: 0, droneCount: 0, droneLimit: 1 });
+    const sim = new Sim(1, { ...SOLO, rockCount: 0, testDrones: 0, droneLimit: 1 });
     sim.ship.credits = DEFAULTS.dronePrice;
     expect(sim.buyDrone(sim.ship)).toBeNull();
     placeInDock(sim, sim.ship);
@@ -145,7 +147,7 @@ describe("drone", () => {
   });
 
   it("flies a bought drone through the same loop", () => {
-    const sim = new Sim(1, { ...SOLO, droneCount: 0, droneLimit: 1 });
+    const sim = new Sim(1, { ...SOLO, testDrones: 0, droneLimit: 1 });
     placeInDock(sim, sim.ship);
     sim.ship.credits = DEFAULTS.dronePrice;
     const drone = sim.buyDrone(sim.ship)!;
@@ -154,7 +156,7 @@ describe("drone", () => {
   }, 30000);
 
   it("stays at the drone limit on its own earnings", () => {
-    const sim = new Sim(1, { ...SOLO, droneCount: 1, droneLimit: 2, dronePrice: 50 });
+    const sim = new Sim(1, { ...SOLO, testDrones: 1, droneLimit: 2, dronePrice: 50 });
     run(sim, 420);
     expect(sim.drones).toHaveLength(2);
   }, 30000);
@@ -203,7 +205,7 @@ describe("drone", () => {
 
   describe("a drone the player bought", () => {
     function owned(extra: Partial<typeof SOLO> = {}): Sim {
-      const sim = new Sim(1, { ...SOLO, droneCount: 0, droneLimit: 5, dronePrice: 500, ...extra });
+      const sim = new Sim(1, { ...SOLO, testDrones: 0, droneLimit: 5, dronePrice: 500, ...extra });
       placeInDock(sim, sim.ship);
       sim.ship.credits = 500;
       expect(sim.buyDrone(sim.ship)).not.toBeNull();
@@ -251,6 +253,48 @@ describe("drone", () => {
       expect(rival.owner).toBeNull();
       expect(bought.ship.owner).toBeNull();
     });
+  });
+
+  describe("traffic", () => {
+    it("starts as one of each ship, apart from drones", () => {
+      const sim = new Sim(1, { ...DEFAULTS });
+      expect(sim.drones.length).toBe(0);
+      expect(sim.traffic.map((pilot) => pilot.ship.model)).toEqual(["racer", "floater"]);
+      expect(sim.traffic[1].ship.parts.has("gun2")).toBe(true);
+    });
+
+    it("never buys anything", () => {
+      const sim = new Sim(1, { ...SOLO, testDrones: 0, trafficRacers: 1, rockCount: 0 });
+      const { ship } = sim.traffic[0];
+      placeInDock(sim, ship);
+      ship.credits = 100000;
+      run(sim, 2);
+      expect(ship.parts.size).toBe(0);
+      expect(sim.traffic.length).toBe(1);
+      expect(sim.drones.length).toBe(0);
+    });
+
+    it("doesn't count against the player's drone limit", () => {
+      const sim = new Sim(1, { ...SOLO, testDrones: 0, trafficRacers: 2, droneLimit: 1, rockCount: 0 });
+      placeInDock(sim, sim.ship);
+      sim.ship.credits = 1000;
+      expect(sim.buyDrone(sim.ship)).not.toBeNull();
+    });
+
+    it.each(["racer", "floater"])("a %s completes the mining loop", (model) => {
+      const sim = new Sim(1, {
+        ...SOLO,
+        testDrones: 0,
+        trafficRacers: model === "racer" ? 1 : 0,
+        trafficFloaters: model === "floater" ? 1 : 0,
+        rockCount: 60,
+        fieldRadius: 1200,
+      });
+      const { ship } = sim.traffic[0];
+      run(sim, 600);
+      expect(ship.trips).toBeGreaterThanOrEqual(1);
+      expect(ship.credits).toBeGreaterThan(0);
+    }, 60000);
   });
 
   it("goes back to a rock it gave up on when nothing else is left", () => {

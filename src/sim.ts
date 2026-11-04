@@ -249,8 +249,10 @@ export class Sim {
     stabilize: true,
   };
   ship!: Ship;
-  /** Other ships, flying by the same rules as the player's. */
+  /** Drones the player bought, plus any self-funded test drones. */
   drones: DronePilot[] = [];
+  /** Other people's ships, going about their own business. The player has no readout of them. */
+  traffic: DronePilot[] = [];
   /** Flies the player's ship to a clicked spot, if it has the part. */
   clickPilot!: ClickPilot;
   rocks: Rock[] = [];
@@ -287,9 +289,16 @@ export class Sim {
     }
     this.clickPilot = new ClickPilot(this.ship);
     this.drones = [];
-    for (let i = 0; i < this.tuning.droneCount; i++) {
+    this.traffic = [];
+    const models: ShipModel[] = [
+      ...Array<ShipModel>(this.tuning.trafficRacers).fill("racer"),
+      ...Array<ShipModel>(this.tuning.trafficFloaters).fill("floater"),
+    ];
+    const count = this.tuning.testDrones + models.length;
+    for (let i = 0; i < count; i++) {
       const y = this.field.y + (i + 1) * 70 * (i % 2 === 0 ? 1 : -1);
-      this.addDrone(this.startX(), y);
+      if (i < this.tuning.testDrones) this.addDrone(this.startX(), y);
+      else this.addTraffic(this.startX(), y, models[i - this.tuning.testDrones]);
     }
     const clear = 260;
     for (let i = 0; i < this.tuning.rockCount; i++) {
@@ -346,11 +355,28 @@ export class Sim {
     };
   }
 
-  private addDrone(x: number, y: number): DronePilot {
+  private makePilot(x: number, y: number, model: ShipModel = "racer"): DronePilot {
     const controls = { thrust: 0, strafe: 0, turn: 0, fire: false, retro: false, stabilize: false };
-    const drone = new DronePilot(this.makeShip(x, y, controls));
+    return new DronePilot(this.makeShip(x, y, controls, model));
+  }
+
+  private addDrone(x: number, y: number): DronePilot {
+    const drone = this.makePilot(x, y);
     this.drones.push(drone);
     return drone;
+  }
+
+  /** Traffic flies as it starts out, and doesn't buy anything or grow in number. */
+  private addTraffic(x: number, y: number, model: ShipModel): void {
+    const pilot = this.makePilot(x, y, model);
+    pilot.shops = false;
+    if (model === "floater") pilot.ship.parts.add("gun2");
+    this.traffic.push(pilot);
+  }
+
+  /** Everything that flies itself. */
+  private get pilots(): DronePilot[] {
+    return [...this.drones, ...this.traffic];
   }
 
   /** Keeps the same object, since the ship and the input code both hold it. */
@@ -536,26 +562,28 @@ export class Sim {
   step(): void {
     const dt = TICK;
     this.clickPilot.update(this);
-    for (const drone of this.drones) drone.update(this);
+    const pilots = this.pilots;
+    for (const pilot of pilots) pilot.update(this);
     this.movePois(dt);
     this.carryBodies();
     this.driftInRocks(dt);
     this.moveRocks(dt);
     this.pullOre(this.ship, dt);
-    for (const drone of this.drones) this.pullOre(drone.ship, dt);
+    for (const pilot of pilots) this.pullOre(pilot.ship, dt);
     this.moveOres(dt);
     this.moveShip(this.ship, dt);
-    for (const drone of this.drones) this.moveShip(drone.ship, dt);
+    for (const pilot of pilots) this.moveShip(pilot.ship, dt);
     this.moveShots(dt);
     this.fireShots(this.ship);
     this.collectOre(this.ship);
     this.unloadOre(this.ship, dt);
     this.repairHull(this.ship, dt);
-    for (const drone of this.drones) {
-      this.fireShots(drone.ship);
-      this.collectOre(drone.ship);
-      this.unloadOre(drone.ship, dt);
-      this.repairHull(drone.ship, dt);
+    // Includes anything bought during the update above.
+    for (const pilot of this.pilots) {
+      this.fireShots(pilot.ship);
+      this.collectOre(pilot.ship);
+      this.unloadOre(pilot.ship, dt);
+      this.repairHull(pilot.ship, dt);
     }
   }
 
@@ -592,7 +620,7 @@ export class Sim {
    */
   private carryBodies(): void {
     this.carryShip(this.ship);
-    for (const drone of this.drones) this.carryShip(drone.ship);
+    for (const pilot of this.pilots) this.carryShip(pilot.ship);
     for (const rock of this.rocks) {
       const frame = this.carry(rock);
       rock.prevAngle = rock.angle;

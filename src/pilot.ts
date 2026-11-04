@@ -162,6 +162,7 @@ class ShipPilot {
   protected speedLimitHere(sim: Sim): number {
     const { ship } = this;
     const { field, tuning } = sim;
+    if (ship.model === "floater") return tuning.clickSpeed;
     const outside = Math.hypot(ship.x - field.x, ship.y - field.y) - tuning.fieldRadius;
     const nearField = tuning.droneFieldSpeed + this.stoppingSpeed(sim, Math.max(0, outside));
     return Math.min(tuning.droneCruiseSpeed, nearField);
@@ -332,6 +333,8 @@ export class DronePilot extends ShipPilot {
   task = "starting";
   /** What it will buy with its earnings, in order. */
   wishlist: PartId[] = DRONE_BUY_ORDER;
+  /** Whether it spends its own money on parts and more drones. */
+  shops = true;
   private hauling = false;
   private rock: Rock | null = null;
   private ore: Ore | null = null;
@@ -373,7 +376,7 @@ export class DronePilot extends ShipPilot {
   private shop(sim: Sim): void {
     const { ship } = this;
     // It doesn't spend its owner's money without being asked.
-    if (ship.owner) return;
+    if (ship.owner || !this.shops) return;
     const allowed = this.wishlist.slice(0, sim.tuning.droneParts);
     const next = allowed.find((part) => !ship.parts.has(part));
     if (next) sim.buyPart(ship, next);

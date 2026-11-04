@@ -12,6 +12,7 @@ import {
 const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
 const DRONE_COLOR = [180, 200, 120];
 const OWNED_DRONE_COLOR = [120, 190, 255];
+const TRAFFIC_COLOR = [150, 155, 165];
 /** The hollow marker shows the distance this many seconds ahead at the current closing speed. */
 const MARKER_LOOK_SECONDS = 3;
 const MARKER_SCALE = 14;
@@ -161,6 +162,13 @@ export class Renderer {
     this.drawShots(sim, alpha);
     this.updateParticles(frameSeconds);
     this.drawTractor(sim, ship, shipX, shipY, alpha, true);
+    for (const pilot of sim.traffic) {
+      const other = pilot.ship;
+      const x = lerp(other.px, other.x, alpha);
+      const y = lerp(other.py, other.y, alpha);
+      this.drawShip(other, x, y, alpha, TRAFFIC_COLOR);
+      if (tuning.showTraffic) this.drawTask(sim, pilot, x, y, "#a8adb8");
+    }
     for (const drone of sim.drones) {
       const other = drone.ship;
       this.drawTractor(sim, other, lerp(other.px, other.x, alpha), lerp(other.py, other.y, alpha), alpha, false);
@@ -347,15 +355,19 @@ export class Renderer {
   }
 
   private drawDrone(sim: Sim, drone: DronePilot, alpha: number): void {
-    const { ctx } = this;
     const { ship } = drone;
     const x = lerp(ship.px, ship.x, alpha);
     const y = lerp(ship.py, ship.y, alpha);
     this.drawShip(ship, x, y, alpha, ship.owner ? OWNED_DRONE_COLOR : DRONE_COLOR);
-    ctx.fillStyle = ship.owner ? "#8fc8ff" : "#f2c572";
+    this.drawTask(sim, drone, x, y, ship.owner ? "#8fc8ff" : "#f2c572");
+  }
+
+  private drawTask(sim: Sim, pilot: DronePilot, x: number, y: number, color: string): void {
+    const { ctx } = this;
+    ctx.fillStyle = color;
     ctx.font = "14px Consolas, monospace";
     ctx.textAlign = "center";
-    ctx.fillText(`${drone.task} ${ship.ore}/${sim.tuning.droneCargo}`, x, y + SHIP_RADIUS + 22);
+    ctx.fillText(`${pilot.task} ${pilot.ship.ore}/${sim.tuning.droneCargo}`, x, y + SHIP_RADIUS + 22);
   }
 
   private drawShip(
@@ -473,6 +485,13 @@ export class Renderer {
         );
       }
     }
+    if (!sim.tuning.showTraffic) return;
+    sim.traffic.forEach((pilot, i) => {
+      const reading = sim.readShip(pilot.ship, viewHalfWidth, viewHalfHeight);
+      if (reading.distance > 0) {
+        this.drawPointer(reading, "#a8adb8", `traffic ${i + 1}`, 0.28, meters, width, height, dpr);
+      }
+    });
   }
 
   /**

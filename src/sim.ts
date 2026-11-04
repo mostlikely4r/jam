@@ -1,4 +1,4 @@
-import { PARTS, type PartId } from "./parts";
+import { PARTS, partFits, type PartId, type ShipModel } from "./parts";
 import { ClickPilot, DronePilot } from "./pilot";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
@@ -56,9 +56,6 @@ interface Body {
   px: number;
   py: number;
 }
-
-/** The racer is the quick ship with an arrow shape. The floater is slow and square. */
-export type ShipModel = "racer" | "floater";
 
 export interface Ship extends Body {
   model: ShipModel;
@@ -448,6 +445,8 @@ export class Sim {
   /** Parts are only sold in the dock. Returns whether the sale went through. */
   buyPart(ship: Ship, id: PartId): boolean {
     const price = this.partPrice(id);
+    const part = PARTS.find((candidate) => candidate.id === id)!;
+    if (!partFits(part, ship.model)) return false;
     if (!this.isDocked(ship) || ship.parts.has(id) || ship.credits < price) return false;
     ship.credits -= price;
     ship.parts.add(id);
@@ -520,6 +519,8 @@ export class Sim {
     this.carryBodies();
     this.driftInRocks(dt);
     this.moveRocks(dt);
+    this.pullOre(this.ship, dt);
+    for (const drone of this.drones) this.pullOre(drone.ship, dt);
     this.moveOres(dt);
     this.moveShip(this.ship, dt);
     for (const drone of this.drones) this.moveShip(drone.ship, dt);
@@ -714,6 +715,25 @@ export class Sim {
       rock.x += rock.vx * dt;
       rock.y += rock.vy * dt;
       rock.angle += rock.spin * dt;
+    }
+  }
+
+  /** Steers loose ore in range toward the ship, so it arrives instead of circling it. */
+  private pullOre(ship: Ship, dt: number): void {
+    if (!ship.parts.has("tractor")) return;
+    const { tractorRange, tractorPull, tractorSpeed } = this.tuning;
+    const most = tractorPull * dt;
+    for (const ore of this.ores) {
+      const dx = ship.x - ore.x;
+      const dy = ship.y - ore.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance > tractorRange || distance === 0) continue;
+      const changeX = ship.vx + (dx / distance) * tractorSpeed - ore.vx;
+      const changeY = ship.vy + (dy / distance) * tractorSpeed - ore.vy;
+      const change = Math.hypot(changeX, changeY);
+      const share = change > most ? most / change : 1;
+      ore.vx += changeX * share;
+      ore.vy += changeY * share;
     }
   }
 

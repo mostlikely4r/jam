@@ -5,7 +5,12 @@ export type PartId =
   | "retro"
   | "meters"
   | "gun2"
-  | "clickMove";
+  | "clickMove"
+  | "clickRoute"
+  | "tractor";
+
+/** The racer is the quick ship with an arrow shape. The floater is slow and square. */
+export type ShipModel = "racer" | "floater";
 
 export interface Part {
   id: PartId;
@@ -16,6 +21,12 @@ export interface Part {
   /** Added to the ship's weight, which divides all of its thrust. */
   weight: number;
   description: string;
+  /** The ships it can be fitted to. Without this, any ship. */
+  fits?: ShipModel[];
+}
+
+export function partFits(part: Part, model: ShipModel): boolean {
+  return part.fits === undefined || part.fits.includes(model);
 }
 
 export const PARTS: Part[] = [
@@ -73,7 +84,24 @@ export const PARTS: Part[] = [
     short: "click",
     price: 400,
     weight: 0.02,
-    description: "Flies you to where you click",
+    description: "Flies you to where you click, straight there",
+  },
+  {
+    id: "clickRoute",
+    label: "Route planner",
+    short: "route",
+    price: 200,
+    weight: 0.02,
+    description: "Click to move steers around what's in the way",
+  },
+  {
+    id: "tractor",
+    label: "Tractor beam",
+    short: "tractor",
+    price: 300,
+    weight: 0.1,
+    description: "Pulls in loose ore nearby",
+    fits: ["floater"],
   },
 ];
 

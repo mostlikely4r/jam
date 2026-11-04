@@ -51,6 +51,9 @@ export const DEFAULTS = {
   gun2ShotsPerSecond: 2,
   preciseChance: 0.25,
   preciseOreSpeed: 12,
+  tractorRange: 350,
+  tractorPull: 120,
+  tractorSpeed: 100,
 
   droneCount: 2,
   dronePrice: 500,
@@ -168,6 +171,9 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
       { key: "gun2ShotsPerSecond", label: "Gun 2 shots per second", min: 0.5, max: 7, step: 0.5 },
       { key: "preciseChance", label: "Gun 2 precision hit chance", min: 0, max: 1, step: 0.05 },
       { key: "preciseOreSpeed", label: "Precision ore speed", min: 0, max: 60, step: 1 },
+      { key: "tractorRange", label: "Tractor range", min: 50, max: 1500, step: 25 },
+      { key: "tractorPull", label: "Tractor pull strength", min: 10, max: 600, step: 10 },
+      { key: "tractorSpeed", label: "Tractor ore speed", min: 10, max: 400, step: 10 },
     ],
   },
   {

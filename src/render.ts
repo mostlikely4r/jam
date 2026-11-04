@@ -159,7 +159,12 @@ export class Renderer {
     this.drawOres(sim, alpha, visible);
     this.drawShots(sim, alpha);
     this.updateParticles(frameSeconds);
-    for (const drone of sim.drones) this.drawDrone(sim, drone, alpha);
+    this.drawTractor(sim, ship, shipX, shipY, alpha, true);
+    for (const drone of sim.drones) {
+      const other = drone.ship;
+      this.drawTractor(sim, other, lerp(other.px, other.x, alpha), lerp(other.py, other.y, alpha), alpha, false);
+      this.drawDrone(sim, drone, alpha);
+    }
     this.drawShip(ship, shipX, shipY, alpha, [200, 215, 235]);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -210,6 +215,35 @@ export class Renderer {
     ctx.lineWidth = 3;
     ctx.strokeRect(-STATION_HALF, -STATION_HALF, size, size);
     ctx.restore();
+  }
+
+  /** A line to each piece of ore being pulled, and for the player a faint ring at full range. */
+  private drawTractor(
+    sim: Sim,
+    ship: Ship,
+    x: number,
+    y: number,
+    alpha: number,
+    showRange: boolean,
+  ): void {
+    if (!ship.parts.has("tractor")) return;
+    const { ctx } = this;
+    const range = sim.tuning.tractorRange;
+    ctx.lineWidth = 1;
+    if (showRange) {
+      ctx.strokeStyle = "rgba(111, 224, 200, 0.12)";
+      ctx.beginPath();
+      ctx.arc(x, y, range, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = "rgba(111, 224, 200, 0.45)";
+    ctx.beginPath();
+    for (const ore of sim.ores) {
+      if (Math.hypot(ore.x - ship.x, ore.y - ship.y) > range) continue;
+      ctx.moveTo(x, y);
+      ctx.lineTo(lerp(ore.px, ore.x, alpha), lerp(ore.py, ore.y, alpha));
+    }
+    ctx.stroke();
   }
 
   private drawClickTarget(sim: Sim, alpha: number): void {

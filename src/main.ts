@@ -1,7 +1,7 @@
 import { Audio } from "./audio";
 import { Renderer } from "./render";
 import { MAX_HULL, type Ship, Sim, TICK } from "./sim";
-import { PARTS, type Part } from "./parts";
+import { PARTS, partFits, type Part } from "./parts";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
 const STORAGE_KEY = "flight-test-tuning";
@@ -65,14 +65,17 @@ function updateShop(): void {
   shop.replaceChildren(heading);
   PARTS.forEach((part, index) => {
     const owned = ship.parts.has(part.id);
+    const fits = partFits(part, ship.model);
     const price = sim.partPrice(part.id);
     const weight = (part.weight * tuning.partWeightScale).toFixed(2);
     const button = document.createElement("button");
     button.className = owned ? "owned" : "";
-    button.disabled = !owned && ship.credits < price;
+    button.disabled = !owned && (!fits || ship.credits < price);
     button.textContent = owned
       ? `${index + 1} SELL ${part.label} for ${price}, -${weight} weight`
-      : `${index + 1} ${part.label}: ${price} credits, +${weight} weight. ${part.description}`;
+      : fits
+        ? `${index + 1} ${part.label}: ${price} credits, +${weight} weight. ${part.description}`
+        : `${index + 1} ${part.label}: doesn't fit this ship`;
     button.addEventListener("click", () => {
       tradePart(part);
       button.blur();
@@ -84,8 +87,8 @@ function updateShop(): void {
   const drone = document.createElement("button");
   drone.disabled = full || ship.credits < tuning.dronePrice;
   drone.textContent = full
-    ? `${PARTS.length + 1} New drone: at the limit of ${tuning.droneLimit}`
-    : `${PARTS.length + 1} New drone: ${tuning.dronePrice} credits. Earns and spends for itself (${sim.drones.length}/${tuning.droneLimit})`;
+    ? `0 New drone: at the limit of ${tuning.droneLimit}`
+    : `0 New drone: ${tuning.dronePrice} credits. Earns and spends for itself (${sim.drones.length}/${tuning.droneLimit})`;
   drone.addEventListener("click", () => {
     sim.buyDrone(ship);
     drone.blur();
@@ -150,6 +153,7 @@ function buildPanel(): void {
       note.textContent = "Your ship's parts, free for testing:";
       panel.append(note);
       for (const part of PARTS) {
+        if (!partFits(part, sim.ship.model)) continue;
         const toggle = document.createElement("label");
         toggle.className = "toggle";
         const box = document.createElement("input");
@@ -254,11 +258,10 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "KeyP") paused = !paused;
   if (event.code === "KeyM") audio.toggleMute();
   if (event.code === "KeyX") setRetro(!tuning.retro);
-  const digit = /^Digit([1-9])$/.exec(event.code);
-  const choice = digit ? Number(digit[1]) - 1 : -1;
-  if (choice >= 0 && sim.isDocked()) {
-    if (choice < PARTS.length) tradePart(PARTS[choice]);
-    else if (choice === PARTS.length) sim.buyDrone(sim.ship);
+  const digit = /^Digit([0-9])$/.exec(event.code);
+  if (digit && sim.isDocked()) {
+    if (digit[1] === "0") sim.buyDrone(sim.ship);
+    else if (Number(digit[1]) <= PARTS.length) tradePart(PARTS[Number(digit[1]) - 1]);
   }
   keys.add(event.code);
 });
@@ -266,6 +269,7 @@ window.addEventListener("keyup", (event) => keys.delete(event.code));
 window.addEventListener("blur", () => keys.clear());
 canvas.addEventListener("mousedown", (event) => {
   audio.start();
+  if (event.button === 2) sim.clickPilot.cancel();
   if (event.button !== 0) return;
   const spot = renderer.screenToWorld(event.clientX, event.clientY);
   sim.orderMove(spot.x, spot.y);

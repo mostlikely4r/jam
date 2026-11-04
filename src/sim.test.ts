@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PARTS } from "./parts";
 import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
-import { DOCK_OFFSET, MAX_HULL, type Poi, Sim, STATION_HALF, TICK } from "./sim";
+import { DOCK_OFFSET, MAX_HULL, type Poi, SHIP_RADIUS, Sim, STATION_HALF, TICK } from "./sim";
 
 /** Every part, weighing nothing, so tests of the thrusters themselves see plain numbers. */
 /** The flight tests below are about the quick ship. The new ship has its own tests. */
@@ -10,7 +10,9 @@ const DEFAULTS = { ...GAME_DEFAULTS, floaterStart: false };
 function fitAll(sim: Sim): Sim {
   sim.tuning.partWeightScale = 0;
   // Gun 2 replaces the gun rather than adding to it, so the shooting tests keep the first one.
-  for (const part of PARTS) if (part.id !== "gun2") sim.ship.parts.add(part.id);
+  for (const part of PARTS) {
+    if (part.id !== "gun2" && part.id !== "tractor") sim.ship.parts.add(part.id);
+  }
   return sim;
 }
 
@@ -918,6 +920,110 @@ describe("the new ship", () => {
     expect(sim.clickPilot.active).toBe(false);
     expect(sim.ship.damageTaken).toBe(0);
   }, 30000);
+
+  it("flies blind without the route planner, and around rocks with it", () => {
+    for (const planner of [false, true]) {
+      const sim = floater();
+      if (planner) sim.ship.parts.add("clickRoute");
+      const rock = sim.makeRock(2, sim.ship.x + 500, sim.ship.y, 0, 0);
+      sim.rocks.push(rock);
+      sim.orderMove(sim.ship.x + 1000, sim.ship.y);
+      let closest = Infinity;
+      for (let i = 0; i < Math.round(30 / TICK); i++) {
+        sim.step();
+        closest = Math.min(closest, Math.hypot(sim.ship.x - rock.x, sim.ship.y - rock.y));
+      }
+      const touching = rock.radius + SHIP_RADIUS + 0.5;
+      if (planner) expect(closest).toBeGreaterThan(touching);
+      else expect(closest).toBeLessThanOrEqual(touching);
+    }
+  }, 30000);
+
+  it("turns to its next burn while coasting", () => {
+    const sim = floater();
+    sim.orderMove(sim.ship.x + 2500, sim.ship.y);
+    let checked = 0;
+    for (let i = 0; i < Math.round(30 / TICK); i++) {
+      sim.step();
+      const { ship } = sim;
+      if (i * TICK < 15 || ship.firing.has("thrusterMain")) continue;
+      const braking = Math.atan2(-ship.vy, -ship.vx);
+      const off = Math.abs(Math.atan2(Math.sin(ship.angle - braking), Math.cos(ship.angle - braking)));
+      expect(off).toBeLessThan(0.4);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(100);
+  }, 30000);
+
+  it("a canceled move keeps coasting", () => {
+    const sim = floater();
+    sim.orderMove(sim.ship.x + 2500, sim.ship.y);
+    run(sim, 10);
+    const speed = Math.hypot(sim.ship.vx, sim.ship.vy);
+    expect(speed).toBeGreaterThan(30);
+    sim.clickPilot.cancel();
+    run(sim, 1);
+    expect(sim.clickPilot.active).toBe(false);
+    expect(sim.ship.firing.has("thrusterMain")).toBe(false);
+    expect(Math.hypot(sim.ship.vx, sim.ship.vy)).toBeCloseTo(speed, 0);
+  }, 30000);
+
+  describe("tractor beam", () => {
+    function withOre(distance: number, vy = 0): Sim {
+      const sim = floater();
+      sim.ship.parts.add("tractor");
+      sim.ores.push({
+        x: sim.ship.x + distance,
+        y: sim.ship.y,
+        px: sim.ship.x + distance,
+        py: sim.ship.y,
+        vx: 0,
+        vy,
+        kind: 0,
+      });
+      return sim;
+    }
+
+    it("isn't fitted from the start", () => {
+      expect(floater().ship.parts.has("tractor")).toBe(false);
+    });
+
+    it("pulls in ore within range until it's picked up", () => {
+      const sim = withOre(300);
+      run(sim, 10);
+      expect(sim.ores.length).toBe(0);
+      expect(sim.ship.ore).toBe(1);
+    });
+
+    it("catches ore that's flying off", () => {
+      const sim = withOre(300, 60);
+      run(sim, 15);
+      expect(sim.ship.ore).toBe(1);
+    });
+
+    it("leaves ore out of range alone", () => {
+      const sim = withOre(GAME_DEFAULTS.tractorRange + 50);
+      run(sim, 2);
+      expect(sim.ores[0].vx).toBe(0);
+    });
+
+    it("does nothing without the part", () => {
+      const sim = withOre(300);
+      sim.ship.parts.delete("tractor");
+      run(sim, 2);
+      expect(sim.ores[0].vx).toBe(0);
+    });
+
+    it("can be bought for the new ship but not the first", () => {
+      for (const floaterStart of [true, false]) {
+        const sim = floater({ floaterStart });
+        sim.ship.credits = 1000;
+        sim.ship.x = sim.station.x + DOCK_OFFSET;
+        sim.ship.y = sim.station.y;
+        expect(sim.buyPart(sim.ship, "tractor")).toBe(floaterStart);
+      }
+    });
+  });
 
   it("needs the part", () => {
     const sim = floater({ floaterStart: false });

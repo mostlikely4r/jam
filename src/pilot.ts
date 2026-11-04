@@ -63,6 +63,8 @@ const FACING_SPIN = 0.1;
 const CLICK_STUCK_SECONDS = 30;
 /** Closer than this counts as progress on a click order. */
 const CLICK_PROGRESS = 10;
+/** Under this speed there's no braking burn to get ready for. */
+const COAST_TURN_SPEED = 10;
 
 interface Mover {
   x: number;
@@ -141,7 +143,19 @@ class ShipPilot {
     const coasting = along <= speed && along >= speed * COAST_SHARE;
     const change = coasting ? 0 : speed - along;
     const tolerance = distance < NEAR_DISTANCE ? NEAR_TOLERANCE : TRAVEL_TOLERANCE;
-    this.steer(sim, heading.x * change - acrossX, heading.y * change - acrossY, tolerance, null);
+    this.steer(
+      sim,
+      heading.x * change - acrossX,
+      heading.y * change - acrossY,
+      tolerance,
+      null,
+      this.coastNose(vx, vy),
+    );
+  }
+
+  /** Where the nose goes while coasting, or null to leave it. */
+  protected coastNose(_vx: number, _vy: number): number | null {
+    return null;
   }
 
   /** Slower inside the field and when coming up on it, so an impact is only a dent. */
@@ -239,6 +253,7 @@ class ShipPilot {
     needY: number,
     tolerance: number,
     hold: number | null,
+    coast: number | null = null,
   ): void {
     const { ship } = this;
     const need = Math.hypot(needX, needY);
@@ -260,7 +275,7 @@ class ShipPilot {
       return;
     }
     this.thrusting = false;
-    this.turnTo(sim, hold ?? ship.angle);
+    this.turnTo(sim, hold ?? coast ?? ship.angle);
   }
 
   /** Makes a correction without turning. Returns false if the thrusters can't cover it. */
@@ -615,5 +630,31 @@ export class ClickPilot extends ShipPilot {
 
   protected override speedLimitHere(sim: Sim): number {
     return sim.tuning.clickSpeed;
+  }
+
+  /** Straight at the spot, whatever is in the way, unless it has the route planner. */
+  protected override routeAround(
+    sim: Sim,
+    target: { x: number; y: number; px: number; py: number },
+    exclude: object | null,
+  ): { x: number; y: number } {
+    const { ship } = this;
+    if (ship.parts.has("clickRoute")) return super.routeAround(sim, target, exclude);
+    const dx = target.x - ship.x;
+    const dy = target.y - ship.y;
+    const distance = Math.hypot(dx, dy) || 1;
+    return { x: dx / distance, y: dy / distance };
+  }
+
+  /** Gets ready for the braking burn: nose against the motion, or along it with a reverse thruster. */
+  protected override coastNose(vx: number, vy: number): number | null {
+    const { ship } = this;
+    if (Math.hypot(vx, vy) < COAST_TURN_SPEED) return null;
+    const braking = Math.atan2(-vy, -vx);
+    if (!ship.parts.has("reverse")) return braking;
+    const reversing = braking + Math.PI;
+    const shorter =
+      Math.abs(wrapAngle(reversing - ship.angle)) < Math.abs(wrapAngle(braking - ship.angle));
+    return shorter ? reversing : braking;
   }
 }

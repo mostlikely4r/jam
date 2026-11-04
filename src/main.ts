@@ -72,10 +72,10 @@ function updateShop(): void {
     button.className = owned ? "owned" : "";
     button.disabled = !owned && (!fits || ship.credits < price);
     button.textContent = owned
-      ? `${index + 1} SELL ${part.label} for ${price}, -${weight} weight`
+      ? `${partKey(index)} SELL ${part.label} for ${price}, -${weight} weight`
       : fits
-        ? `${index + 1} ${part.label}: ${price} credits, +${weight} weight. ${part.description}`
-        : `${index + 1} ${part.label}: doesn't fit this ship`;
+        ? `${partKey(index)} ${part.label}: ${price} credits, +${weight} weight. ${part.description}`
+        : `${partKey(index)} ${part.label}: doesn't fit this ship`;
     button.addEventListener("click", () => {
       tradePart(part);
       button.blur();
@@ -87,13 +87,18 @@ function updateShop(): void {
   const drone = document.createElement("button");
   drone.disabled = full || ship.credits < tuning.dronePrice;
   drone.textContent = full
-    ? `0 New drone: at the limit of ${tuning.droneLimit}`
-    : `0 New drone: ${tuning.dronePrice} credits. Earns and spends for itself (${sim.drones.length}/${tuning.droneLimit})`;
+    ? `- New drone: at the limit of ${tuning.droneLimit}`
+    : `- New drone: ${tuning.dronePrice} credits. Earns and spends for itself (${sim.drones.length}/${tuning.droneLimit})`;
   drone.addEventListener("click", () => {
     sim.buyDrone(ship);
     drone.blur();
   });
   shop.append(drone);
+}
+
+/** Keys 1 to 9 and then 0 pick a part. The minus key buys a drone. */
+function partKey(index: number): string {
+  return index === 9 ? "0" : String(index + 1);
 }
 
 function saveTuning(): void {
@@ -260,19 +265,20 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "KeyX") setRetro(!tuning.retro);
   const digit = /^Digit([0-9])$/.exec(event.code);
   if (digit && sim.isDocked()) {
-    if (digit[1] === "0") sim.buyDrone(sim.ship);
-    else if (Number(digit[1]) <= PARTS.length) tradePart(PARTS[Number(digit[1]) - 1]);
+    const part = PARTS[digit[1] === "0" ? 9 : Number(digit[1]) - 1];
+    if (part) tradePart(part);
   }
+  if (event.code === "Minus" && sim.isDocked()) sim.buyDrone(sim.ship);
   keys.add(event.code);
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));
 window.addEventListener("blur", () => keys.clear());
 canvas.addEventListener("mousedown", (event) => {
   audio.start();
-  if (event.button === 2) sim.clickPilot.cancel();
-  if (event.button !== 0) return;
+  if (event.button !== 0 && event.button !== 2) return;
   const spot = renderer.screenToWorld(event.clientX, event.clientY);
-  sim.orderMove(spot.x, spot.y);
+  if (event.button === 0) sim.orderMove(spot.x, spot.y);
+  else sim.orderTurn(spot.x, spot.y);
 });
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 canvas.addEventListener(

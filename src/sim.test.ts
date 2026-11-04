@@ -1025,6 +1025,109 @@ describe("the new ship", () => {
     });
   });
 
+  describe("click to turn", () => {
+    const angleTo = (sim: Sim, x: number, y: number) =>
+      Math.atan2(y - sim.ship.y, x - sim.ship.x);
+    const off = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+
+    function turner(extra: Partial<typeof DEFAULTS> = {}): Sim {
+      const sim = floater(extra);
+      sim.ship.parts.add("clickTurn");
+      return sim;
+    }
+
+    function finish(sim: Sim, seconds = 60): void {
+      let ticks = 0;
+      while (sim.clickPilot.active && ticks < Math.round(seconds / TICK)) {
+        sim.step();
+        ticks++;
+      }
+    }
+
+    it("faces the spot using rotation only, then lets go", () => {
+      const sim = turner();
+      const x = sim.ship.x - 300;
+      const y = sim.ship.y + 200;
+      const start = { x: sim.ship.x, y: sim.ship.y };
+      sim.orderTurn(x, y);
+      for (let i = 0; i < Math.round(20 / TICK) && sim.clickPilot.active; i++) {
+        sim.step();
+        expect(sim.ship.firing.has("thrusterMain")).toBe(false);
+      }
+      expect(sim.clickPilot.active).toBe(false);
+      expect(off(sim.ship.angle, angleTo(sim, x, y))).toBeLessThan(0.1);
+      expect(Math.abs(sim.ship.spin)).toBeLessThan(0.2);
+      expect(Math.hypot(sim.ship.x - start.x, sim.ship.y - start.y)).toBeLessThan(1);
+    }, 30000);
+
+    it("during a move, cancels it and turns right away while coasting", () => {
+      const sim = turner();
+      sim.orderMove(sim.ship.x + 2500, sim.ship.y);
+      run(sim, 10);
+      const speed = Math.hypot(sim.ship.vx, sim.ship.vy);
+      expect(speed).toBeGreaterThan(30);
+      const x = sim.ship.x;
+      const y = sim.ship.y + 2000;
+      expect(sim.orderTurn(x, y)).toBe(true);
+      expect(sim.clickPilot.target()).toBeNull();
+      for (let i = 0; i < Math.round(20 / TICK) && sim.clickPilot.active; i++) {
+        sim.step();
+        expect(sim.ship.firing.has("thrusterMain")).toBe(false);
+      }
+      expect(sim.clickPilot.active).toBe(false);
+      expect(Math.hypot(sim.ship.vx, sim.ship.vy)).toBeCloseTo(speed, 0);
+      expect(off(sim.ship.angle, angleTo(sim, x, y))).toBeLessThan(0.15);
+    }, 30000);
+
+    it("a new right click replaces the spot", () => {
+      const sim = turner();
+      sim.orderTurn(sim.ship.x - 300, sim.ship.y);
+      run(sim, 0.5);
+      const x = sim.ship.x;
+      const y = sim.ship.y + 300;
+      sim.orderTurn(x, y);
+      finish(sim);
+      expect(off(sim.ship.angle, angleTo(sim, x, y))).toBeLessThan(0.1);
+    }, 30000);
+
+    it("works without click to move", () => {
+      const sim = turner();
+      sim.ship.parts.delete("clickMove");
+      sim.orderTurn(sim.ship.x, sim.ship.y + 300);
+      finish(sim);
+      expect(sim.clickPilot.active).toBe(false);
+      expect(off(sim.ship.angle, Math.PI / 2)).toBeLessThan(0.1);
+    }, 30000);
+
+    it("a left click during a turn flies there", () => {
+      const sim = turner();
+      sim.orderTurn(sim.ship.x - 300, sim.ship.y);
+      run(sim, 0.5);
+      sim.orderMove(sim.ship.x + 400, sim.ship.y);
+      expect(sim.clickPilot.target()).not.toBeNull();
+      expect(sim.clickPilot.aim()).toBeNull();
+    });
+  });
+
+  it("a left click during a move changes the destination", () => {
+    const sim = floater();
+    sim.orderMove(sim.ship.x + 2000, sim.ship.y);
+    run(sim, 3);
+    const x = sim.ship.x;
+    const y = sim.ship.y + 500;
+    sim.orderMove(x, y);
+    const target = sim.clickPilot.target()!;
+    expect(Math.hypot(target.x - x, target.y - y)).toBeLessThan(1);
+  }, 30000);
+
+  it("a right click without click to turn only cancels the move", () => {
+    const sim = floater();
+    sim.orderMove(sim.ship.x + 2000, sim.ship.y);
+    run(sim, 3);
+    expect(sim.orderTurn(sim.ship.x, sim.ship.y + 500)).toBe(false);
+    expect(sim.clickPilot.active).toBe(false);
+  }, 30000);
+
   it("needs the part", () => {
     const sim = floater({ floaterStart: false });
     expect(sim.orderMove(0, 0)).toBe(false);

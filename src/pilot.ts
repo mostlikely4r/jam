@@ -511,6 +511,8 @@ interface ClickOrder {
   /** The spot in the POI's own axes, so it turns with the POI. */
   x: number;
   y: number;
+  /** Only turning to face the spot, without flying anywhere. */
+  turnOnly: boolean;
   /** Where the nose ends up, or null to leave it where the stop left it. */
   face: number | null;
   stage: "flying" | "stopping" | "facing";
@@ -519,8 +521,9 @@ interface ClickOrder {
 }
 
 /**
- * Flies to a clicked spot: rotate, thrust, coast, rotate to stop, thrust. It leaves
- * the gun alone, and only flies while it has an order, so the player can always take over.
+ * Flies to a clicked spot: rotate, thrust, coast, rotate to stop, thrust. Or turns to
+ * face one. It leaves the gun alone, and only flies while it has an order, so the
+ * player can always take over.
  */
 export class ClickPilot extends ShipPilot {
   private order: ClickOrder | null = null;
@@ -534,10 +537,19 @@ export class ClickPilot extends ShipPilot {
     return this.order?.stage ?? "";
   }
 
-  /** Where the order leads right now, or null without one. */
+  /** Where a flight leads right now, or null without one. */
   target(): { x: number; y: number; px: number; py: number } | null {
-    if (!this.order) return null;
-    const { poi, x, y } = this.order;
+    if (!this.order || this.order.turnOnly) return null;
+    return this.spot(this.order.poi, this.order.x, this.order.y);
+  }
+
+  /** The spot the ship is turning to face, or null without one. */
+  aim(): { x: number; y: number; px: number; py: number } | null {
+    if (!this.order?.turnOnly) return null;
+    return this.spot(this.order.poi, this.order.x, this.order.y);
+  }
+
+  private spot(poi: Poi, x: number, y: number): { x: number; y: number; px: number; py: number } {
     const at = (cx: number, cy: number, rotation: number) => ({
       x: cx + x * Math.cos(rotation) - y * Math.sin(rotation),
       y: cy + x * Math.sin(rotation) + y * Math.cos(rotation),
@@ -547,19 +559,38 @@ export class ClickPilot extends ShipPilot {
     return { x: now.x, y: now.y, px: before.x, py: before.y };
   }
 
-  moveTo(sim: Sim, x: number, y: number): void {
-    const { ship } = this;
-    const poi = sim.nearestPoi(x, y);
+  /** A world position in a POI's own axes, so it turns with the POI. */
+  private toPoiAxes(poi: Poi, x: number, y: number): { x: number; y: number } {
     const dx = x - poi.x;
     const dy = y - poi.y;
     const cos = Math.cos(poi.rotation);
     const sin = Math.sin(poi.rotation);
+    return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
+  }
+
+  moveTo(sim: Sim, x: number, y: number): void {
+    const { ship } = this;
+    const poi = sim.nearestPoi(x, y);
     this.order = {
       poi,
-      x: dx * cos + dy * sin,
-      y: -dx * sin + dy * cos,
+      ...this.toPoiAxes(poi, x, y),
+      turnOnly: false,
       face: sim.tuning.clickFaceTravel ? Math.atan2(y - ship.y, x - ship.x) : null,
       stage: "flying",
+      closest: Infinity,
+      stuck: 0,
+    };
+  }
+
+  /** Starts turning to face a spot, in place of any other order. */
+  faceSpot(sim: Sim, x: number, y: number): void {
+    const poi = sim.nearestPoi(x, y);
+    this.order = {
+      poi,
+      ...this.toPoiAxes(poi, x, y),
+      turnOnly: true,
+      face: null,
+      stage: "facing",
       closest: Infinity,
       stuck: 0,
     };
@@ -585,7 +616,7 @@ export class ClickPilot extends ShipPilot {
   update(sim: Sim): void {
     const { order, ship } = this;
     if (!order) return;
-    if (!ship.parts.has("clickMove")) {
+    if (!ship.parts.has(order.turnOnly ? "clickTurn" : "clickMove")) {
       this.cancel();
       return;
     }
@@ -594,7 +625,7 @@ export class ClickPilot extends ShipPilot {
     // Everything near the POI turns with it, so the nose's goal does too.
     if (order.face !== null) order.face += order.poi.turn;
 
-    const target = this.target()!;
+    const target = this.spot(order.poi, order.x, order.y);
     const distance = Math.hypot(target.x - ship.x, target.y - ship.y);
     const { vx, vy } = this.relativeVelocity(target);
     const speed = Math.hypot(vx, vy);
@@ -618,13 +649,16 @@ export class ClickPilot extends ShipPilot {
       else this.brake(sim, -vx, -vy, STOPPED_SPEED, null);
     }
     if (order.stage === "facing") {
-      if (order.face === null) {
+      const face = order.turnOnly
+        ? Math.atan2(target.y - ship.y, target.x - ship.x)
+        : order.face;
+      if (face === null) {
         this.cancel();
         return;
       }
-      const off = Math.abs(wrapAngle(order.face - ship.angle));
+      const off = Math.abs(wrapAngle(face - ship.angle));
       if (off < FACING_ANGLE && Math.abs(ship.spin) < FACING_SPIN) this.cancel();
-      else this.turnTo(sim, order.face);
+      else this.turnTo(sim, face);
     }
   }
 

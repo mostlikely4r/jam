@@ -368,6 +368,14 @@ export class Sim {
     return true;
   }
 
+  /** Cancels any click order, leaving the ship coasting. With the part, it also turns to face the spot. */
+  orderTurn(x: number, y: number): boolean {
+    this.clickPilot.cancel();
+    if (!this.ship.parts.has("clickTurn")) return false;
+    this.clickPilot.faceSpot(this, x, y);
+    return true;
+  }
+
   private startX(): number {
     return this.field.x - this.tuning.fieldRadius - 200;
   }
@@ -460,7 +468,7 @@ export class Sim {
     if (!this.isDocked(ship) || !ship.parts.has(id)) return false;
     ship.credits += this.partPrice(id);
     ship.parts.delete(id);
-    if (id === "clickMove" && ship === this.ship) this.clickPilot.cancel();
+    if ((id === "clickMove" || id === "clickTurn") && ship === this.ship) this.clickPilot.cancel();
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     return true;
   }

@@ -247,9 +247,17 @@ export class Renderer {
   }
 
   private drawClickTarget(sim: Sim, alpha: number): void {
+    const { ctx } = this;
+    const aim = sim.clickPilot.aim();
+    if (aim) {
+      ctx.strokeStyle = "rgba(242, 197, 114, 0.8)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(lerp(aim.px, aim.x, alpha), lerp(aim.py, aim.y, alpha), 9, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     const target = sim.clickPilot.target();
     if (!target) return;
-    const { ctx } = this;
     const x = lerp(target.px, target.x, alpha);
     const y = lerp(target.py, target.y, alpha);
     ctx.strokeStyle = "rgba(143, 180, 255, 0.8)";

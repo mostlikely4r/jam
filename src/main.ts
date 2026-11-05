@@ -104,6 +104,7 @@ function updateShop(): void {
 
 /** Keys 1 to 9 and then 0 pick a part. The minus key buys a drone. */
 function partKey(index: number): string {
+  if (index === 10) return "=";
   return index === 9 ? "0" : String(index + 1);
 }
 
@@ -296,6 +297,7 @@ window.addEventListener("keydown", (event) => {
     const part = PARTS[digit[1] === "0" ? 9 : Number(digit[1]) - 1];
     if (part) tradePart(part);
   }
+  if (event.code === "Equal" && sim.isDocked() && PARTS[10]) tradePart(PARTS[10]);
   if (event.code === "Minus" && sim.isDocked()) sim.buyDrone(sim.ship);
   keys.add(event.code);
 });
@@ -309,6 +311,14 @@ canvas.addEventListener("mousedown", (event) => {
   else sim.orderTurn(spot.x, spot.y);
 });
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+/** Where the mouse is on screen, so the turret keeps aiming there as the view moves. */
+let mouse: { x: number; y: number } | null = null;
+canvas.addEventListener("mousemove", (event) => {
+  mouse = { x: event.clientX, y: event.clientY };
+});
+canvas.addEventListener("mouseleave", () => {
+  mouse = null;
+});
 canvas.addEventListener(
   "wheel",
   (event) => {
@@ -337,6 +347,7 @@ function frame(now: number): void {
   if (seconds > 0) fps += (1 / seconds - fps) * 0.05;
 
   readControls();
+  sim.ship.aim = mouse ? renderer.screenToWorld(mouse.x, mouse.y) : null;
   if (!paused) {
     accumulator += seconds * timeScale;
     while (accumulator >= TICK) {

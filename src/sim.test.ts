@@ -140,6 +140,47 @@ describe("thrusters", () => {
   });
 });
 
+describe("turret mount", () => {
+  function turretSim() {
+    const sim = emptySim();
+    sim.ship.parts.add("turret");
+    sim.ship.angle = 0;
+    sim.ship.aim = { x: sim.ship.x, y: sim.ship.y + 1000 };
+    return sim;
+  }
+
+  it("turns toward the aim at its own speed, relative to the ship", () => {
+    const sim = turretSim();
+    sim.tuning.turretTurnSpeed = 90;
+    run(sim, 0.5);
+    expect(sim.ship.turretAngle).toBeCloseTo(Math.PI / 4, 1);
+    run(sim, 1);
+    expect(sim.ship.turretAngle).toBeCloseTo(Math.PI / 2, 2);
+  });
+
+  it("fires where it points, with a third of the gun's range", () => {
+    const sim = turretSim();
+    run(sim, 2);
+    sim.controls.fire = true;
+    sim.step();
+    const shot = sim.shots[0];
+    expect(Math.atan2(shot.vy - sim.ship.vy, shot.vx - sim.ship.vx)).toBeCloseTo(Math.PI / 2, 2);
+    expect(shot.life).toBeCloseTo(sim.tuning.shotLife * sim.tuning.turretRange, 2);
+  });
+
+  it("without a turret the gun fires from the nose at full range", () => {
+    const sim = emptySim();
+    sim.ship.parts.delete("turret");
+    sim.ship.angle = 0;
+    sim.ship.aim = { x: sim.ship.x, y: sim.ship.y + 1000 };
+    sim.controls.fire = true;
+    sim.step();
+    const shot = sim.shots[0];
+    expect(Math.atan2(shot.vy - sim.ship.vy, shot.vx - sim.ship.vx)).toBeCloseTo(sim.ship.angle, 1);
+    expect(shot.life).toBeCloseTo(sim.tuning.shotLife, 2);
+  });
+});
+
 describe("impacts", () => {
   it("does not let a very fast ship pass through a rock", () => {
     const sim = emptySim();

@@ -96,6 +96,11 @@ export interface Ship extends Body {
   spin: number;
   hull: number;
   cooldown: number;
+  /** Which way the turret points, relative to the nose. 0 without a turret. */
+  turretAngle: number;
+  prevTurretAngle: number;
+  /** The world spot the turret turns toward, or null to face forward. */
+  aim: { x: number; y: number } | null;
   /** Thrusters that fired on the last tick. */
   firing: Set<ThrusterId>;
 }
@@ -552,6 +557,9 @@ export class Sim {
       spin: 0,
       hull: MAX_HULL,
       cooldown: 0,
+      turretAngle: 0,
+      prevTurretAngle: 0,
+      aim: null,
       firing: new Set(),
     };
   }
@@ -1011,6 +1019,21 @@ export class Sim {
       this.stats.topSpeed = Math.max(this.stats.topSpeed, Math.hypot(ship.vx, ship.vy));
     }
     ship.cooldown = Math.max(0, ship.cooldown - dt);
+    this.turnTurret(ship, dt);
+  }
+
+  /** The turret turns toward its aim at a fixed speed relative to the ship, so the ship's own turning adds or takes away. */
+  private turnTurret(ship: Ship, dt: number): void {
+    ship.prevTurretAngle = ship.turretAngle;
+    if (!ship.parts.has("turret")) {
+      ship.turretAngle = 0;
+      return;
+    }
+    const wrap = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
+    const want = ship.aim ? wrap(Math.atan2(ship.aim.y - ship.y, ship.aim.x - ship.x) - ship.angle) : 0;
+    const step = ((this.tuning.turretTurnSpeed * Math.PI) / 180) * dt;
+    const change = Math.max(-step, Math.min(step, wrap(want - ship.turretAngle)));
+    ship.turretAngle = wrap(ship.turretAngle + change);
   }
 
   /**
@@ -1335,9 +1358,11 @@ export class Sim {
     const { tuning } = this;
     if (!ship.controls.fire || ship.cooldown > 0) return;
     const precise = ship.parts.has("gun2");
+    const turret = ship.parts.has("turret");
     ship.cooldown = 1 / (precise ? tuning.gun2ShotsPerSecond : tuning.shotsPerSecond);
-    const cos = Math.cos(ship.angle);
-    const sin = Math.sin(ship.angle);
+    const angle = ship.angle + (turret ? ship.turretAngle : 0);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
     const x = ship.x + cos * (SHIP_RADIUS + 4);
     const y = ship.y + sin * (SHIP_RADIUS + 4);
     this.shots.push({
@@ -1347,7 +1372,7 @@ export class Sim {
       py: y,
       vx: ship.vx + cos * tuning.shotSpeed,
       vy: ship.vy + sin * tuning.shotSpeed,
-      life: tuning.shotLife,
+      life: tuning.shotLife * (turret ? tuning.turretRange : 1),
       precise,
       from: ship,
     });

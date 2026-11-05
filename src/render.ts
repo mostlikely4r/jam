@@ -571,6 +571,23 @@ export class Renderer {
       ctx.closePath();
       ctx.fill();
     }
+    if (ship.parts.has("turret")) {
+      const turn = Math.atan2(
+        Math.sin(ship.turretAngle - ship.prevTurretAngle),
+        Math.cos(ship.turretAngle - ship.prevTurretAngle),
+      );
+      ctx.rotate(ship.prevTurretAngle + turn * alpha);
+      ctx.fillStyle = "#c9d4e6";
+      ctx.strokeStyle = "#c9d4e6";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(r * 1.15, 0);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 

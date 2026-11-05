@@ -8,7 +8,8 @@ export type PartId =
   | "clickMove"
   | "clickRoute"
   | "tractor"
-  | "clickTurn";
+  | "clickTurn"
+  | "turret";
 
 /** The racer is the quick ship with an arrow shape. The floater is slow and square. */
 export type ShipModel = "racer" | "floater";
@@ -111,6 +112,14 @@ export const PARTS: Part[] = [
     price: 150,
     weight: 0.02,
     description: "Right click faces that spot, right away",
+  },
+  {
+    id: "turret",
+    label: "Turret mount",
+    short: "turret",
+    price: 300,
+    weight: 0.1,
+    description: "Your gun turns to follow the mouse, with a third of its range",
   },
 ];
 

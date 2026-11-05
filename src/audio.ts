@@ -47,6 +47,15 @@ export class Audio {
     this.engine.gain.setTargetAtTime(active ? 0.55 : 0, this.ctx.currentTime, 0.04);
   }
 
+  /** A short radio blip, or a falling two-note alarm for a mayday. */
+  beep(mayday: boolean): void {
+    if (mayday) {
+      this.tone(1320, 880, 0.18, 0.12, "square");
+      return;
+    }
+    this.tone(1560, 1560, 0.05, 0.06, "sine");
+  }
+
   play(events: SimEvent[]): void {
     for (const event of events) {
       switch (event.type) {

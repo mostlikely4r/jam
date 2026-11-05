@@ -1,3 +1,4 @@
+import { Chatter } from "./chatter";
 import { PARTS, partFits, type PartId, type ShipModel } from "./parts";
 import { ClickPilot, DronePilot, FighterPilot } from "./pilot";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
@@ -156,6 +157,8 @@ export interface Shot extends Body {
 
 export interface Ore extends Body {
   kind: number;
+  /** Whose shot broke it loose, if anyone's. */
+  from?: Ship | null;
 }
 
 export type SimEvent =
@@ -165,7 +168,18 @@ export type SimEvent =
   | { type: "pickup"; x: number; y: number; kind: number }
   | { type: "sale"; x: number; y: number }
   | { type: "impact"; x: number; y: number; damage: number; player: boolean }
-  | { type: "wreck"; x: number; y: number; player: boolean };
+  | { type: "wreck"; x: number; y: number; player: boolean }
+  | {
+      type: "chatter";
+      x: number;
+      y: number;
+      /** The ship talking, or null for the station. */
+      speaker: Ship | null;
+      name: string;
+      text: string;
+      /** Heard at any distance. */
+      mayday: boolean;
+    };
 
 export interface Stats {
   bestOre: number;
@@ -297,6 +311,7 @@ export class Sim {
   events: SimEvent[] = [];
   stats: Stats = { bestOre: 0, topSpeed: 0 };
   private random: () => number = Math.random;
+  chatter = new Chatter(1);
   /** Counts down to the next rock drifting in, in units of the average wait. */
   private inflowTimer = 1;
 
@@ -307,6 +322,7 @@ export class Sim {
 
   reset(seed: number): void {
     this.random = makeRandom(seed);
+    this.chatter = new Chatter(seed);
     this.rocks = [];
     this.shots = [];
     this.ores = [];
@@ -490,6 +506,12 @@ export class Sim {
     const { ship } = this;
     if (Math.hypot(other.x - ship.x, other.y - ship.y) > this.tuning.visionRange) return false;
     return this.clearSight(ship.x, ship.y, other.x, other.y);
+  }
+
+  /** Whether the player picks up a radio line: anything in range, and maydays from anywhere. */
+  hears(line: { x: number; y: number; mayday: boolean }): boolean {
+    if (line.mayday) return true;
+    return Math.hypot(line.x - this.ship.x, line.y - this.ship.y) <= this.tuning.chatterRange;
   }
 
   /** A number from 0 to 1, from the same seeded generator as the rest of the world. */
@@ -732,6 +754,7 @@ export class Sim {
     }
     this.spendStationOre();
     this.spendPirateOre();
+    if (this.tuning.chatter) this.chatter.update(this, dt);
   }
 
   /** Each POI follows a fixed circle around its parent, or the system's center. */
@@ -1256,10 +1279,12 @@ export class Sim {
       if (spare < this.oreFor(tuning.defenderPrice)) return;
       this.chargeForService(this.stationAccount, tuning.defenderPrice);
       this.addFighter(dock.x, dock.y, "defender");
+      if (this.tuning.chatter) this.chatter.defenderLaunched(this);
     } else {
       if (spare < this.oreFor(tuning.rebuildCost)) return;
       this.chargeForService(this.stationAccount, tuning.rebuildCost);
       this.addTraffic(dock.x, dock.y, this.lostTraffic.shift()!);
+      if (this.tuning.chatter) this.chatter.trafficReplaced(this, this.traffic[this.traffic.length - 1].ship);
     }
     this.events.push({ type: "sale", x: dock.x, y: dock.y });
   }
@@ -1328,9 +1353,9 @@ export class Sim {
         this.events.push({ type: "hit", x, y });
         hit.hp -= 1;
         if (shot.precise && this.random() < this.tuning.preciseChance) {
-          this.releaseOre(x, y, hit);
+          this.releaseOre(x, y, hit, shot.from);
         }
-        if (hit.hp <= 0) this.breakRock(hit);
+        if (hit.hp <= 0) this.breakRock(hit, shot.from);
         continue;
       }
 
@@ -1349,6 +1374,7 @@ export class Sim {
     ship.damageTaken += damage;
     ship.shotFrom = { x: shot.from.x, y: shot.from.y };
     this.distress = { ship, age: 0 };
+    if (this.tuning.chatter) this.chatter.shot(this, ship, shot.from);
     const player = ship === this.ship;
     this.events.push({ type: "impact", x: ship.x, y: ship.y, damage, player });
     if (ship.hull <= 0) this.wreckShip(ship);
@@ -1380,7 +1406,7 @@ export class Sim {
   }
 
   /** A precision hit: ore comes loose where the shot landed, moving slowly in any direction. */
-  private releaseOre(x: number, y: number, rock: Rock): void {
+  private releaseOre(x: number, y: number, rock: Rock, from: Ship): void {
     const dir = this.random() * Math.PI * 2;
     const kick = this.tuning.preciseOreSpeed * (0.5 + this.random() * 0.5);
     this.ores.push({
@@ -1391,10 +1417,12 @@ export class Sim {
       vx: rock.vx + Math.cos(dir) * kick,
       vy: rock.vy + Math.sin(dir) * kick,
       kind: Math.floor(this.random() * ORE_KINDS),
+      from,
     });
   }
 
-  breakRock(rock: Rock): void {
+  /** Breaks a rock into smaller ones and maybe some ore, marked as freed by `by` if anyone. */
+  breakRock(rock: Rock, by: Ship | null = null): void {
     this.rocks.splice(this.rocks.indexOf(rock), 1);
     this.events.push({ type: "break", x: rock.x, y: rock.y, radius: rock.radius });
 
@@ -1431,6 +1459,7 @@ export class Sim {
         vx: rock.vx + Math.cos(dir) * kick,
         vy: rock.vy + Math.sin(dir) * kick,
         kind: Math.floor(this.random() * ORE_KINDS),
+        from: by,
       });
     }
   }
@@ -1500,6 +1529,7 @@ export class Sim {
       );
       if (segment === null) return true;
       ship.ore++;
+      if (this.tuning.chatter) this.chatter.pickedUp(this, ship, ore);
       if (ship === this.ship) this.stats.bestOre = Math.max(this.stats.bestOre, ship.ore);
       this.events.push({ type: "pickup", x: ore.x, y: ore.y, kind: ore.kind });
       return false;

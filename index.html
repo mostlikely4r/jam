@@ -29,6 +29,14 @@
       #shop { position: fixed; right: 12px; bottom: 44px; width: 430px; max-height: calc(100vh - 64px); overflow-y: auto;
               box-sizing: border-box; padding: 10px 12px; background: #0b0f18e8; border: 1px solid #5fae66; }
       #shop[hidden] { display: none; }
+      #chatter { position: fixed; right: 12px; top: 12px; width: 380px; pointer-events: none; font-size: 13px;
+                 text-shadow: 0 1px 2px #000; }
+      body:has(#panel:not([hidden])) #chatter { right: 302px; }
+      #chatter div { margin-bottom: 3px; transition: opacity 1s; }
+      #chatter .who { color: #a8d8ff; }
+      #chatter .station .who { color: #8fe3a1; }
+      #chatter .mayday { color: #ff8a7c; }
+      #chatter .mayday .who { color: #ff6b5c; }
       body:has(#panel:not([hidden])) #shop { right: 302px; }
       #shop h2 { font-size: 12px; margin: 0 0 8px; color: #8fe3a1; text-transform: uppercase; letter-spacing: 1px; }
       #shop button { display: block; width: 100%; text-align: left; background: #1a2233; color: #cfd8e6; border: 1px solid #33405a;
@@ -42,6 +50,7 @@
     <canvas id="view"></canvas>
     <div id="hud"></div>
     <div id="help">W/S thrust  A/D strafe  Q/E or arrows rotate  X retro  1-9, 0, = parts  - drone  Space fire  Left click move there  Right click cancel and face there (with the parts)  Wheel zoom  R restart  Tab tuning  P pause  M mute</div>
+    <div id="chatter"></div>
     <div id="shop" hidden></div>
     <div id="panel" hidden></div>
     <script type="module" src="/src/main.ts"></script>

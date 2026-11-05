@@ -14,6 +14,7 @@ import {
 const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
 /** How long the mark where a pirate was last seen takes to fade away. */
 const GHOST_MILLISECONDS = 30000;
+const PING_SECONDS = 1.4;
 const PILE_ROWS = 12;
 const PILE_ORE_PER_LUMP = 5;
 const DRONE_COLOR = [180, 200, 120];
@@ -54,6 +55,7 @@ function mod(value: number, size: number): number {
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private particles: Particle[] = [];
+  private pings: { speaker: Ship | null; x: number; y: number; mayday: boolean; age: number }[] = [];
   /** Where the player last saw each pirate, in the axes of what it was near. */
   private ghosts = new WeakMap<Ship, { poi: Poi; x: number; y: number; seenAt: number }>();
   private stars: Star[] = [];
@@ -78,6 +80,11 @@ export class Renderer {
       x: camX + (clientX * dpr - width / 2) / scale,
       y: camY + (clientY * dpr - height / 2) / scale,
     };
+  }
+
+  /** A ring that grows from whoever just spoke on the radio. */
+  addPing(line: { speaker: Ship | null; x: number; y: number; mayday: boolean }): void {
+    this.pings.push({ ...line, age: 0 });
   }
 
   addEvents(events: SimEvent[]): void {
@@ -171,6 +178,7 @@ export class Renderer {
     this.drawRocks(sim, alpha, visible);
     this.drawOres(sim, alpha, visible);
     this.drawShots(sim, alpha);
+    this.drawPings(sim, alpha, frameSeconds);
     this.updateParticles(frameSeconds);
     this.drawTractor(sim, ship, shipX, shipY, alpha, true);
     for (const pilot of sim.traffic) {
@@ -460,6 +468,26 @@ export class Renderer {
       ctx.arc(x, y, SHIP_RADIUS + 14, -Math.PI / 2, -Math.PI / 2 + spotted * Math.PI * 2);
       ctx.stroke();
     }
+  }
+
+  private drawPings(sim: Sim, alpha: number, frameSeconds: number): void {
+    const { ctx } = this;
+    this.pings = this.pings.filter((ping) => ping.age < PING_SECONDS);
+    for (const ping of this.pings) {
+      ping.age += frameSeconds;
+      const speaker = ping.speaker;
+      const dock = sim.dockPoint();
+      const x = speaker ? lerp(speaker.px, speaker.x, alpha) : dock.x;
+      const y = speaker ? lerp(speaker.py, speaker.y, alpha) : dock.y;
+      const share = Math.min(1, ping.age / PING_SECONDS);
+      ctx.globalAlpha = (1 - share) * 0.8;
+      ctx.strokeStyle = ping.mayday ? "#ff6b5c" : speaker ? "#a8d8ff" : "#8fe3a1";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, SHIP_RADIUS + 6 + share * (ping.mayday ? 160 : 70), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   }
 
   /** A fading mark where a pirate was last seen, carried along with what it was near. */

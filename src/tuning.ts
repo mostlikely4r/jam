@@ -61,6 +61,8 @@ export const DEFAULTS = {
   trafficFloaters: 1,
   showTraffic: false,
   trafficFlees: true,
+  chatter: true,
+  chatterRange: 1500,
 
   pirates: 1,
   defenders: 1,
@@ -205,6 +207,7 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
     sliders: [
       { key: "trafficRacers", label: "First ships (on restart)", min: 0, max: 10, step: 1 },
       { key: "trafficFloaters", label: "New ships (on restart)", min: 0, max: 10, step: 1 },
+      { key: "chatterRange", label: "Radio range", min: 300, max: 5000, step: 100 },
     ],
   },
   {

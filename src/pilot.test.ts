@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { THANKS } from "./chatter";
 import { PARTS } from "./parts";
 import { DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, MAX_HULL, Sim, TICK } from "./sim";
@@ -693,6 +694,82 @@ describe("pirate and defender", () => {
       expect(sim.drones).toContain(pilot);
       run(sim, 0.1);
       expect(pilot.task).not.toBe("fleeing");
+    });
+  });
+
+  describe("radio chatter", () => {
+    type Line = Extract<Sim["events"][number], { type: "chatter" }>;
+    function listen(sim: Sim, seconds: number, each?: () => void): Line[] {
+      const heard: Line[] = [];
+      run(sim, seconds, () => {
+        each?.();
+        for (const event of sim.events) if (event.type === "chatter") heard.push(event);
+      });
+      return heard;
+    }
+    const looseOre = (sim: Sim, x: number, y: number) => ({
+      x,
+      y,
+      px: x,
+      py: y,
+      vx: 0,
+      vy: 0,
+      kind: 0,
+      from: sim.ship,
+    });
+
+    it("traffic thanks the player for ore the player broke loose far away, once in a while", () => {
+      const sim = arena({ trafficRacers: 1 });
+      const { ship } = sim.traffic[0];
+      pin(sim.ship, ship.x + 3000, ship.y);
+      sim.ores.push(looseOre(sim, ship.x, ship.y));
+      const first = listen(sim, 0.1);
+      expect(first.some((line) => line.speaker === ship && THANKS.includes(line.text))).toBe(true);
+      sim.ores.push(looseOre(sim, ship.x, ship.y));
+      const second = listen(sim, 0.1);
+      expect(second.filter((line) => THANKS.includes(line.text))).toEqual([]);
+    });
+
+    it("no thanks for ore picked up right next to the player, or ore nobody shot", () => {
+      const sim = arena({ trafficRacers: 1 });
+      const { ship } = sim.traffic[0];
+      pin(sim.ship, ship.x + 100, ship.y);
+      sim.ores.push(looseOre(sim, ship.x, ship.y));
+      sim.ores.push({ ...looseOre(sim, ship.x, ship.y), from: null });
+      expect(listen(sim, 0.1).filter((line) => THANKS.includes(line.text))).toEqual([]);
+    });
+
+    it("a ship a pirate shoots calls a mayday, heard from anywhere", () => {
+      const sim = arena({ trafficRacers: 1, pirates: 1, shotDamage: 1 });
+      const { ship } = sim.traffic[0];
+      const pirate = sim.fighters[0].ship;
+      pin(ship, 0, 0);
+      pin(sim.ship, 50000, 0);
+      sim.shots.push({ x: -30, y: 0, px: -30, py: 0, vx: 800, vy: 0, life: 1, precise: false, from: pirate });
+      const heard = listen(sim, 0.2, () => pin(ship, 0, 0));
+      const mayday = heard.find((line) => line.mayday);
+      expect(mayday?.speaker).toBe(ship);
+      expect(sim.hears(mayday!)).toBe(true);
+      expect(sim.hears({ ...mayday!, mayday: false })).toBe(false);
+    });
+
+    it("traffic heading in to dock gets a reply from the station", () => {
+      const sim = arena({ trafficRacers: 1 });
+      const pilot = sim.traffic[0];
+      pin(pilot.ship, sim.station.x + 2500, sim.station.y);
+      pilot.ship.ore = DEFAULTS.droneCargo;
+      const heard = listen(sim, 3);
+      const name = sim.chatter.nameOf(sim, pilot.ship);
+      expect(heard.some((line) => line.speaker === pilot.ship)).toBe(true);
+      expect(heard.some((line) => line.speaker === null && line.text.includes(name))).toBe(true);
+    });
+
+    it("says nothing with the switch off", () => {
+      const sim = arena({ trafficRacers: 1, chatter: false });
+      const pilot = sim.traffic[0];
+      pin(pilot.ship, sim.station.x + 2500, sim.station.y);
+      pilot.ship.ore = DEFAULTS.droneCargo;
+      expect(listen(sim, 3)).toEqual([]);
     });
   });
 

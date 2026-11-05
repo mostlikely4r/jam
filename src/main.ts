@@ -1,5 +1,6 @@
 import { Audio } from "./audio";
 import { Renderer } from "./render";
+import { Radio } from "./radio";
 import { MAX_HULL, type Ship, Sim, TICK } from "./sim";
 import { PARTS, partFits, type Part } from "./parts";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
@@ -207,6 +208,7 @@ function buildPanel(): void {
         { key: "showTraffic", label: "Show traffic readouts and arrows" },
         { key: "trafficFlees", label: "Traffic flees from pirates" },
         { key: "sightLines", label: "Rocks block sight" },
+        { key: "chatter", label: "Radio chatter" },
       ] as const;
       for (const { key, label: text } of switches) {
         const toggle = document.createElement("label");
@@ -337,6 +339,7 @@ function partList(ship: Ship): string {
 }
 
 let lastTime = performance.now();
+const radio = new Radio(document.getElementById("chatter")!);
 let accumulator = 0;
 let fps = 60;
 let hudTimer = 0;
@@ -356,6 +359,13 @@ function frame(now: number): void {
     }
   }
 
+  for (const event of sim.events) {
+    if (event.type !== "chatter" || !sim.hears(event)) continue;
+    radio.add(event, sim.ship);
+    renderer.addPing(event);
+    audio.beep(event.mayday);
+  }
+  radio.update();
   renderer.addEvents(sim.events);
   audio.play(
     sim.events.filter(

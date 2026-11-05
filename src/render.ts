@@ -11,6 +11,8 @@ import {
 } from "./sim";
 
 const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
+const PILE_ROWS = 12;
+const PILE_ORE_PER_LUMP = 5;
 const DRONE_COLOR = [180, 200, 120];
 const OWNED_DRONE_COLOR = [120, 190, 255];
 const TRAFFIC_COLOR = [150, 155, 165];
@@ -228,7 +230,21 @@ export class Renderer {
     ctx.strokeStyle = "#aab1bd";
     ctx.lineWidth = 3;
     ctx.strokeRect(-STATION_HALF, -STATION_HALF, size, size);
+    this.drawOrePile(sim.stationOre, STATION_HALF);
     ctx.restore();
+  }
+
+  /** Ore as lumps on a deck around the origin, filling up row by row, with no number to read. */
+  private drawOrePile(ore: number, half: number): void {
+    const { ctx } = this;
+    const lumps = Math.min(PILE_ROWS * PILE_ROWS, Math.ceil(ore / PILE_ORE_PER_LUMP));
+    const pitch = (half * 2) / (PILE_ROWS + 1);
+    for (let i = 0; i < lumps; i++) {
+      ctx.fillStyle = ORE_COLORS[(i * 7) % ORE_COLORS.length];
+      const x = -half + pitch * ((i % PILE_ROWS) + 1);
+      const y = half - pitch * (Math.floor(i / PILE_ROWS) + 1);
+      ctx.fillRect(x - pitch * 0.3, y - pitch * 0.3, pitch * 0.6, pitch * 0.6);
+    }
   }
 
   /** A line to each piece of ore being pulled, and for the player a faint ring at full range. */
@@ -269,10 +285,16 @@ export class Renderer {
     ctx.lineWidth = 2;
     ctx.setLineDash([14, 10]);
     ctx.beginPath();
-    ctx.arc(lerp(base.px, base.x, alpha), lerp(base.py, base.y, alpha), PIRATE_BASE_RADIUS, 0, Math.PI * 2);
+    const x = lerp(base.px, base.x, alpha);
+    const y = lerp(base.py, base.y, alpha);
+    ctx.arc(x, y, PIRATE_BASE_RADIUS, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     ctx.setLineDash([]);
+    ctx.save();
+    ctx.translate(x, y);
+    this.drawOrePile(sim.pirateOre, PIRATE_BASE_RADIUS * 0.65);
+    ctx.restore();
   }
 
   private drawClickTarget(sim: Sim, alpha: number): void {

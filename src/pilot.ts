@@ -121,6 +121,46 @@ class ShipPilot {
     return sim.clearSight(ship.x, ship.y, other.x, other.y);
   }
 
+  /** Gets within range, settles, then aims ahead of the rock and fires. Says which it's doing. */
+  protected attack(sim: Sim, rock: Rock): "to rock" | "shooting" {
+    const { ship } = this;
+    const { tuning } = sim;
+    const dx = rock.x - ship.x;
+    const dy = rock.y - ship.y;
+    const distance = Math.hypot(dx, dy);
+    const clearance = distance - rock.radius;
+
+    if (clearance > FIRING_DISTANCE + 150) {
+      this.flyTo(sim, rock, rock.radius + FIRING_DISTANCE, 0, rock);
+      return "to rock";
+    }
+
+    const { vx, vy } = this.relativeVelocity(rock);
+    const flightTime = distance / tuning.shotSpeed;
+    const aim = Math.atan2(dy - vy * flightTime, dx - vx * flightTime);
+    const closing = (vx * dx + vy * dy) / distance;
+    if (clearance < TOO_CLOSE_DISTANCE) {
+      this.steer(
+        sim,
+        (-dx / distance) * BACK_OFF_SPEED - vx,
+        (-dy / distance) * BACK_OFF_SPEED - vy,
+        SETTLE_SPEED,
+        aim,
+      );
+    } else if (closing * COLLISION_WARNING_SECONDS > clearance - TOO_CLOSE_DISTANCE) {
+      this.brake(sim, -vx, -vy, SETTLE_SPEED, aim);
+    } else {
+      // Coasting past is fine. The gun leads the rock.
+      this.steer(sim, 0, 0, SETTLE_SPEED, aim);
+    }
+
+    const spread = Math.atan2(rock.radius * 0.7, distance);
+    const aimed = Math.abs(wrapAngle(aim - ship.angle)) < spread;
+    const inRange = distance < tuning.shotSpeed * tuning.shotLife * 0.9;
+    ship.controls.fire = aimed && inRange && (!this.burning || this.correctingDirectly);
+    return "shooting";
+  }
+
   /** Stays put relative to a moving point. */
   protected hold(sim: Sim, now: { x: number; y: number }, before: { x: number; y: number }): void {
     const { vx, vy } = this.relativeVelocity({ x: now.x, y: now.y, px: before.x, py: before.y });
@@ -400,8 +440,7 @@ export class DronePilot extends ShipPilot {
     // Empty means delivered or wrecked. Either way, this load is over.
     if (ship.ore === 0) this.hauling = false;
     if (ship.ore >= sim.tuning.droneCargo) this.hauling = true;
-    const canAffordRepair =
-      ship.ore > 0 || sim.accountOf(ship).credits >= sim.tuning.repairCost;
+    const canAffordRepair = ship.ore > 0 || sim.canPayRepair(ship);
     if (ship.hull < LOW_HULL && canAffordRepair) this.hauling = true;
 
     // Repairs come before shopping, so it never spends its repair money on parts.
@@ -486,7 +525,7 @@ export class DronePilot extends ShipPilot {
       return;
     }
     if (this.rock) {
-      this.attack(sim, this.rock);
+      this.task = this.attack(sim, this.rock);
       return;
     }
     if (ship.ore > 0) {
@@ -550,46 +589,6 @@ export class DronePilot extends ShipPilot {
     if (this.ore !== previousOre || this.rock !== previousRock) this.targetAge = 0;
   }
 
-  /** Gets within range, settles, then aims ahead of the rock and fires. */
-  private attack(sim: Sim, rock: Rock): void {
-    const { ship } = this;
-    const { tuning } = sim;
-    const dx = rock.x - ship.x;
-    const dy = rock.y - ship.y;
-    const distance = Math.hypot(dx, dy);
-    const clearance = distance - rock.radius;
-
-    if (clearance > FIRING_DISTANCE + 150) {
-      this.task = "to rock";
-      this.flyTo(sim, rock, rock.radius + FIRING_DISTANCE, 0, rock);
-      return;
-    }
-
-    this.task = "shooting";
-    const { vx, vy } = this.relativeVelocity(rock);
-    const flightTime = distance / tuning.shotSpeed;
-    const aim = Math.atan2(dy - vy * flightTime, dx - vx * flightTime);
-    const closing = (vx * dx + vy * dy) / distance;
-    if (clearance < TOO_CLOSE_DISTANCE) {
-      this.steer(
-        sim,
-        (-dx / distance) * BACK_OFF_SPEED - vx,
-        (-dy / distance) * BACK_OFF_SPEED - vy,
-        SETTLE_SPEED,
-        aim,
-      );
-    } else if (closing * COLLISION_WARNING_SECONDS > clearance - TOO_CLOSE_DISTANCE) {
-      this.brake(sim, -vx, -vy, SETTLE_SPEED, aim);
-    } else {
-      // Coasting past is fine. The gun leads the rock.
-      this.steer(sim, 0, 0, SETTLE_SPEED, aim);
-    }
-
-    const spread = Math.atan2(rock.radius * 0.7, distance);
-    const aimed = Math.abs(wrapAngle(aim - ship.angle)) < spread;
-    const inRange = distance < tuning.shotSpeed * tuning.shotLife * 0.9;
-    ship.controls.fire = aimed && inRange && (!this.burning || this.correctingDirectly);
-  }
 }
 
 interface ClickOrder {
@@ -788,6 +787,9 @@ export class FighterPilot extends ShipPilot {
   private ore: Ore | null = null;
   private oreAge = 0;
   private ignoredOre = new WeakSet<object>();
+  private rock: Rock | null = null;
+  private rockAge = 0;
+  private ignoredRocks = new WeakSet<object>();
   /** Where the nose should stay this tick, or null to look where it's going. */
   private look: number | null = null;
 
@@ -820,6 +822,7 @@ export class FighterPilot extends ShipPilot {
       this.patrol = null;
       this.headingHome = false;
       this.ore = null;
+      this.rock = null;
       ship.shotFrom = null;
     }
 
@@ -846,6 +849,7 @@ export class FighterPilot extends ShipPilot {
     }
     if (this.goHome(sim)) return;
     if (this.gather(sim)) return;
+    if (ship.faction === "pirate" && this.mine(sim)) return;
     if (ship.ore > 0) {
       this.headingHome = true;
       this.goHome(sim);
@@ -857,7 +861,7 @@ export class FighterPilot extends ShipPilot {
   /** Goes home to sell a full load or repair a low hull. Returns whether it's doing that. */
   private goHome(sim: Sim): boolean {
     const { ship } = this;
-    const canPay = ship.ore > 0 || sim.accountOf(ship).credits >= sim.tuning.repairCost;
+    const canPay = ship.ore > 0 || sim.canPayRepair(ship);
     if (ship.ore >= sim.tuning.droneCargo || (ship.hull < LOW_HULL && canPay)) {
       this.headingHome = true;
     }
@@ -904,9 +908,36 @@ export class FighterPilot extends ShipPilot {
     return true;
   }
 
+  /** Works the nearest rock until it breaks. Returns whether there is one to work. */
+  private mine(sim: Sim): boolean {
+    const { ship } = this;
+    if (this.rock && !sim.rocks.includes(this.rock)) this.rock = null;
+    this.rockAge += TICK;
+    if (this.rock && this.rockAge > GIVE_UP_SECONDS) {
+      this.ignoredRocks.add(this.rock);
+      this.rock = null;
+    }
+    if (!this.rock) {
+      let best = Infinity;
+      for (const rock of sim.rocks) {
+        if (this.ignoredRocks.has(rock)) continue;
+        const distance = Math.hypot(rock.x - ship.x, rock.y - ship.y) - rock.radius;
+        if (distance < best) {
+          best = distance;
+          this.rock = rock;
+        }
+      }
+      this.rockAge = 0;
+    }
+    if (!this.rock) return false;
+    const stage = this.attack(sim, this.rock);
+    this.task = stage === "shooting" ? "mining" : "to rock";
+    return true;
+  }
+
   private wants(sim: Sim, other: Ship): boolean {
     if (other === this.ship || other.hull <= 0 || sim.isDocked(other)) return false;
-    return this.ship.faction === "pirate" || other.faction === "pirate";
+    return this.ship.faction !== other.faction && (this.ship.faction === "pirate" || other.faction === "pirate");
   }
 
   /** Stays on its target while it can see it. Otherwise the nearest thing in view. */

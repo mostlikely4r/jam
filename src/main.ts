@@ -54,7 +54,7 @@ let shopState = "";
 function updateShop(): void {
   const { ship } = sim;
   const docked = sim.isDocked();
-  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit}`;
+  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasOreFor(sim.partPrice(part.id))).join()} ${sim.hasOreFor(tuning.dronePrice)}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked;
@@ -70,11 +70,14 @@ function updateShop(): void {
     const weight = (part.weight * tuning.partWeightScale).toFixed(2);
     const button = document.createElement("button");
     button.className = owned ? "owned" : "";
-    button.disabled = !owned && (!fits || ship.credits < price);
+    const inStock = sim.hasOreFor(price);
+    button.disabled = !owned && (!fits || !inStock || ship.credits < price);
     button.textContent = owned
       ? `${partKey(index)} SELL ${part.label} for ${price}, -${weight} weight`
       : fits
-        ? `${partKey(index)} ${part.label}: ${price} credits, +${weight} weight. ${part.description}`
+        ? inStock
+          ? `${partKey(index)} ${part.label}: ${price} credits, +${weight} weight. ${part.description}`
+          : `${partKey(index)} ${part.label}: the station is out of ore`
         : `${partKey(index)} ${part.label}: doesn't fit this ship`;
     button.addEventListener("click", () => {
       tradePart(part);
@@ -85,10 +88,13 @@ function updateShop(): void {
 
   const full = sim.drones.length >= tuning.droneLimit;
   const drone = document.createElement("button");
-  drone.disabled = full || ship.credits < tuning.dronePrice;
+  const droneInStock = sim.hasOreFor(tuning.dronePrice);
+  drone.disabled = full || !droneInStock || ship.credits < tuning.dronePrice;
   drone.textContent = full
     ? `- New drone: at the limit of ${tuning.droneLimit}`
-    : `- New drone: ${tuning.dronePrice} credits. Earns for you (${sim.drones.length}/${tuning.droneLimit})`;
+    : !droneInStock
+      ? "- New drone: the station is out of ore"
+      : `- New drone: ${tuning.dronePrice} credits. Earns for you (${sim.drones.length}/${tuning.droneLimit})`;
   drone.addEventListener("click", () => {
     sim.buyDrone(ship);
     drone.blur();
@@ -361,7 +367,7 @@ function frame(now: number): void {
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
       `Ore   ${sim.ship.ore}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
       `Parts ${partList(sim.ship)}  Weight ${sim.shipWeight(sim.ship).toFixed(2)}`,
-      `Moving relative to ${sim.ship.frame.name}${sim.isDocked() ? "  DOCKED" : ""}${sim.clickPilot.active ? `  Click order: ${sim.clickPilot.task}` : ""}`,
+      `Moving relative to ${sim.ship.frame.name}${sim.isDocked() ? "  DOCKED" : ""}${sim.clickPilot.active ? `  Click order: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < MAX_HULL && !sim.hasOreFor(tuning.repairCost) ? "  No repairs: the station is out of ore" : ""}`,
       `Rocks ${sim.rocks.length}  Wrecks ${sim.ship.wrecks}`,
       ...sim.drones.flatMap((drone, index) => {
         const { ship } = drone;
@@ -380,11 +386,11 @@ function frame(now: number): void {
       ...(tuning.showTraffic
         ? sim.fighters.map(
             ({ ship, task }) =>
-              `${ship.faction === "pirate" ? "Pirate" : "Defender"} ${task}  Hull ${Math.round((ship.hull / MAX_HULL) * 100)}%  Ore ${ship.ore}  Wrecks ${ship.wrecks}${ship.faction === "pirate" ? `  Credits ${ship.credits}` : ""}`,
+              `${ship.faction === "pirate" ? "Pirate" : "Defender"} ${task}  Hull ${Math.round((ship.hull / MAX_HULL) * 100)}%  Ore ${ship.ore}  Wrecks ${ship.wrecks}`,
           )
         : []),
       ...(tuning.showTraffic
-        ? [`Station balance ${sim.stationAccount.credits}  Ore held ${sim.stationOre}`]
+        ? [`Station balance ${sim.stationAccount.credits}  Ore held ${Math.floor(sim.stationOre)}  Lost traffic ${sim.lostTraffic.length}  Pirate base ore ${Math.floor(sim.pirateOre)}`]
         : []),
       `FPS   ${Math.round(fps)}${paused ? "  PAUSED" : ""}`,
     ].join("\n");

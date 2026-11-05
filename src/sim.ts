@@ -276,6 +276,10 @@ export class Sim {
   stationAccount = { credits: 0 };
   /** Ore the station has bought and is holding. */
   stationOre = 0;
+  /** The pirate base's ore. It pays for pirates' repairs, rebuilds and new ships. */
+  pirateOre = 0;
+  /** Traffic gone for good, waiting for the station to replace it. */
+  lostTraffic: ShipModel[] = [];
   /** The ship most recently hit by a shot, if that was recent. */
   distress: { ship: Ship; age: number } | null = null;
   /** Flies the player's ship to a clicked spot, if it has the part. */
@@ -316,7 +320,9 @@ export class Sim {
     this.drones = [];
     this.distress = null;
     this.stationAccount = { credits: this.tuning.stationStartCredits };
-    this.stationOre = 0;
+    this.stationOre = this.tuning.stationStartOre;
+    this.pirateOre = this.tuning.pirateStartOre;
+    this.lostTraffic = [];
     this.fighters = [];
     for (let i = 0; i < this.tuning.pirates; i++) {
       const start = this.homeOf(null, "pirate");
@@ -431,7 +437,6 @@ export class Sim {
       { thrust: 0, strafe: 0, turn: 0, fire: false, retro: false, stabilize: false },
     );
     ship.faction = faction;
-    if (faction === "pirate") ship.credits = this.tuning.pirateStartCredits;
     ship.parts.add("reverse");
     ship.parts.add("strafe");
     this.fighters.push(new FighterPilot(ship));
@@ -591,7 +596,8 @@ export class Sim {
     const part = PARTS.find((candidate) => candidate.id === id)!;
     if (!partFits(part, ship.model)) return false;
     if (!this.isDocked(ship) || ship.parts.has(id) || ship.credits < price) return false;
-    ship.credits -= price;
+    if (!this.hasOreFor(price)) return false;
+    this.chargeForService(ship, price);
     ship.parts.add(id);
     if (id === "retro" && ship === this.ship) this.tuning.retro = true;
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
@@ -601,7 +607,7 @@ export class Sim {
   /** Sells a part back at full price, so a ship can go back to being light. */
   sellPart(ship: Ship, id: PartId): boolean {
     if (!this.isDocked(ship) || !ship.parts.has(id)) return false;
-    ship.credits += this.partPrice(id);
+    this.chargeForService(ship, -this.partPrice(id));
     ship.parts.delete(id);
     if ((id === "clickMove" || id === "clickTurn") && ship === this.ship) this.clickPilot.cancel();
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
@@ -612,14 +618,31 @@ export class Sim {
   buyDrone(buyer: Ship): DronePilot | null {
     const { tuning } = this;
     if (!this.isDocked(buyer) || buyer.credits < tuning.dronePrice) return null;
-    if (this.drones.length >= tuning.droneLimit) return null;
-    buyer.credits -= tuning.dronePrice;
+    if (this.drones.length >= tuning.droneLimit || !this.hasOreFor(tuning.dronePrice)) return null;
+    this.chargeForService(buyer, tuning.dronePrice);
     const dock = this.dockPoint();
     this.events.push({ type: "sale", x: dock.x, y: dock.y });
     const drone = this.addDrone(dock.x, dock.y);
     // The player's drones work for the player. Others' drones work for themselves.
     if (buyer === this.ship) drone.ship.owner = buyer;
     return drone;
+  }
+
+  /** The ore in the station's pile that a service worth this many credits uses up. */
+  oreFor(credits: number): number {
+    const { serviceCreditsPerOre } = this.tuning;
+    return serviceCreditsPerOre > 0 ? credits / serviceCreditsPerOre : 0;
+  }
+
+  hasOreFor(credits: number): boolean {
+    return this.stationOre >= this.oreFor(credits);
+  }
+
+  /** The buyer pays the station, and the service comes out of its pile, which stops at empty. */
+  private chargeForService(buyer: { credits: number }, credits: number): void {
+    buyer.credits -= credits;
+    this.stationAccount.credits += credits;
+    this.stationOre = Math.max(0, this.stationOre - this.oreFor(credits));
   }
 
   /** Whose credits this ship earns and spends: its owner's, the station's, or its own. */
@@ -693,7 +716,8 @@ export class Sim {
       this.unloadOre(pilot.ship, dt);
       this.repairHull(pilot.ship, dt);
     }
-    this.buyDefenders();
+    this.spendStationOre();
+    this.spendPirateOre();
   }
 
   /** Each POI follows a fixed circle around its parent, or the system's center. */
@@ -1121,12 +1145,30 @@ export class Sim {
     this.dropOre(ship);
     const { rebuildCost } = this.tuning;
     const account = this.accountOf(ship);
-    // Only the player can rebuild on credit. Anyone else who can't pay is gone for good.
-    if (!player && rebuildCost > 0 && account.credits < rebuildCost) {
+    // A pirate is rebuilt from its base's pile, or it's gone for good.
+    if (ship.faction === "pirate") {
+      if (this.pirateOre < this.oreFor(rebuildCost)) {
+        this.removeShip(ship);
+        return;
+      }
+      this.pirateOre -= this.oreFor(rebuildCost);
+      ship.upkeep += rebuildCost;
+      this.respawn(ship);
+      return;
+    }
+    // A defender is never rebuilt. The station builds a new one when lost traffic calls for it.
+    if (ship.faction === "defender") {
       this.removeShip(ship);
       return;
     }
-    account.credits -= rebuildCost;
+    // Only the player can always rebuild. Anyone else needs the money, and the station the ore.
+    if (!player && rebuildCost > 0) {
+      if (account.credits < rebuildCost || !this.hasOreFor(rebuildCost)) {
+        this.removeShip(ship);
+        return;
+      }
+    }
+    this.chargeForService(account, rebuildCost);
     ship.upkeep += rebuildCost;
     this.respawn(ship);
   }
@@ -1150,6 +1192,7 @@ export class Sim {
   }
 
   private removeShip(ship: Ship): void {
+    if (this.traffic.some((pilot) => pilot.ship === ship)) this.lostTraffic.push(ship.model);
     const others = (pilots: DronePilot[]) => pilots.filter((pilot) => pilot.ship !== ship);
     this.drones = others(this.drones);
     this.traffic = others(this.traffic);
@@ -1157,15 +1200,38 @@ export class Sim {
     if (this.distress?.ship === ship) this.distress = null;
   }
 
-  /** The station buys a defender whenever it can afford one, up to its limit. */
-  private buyDefenders(): void {
-    const { tuning, stationAccount } = this;
-    const defenders = this.fighters.filter((pilot) => pilot.ship.faction === "defender").length;
-    if (defenders >= tuning.defenderLimit || stationAccount.credits < tuning.defenderPrice) return;
-    if (tuning.defenderPrice <= 0) return;
-    stationAccount.credits -= tuning.defenderPrice;
+  /** The pirate base builds more pirates from ore beyond its reserve, up to its limit. */
+  private spendPirateOre(): void {
+    const { tuning, pirateBase } = this;
+    if (!pirateBase || tuning.defenderPrice <= 0) return;
+    const pirates = this.fighters.filter((pilot) => pilot.ship.faction === "pirate").length;
+    if (pirates >= tuning.pirateLimit) return;
+    const price = this.oreFor(tuning.defenderPrice);
+    if (this.pirateOre - tuning.stationReserveOre < price) return;
+    this.pirateOre -= price;
+    this.addFighter(pirateBase.x, pirateBase.y, "pirate");
+  }
+
+  /**
+   * The station only spends ore beyond its reserve, and only in response to lost traffic:
+   * first a defender if it has none, then the lost ship. It saves up for the defender
+   * rather than spending on the ship.
+   */
+  private spendStationOre(): void {
+    const { tuning } = this;
+    if (this.lostTraffic.length === 0) return;
+    const spare = this.stationOre - tuning.stationReserveOre;
     const dock = this.dockPoint();
-    this.addFighter(dock.x, dock.y, "defender");
+    const hasDefender = this.fighters.some((pilot) => pilot.ship.faction === "defender");
+    if (!hasDefender && tuning.defenderPrice > 0) {
+      if (spare < this.oreFor(tuning.defenderPrice)) return;
+      this.chargeForService(this.stationAccount, tuning.defenderPrice);
+      this.addFighter(dock.x, dock.y, "defender");
+    } else {
+      if (spare < this.oreFor(tuning.rebuildCost)) return;
+      this.chargeForService(this.stationAccount, tuning.rebuildCost);
+      this.addTraffic(dock.x, dock.y, this.lostTraffic.shift()!);
+    }
     this.events.push({ type: "sale", x: dock.x, y: dock.y });
   }
 
@@ -1348,21 +1414,30 @@ export class Sim {
     while (ship.unloadTimer >= UNLOAD_SECONDS && ship.ore > 0) {
       ship.unloadTimer -= UNLOAD_SECONDS;
       ship.ore--;
-      this.accountOf(ship).credits += this.tuning.creditsPerOre;
-      if (ship.faction !== "pirate") this.stationOre++;
+      if (ship.faction === "pirate") {
+        this.pirateOre++;
+      } else {
+        this.accountOf(ship).credits += this.tuning.creditsPerOre;
+        this.stationOre++;
+        this.stationAccount.credits -= this.tuning.creditsPerOre;
+      }
       ship.earned += this.tuning.creditsPerOre;
       this.events.push({ type: "sale", x: ship.x, y: ship.y });
       if (ship.ore === 0) ship.trips++;
     }
   }
 
-  /** Whether the dock could repair this ship right now, given its hull and credits. */
+  /** Whether the ship has the money for a hull point, and its dock the ore. */
+  canPayRepair(ship: Ship): boolean {
+    const { repairCost } = this.tuning;
+    if (ship.faction === "pirate") return this.pirateOre >= this.oreFor(repairCost);
+    if (!this.hasOreFor(repairCost)) return false;
+    return ship.faction === "defender" || this.accountOf(ship).credits >= repairCost;
+  }
+
+  /** Whether the dock could repair this ship right now. */
   canRepair(ship: Ship): boolean {
-    return (
-      this.isHome(ship) &&
-      ship.hull < MAX_HULL &&
-      this.accountOf(ship).credits >= this.tuning.repairCost
-    );
+    return this.isHome(ship) && ship.hull < MAX_HULL && this.canPayRepair(ship);
   }
 
   /** The dock repairs a hull point at a time, for as long as the ship can pay. */
@@ -1376,7 +1451,8 @@ export class Sim {
     while (ship.repairTimer >= 1 && this.canRepair(ship)) {
       ship.repairTimer -= 1;
       ship.hull = Math.min(MAX_HULL, ship.hull + 1);
-      this.accountOf(ship).credits -= tuning.repairCost;
+      if (ship.faction === "pirate") this.pirateOre -= this.oreFor(tuning.repairCost);
+      else this.chargeForService(this.accountOf(ship), tuning.repairCost);
       ship.upkeep += tuning.repairCost;
     }
   }

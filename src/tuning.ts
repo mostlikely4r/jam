@@ -58,11 +58,13 @@ export const DEFAULTS = {
   trafficRacers: 1,
   trafficFloaters: 1,
   showTraffic: false,
+  trafficFlees: true,
 
   pirates: 1,
   defenders: 1,
   visionRange: 1500,
   visionAngle: 45,
+  sightLines: true,
   shotDamage: 4,
   pirateStartCredits: 900,
   stationStartCredits: 300,

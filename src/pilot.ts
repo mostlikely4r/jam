@@ -65,6 +65,8 @@ const CLICK_STUCK_SECONDS = 30;
 const CLICK_PROGRESS = 10;
 /** Under this speed there's no braking burn to get ready for. */
 const COAST_TURN_SPEED = 10;
+/** How long after its last sight of a pirate a sheltering ship goes back out. */
+const FLEE_CALM_SECONDS = 15;
 
 interface Mover {
   x: number;
@@ -111,6 +113,13 @@ class ShipPilot {
   private spinPush = 0;
 
   constructor(readonly ship: Ship) {}
+
+  /** Whether another ship is in range with no rock in the way, whichever way the nose points. */
+  protected inView(sim: Sim, other: Ship): boolean {
+    const { ship } = this;
+    if (Math.hypot(other.x - ship.x, other.y - ship.y) > sim.tuning.visionRange) return false;
+    return sim.clearSight(ship.x, ship.y, other.x, other.y);
+  }
 
   /** Stays put relative to a moving point. */
   protected hold(sim: Sim, now: { x: number; y: number }, before: { x: number; y: number }): void {
@@ -360,6 +369,10 @@ export class DronePilot extends ShipPilot {
   wishlist: PartId[] = DRONE_BUY_ORDER;
   /** Whether it spends its own money on parts and more drones. */
   shops = true;
+  /** Whether it runs for the station when it sees a pirate. */
+  flees = false;
+  private fleeing = false;
+  private sinceSighting = 0;
   private hauling = false;
   private rock: Rock | null = null;
   private ore: Ore | null = null;
@@ -378,6 +391,12 @@ export class DronePilot extends ShipPilot {
     controls.stabilize = false;
     this.correctingDirectly = false;
 
+    this.watchForPirates(sim);
+    if (this.fleeing) {
+      this.flee(sim);
+      return;
+    }
+
     // Empty means delivered or wrecked. Either way, this load is over.
     if (ship.ore === 0) this.hauling = false;
     if (ship.ore >= sim.tuning.droneCargo) this.hauling = true;
@@ -395,6 +414,42 @@ export class DronePilot extends ShipPilot {
 
     if (this.hauling) this.haul(sim);
     else this.mine(sim);
+  }
+
+  private watchForPirates(sim: Sim): void {
+    if (!this.flees || !sim.tuning.trafficFlees) {
+      this.fleeing = false;
+      return;
+    }
+    this.sinceSighting += TICK;
+    const sighted = sim.fighters.some(
+      ({ ship }) => ship.faction === "pirate" && this.inView(sim, ship),
+    );
+    if (sighted) {
+      this.fleeing = true;
+      this.sinceSighting = 0;
+    }
+  }
+
+  /** Runs for the dock, whether or not the pirate is still in view, and waits there until it's clear. */
+  private flee(sim: Sim): void {
+    const dock = sim.dockPoint();
+    const before = sim.dockPoint(true);
+    if (!sim.isDocked(this.ship)) {
+      this.task = "fleeing";
+      this.flyTo(sim, { x: dock.x, y: dock.y, px: before.x, py: before.y }, DOCK_ARRIVAL_SLACK, 0, null);
+      return;
+    }
+    this.task = "sheltering";
+    this.hold(sim, dock, before);
+    if (this.sinceSighting > FLEE_CALM_SECONDS) {
+      // What it was doing before has gone stale, and isn't its own fault.
+      this.fleeing = false;
+      this.rock = null;
+      this.ore = null;
+      this.targetAge = 0;
+      this.retarget = 0;
+    }
   }
 
   /** Buys the next thing on its list if it has the money. Once that's done, a new drone. */
@@ -736,15 +791,13 @@ export class FighterPilot extends ShipPilot {
   /** Where the nose should stay this tick, or null to look where it's going. */
   private look: number | null = null;
 
-  /** Whether another ship is inside this one's cone of vision and range. */
+  /** Whether another ship is inside this one's cone of vision, in range, with no rock in the way. */
   sees(sim: Sim, other: Ship): boolean {
     const { ship } = this;
-    const { tuning } = sim;
-    const dx = other.x - ship.x;
-    const dy = other.y - ship.y;
-    if (Math.hypot(dx, dy) > tuning.visionRange) return false;
-    const off = Math.abs(wrapAngle(Math.atan2(dy, dx) - ship.angle));
-    return off <= ((tuning.visionAngle / 2) * Math.PI) / 180;
+    const direction = Math.atan2(other.y - ship.y, other.x - ship.x);
+    const off = Math.abs(wrapAngle(direction - ship.angle));
+    if (off > ((sim.tuning.visionAngle / 2) * Math.PI) / 180) return false;
+    return this.inView(sim, other);
   }
 
   update(sim: Sim): void {

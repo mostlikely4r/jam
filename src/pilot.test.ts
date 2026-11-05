@@ -541,8 +541,115 @@ describe("pirate and defender", () => {
     expect(pilot.task).toBe("patrolling");
   });
 
+  describe("sight lines and fleeing", () => {
+    function addRock(sim: Sim, x: number, y: number, radius: number): void {
+      sim.rocks.push({
+        x,
+        y,
+        px: x,
+        py: y,
+        vx: 0,
+        vy: 0,
+        arriving: false,
+        tier: 0,
+        radius,
+        hp: 1000,
+        angle: 0,
+        prevAngle: 0,
+        spin: 0,
+        shape: [1],
+      });
+    }
+
+    it("a rock hides a ship from a pirate, unless the switch is off", () => {
+      const sim = arena({ pirates: 1, defenders: 0 });
+      const pilot = sim.fighters[0];
+      const { x, y } = pilot.ship;
+      pilot.ship.angle = 0;
+      pin(sim.ship, x + 900, y);
+      expect(pilot.sees(sim, sim.ship)).toBe(true);
+      addRock(sim, x + 450, y, 60);
+      expect(pilot.sees(sim, sim.ship)).toBe(false);
+      pin(sim.ship, x + 900, y + 300);
+      expect(pilot.sees(sim, sim.ship)).toBe(true);
+      pin(sim.ship, x + 900, y);
+      sim.tuning.sightLines = false;
+      expect(pilot.sees(sim, sim.ship)).toBe(true);
+    });
+
+    it("a pirate stops attacking a ship that goes behind a rock, and goes to look for it", () => {
+      const sim = arena({ pirates: 1, defenders: 0, shotDamage: 0 });
+      const pilot = sim.fighters[0];
+      const { x, y } = pilot.ship;
+      pilot.ship.angle = 0;
+      pin(sim.ship, x + 900, y);
+      run(sim, 0.1);
+      expect(pilot.task).toBe("attacking");
+      addRock(sim, x + 500, y, 150);
+      run(sim, 0.1);
+      expect(pilot.task).toBe("searching");
+    });
+
+    /** Traffic beside the station, with a pirate behind its tail and in range. */
+    function chased(extra: Partial<typeof SOLO> = {}) {
+      const sim = arena({ pirates: 1, trafficRacers: 1, shotDamage: 0, ...extra });
+      const pirate = sim.fighters[0].ship;
+      const pilot = sim.traffic[0] ?? sim.drones[0];
+      const startX = sim.station.x + 700;
+      const startY = sim.station.y;
+      pin(pilot.ship, startX, startY);
+      pilot.ship.angle = 0;
+      pin(pirate, startX - 800, startY - 800);
+      return { sim, pilot, pirate, startX, startY };
+    }
+
+    it("traffic runs for the station on seeing a pirate behind it, waits, and goes back out", () => {
+      const { sim, pilot, pirate } = chased();
+      run(sim, 0.1);
+      expect(pilot.task).toBe("fleeing");
+      const tasks = new Set<string>();
+      // Out of view from here on, and it keeps running anyway.
+      run(sim, 90, () => {
+        pin(pirate, sim.station.x + 20000, sim.station.y);
+        tasks.add(pilot.task);
+        if (pilot.task === "sheltering") expect(sim.isDocked(pilot.ship)).toBe(true);
+      });
+      expect(tasks.has("sheltering")).toBe(true);
+      expect(pilot.task).not.toBe("fleeing");
+      expect(pilot.task).not.toBe("sheltering");
+    }, 30000);
+
+    it("traffic stays in the dock while a pirate is in view", () => {
+      const { sim, pilot, pirate } = chased();
+      placeInDock(sim, pilot.ship);
+      run(sim, 40, () => pin(pirate, sim.station.x + 1000, sim.station.y));
+      expect(pilot.task).toBe("sheltering");
+      expect(sim.isDocked(pilot.ship)).toBe(true);
+    }, 30000);
+
+    it("traffic doesn't run from a pirate behind a rock", () => {
+      const { sim, pilot, startX, startY } = chased();
+      addRock(sim, startX - 400, startY - 400, 150);
+      run(sim, 0.1);
+      expect(pilot.task).not.toBe("fleeing");
+    });
+
+    it("traffic doesn't run with the switch off", () => {
+      const { sim, pilot } = chased({ trafficFlees: false });
+      run(sim, 0.1);
+      expect(pilot.task).not.toBe("fleeing");
+    });
+
+    it("the player's drones don't run", () => {
+      const { sim, pilot } = chased({ trafficRacers: 0, testDrones: 1 });
+      expect(sim.drones).toContain(pilot);
+      run(sim, 0.1);
+      expect(pilot.task).not.toBe("fleeing");
+    });
+  });
+
   describe("the money loop", () => {
-    const ore = (x: number, y: number) => ({ x, y, px: x, py: y, vx: 0, vy: 0, kind: 0 });
+    const ore =(x: number, y: number) => ({ x, y, px: x, py: y, vx: 0, vy: 0, kind: 0 });
 
     function shoot(sim: Sim, ship: Sim["ship"], from: Sim["ship"]): void {
       sim.shots.push({

@@ -196,18 +196,25 @@ function buildPanel(): void {
     }
 
     if (group.title === "Traffic") {
-      const toggle = document.createElement("label");
-      toggle.className = "toggle";
-      const box = document.createElement("input");
-      box.type = "checkbox";
-      box.checked = tuning.showTraffic;
-      box.addEventListener("change", () => {
-        tuning.showTraffic = box.checked;
-        saveTuning();
-        box.blur();
-      });
-      toggle.append(box, " Show traffic readouts and arrows");
-      panel.append(toggle);
+      const switches = [
+        { key: "showTraffic", label: "Show traffic readouts and arrows" },
+        { key: "trafficFlees", label: "Traffic flees from pirates" },
+        { key: "sightLines", label: "Rocks block sight" },
+      ] as const;
+      for (const { key, label: text } of switches) {
+        const toggle = document.createElement("label");
+        toggle.className = "toggle";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = tuning[key];
+        box.addEventListener("change", () => {
+          tuning[key] = box.checked;
+          saveTuning();
+          box.blur();
+        });
+        toggle.append(box, ` ${text}`);
+        panel.append(toggle);
+      }
     }
 
     if (group.title === "Thrusters") {

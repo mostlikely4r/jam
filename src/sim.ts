@@ -418,6 +418,7 @@ export class Sim {
   private addTraffic(x: number, y: number, model: ShipModel): void {
     const pilot = this.makePilot(x, y, model);
     pilot.shops = false;
+    pilot.flees = true;
     if (model === "floater") pilot.ship.parts.add("gun2");
     this.traffic.push(pilot);
   }
@@ -462,6 +463,16 @@ export class Sim {
   /** Every ship in the world, the player's included. */
   get ships(): Ship[] {
     return [this.ship, ...this.pilots.map((pilot) => pilot.ship)];
+  }
+
+  /** Whether no rock stands between two points. */
+  clearSight(fromX: number, fromY: number, toX: number, toY: number): boolean {
+    if (!this.tuning.sightLines) return true;
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    return this.rocks.every(
+      (rock) => sweepCircle(fromX - rock.x, fromY - rock.y, dx, dy, rock.radius) === null,
+    );
   }
 
   /** A number from 0 to 1, from the same seeded generator as the rest of the world. */

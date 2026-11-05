@@ -64,6 +64,10 @@ export const DEFAULTS = {
   visionRange: 1500,
   visionAngle: 45,
   shotDamage: 4,
+  pirateStartCredits: 900,
+  stationStartCredits: 300,
+  defenderPrice: 500,
+  defenderLimit: 5,
 
   testDrones: 0,
   dronePrice: 500,
@@ -201,6 +205,10 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
       { key: "visionRange", label: "Vision range", min: 300, max: 5000, step: 100 },
       { key: "visionAngle", label: "Vision cone (degrees)", min: 10, max: 360, step: 5 },
       { key: "shotDamage", label: "Damage per shot to a ship", min: 0, max: 50, step: 1 },
+      { key: "pirateStartCredits", label: "Pirate starting money (on restart)", min: 0, max: 5000, step: 100 },
+      { key: "stationStartCredits", label: "Station starting balance (on restart)", min: 0, max: 5000, step: 100 },
+      { key: "defenderPrice", label: "Station pays for a new defender", min: 0, max: 5000, step: 50 },
+      { key: "defenderLimit", label: "Most defenders the station buys up to", min: 0, max: 10, step: 1 },
     ],
   },
   {

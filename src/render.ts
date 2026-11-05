@@ -1,6 +1,7 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import {
   DOCK_OFFSET,
+  PIRATE_BASE_RADIUS,
   Sim,
   SHIP_RADIUS,
   STATION_HALF,
@@ -158,6 +159,7 @@ export class Renderer {
       Math.abs(x - camX) < halfW + r && Math.abs(y - camY) < halfH + r;
 
     this.drawStation(sim, alpha);
+    this.drawPirateBase(sim, alpha);
     this.drawClickTarget(sim, alpha);
     this.drawRocks(sim, alpha, visible);
     this.drawOres(sim, alpha, visible);
@@ -256,6 +258,21 @@ export class Renderer {
       ctx.lineTo(lerp(ore.px, ore.x, alpha), lerp(ore.py, ore.y, alpha));
     }
     ctx.stroke();
+  }
+
+  private drawPirateBase(sim: Sim, alpha: number): void {
+    const base = sim.pirateBase;
+    if (!base) return;
+    const { ctx } = this;
+    ctx.fillStyle = "rgba(235, 90, 80, 0.08)";
+    ctx.strokeStyle = "#eb5a50";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([14, 10]);
+    ctx.beginPath();
+    ctx.arc(lerp(base.px, base.x, alpha), lerp(base.py, base.y, alpha), PIRATE_BASE_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   private drawClickTarget(sim: Sim, alpha: number): void {

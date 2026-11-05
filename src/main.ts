@@ -373,8 +373,11 @@ function frame(now: number): void {
       ...(tuning.showTraffic
         ? sim.fighters.map(
             ({ ship, task }) =>
-              `${ship.faction === "pirate" ? "Pirate" : "Defender"} ${task}  Hull ${Math.round((ship.hull / MAX_HULL) * 100)}%  Wrecks ${ship.wrecks}`,
+              `${ship.faction === "pirate" ? "Pirate" : "Defender"} ${task}  Hull ${Math.round((ship.hull / MAX_HULL) * 100)}%  Ore ${ship.ore}  Wrecks ${ship.wrecks}${ship.faction === "pirate" ? `  Credits ${ship.credits}` : ""}`,
           )
+        : []),
+      ...(tuning.showTraffic
+        ? [`Station balance ${sim.stationAccount.credits}  Ore held ${sim.stationOre}`]
         : []),
       `FPS   ${Math.round(fps)}${paused ? "  PAUSED" : ""}`,
     ].join("\n");

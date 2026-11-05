@@ -712,6 +712,9 @@ const SPOT_REACHED = 120;
 /** Keeps moving through patrol points rather than stopping at each. */
 const PATROL_PASS_SPEED = 60;
 const PATROL_GIVE_UP_SECONDS = 60;
+const HOME_SLACK = 50;
+/** How long it chases one piece of ore before trying another. */
+const ORE_GIVE_UP_SECONDS = 30;
 
 /**
  * A pirate or a defender. It looks where its nose points and chases what it sees.
@@ -726,6 +729,10 @@ export class FighterPilot extends ShipPilot {
   private patrol: { poi: Poi; x: number; y: number } | null = null;
   private patrolAge = 0;
   private wrecks = 0;
+  private headingHome = false;
+  private ore: Ore | null = null;
+  private oreAge = 0;
+  private ignoredOre = new WeakSet<object>();
   /** Where the nose should stay this tick, or null to look where it's going. */
   private look: number | null = null;
 
@@ -758,6 +765,8 @@ export class FighterPilot extends ShipPilot {
       this.target = null;
       this.lastSeen = null;
       this.patrol = null;
+      this.headingHome = false;
+      this.ore = null;
       ship.shotFrom = null;
     }
 
@@ -782,7 +791,64 @@ export class FighterPilot extends ShipPilot {
       this.flyTo(sim, distress.ship, FIGHT_DISTANCE, PATROL_PASS_SPEED, null);
       return;
     }
+    if (this.goHome(sim)) return;
+    if (this.gather(sim)) return;
+    if (ship.ore > 0) {
+      this.headingHome = true;
+      this.goHome(sim);
+      return;
+    }
     this.fly(sim);
+  }
+
+  /** Goes home to sell a full load or repair a low hull. Returns whether it's doing that. */
+  private goHome(sim: Sim): boolean {
+    const { ship } = this;
+    const canPay = ship.ore > 0 || sim.accountOf(ship).credits >= sim.tuning.repairCost;
+    if (ship.ore >= sim.tuning.droneCargo || (ship.hull < LOW_HULL && canPay)) {
+      this.headingHome = true;
+    }
+    const busy = ship.ore > 0 || sim.canRepair(ship);
+    if (sim.isHome(ship) && busy) {
+      this.task = "at home";
+      this.hold(sim, sim.homeOf(ship), sim.homeOf(ship, ship.faction, true));
+      this.headingHome = true;
+      return true;
+    }
+    if (sim.isHome(ship)) this.headingHome = false;
+    if (!this.headingHome) return false;
+    this.task = "heading home";
+    const home = sim.homeOf(ship);
+    const before = sim.homeOf(ship, ship.faction, true);
+    this.flyTo(sim, { x: home.x, y: home.y, px: before.x, py: before.y }, HOME_SLACK, 0, null);
+    return true;
+  }
+
+  /** Flies through the nearest loose ore in range. Returns whether there is any. */
+  private gather(sim: Sim): boolean {
+    const { ship } = this;
+    if (this.ore && !sim.ores.includes(this.ore)) this.ore = null;
+    this.oreAge += TICK;
+    if (this.ore && this.oreAge > ORE_GIVE_UP_SECONDS) {
+      this.ignoredOre.add(this.ore);
+      this.ore = null;
+    }
+    if (!this.ore) {
+      let best = sim.tuning.visionRange;
+      for (const ore of sim.ores) {
+        if (this.ignoredOre.has(ore)) continue;
+        const distance = Math.hypot(ore.x - ship.x, ore.y - ship.y);
+        if (distance < best) {
+          best = distance;
+          this.ore = ore;
+        }
+      }
+      this.oreAge = 0;
+    }
+    if (!this.ore) return false;
+    this.task = "gathering";
+    this.flyTo(sim, this.ore, 0, PASS_THROUGH_ORE_SPEED, this.ore);
+    return true;
   }
 
   private wants(sim: Sim, other: Ship): boolean {

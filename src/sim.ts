@@ -14,6 +14,10 @@ export const STATION_HALF = 150;
 const PIRATE_START_DISTANCE = 2000;
 /** How long a hit ship keeps calling for help. */
 const DISTRESS_SECONDS = 10;
+/** Size of the pirates' round docking zone. */
+export const PIRATE_BASE_RADIUS = 200;
+/** How fast a wreck's cargo drifts away. */
+const WRECK_ORE_SPEED = 15;
 /** The dock box sits directly beside the solid box. */
 export const DOCK_OFFSET = STATION_HALF * 2;
 /** Far enough from the station's center to clear both boxes at any rotation. */
@@ -111,7 +115,7 @@ export interface Rock extends Body {
 
 /** A point of interest: it orbits on a fixed path, spins, and carries nearby objects. */
 export interface Poi {
-  name: "field" | "station";
+  name: "field" | "station" | "pirate base";
   parent: Poi | null;
   x: number;
   y: number;
@@ -266,6 +270,12 @@ export class Sim {
   /** Other people's ships, going about their own business. The player has no readout of them. */
   traffic: DronePilot[] = [];
   fighters: FighterPilot[] = [];
+  /** Where pirates dock. Only exists in a game with pirates. */
+  pirateBase: Poi | null = null;
+  /** The station's own money. Defenders earn it, and it pays for defenders. */
+  stationAccount = { credits: 0 };
+  /** Ore the station has bought and is holding. */
+  stationOre = 0;
   /** The ship most recently hit by a shot, if that was recent. */
   distress: { ship: Ship; age: number } | null = null;
   /** Flies the player's ship to a clicked spot, if it has the part. */
@@ -305,9 +315,11 @@ export class Sim {
     this.clickPilot = new ClickPilot(this.ship);
     this.drones = [];
     this.distress = null;
+    this.stationAccount = { credits: this.tuning.stationStartCredits };
+    this.stationOre = 0;
     this.fighters = [];
     for (let i = 0; i < this.tuning.pirates; i++) {
-      const start = this.pirateStart();
+      const start = this.homeOf(null, "pirate");
       this.addFighter(start.x, start.y, "pirate");
     }
     for (let i = 0; i < this.tuning.defenders; i++) {
@@ -353,6 +365,17 @@ export class Sim {
       Math.PI,
       STATION_REACH,
     );
+    // Orbits at the same pace as the station, so it stays on the far side of the field.
+    this.pirateBase =
+      tuning.pirates > 0
+        ? this.makePoi(
+            "pirate base",
+            this.field,
+            tuning.fieldRadius + PIRATE_START_DISTANCE,
+            0,
+            PIRATE_BASE_RADIUS,
+          )
+        : null;
   }
 
   private makePoi(
@@ -407,19 +430,28 @@ export class Sim {
       { thrust: 0, strafe: 0, turn: 0, fire: false, retro: false, stabilize: false },
     );
     ship.faction = faction;
+    if (faction === "pirate") ship.credits = this.tuning.pirateStartCredits;
     ship.parts.add("reverse");
     ship.parts.add("strafe");
     this.fighters.push(new FighterPilot(ship));
   }
 
-  /** Outside the field, on the far side from the station. */
-  private pirateStart(): { x: number; y: number } {
-    const { field, station, tuning } = this;
-    const dx = field.x - station.x;
-    const dy = field.y - station.y;
-    const gap = Math.hypot(dx, dy) || 1;
-    const distance = tuning.fieldRadius + PIRATE_START_DISTANCE;
-    return { x: field.x + (dx / gap) * distance, y: field.y + (dy / gap) * distance };
+  /** Where a ship docks: its faction's own place, now or as of the previous tick. */
+  homeOf(ship: Ship | null, faction = ship?.faction, previous = false): { x: number; y: number } {
+    const base = this.pirateBase;
+    if (faction === "pirate" && base) {
+      return previous ? { x: base.px, y: base.py } : { x: base.x, y: base.y };
+    }
+    return this.dockPoint(previous);
+  }
+
+  /** Whether a ship is where it can sell and repair. */
+  isHome(ship: Ship): boolean {
+    const base = this.pirateBase;
+    if (ship.faction === "pirate" && base) {
+      return Math.hypot(ship.x - base.x, ship.y - base.y) < PIRATE_BASE_RADIUS;
+    }
+    return this.isDocked(ship);
   }
 
   /** Everything that flies itself. */
@@ -505,7 +537,7 @@ export class Sim {
   private respawn(ship: Ship): void {
     const isPlayer = ship === this.ship;
     if (isPlayer) this.clickPilot.cancel();
-    const home = ship.faction === "pirate" ? this.pirateStart() : this.dockPoint();
+    const home = this.homeOf(ship);
     ship.x = isPlayer ? this.startX() : home.x;
     ship.y = isPlayer ? this.field.y : home.y;
     ship.px = ship.x;
@@ -579,8 +611,9 @@ export class Sim {
     return drone;
   }
 
-  /** The ship whose credits this ship earns and spends. */
-  accountOf(ship: Ship): Ship {
+  /** Whose credits this ship earns and spends: its owner's, the station's, or its own. */
+  accountOf(ship: Ship): { credits: number } {
+    if (ship.faction === "defender") return this.stationAccount;
     return ship.owner ?? ship;
   }
 
@@ -649,6 +682,7 @@ export class Sim {
       this.unloadOre(pilot.ship, dt);
       this.repairHull(pilot.ship, dt);
     }
+    this.buyDefenders();
   }
 
   /** Each POI follows a fixed circle around its parent, or the system's center. */
@@ -656,6 +690,7 @@ export class Sim {
     const { tuning, field, station } = this;
     this.movePoi(field, tuning.fieldOrbitPeriod, tuning.fieldRotationPeriod, dt);
     this.movePoi(station, tuning.orbitPeriod, tuning.stationRotationPeriod, dt);
+    if (this.pirateBase) this.movePoi(this.pirateBase, tuning.orbitPeriod, 0, dt);
   }
 
   private movePoi(poi: Poi, orbitPeriod: number, rotationPeriod: number, dt: number): void {
@@ -672,10 +707,13 @@ export class Sim {
 
   /** Nearest by distance from each POI's edge, so a large field claims more space. */
   nearestPoi(x: number, y: number): Poi {
-    const { field, station } = this;
+    const { field, station, pirateBase } = this;
     const toField = Math.hypot(x - field.px, y - field.py) - field.reach;
     const toStation = Math.hypot(x - station.px, y - station.py) - station.reach;
-    return toStation < toField ? station : field;
+    const nearest = toStation < toField ? station : field;
+    if (!pirateBase) return nearest;
+    const toBase = Math.hypot(x - pirateBase.px, y - pirateBase.py) - pirateBase.reach;
+    return toBase < Math.min(toField, toStation) ? pirateBase : nearest;
   }
 
   /**
@@ -1069,10 +1107,55 @@ export class Sim {
     const player = ship === this.ship;
     this.events.push({ type: "wreck", x: ship.x, y: ship.y, player });
     ship.wrecks++;
-    // A rebuild never waits on money, so a wreck can't leave a ship with no moves.
-    this.accountOf(ship).credits -= this.tuning.rebuildCost;
-    ship.upkeep += this.tuning.rebuildCost;
+    this.dropOre(ship);
+    const { rebuildCost } = this.tuning;
+    const account = this.accountOf(ship);
+    // Only the player can rebuild on credit. Anyone else who can't pay is gone for good.
+    if (!player && rebuildCost > 0 && account.credits < rebuildCost) {
+      this.removeShip(ship);
+      return;
+    }
+    account.credits -= rebuildCost;
+    ship.upkeep += rebuildCost;
     this.respawn(ship);
+  }
+
+  /** A wreck's cargo stays in the world for anyone to collect. */
+  private dropOre(ship: Ship): void {
+    for (let i = 0; i < ship.ore; i++) {
+      const dir = this.random() * Math.PI * 2;
+      const kick = WRECK_ORE_SPEED * (0.5 + this.random() * 0.5);
+      this.ores.push({
+        x: ship.x,
+        y: ship.y,
+        px: ship.x,
+        py: ship.y,
+        vx: ship.vx + Math.cos(dir) * kick,
+        vy: ship.vy + Math.sin(dir) * kick,
+        kind: Math.floor(this.random() * ORE_KINDS),
+      });
+    }
+    ship.ore = 0;
+  }
+
+  private removeShip(ship: Ship): void {
+    const others = (pilots: DronePilot[]) => pilots.filter((pilot) => pilot.ship !== ship);
+    this.drones = others(this.drones);
+    this.traffic = others(this.traffic);
+    this.fighters = this.fighters.filter((pilot) => pilot.ship !== ship);
+    if (this.distress?.ship === ship) this.distress = null;
+  }
+
+  /** The station buys a defender whenever it can afford one, up to its limit. */
+  private buyDefenders(): void {
+    const { tuning, stationAccount } = this;
+    const defenders = this.fighters.filter((pilot) => pilot.ship.faction === "defender").length;
+    if (defenders >= tuning.defenderLimit || stationAccount.credits < tuning.defenderPrice) return;
+    if (tuning.defenderPrice <= 0) return;
+    stationAccount.credits -= tuning.defenderPrice;
+    const dock = this.dockPoint();
+    this.addFighter(dock.x, dock.y, "defender");
+    this.events.push({ type: "sale", x: dock.x, y: dock.y });
   }
 
   private moveShots(dt: number): void {
@@ -1246,7 +1329,7 @@ export class Sim {
 
   /** Ore turns into credits one piece at a time while in the dock. */
   private unloadOre(ship: Ship, dt: number): void {
-    if (ship.ore <= 0 || !this.isDocked(ship)) {
+    if (ship.ore <= 0 || !this.isHome(ship)) {
       ship.unloadTimer = 0;
       return;
     }
@@ -1255,6 +1338,7 @@ export class Sim {
       ship.unloadTimer -= UNLOAD_SECONDS;
       ship.ore--;
       this.accountOf(ship).credits += this.tuning.creditsPerOre;
+      if (ship.faction !== "pirate") this.stationOre++;
       ship.earned += this.tuning.creditsPerOre;
       this.events.push({ type: "sale", x: ship.x, y: ship.y });
       if (ship.ore === 0) ship.trips++;
@@ -1264,7 +1348,7 @@ export class Sim {
   /** Whether the dock could repair this ship right now, given its hull and credits. */
   canRepair(ship: Ship): boolean {
     return (
-      this.isDocked(ship) &&
+      this.isHome(ship) &&
       ship.hull < MAX_HULL &&
       this.accountOf(ship).credits >= this.tuning.repairCost
     );

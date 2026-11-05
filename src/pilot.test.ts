@@ -541,6 +541,168 @@ describe("pirate and defender", () => {
     expect(pilot.task).toBe("patrolling");
   });
 
+  describe("the money loop", () => {
+    const ore = (x: number, y: number) => ({ x, y, px: x, py: y, vx: 0, vy: 0, kind: 0 });
+
+    function shoot(sim: Sim, ship: Sim["ship"], from: Sim["ship"]): void {
+      sim.shots.push({
+        x: ship.x - 30,
+        y: ship.y,
+        px: ship.x - 30,
+        py: ship.y,
+        vx: ship.vx + 800,
+        vy: ship.vy,
+        life: 1,
+        precise: false,
+        from,
+      });
+    }
+
+    function traffic(extra: Partial<typeof SOLO> = {}): Sim {
+      return arena({ trafficRacers: 1, rebuildCost: 300, ...extra });
+    }
+
+    function wreck(sim: Sim, ship: Sim["ship"]): void {
+      pin(ship, 0, 0);
+      ship.hull = 1;
+      shoot(sim, ship, sim.ship);
+      run(sim, 0.2);
+    }
+
+    it("a wreck's cargo stays where it died", () => {
+      const sim = traffic();
+      const { ship } = sim.traffic[0];
+      ship.credits = 300;
+      ship.ore = 4;
+      wreck(sim, ship);
+      expect(ship.ore).toBe(0);
+      expect(sim.ores.length).toBe(4);
+      for (const piece of sim.ores) expect(Math.hypot(piece.x, piece.y)).toBeLessThan(100);
+    });
+
+    it("traffic that can pay is rebuilt and charged", () => {
+      const sim = traffic();
+      const { ship } = sim.traffic[0];
+      ship.credits = 500;
+      wreck(sim, ship);
+      expect(sim.traffic.length).toBe(1);
+      expect(ship.credits).toBe(200);
+      expect(ship.hull).toBe(MAX_HULL);
+    });
+
+    it("traffic that can't pay is gone for good, and early death means no ship", () => {
+      const sim = traffic();
+      wreck(sim, sim.traffic[0].ship);
+      expect(sim.traffic.length).toBe(0);
+      run(sim, 1);
+    });
+
+    it("a player's drone is gone if the player can't pay", () => {
+      const sim = arena({ rebuildCost: 300, dronePrice: 100, droneLimit: 5 });
+      placeInDock(sim, sim.ship);
+      sim.ship.credits = 100;
+      const drone = sim.buyDrone(sim.ship)!;
+      wreck(sim, drone.ship);
+      expect(sim.drones.length).toBe(0);
+    });
+
+    it("the player still rebuilds on credit", () => {
+      const sim = arena({ rebuildCost: 300 });
+      sim.ship.hull = 1;
+      shoot(sim, sim.ship, sim.ship);
+      sim.shots[0].from = sim.fighters[0]?.ship ?? ({} as Sim["ship"]);
+      run(sim, 0.2);
+      expect(sim.ship.wrecks).toBe(1);
+      expect(sim.ship.credits).toBe(-300);
+    });
+
+    it("a pirate starts with money, and pays for its own rebuilds until it runs out", () => {
+      const sim = arena({ pirates: 1, rebuildCost: 300, pirateStartCredits: 300 });
+      const { ship } = sim.fighters[0];
+      expect(ship.credits).toBe(300);
+      wreck(sim, ship);
+      expect(sim.fighters.length).toBe(1);
+      expect(ship.credits).toBe(0);
+      wreck(sim, ship);
+      expect(sim.fighters.length).toBe(0);
+    });
+
+    it("a pirate collects loose ore with no target, sells it at its base, and keeps the money", () => {
+      const sim = arena({ pirates: 1, pirateStartCredits: 0 });
+      const pilot = sim.fighters[0];
+      const { ship } = pilot;
+      sim.ores.push(ore(ship.x + 300, ship.y));
+      run(sim, 1);
+      expect(pilot.task).toBe("gathering");
+      let ticks = 0;
+      while (ship.credits === 0 && ticks < Math.round(120 / TICK)) {
+        sim.step();
+        ticks++;
+      }
+      expect(ship.credits).toBe(DEFAULTS.creditsPerOre);
+      expect(sim.stationOre).toBe(0);
+      expect(sim.stationAccount.credits).toBe(DEFAULTS.stationStartCredits);
+    }, 30000);
+
+    it("a defender collects ore for the station's balance, and the station keeps the ore", () => {
+      const sim = arena({ defenders: 1, stationStartCredits: 0 });
+      const { ship } = sim.fighters[0];
+      sim.ores.push(ore(ship.x + 800, ship.y + 800));
+      let ticks = 0;
+      while (sim.stationOre === 0 && ticks < Math.round(120 / TICK)) {
+        sim.step();
+        ticks++;
+      }
+      expect(sim.stationOre).toBe(1);
+      expect(sim.stationAccount.credits).toBe(DEFAULTS.creditsPerOre);
+      expect(ship.credits).toBe(0);
+    }, 30000);
+
+    it("traffic selling ore adds to the station's ore but not its balance", () => {
+      const sim = traffic();
+      const { ship } = sim.traffic[0];
+      placeInDock(sim, ship);
+      ship.ore = 3;
+      run(sim, 1);
+      expect(sim.stationOre).toBe(3);
+      expect(ship.credits).toBe(3 * DEFAULTS.creditsPerOre);
+      expect(sim.stationAccount.credits).toBe(DEFAULTS.stationStartCredits);
+    });
+
+    it("the station buys a defender when it can afford one, up to its limit", () => {
+      const sim = arena({ defenders: 1, stationStartCredits: 0, defenderPrice: 500, defenderLimit: 2 });
+      sim.stationAccount.credits = 1500;
+      sim.step();
+      expect(sim.fighters.length).toBe(2);
+      expect(sim.stationAccount.credits).toBe(1000);
+      sim.step();
+      expect(sim.fighters.length).toBe(2);
+    });
+
+    it("a defender is rebuilt from the station's balance, or lost", () => {
+      const sim = arena({ defenders: 1, rebuildCost: 300, stationStartCredits: 300, defenderPrice: 5000 });
+      const { ship } = sim.fighters[0];
+      wreck(sim, ship);
+      expect(sim.fighters.length).toBe(1);
+      expect(sim.stationAccount.credits).toBe(0);
+      wreck(sim, ship);
+      expect(sim.fighters.length).toBe(0);
+    });
+
+    it("a kill for good leaves its cargo and the pirate carries on", () => {
+      const sim = arena({ pirates: 1, trafficRacers: 1, rebuildCost: 300 });
+      const pirate = sim.fighters[0].ship;
+      const prey = sim.traffic[0].ship;
+      pirate.angle = 0;
+      pin(prey, pirate.x + 500, pirate.y);
+      prey.ore = 2;
+      for (let i = 0; i < Math.round(30 / TICK) && sim.traffic.length > 0; i++) sim.step();
+      expect(sim.traffic.length).toBe(0);
+      run(sim, 2);
+      expect(sim.ores.length + pirate.ore + pirate.earned / DEFAULTS.creditsPerOre).toBe(2);
+    }, 30000);
+  });
+
   it("shots don't hit whoever fired them", () => {
     const sim = arena();
     sim.controls.fire = true;

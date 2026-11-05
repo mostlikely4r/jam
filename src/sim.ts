@@ -119,6 +119,31 @@ export interface Rock extends Body {
   shape: number[];
 }
 
+/** A big freighter that comes from far away to buy the station's ore. It flies a fixed path in the station's axes. */
+export interface Hauler {
+  stage: "arriving" | "loading" | "leaving";
+  /** Seconds into the current stage. */
+  time: number;
+  /** How far along its path, in the station's axes: negative before the berth, positive after. */
+  offset: number;
+  prevOffset: number;
+  cargo: number;
+  /** Seconds at the berth with nothing to load. */
+  idle: number;
+  loadTimer: number;
+}
+
+export const HAULER_LENGTH = 300;
+export const HAULER_WIDTH = 100;
+/** Beside the station, on the side away from the dock, its long side along the station's. */
+const HAULER_BERTH_X = -(STATION_HALF + 40 + HAULER_WIDTH / 2);
+const HAULER_APPROACH = 6000;
+const HAULER_APPROACH_SECONDS = 90;
+const HAULER_LEAVE_ACCEL = 3;
+const HAULER_GONE = 8000;
+/** It leaves after waiting this long with nothing to load. */
+const HAULER_WAIT_SECONDS = 15;
+
 /** A point of interest: it orbits on a fixed path, spins, and carries nearby objects. */
 export interface Poi {
   name: "field" | "station" | "pirate base";
@@ -295,6 +320,9 @@ export class Sim {
   stationAccount = { credits: 0 };
   /** Ore the station has bought and is holding. */
   stationOre = 0;
+  hauler: Hauler | null = null;
+  /** Seconds until the next hauler sets out. */
+  haulerTimer = 0;
   /** The pirate base's ore. It pays for pirates' repairs, rebuilds and new ships. */
   pirateOre = 0;
   /** Traffic gone for good, waiting for the station to replace it. */
@@ -342,6 +370,8 @@ export class Sim {
     this.distress = null;
     this.stationAccount = { credits: this.tuning.stationStartCredits };
     this.stationOre = this.tuning.stationStartOre;
+    this.hauler = null;
+    this.haulerTimer = this.tuning.haulerFirst;
     this.pirateOre = this.tuning.pirateStartOre;
     this.lostTraffic = [];
     this.fighters = [];
@@ -506,6 +536,83 @@ export class Sim {
     const { ship } = this;
     if (Math.hypot(other.x - ship.x, other.y - ship.y) > this.tuning.visionRange) return false;
     return this.clearSight(ship.x, ship.y, other.x, other.y);
+  }
+
+  /** Where the hauler is in the world, now or as of the previous tick, and which way it points. */
+  haulerSpot(previous = false): { x: number; y: number; angle: number } | null {
+    const { hauler, station } = this;
+    if (!hauler) return null;
+    const rotation = previous ? station.prevRotation : station.rotation;
+    const cx = previous ? station.px : station.x;
+    const cy = previous ? station.py : station.y;
+    const along = previous ? hauler.prevOffset : hauler.offset;
+    const cos = Math.cos(rotation);
+    const sin = Math.sin(rotation);
+    return {
+      x: cx + HAULER_BERTH_X * cos - along * sin,
+      y: cy + HAULER_BERTH_X * sin + along * cos,
+      angle: rotation + Math.PI / 2,
+    };
+  }
+
+  /**
+   * A hauler sets out on a schedule. It comes in slowing all the way, loads ore above
+   * what the station keeps back, pays for it, then leaves slowly the other way.
+   */
+  private moveHauler(dt: number): void {
+    const { tuning } = this;
+    if (!this.hauler) {
+      if (!tuning.haulers) return;
+      this.haulerTimer -= dt;
+      if (this.haulerTimer > 0) return;
+      this.haulerTimer = tuning.haulerInterval;
+      this.hauler = {
+        stage: "arriving",
+        time: 0,
+        offset: -HAULER_APPROACH,
+        prevOffset: -HAULER_APPROACH,
+        cargo: 0,
+        idle: 0,
+        loadTimer: 0,
+      };
+      return;
+    }
+    const hauler = this.hauler;
+    hauler.prevOffset = hauler.offset;
+    hauler.time += dt;
+    if (hauler.stage === "arriving") {
+      const left = Math.max(0, 1 - hauler.time / HAULER_APPROACH_SECONDS);
+      hauler.offset = -HAULER_APPROACH * left * left;
+      if (left > 0) return;
+      hauler.stage = "loading";
+      hauler.time = 0;
+      if (tuning.chatter) this.chatter.haulerBerthed(this);
+      return;
+    }
+    if (hauler.stage === "loading") {
+      const keep = Math.max(tuning.haulerKeep, tuning.stationReserveOre);
+      const canLoad = hauler.cargo < tuning.haulerCapacity && this.stationOre - keep >= 1;
+      if (!canLoad) {
+        hauler.idle += dt;
+      } else {
+        hauler.idle = 0;
+        hauler.loadTimer += dt * tuning.haulerLoadRate;
+        while (hauler.loadTimer >= 1 && hauler.cargo < tuning.haulerCapacity && this.stationOre - keep >= 1) {
+          hauler.loadTimer -= 1;
+          hauler.cargo++;
+          this.stationOre--;
+          this.stationAccount.credits += tuning.haulerPrice;
+        }
+      }
+      if (hauler.cargo >= tuning.haulerCapacity || hauler.idle >= HAULER_WAIT_SECONDS) {
+        hauler.stage = "leaving";
+        hauler.time = 0;
+        if (tuning.chatter) this.chatter.haulerLeaving(this, hauler.cargo);
+      }
+      return;
+    }
+    hauler.offset = 0.5 * HAULER_LEAVE_ACCEL * hauler.time * hauler.time;
+    if (hauler.offset > HAULER_GONE) this.hauler = null;
   }
 
   /** Whether the player picks up a radio line: anything in range, and maydays from anywhere. */
@@ -754,6 +861,7 @@ export class Sim {
     }
     this.spendStationOre();
     this.spendPirateOre();
+    this.moveHauler(dt);
     if (this.tuning.chatter) this.chatter.update(this, dt);
   }
 

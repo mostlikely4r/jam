@@ -20,6 +20,7 @@ const SOLO = {
   stationStartOre: 100000,
   stationReserveOre: Infinity,
   detectSeconds: 0,
+  haulers: false,
 };
 
 function run(sim: Sim, seconds: number, each?: () => void): void {
@@ -771,6 +772,76 @@ describe("pirate and defender", () => {
       pilot.ship.ore = DEFAULTS.droneCargo;
       expect(listen(sim, 3)).toEqual([]);
     });
+  });
+
+  describe("haulers", () => {
+    function haulerWorld(extra: Partial<typeof SOLO> = {}): Sim {
+      return arena({
+        haulers: true,
+        haulerFirst: 10,
+        haulerInterval: 600,
+        haulerCapacity: 50,
+        haulerKeep: 60,
+        haulerPrice: 15,
+        haulerLoadRate: 10,
+        stationReserveOre: 20,
+        stationStartOre: 100,
+        stationStartCredits: 0,
+        ...extra,
+      });
+    }
+
+    it("comes in slowing all the way, and stops beside the station", () => {
+      const sim = haulerWorld();
+      run(sim, 9);
+      expect(sim.hauler).toBeNull();
+      run(sim, 2);
+      expect(sim.hauler?.stage).toBe("arriving");
+      const speeds: number[] = [];
+      run(sim, 89, () => {
+        const now = sim.haulerSpot();
+        const before = sim.haulerSpot(true);
+        if (now && before) speeds.push(Math.hypot(now.x - before.x, now.y - before.y) / TICK);
+      });
+      expect(sim.hauler?.stage).toBe("loading");
+      expect(speeds[0]).toBeGreaterThan(speeds[Math.floor(speeds.length / 2)]);
+      expect(speeds[speeds.length - 1]).toBeLessThan(2);
+      const spot = sim.haulerSpot()!;
+      const gap = Math.hypot(spot.x - sim.station.x, spot.y - sim.station.y);
+      expect(gap).toBeLessThan(300);
+      const dock = sim.dockPoint();
+      expect(Math.hypot(spot.x - dock.x, spot.y - dock.y)).toBeGreaterThan(400);
+    }, 30000);
+
+    it("loads only what the station has beyond what it keeps, pays for it, then leaves and is gone", () => {
+      const sim = haulerWorld();
+      run(sim, 105);
+      expect(sim.stationOre).toBe(60);
+      expect(sim.hauler?.cargo).toBe(40);
+      expect(sim.stationAccount.credits).toBe(40 * 15);
+      run(sim, 20);
+      expect(sim.hauler?.stage).toBe("leaving");
+      run(sim, 120);
+      expect(sim.hauler).toBeNull();
+    }, 30000);
+
+    it("leaves straight away once full", () => {
+      const sim = haulerWorld({ stationStartOre: 1000 });
+      run(sim, 106);
+      expect(sim.hauler?.cargo).toBe(50);
+      expect(sim.hauler?.stage).toBe("leaving");
+    }, 30000);
+
+    it("says hello at the berth and goodbye when it leaves", () => {
+      const sim = haulerWorld();
+      const lines: string[] = [];
+      run(sim, 130, () => {
+        for (const event of sim.events) if (event.type === "chatter") lines.push(`${event.name}: ${event.text}`);
+      });
+      expect(lines.some((line) => line.startsWith("Long Haul: At your berth"))).toBe(true);
+      expect(lines.some((line) => line.startsWith("Station: Roger, Long Haul"))).toBe(true);
+      expect(lines.some((line) => line.startsWith("Long Haul: 40 ore aboard"))).toBe(true);
+    }, 30000);
   });
 
   describe("the money loop", () => {

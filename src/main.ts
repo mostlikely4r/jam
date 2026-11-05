@@ -209,6 +209,7 @@ function buildPanel(): void {
         { key: "trafficFlees", label: "Traffic flees from pirates" },
         { key: "sightLines", label: "Rocks block sight" },
         { key: "chatter", label: "Radio chatter" },
+        { key: "haulers", label: "Haulers buy station ore" },
       ] as const;
       for (const { key, label: text } of switches) {
         const toggle = document.createElement("label");

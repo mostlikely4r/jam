@@ -1,6 +1,8 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import {
   DOCK_OFFSET,
+  HAULER_LENGTH,
+  HAULER_WIDTH,
   PIRATE_BASE_RADIUS,
   Sim,
   SHIP_RADIUS,
@@ -15,6 +17,8 @@ const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
 /** How long the mark where a pirate was last seen takes to fade away. */
 const GHOST_MILLISECONDS = 30000;
 const PING_SECONDS = 1.4;
+const HAULER_COLUMNS = 10;
+const HAULER_ROWS = 4;
 const PILE_ROWS = 12;
 const PILE_ORE_PER_LUMP = 5;
 const DRONE_COLOR = [180, 200, 120];
@@ -173,12 +177,13 @@ export class Renderer {
       Math.abs(x - camX) < halfW + r && Math.abs(y - camY) < halfH + r;
 
     this.drawStation(sim, alpha);
+    this.drawHauler(sim, alpha);
     this.drawPirateBase(sim, alpha);
     this.drawClickTarget(sim, alpha);
     this.drawRocks(sim, alpha, visible);
     this.drawOres(sim, alpha, visible);
     this.drawShots(sim, alpha);
-    this.drawPings(sim, alpha, frameSeconds);
+    this.drawPings(alpha, frameSeconds);
     this.updateParticles(frameSeconds);
     this.drawTractor(sim, ship, shipX, shipY, alpha, true);
     for (const pilot of sim.traffic) {
@@ -470,15 +475,14 @@ export class Renderer {
     }
   }
 
-  private drawPings(sim: Sim, alpha: number, frameSeconds: number): void {
+  private drawPings(alpha: number, frameSeconds: number): void {
     const { ctx } = this;
     this.pings = this.pings.filter((ping) => ping.age < PING_SECONDS);
     for (const ping of this.pings) {
       ping.age += frameSeconds;
       const speaker = ping.speaker;
-      const dock = sim.dockPoint();
-      const x = speaker ? lerp(speaker.px, speaker.x, alpha) : dock.x;
-      const y = speaker ? lerp(speaker.py, speaker.y, alpha) : dock.y;
+      const x = speaker ? lerp(speaker.px, speaker.x, alpha) : ping.x;
+      const y = speaker ? lerp(speaker.py, speaker.y, alpha) : ping.y;
       const share = Math.min(1, ping.age / PING_SECONDS);
       ctx.globalAlpha = (1 - share) * 0.8;
       ctx.strokeStyle = ping.mayday ? "#ff6b5c" : speaker ? "#a8d8ff" : "#8fe3a1";
@@ -488,6 +492,45 @@ export class Renderer {
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
+  }
+
+  /** A long freighter, its cargo shown as lumps that fill it as it loads. */
+  private drawHauler(sim: Sim, alpha: number): void {
+    const now = sim.haulerSpot();
+    const before = sim.haulerSpot(true);
+    const hauler = sim.hauler;
+    if (!now || !before || !hauler) return;
+    const { ctx } = this;
+    const x = lerp(before.x, now.x, alpha);
+    const y = lerp(before.y, now.y, alpha);
+    const half = HAULER_LENGTH / 2;
+    const side = HAULER_WIDTH / 2;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(lerp(before.angle, now.angle, alpha));
+
+    // Braking on the way in, pushing on the way out.
+    if (hauler.stage === "arriving") this.drawFlame(half + 4, 0, 0, 3, 14);
+    if (hauler.stage === "leaving") this.drawFlame(-half - 4, 0, Math.PI, 3, 14);
+
+    ctx.fillStyle = "#59647a";
+    ctx.fillRect(-half, -side, HAULER_LENGTH, HAULER_WIDTH);
+    ctx.strokeStyle = "#aab1bd";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-half, -side, HAULER_LENGTH, HAULER_WIDTH);
+    ctx.fillStyle = "#3d4556";
+    ctx.fillRect(half - 50, -side + 8, 42, HAULER_WIDTH - 16);
+
+    const lumps = Math.min(HAULER_ROWS * HAULER_COLUMNS, Math.ceil(hauler.cargo / PILE_ORE_PER_LUMP));
+    const pitch = (HAULER_LENGTH - 70) / HAULER_COLUMNS;
+    const rowPitch = (HAULER_WIDTH - 20) / HAULER_ROWS;
+    for (let i = 0; i < lumps; i++) {
+      ctx.fillStyle = ORE_COLORS[(i * 7) % ORE_COLORS.length];
+      const lx = -half + 10 + pitch * (i % HAULER_COLUMNS) + pitch * 0.2;
+      const ly = -side + 10 + rowPitch * Math.floor(i / HAULER_COLUMNS) + rowPitch * 0.2;
+      ctx.fillRect(lx, ly, pitch * 0.6, rowPitch * 0.6);
+    }
+    ctx.restore();
   }
 
   /** A fading mark where a pirate was last seen, carried along with what it was near. */

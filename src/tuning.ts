@@ -62,6 +62,13 @@ export const DEFAULTS = {
   showTraffic: false,
   trafficFlees: true,
   chatter: true,
+  haulers: true,
+  haulerFirst: 300,
+  haulerInterval: 600,
+  haulerCapacity: 200,
+  haulerKeep: 150,
+  haulerPrice: 15,
+  haulerLoadRate: 2,
   chatterRange: 1500,
 
   pirates: 1,
@@ -226,6 +233,17 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
       { key: "serviceCreditsPerOre", label: "Credits of service per ore used", min: 1, max: 100, step: 1 },
       { key: "stationReserveOre", label: "Ore the station keeps for repairs", min: 0, max: 200, step: 5 },
       { key: "defenderPrice", label: "Credits of ore in a new defender", min: 0, max: 5000, step: 50 },
+    ],
+  },
+  {
+    title: "Haulers",
+    sliders: [
+      { key: "haulerFirst", label: "First arrival (s, on restart)", min: 0, max: 3600, step: 30 },
+      { key: "haulerInterval", label: "Time between visits (s)", min: 60, max: 3600, step: 30 },
+      { key: "haulerCapacity", label: "Ore a hauler carries", min: 10, max: 1000, step: 10 },
+      { key: "haulerKeep", label: "Ore the station keeps back", min: 0, max: 500, step: 10 },
+      { key: "haulerPrice", label: "Credits a hauler pays per ore", min: 0, max: 100, step: 1 },
+      { key: "haulerLoadRate", label: "Ore loaded per second", min: 0.5, max: 20, step: 0.5 },
     ],
   },
   {

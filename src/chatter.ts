@@ -26,6 +26,7 @@ const TRAFFIC_NAMES = [
   "Robin",
 ];
 
+const HAULER_NAME = "Long Haul";
 const DOCKING = [
   "Hold's full, heading in to dock.",
   "Coming home with a load.",
@@ -162,6 +163,20 @@ export class Chatter {
     this.say(sim, ship, this.pick(ship.faction === "defender" ? ENGAGED : MAYDAY), true);
   }
 
+  haulerBerthed(sim: Sim): void {
+    const spot = sim.haulerSpot();
+    if (!spot) return;
+    this.lineFrom(sim, HAULER_NAME, "At your berth and ready to load.", spot.x, spot.y);
+    this.reply(`Roger, ${HAULER_NAME}. Loading now.`);
+  }
+
+  haulerLeaving(sim: Sim, cargo: number): void {
+    const spot = sim.haulerSpot();
+    if (!spot) return;
+    const text = cargo > 0 ? `${cargo} ore aboard. See you next run.` : "Nothing for us today. We'll try again later.";
+    this.lineFrom(sim, HAULER_NAME, text, spot.x, spot.y);
+  }
+
   defenderLaunched(sim: Sim): void {
     this.stationSays(sim, "Defender launching. Stay safe out there.");
   }
@@ -194,6 +209,10 @@ export class Chatter {
       y: ship.y,
       mayday,
     });
+  }
+
+  private lineFrom(sim: Sim, name: string, text: string, x: number, y: number): void {
+    sim.events.push({ type: "chatter", speaker: null, name, text, x, y, mayday: false });
   }
 
   private stationSays(sim: Sim, text: string): void {

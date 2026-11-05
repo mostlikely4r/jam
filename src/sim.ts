@@ -1,5 +1,5 @@
 import { PARTS, partFits, type PartId, type ShipModel } from "./parts";
-import { ClickPilot, DronePilot } from "./pilot";
+import { ClickPilot, DronePilot, FighterPilot } from "./pilot";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
 export const TICK = 1 / 120;
@@ -10,6 +10,10 @@ const PICKUP_MARGIN = 10;
 const TIER_RADIUS = [18, 34, 60];
 const ORE_KINDS = 3;
 export const STATION_HALF = 150;
+/** How far outside the field a pirate starts, on the far side from the station. */
+const PIRATE_START_DISTANCE = 2000;
+/** How long a hit ship keeps calling for help. */
+const DISTRESS_SECONDS = 10;
 /** The dock box sits directly beside the solid box. */
 export const DOCK_OFFSET = STATION_HALF * 2;
 /** Far enough from the station's center to clear both boxes at any rotation. */
@@ -57,8 +61,14 @@ interface Body {
   py: number;
 }
 
+export type Faction = "pirate" | "defender";
+
 export interface Ship extends Body {
   model: ShipModel;
+  /** Pirates and defenders. Everyone else is null. */
+  faction: Faction | null;
+  /** Where the last shot to hit this ship came from, until something reads it. */
+  shotFrom: { x: number; y: number } | null;
   controls: Controls;
   parts: Set<PartId>;
   /** The ship whose account this one shares, or null if it keeps its own. */
@@ -131,6 +141,8 @@ export interface Shot extends Body {
   life: number;
   /** Fired by gun 2, so it may be a precision hit. */
   precise: boolean;
+  /** Who fired it. Its own shots can't hit it. */
+  from: Ship;
 }
 
 export interface Ore extends Body {
@@ -253,6 +265,9 @@ export class Sim {
   drones: DronePilot[] = [];
   /** Other people's ships, going about their own business. The player has no readout of them. */
   traffic: DronePilot[] = [];
+  fighters: FighterPilot[] = [];
+  /** The ship most recently hit by a shot, if that was recent. */
+  distress: { ship: Ship; age: number } | null = null;
   /** Flies the player's ship to a clicked spot, if it has the part. */
   clickPilot!: ClickPilot;
   rocks: Rock[] = [];
@@ -289,6 +304,16 @@ export class Sim {
     }
     this.clickPilot = new ClickPilot(this.ship);
     this.drones = [];
+    this.distress = null;
+    this.fighters = [];
+    for (let i = 0; i < this.tuning.pirates; i++) {
+      const start = this.pirateStart();
+      this.addFighter(start.x, start.y, "pirate");
+    }
+    for (let i = 0; i < this.tuning.defenders; i++) {
+      const dock = this.dockPoint();
+      this.addFighter(dock.x, dock.y, "defender");
+    }
     this.traffic = [];
     const models: ShipModel[] = [
       ...Array<ShipModel>(this.tuning.trafficRacers).fill("racer"),
@@ -374,9 +399,42 @@ export class Sim {
     this.traffic.push(pilot);
   }
 
+  /** Six thrusters and the first gun. */
+  private addFighter(x: number, y: number, faction: Faction): void {
+    const ship = this.makeShip(
+      x,
+      y,
+      { thrust: 0, strafe: 0, turn: 0, fire: false, retro: false, stabilize: false },
+    );
+    ship.faction = faction;
+    ship.parts.add("reverse");
+    ship.parts.add("strafe");
+    this.fighters.push(new FighterPilot(ship));
+  }
+
+  /** Outside the field, on the far side from the station. */
+  private pirateStart(): { x: number; y: number } {
+    const { field, station, tuning } = this;
+    const dx = field.x - station.x;
+    const dy = field.y - station.y;
+    const gap = Math.hypot(dx, dy) || 1;
+    const distance = tuning.fieldRadius + PIRATE_START_DISTANCE;
+    return { x: field.x + (dx / gap) * distance, y: field.y + (dy / gap) * distance };
+  }
+
   /** Everything that flies itself. */
-  private get pilots(): DronePilot[] {
-    return [...this.drones, ...this.traffic];
+  private get pilots(): (DronePilot | FighterPilot)[] {
+    return [...this.drones, ...this.traffic, ...this.fighters];
+  }
+
+  /** Every ship in the world, the player's included. */
+  get ships(): Ship[] {
+    return [this.ship, ...this.pilots.map((pilot) => pilot.ship)];
+  }
+
+  /** A number from 0 to 1, from the same seeded generator as the rest of the world. */
+  roll(): number {
+    return this.random();
   }
 
   /** Keeps the same object, since the ship and the input code both hold it. */
@@ -413,6 +471,8 @@ export class Sim {
   private makeShip(x: number, y: number, controls: Controls, model: ShipModel = "racer"): Ship {
     return {
       model,
+      faction: null,
+      shotFrom: null,
       x,
       y,
       px: x,
@@ -443,11 +503,11 @@ export class Sim {
 
   /** The player restarts by the field. A drone restarts in the dock, where it would be rebuilt. */
   private respawn(ship: Ship): void {
-    const dock = this.dockPoint();
     const isPlayer = ship === this.ship;
     if (isPlayer) this.clickPilot.cancel();
-    ship.x = isPlayer ? this.startX() : dock.x;
-    ship.y = isPlayer ? this.field.y : dock.y;
+    const home = ship.faction === "pirate" ? this.pirateStart() : this.dockPoint();
+    ship.x = isPlayer ? this.startX() : home.x;
+    ship.y = isPlayer ? this.field.y : home.y;
     ship.px = ship.x;
     ship.py = ship.y;
     ship.vx = 0;
@@ -561,6 +621,10 @@ export class Sim {
   /** Advance one fixed tick. Display rate and time speedup never change its size. */
   step(): void {
     const dt = TICK;
+    if (this.distress) {
+      this.distress.age += dt;
+      if (this.distress.age > DISTRESS_SECONDS) this.distress = null;
+    }
     this.clickPilot.update(this);
     const pilots = this.pilots;
     for (const pilot of pilots) pilot.update(this);
@@ -1037,10 +1101,35 @@ export class Sim {
         }
       }
 
+      let hitShip: Ship | null = null;
+      for (const ship of this.ships) {
+        if (ship === shot.from) continue;
+        const t = sweepCircle(
+          shot.x - ship.x,
+          shot.y - ship.y,
+          (shot.vx - ship.vx) * dt,
+          (shot.vy - ship.vy) * dt,
+          SHIP_RADIUS,
+        );
+        if (t !== null && t < hitT) {
+          hitT = t;
+          hit = null;
+          hitShip = ship;
+        }
+      }
+
       if (stationHit && stationHit.t < hitT) {
         const x = shot.x + shot.vx * dt * stationHit.t;
         const y = shot.y + shot.vy * dt * stationHit.t;
         this.events.push({ type: "hit", x, y });
+        continue;
+      }
+
+      if (hitShip) {
+        const x = shot.x + shot.vx * dt * hitT;
+        const y = shot.y + shot.vy * dt * hitT;
+        this.events.push({ type: "hit", x, y });
+        this.shootShip(hitShip, shot);
         continue;
       }
 
@@ -1063,6 +1152,19 @@ export class Sim {
     this.shots = remaining;
   }
 
+  /** A ship in the dock is safe: shots pass through. Anywhere else, hits do damage. */
+  private shootShip(ship: Ship, shot: Shot): void {
+    if (this.isDocked(ship)) return;
+    const damage = this.tuning.shotDamage;
+    ship.hull -= damage;
+    ship.damageTaken += damage;
+    ship.shotFrom = { x: shot.from.x, y: shot.from.y };
+    this.distress = { ship, age: 0 };
+    const player = ship === this.ship;
+    this.events.push({ type: "impact", x: ship.x, y: ship.y, damage, player });
+    if (ship.hull <= 0) this.wreckShip(ship);
+  }
+
   private fireShots(ship: Ship): void {
     const { tuning } = this;
     if (!ship.controls.fire || ship.cooldown > 0) return;
@@ -1081,6 +1183,7 @@ export class Sim {
       vy: ship.vy + sin * tuning.shotSpeed,
       life: tuning.shotLife,
       precise,
+      from: ship,
     });
     this.events.push({ type: "shot", x, y });
   }

@@ -59,6 +59,12 @@ export const DEFAULTS = {
   trafficFloaters: 1,
   showTraffic: false,
 
+  pirates: 1,
+  defenders: 1,
+  visionRange: 1500,
+  visionAngle: 45,
+  shotDamage: 4,
+
   testDrones: 0,
   dronePrice: 500,
   droneLimit: 5,
@@ -185,6 +191,16 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
     sliders: [
       { key: "trafficRacers", label: "First ships (on restart)", min: 0, max: 10, step: 1 },
       { key: "trafficFloaters", label: "New ships (on restart)", min: 0, max: 10, step: 1 },
+    ],
+  },
+  {
+    title: "Pirate and defender",
+    sliders: [
+      { key: "pirates", label: "Pirates (on restart)", min: 0, max: 5, step: 1 },
+      { key: "defenders", label: "Defenders (on restart)", min: 0, max: 5, step: 1 },
+      { key: "visionRange", label: "Vision range", min: 300, max: 5000, step: 100 },
+      { key: "visionAngle", label: "Vision cone (degrees)", min: 10, max: 360, step: 5 },
+      { key: "shotDamage", label: "Damage per shot to a ship", min: 0, max: 50, step: 1 },
     ],
   },
   {

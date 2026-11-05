@@ -1,4 +1,4 @@
-import type { DronePilot } from "./pilot";
+import type { FighterPilot, DronePilot } from "./pilot";
 import {
   DOCK_OFFSET,
   Sim,
@@ -13,6 +13,8 @@ const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
 const DRONE_COLOR = [180, 200, 120];
 const OWNED_DRONE_COLOR = [120, 190, 255];
 const TRAFFIC_COLOR = [150, 155, 165];
+const PIRATE_COLOR = [235, 90, 80];
+const DEFENDER_COLOR = [110, 235, 170];
 /** The hollow marker shows the distance this many seconds ahead at the current closing speed. */
 const MARKER_LOOK_SECONDS = 3;
 const MARKER_SCALE = 14;
@@ -169,6 +171,7 @@ export class Renderer {
       this.drawShip(other, x, y, alpha, TRAFFIC_COLOR);
       if (tuning.showTraffic) this.drawTask(sim, pilot, x, y, "#a8adb8");
     }
+    for (const pilot of sim.fighters) this.drawFighter(sim, pilot, alpha);
     for (const drone of sim.drones) {
       const other = drone.ship;
       this.drawTractor(sim, other, lerp(other.px, other.x, alpha), lerp(other.py, other.y, alpha), alpha, false);
@@ -362,7 +365,35 @@ export class Renderer {
     this.drawTask(sim, drone, x, y, ship.owner ? "#8fc8ff" : "#f2c572");
   }
 
-  private drawTask(sim: Sim, pilot: DronePilot, x: number, y: number, color: string): void {
+  /** Its cone of vision and what it's doing only show with the traffic readouts on. */
+  private drawFighter(sim: Sim, pilot: FighterPilot, alpha: number): void {
+    const { ctx } = this;
+    const { ship } = pilot;
+    const { tuning } = sim;
+    const x = lerp(ship.px, ship.x, alpha);
+    const y = lerp(ship.py, ship.y, alpha);
+    const pirate = ship.faction === "pirate";
+    if (tuning.showTraffic) {
+      const half = ((tuning.visionAngle / 2) * Math.PI) / 180;
+      const angle = lerp(ship.prevAngle, ship.angle, alpha);
+      ctx.fillStyle = pirate ? "rgba(235, 90, 80, 0.07)" : "rgba(110, 235, 170, 0.07)";
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.arc(x, y, tuning.visionRange, angle - half, angle + half);
+      ctx.closePath();
+      ctx.fill();
+      this.drawTask(sim, pilot, x, y, pirate ? "#eb5a50" : "#6eebaa");
+    }
+    this.drawShip(ship, x, y, alpha, pirate ? PIRATE_COLOR : DEFENDER_COLOR);
+  }
+
+  private drawTask(
+    sim: Sim,
+    pilot: { task: string; ship: Ship },
+    x: number,
+    y: number,
+    color: string,
+  ): void {
     const { ctx } = this;
     ctx.fillStyle = color;
     ctx.font = "14px Consolas, monospace";
@@ -492,6 +523,22 @@ export class Renderer {
         this.drawPointer(reading, "#a8adb8", `traffic ${i + 1}`, 0.28, meters, width, height, dpr);
       }
     });
+    for (const pilot of sim.fighters) {
+      const reading = sim.readShip(pilot.ship, viewHalfWidth, viewHalfHeight);
+      const pirate = pilot.ship.faction === "pirate";
+      if (reading.distance > 0) {
+        this.drawPointer(
+          reading,
+          pirate ? "#eb5a50" : "#6eebaa",
+          pirate ? "pirate" : "defender",
+          0.28,
+          meters,
+          width,
+          height,
+          dpr,
+        );
+      }
+    }
   }
 
   /**

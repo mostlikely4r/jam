@@ -370,6 +370,12 @@ function frame(now: number): void {
               `Traffic ${index + 1} ${ship.model} ${task} ${ship.ore}/${tuning.droneCargo}  Hull ${Math.round((ship.hull / MAX_HULL) * 100)}%  Credits ${ship.credits}  Trips ${ship.trips}  Wrecks ${ship.wrecks}`,
           )
         : []),
+      ...(tuning.showTraffic
+        ? sim.fighters.map(
+            ({ ship, task }) =>
+              `${ship.faction === "pirate" ? "Pirate" : "Defender"} ${task}  Hull ${Math.round((ship.hull / MAX_HULL) * 100)}%  Wrecks ${ship.wrecks}`,
+          )
+        : []),
       `FPS   ${Math.round(fps)}${paused ? "  PAUSED" : ""}`,
     ].join("\n");
   }

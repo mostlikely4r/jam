@@ -9,6 +9,8 @@ const SOLO = {
   floaterStart: false,
   trafficRacers: 0,
   trafficFloaters: 0,
+  pirates: 0,
+  defenders: 0,
   testDrones: 1,
   droneParts: 0,
   droneLimit: 1,
@@ -257,7 +259,7 @@ describe("drone", () => {
 
   describe("traffic", () => {
     it("starts as one of each ship, apart from drones", () => {
-      const sim = new Sim(1, { ...DEFAULTS });
+      const sim = new Sim(1, { ...DEFAULTS, pirates: 0, defenders: 0 });
       expect(sim.drones.length).toBe(0);
       expect(sim.traffic.map((pilot) => pilot.ship.model)).toEqual(["racer", "floater"]);
       expect(sim.traffic[1].ship.parts.has("gun2")).toBe(true);
@@ -334,4 +336,215 @@ describe("drone", () => {
     expect(used.has("thrusterReverse")).toBe(true);
     expect(used.has("thrusterStrafeLeft") || used.has("thrusterStrafeRight")).toBe(true);
   }, 30000);
+});
+
+describe("pirate and defender", () => {
+  function arena(extra: Partial<typeof SOLO> = {}): Sim {
+    const sim = new Sim(1, {
+      ...SOLO,
+      testDrones: 0,
+      rockCount: 0,
+      rockInflow: 0,
+      floaterStart: false,
+      fieldOrbitRadius: 0,
+      fieldRotationPeriod: 0,
+      stationRotationPeriod: 0,
+      orbitPeriod: 0,
+      ...extra,
+    });
+    return sim;
+  }
+
+  /** Keeps a ship still at a spot, with nothing else going on. */
+  function pin(ship: Sim["ship"], x: number, y: number): void {
+    ship.x = x;
+    ship.y = y;
+    ship.px = x;
+    ship.py = y;
+    ship.vx = 0;
+    ship.vy = 0;
+  }
+
+  it("the pirate starts away from the field, opposite the station, and the defender in the dock", () => {
+    const sim = new Sim(1, { ...SOLO, testDrones: 0, pirates: 1, defenders: 1 });
+    const pirate = sim.fighters[0].ship;
+    const defender = sim.fighters[1].ship;
+    const toPirate = Math.atan2(pirate.y - sim.field.y, pirate.x - sim.field.x);
+    const toStation = Math.atan2(sim.station.y - sim.field.y, sim.station.x - sim.field.x);
+    const apart = Math.abs(Math.atan2(Math.sin(toPirate - toStation), Math.cos(toPirate - toStation)));
+    expect(apart).toBeCloseTo(Math.PI, 3);
+    expect(Math.hypot(pirate.x - sim.field.x, pirate.y - sim.field.y)).toBeGreaterThan(
+      DEFAULTS.fieldRadius,
+    );
+    expect(sim.isDocked(defender)).toBe(true);
+    for (const { ship } of sim.fighters) {
+      expect(ship.parts.has("reverse")).toBe(true);
+      expect(ship.parts.has("strafe")).toBe(true);
+    }
+  });
+
+  it("sees only inside its cone and range", () => {
+    const sim = arena({ pirates: 1, defenders: 0 });
+    const pilot = sim.fighters[0];
+    const { x, y } = pilot.ship;
+    pilot.ship.angle = 0;
+    const at = (dx: number, dy: number) => {
+      pin(sim.ship, x + dx, y + dy);
+      return pilot.sees(sim, sim.ship);
+    };
+    expect(at(800, 0)).toBe(true);
+    expect(at(800, 800 * Math.tan((20 * Math.PI) / 180))).toBe(true);
+    expect(at(800, 800 * Math.tan((25 * Math.PI) / 180))).toBe(false);
+    expect(at(-800, 0)).toBe(false);
+    expect(at(DEFAULTS.visionRange + 50, 0)).toBe(false);
+  });
+
+  it("a pirate chases and kills what it sees, and the wreck is charged", () => {
+    const sim = arena({ pirates: 1, defenders: 0, rebuildCost: 300 });
+    const pilot = sim.fighters[0];
+    const { ship } = pilot;
+    ship.angle = 0;
+    pin(sim.ship, ship.x + 900, ship.y);
+    let tasks = new Set<string>();
+    for (let i = 0; i < Math.round(30 / TICK) && sim.ship.wrecks === 0; i++) {
+      sim.step();
+      tasks.add(pilot.task);
+    }
+    expect(tasks.has("attacking")).toBe(true);
+    expect(sim.ship.wrecks).toBe(1);
+    expect(sim.ship.credits).toBe(-300);
+  }, 30000);
+
+  it("a pirate goes to the last place it saw a ship, then back to patrolling", () => {
+    const sim = arena({ pirates: 1, defenders: 0, shotDamage: 0 });
+    const pilot = sim.fighters[0];
+    const { ship } = pilot;
+    ship.angle = 0;
+    const seenX = ship.x + 700;
+    const seenY = ship.y;
+    pin(sim.ship, seenX, seenY);
+    run(sim, 0.5);
+    expect(pilot.task).toBe("attacking");
+    // Gone, somewhere behind it and out of range.
+    pin(sim.ship, ship.x - 5000, ship.y);
+    sim.step();
+    expect(pilot.task).toBe("searching");
+    let closest = Infinity;
+    for (let i = 0; i < Math.round(30 / TICK) && pilot.task === "searching"; i++) {
+      pin(sim.ship, ship.x - 5000, ship.y);
+      sim.step();
+      closest = Math.min(closest, Math.hypot(ship.x - seenX, ship.y - seenY));
+    }
+    expect(closest).toBeLessThan(150);
+    expect(pilot.task).toBe("patrolling");
+  }, 30000);
+
+  it("a pirate leaves a docked ship alone, and shots can't hurt it there", () => {
+    const sim = arena({ pirates: 1, defenders: 0 });
+    const pilot = sim.fighters[0];
+    placeInDock(sim, sim.ship);
+    const dock = sim.dockPoint();
+    pin(pilot.ship, dock.x - 900, dock.y + 900);
+    pilot.ship.angle = Math.atan2(-900, 900);
+    sim.step();
+    expect(pilot.task).not.toBe("attacking");
+    const before = sim.ship.hull;
+    sim.shots.push({
+      x: sim.ship.x - 40,
+      y: sim.ship.y,
+      px: sim.ship.x - 40,
+      py: sim.ship.y,
+      vx: 800,
+      vy: 0,
+      life: 1,
+      precise: false,
+      from: pilot.ship,
+    });
+    run(sim, 0.2);
+    expect(sim.ship.hull).toBe(before);
+  });
+
+  it("a defender ignores everyone but pirates", () => {
+    const sim = arena({ pirates: 0, defenders: 1 });
+    const pilot = sim.fighters[0];
+    pilot.ship.angle = 0;
+    pin(pilot.ship, 0, 0);
+    pin(sim.ship, 500, 0);
+    run(sim, 2);
+    expect(pilot.task).not.toBe("attacking");
+    expect(sim.ship.damageTaken).toBe(0);
+  }, 30000);
+
+  it("a defender attacks a pirate it sees", () => {
+    const sim = arena({ pirates: 1, defenders: 1 });
+    const pirate = sim.fighters[0];
+    const defender = sim.fighters[1];
+    pin(defender.ship, 0, 0);
+    defender.ship.angle = 0;
+    pin(pirate.ship, 800, 0);
+    pirate.ship.angle = 0;
+    sim.step();
+    expect(defender.task).toBe("attacking");
+  });
+
+  it("a defender with no target goes to a ship under fire", () => {
+    const sim = arena({ pirates: 0, defenders: 1 });
+    const defender = sim.fighters[0];
+    pin(defender.ship, 0, 0);
+    defender.ship.angle = Math.PI;
+    pin(sim.ship, 1500, 0);
+    sim.distress = { ship: sim.ship, age: 0 };
+    run(sim, 0.1);
+    expect(defender.task).toBe("responding");
+    const start = Math.hypot(sim.ship.x - defender.ship.x, sim.ship.y - defender.ship.y);
+    for (let i = 0; i < Math.round(8 / TICK); i++) {
+      pin(sim.ship, 1500, 0);
+      sim.step();
+    }
+    expect(Math.hypot(sim.ship.x - defender.ship.x, sim.ship.y - defender.ship.y)).toBeLessThan(start - 200);
+  }, 30000);
+
+  it("a pirate killed comes back at its start", () => {
+    const sim = arena({ pirates: 1, defenders: 0 });
+    const { ship } = sim.fighters[0];
+    const startX = ship.x;
+    const startY = ship.y;
+    pin(ship, 0, 0);
+    ship.hull = 1;
+    sim.shots.push({
+      x: -30,
+      y: 0,
+      px: -30,
+      py: 0,
+      vx: 800,
+      vy: 0,
+      life: 1,
+      precise: false,
+      from: sim.ship,
+    });
+    run(sim, 0.2);
+    expect(ship.wrecks).toBe(1);
+    expect(ship.hull).toBe(MAX_HULL);
+    expect(Math.hypot(ship.x - startX, ship.y - startY)).toBeLessThan(100);
+  });
+
+  it("a rebuilt pirate forgets what it was doing", () => {
+    const sim = arena({ pirates: 1, defenders: 0, shotDamage: 0 });
+    const pilot = sim.fighters[0];
+    pilot.ship.angle = 0;
+    pin(sim.ship, pilot.ship.x + 700, pilot.ship.y);
+    sim.step();
+    expect(pilot.task).toBe("attacking");
+    pin(sim.ship, pilot.ship.x - 5000, pilot.ship.y);
+    pilot.ship.wrecks++;
+    sim.step();
+    expect(pilot.task).toBe("patrolling");
+  });
+
+  it("shots don't hit whoever fired them", () => {
+    const sim = arena();
+    sim.controls.fire = true;
+    run(sim, 1);
+    expect(sim.ship.damageTaken).toBe(0);
+  });
 });

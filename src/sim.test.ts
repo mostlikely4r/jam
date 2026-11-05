@@ -5,7 +5,14 @@ import { DOCK_OFFSET, MAX_HULL, type Poi, SHIP_RADIUS, Sim, STATION_HALF, TICK }
 
 /** Every part, weighing nothing, so tests of the thrusters themselves see plain numbers. */
 /** The flight tests below are about the quick ship. The new ship has its own tests. */
-const DEFAULTS = { ...GAME_DEFAULTS, floaterStart: false, trafficRacers: 0, trafficFloaters: 0 };
+const DEFAULTS = {
+  ...GAME_DEFAULTS,
+  floaterStart: false,
+  trafficRacers: 0,
+  trafficFloaters: 0,
+  pirates: 0,
+  defenders: 0,
+};
 
 function fitAll(sim: Sim): Sim {
   sim.tuning.partWeightScale = 0;
@@ -775,6 +782,8 @@ describe("the new ship", () => {
       ...GAME_DEFAULTS,
       trafficRacers: 0,
       trafficFloaters: 0,
+      pirates: 0,
+      defenders: 0,
       rockCount: 0,
       rockInflow: 0,
       testDrones: 0,

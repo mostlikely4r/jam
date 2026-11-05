@@ -77,6 +77,26 @@ function wrapAngle(angle: number): number {
   return Math.atan2(Math.sin(angle), Math.cos(angle));
 }
 
+/** Where a spot held in a POI's own axes is now, and was a tick ago. */
+function poiSpot(poi: Poi, x: number, y: number): Mover {
+  const at = (cx: number, cy: number, rotation: number) => ({
+    x: cx + x * Math.cos(rotation) - y * Math.sin(rotation),
+    y: cy + x * Math.sin(rotation) + y * Math.cos(rotation),
+  });
+  const now = at(poi.x, poi.y, poi.rotation);
+  const before = at(poi.px, poi.py, poi.prevRotation);
+  return { x: now.x, y: now.y, px: before.x, py: before.y };
+}
+
+/** A world position in a POI's own axes, so it turns with the POI. */
+function toPoiAxes(poi: Poi, x: number, y: number): { x: number; y: number } {
+  const dx = x - poi.x;
+  const dy = y - poi.y;
+  const cos = Math.cos(poi.rotation);
+  const sin = Math.sin(poi.rotation);
+  return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
+}
+
 /**
  * Flying skills any automated pilot can use. It only reads what a pilot can see and
  * only sets the ship's controls, so it obeys the same physics and fit as any other ship.
@@ -148,9 +168,14 @@ class ShipPilot {
       heading.x * change - acrossX,
       heading.y * change - acrossY,
       tolerance,
-      null,
+      this.flightNose(heading),
       this.coastNose(vx, vy),
     );
+  }
+
+  /** Where the nose stays throughout a flight, or null if it's free to turn for burns. */
+  protected flightNose(_heading: { x: number; y: number }): number | null {
+    return null;
   }
 
   /** Where the nose goes while coasting, or null to leave it. */
@@ -546,32 +571,13 @@ export class ClickPilot extends ShipPilot {
   /** Where a flight leads right now, or null without one. */
   target(): { x: number; y: number; px: number; py: number } | null {
     if (!this.order || this.order.turnOnly) return null;
-    return this.spot(this.order.poi, this.order.x, this.order.y);
+    return poiSpot(this.order.poi, this.order.x, this.order.y);
   }
 
   /** The spot the ship is turning to face, or null without one. */
   aim(): { x: number; y: number; px: number; py: number } | null {
     if (!this.order?.turnOnly) return null;
-    return this.spot(this.order.poi, this.order.x, this.order.y);
-  }
-
-  private spot(poi: Poi, x: number, y: number): { x: number; y: number; px: number; py: number } {
-    const at = (cx: number, cy: number, rotation: number) => ({
-      x: cx + x * Math.cos(rotation) - y * Math.sin(rotation),
-      y: cy + x * Math.sin(rotation) + y * Math.cos(rotation),
-    });
-    const now = at(poi.x, poi.y, poi.rotation);
-    const before = at(poi.px, poi.py, poi.prevRotation);
-    return { x: now.x, y: now.y, px: before.x, py: before.y };
-  }
-
-  /** A world position in a POI's own axes, so it turns with the POI. */
-  private toPoiAxes(poi: Poi, x: number, y: number): { x: number; y: number } {
-    const dx = x - poi.x;
-    const dy = y - poi.y;
-    const cos = Math.cos(poi.rotation);
-    const sin = Math.sin(poi.rotation);
-    return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
+    return poiSpot(this.order.poi, this.order.x, this.order.y);
   }
 
   moveTo(sim: Sim, x: number, y: number): void {
@@ -579,7 +585,7 @@ export class ClickPilot extends ShipPilot {
     const poi = sim.nearestPoi(x, y);
     this.order = {
       poi,
-      ...this.toPoiAxes(poi, x, y),
+      ...toPoiAxes(poi, x, y),
       turnOnly: false,
       face: sim.tuning.clickFaceTravel ? Math.atan2(y - ship.y, x - ship.x) : null,
       stage: "flying",
@@ -593,7 +599,7 @@ export class ClickPilot extends ShipPilot {
     const poi = sim.nearestPoi(x, y);
     this.order = {
       poi,
-      ...this.toPoiAxes(poi, x, y),
+      ...toPoiAxes(poi, x, y),
       turnOnly: true,
       face: null,
       stage: "facing",
@@ -631,7 +637,7 @@ export class ClickPilot extends ShipPilot {
     // Everything near the POI turns with it, so the nose's goal does too.
     if (order.face !== null) order.face += order.poi.turn;
 
-    const target = this.spot(order.poi, order.x, order.y);
+    const target = poiSpot(order.poi, order.x, order.y);
     const distance = Math.hypot(target.x - ship.x, target.y - ship.y);
     const { vx, vy } = this.relativeVelocity(target);
     const speed = Math.hypot(vx, vy);
@@ -696,5 +702,176 @@ export class ClickPilot extends ShipPilot {
     const shorter =
       Math.abs(wrapAngle(reversing - ship.angle)) < Math.abs(wrapAngle(braking - ship.angle));
     return shorter ? reversing : braking;
+  }
+}
+
+/** How close it gets to a target before it stops closing in. */
+const FIGHT_DISTANCE = 300;
+/** Close enough to a spot it was checking. */
+const SPOT_REACHED = 120;
+/** Keeps moving through patrol points rather than stopping at each. */
+const PATROL_PASS_SPEED = 60;
+const PATROL_GIVE_UP_SECONDS = 60;
+
+/**
+ * A pirate or a defender. It looks where its nose points and chases what it sees.
+ * When that leaves its view it goes to where it last saw it, then back to patrolling
+ * the field. A pirate hunts any ship. A defender hunts pirates, and goes to ships under fire.
+ */
+export class FighterPilot extends ShipPilot {
+  /** What it's doing, in words for the display. */
+  task = "patrolling";
+  private target: Ship | null = null;
+  private lastSeen: { poi: Poi; x: number; y: number } | null = null;
+  private patrol: { poi: Poi; x: number; y: number } | null = null;
+  private patrolAge = 0;
+  private wrecks = 0;
+  /** Where the nose should stay this tick, or null to look where it's going. */
+  private look: number | null = null;
+
+  /** Whether another ship is inside this one's cone of vision and range. */
+  sees(sim: Sim, other: Ship): boolean {
+    const { ship } = this;
+    const { tuning } = sim;
+    const dx = other.x - ship.x;
+    const dy = other.y - ship.y;
+    if (Math.hypot(dx, dy) > tuning.visionRange) return false;
+    const off = Math.abs(wrapAngle(Math.atan2(dy, dx) - ship.angle));
+    return off <= ((tuning.visionAngle / 2) * Math.PI) / 180;
+  }
+
+  update(sim: Sim): void {
+    const { ship } = this;
+    const { controls } = ship;
+    controls.thrust = 0;
+    controls.strafe = 0;
+    controls.turn = 0;
+    controls.fire = false;
+    controls.retro = false;
+    controls.stabilize = false;
+    this.correctingDirectly = false;
+    this.look = null;
+
+    // A rebuilt ship starts over, with nothing to remember.
+    if (ship.wrecks !== this.wrecks) {
+      this.wrecks = ship.wrecks;
+      this.target = null;
+      this.lastSeen = null;
+      this.patrol = null;
+      ship.shotFrom = null;
+    }
+
+    // A shot from out of view is worth checking, whoever is under fire elsewhere.
+    if (ship.shotFrom) {
+      if (!this.target) this.remember(sim, ship.shotFrom.x, ship.shotFrom.y);
+      ship.shotFrom = null;
+    }
+
+    this.chooseTarget(sim);
+    if (this.target) {
+      this.fight(sim, this.target);
+      return;
+    }
+    if (this.lastSeen) {
+      this.search(sim);
+      return;
+    }
+    const distress = sim.distress;
+    if (ship.faction === "defender" && distress && distress.ship !== ship) {
+      this.task = "responding";
+      this.flyTo(sim, distress.ship, FIGHT_DISTANCE, PATROL_PASS_SPEED, null);
+      return;
+    }
+    this.fly(sim);
+  }
+
+  private wants(sim: Sim, other: Ship): boolean {
+    if (other === this.ship || other.hull <= 0 || sim.isDocked(other)) return false;
+    return this.ship.faction === "pirate" || other.faction === "pirate";
+  }
+
+  /** Stays on its target while it can see it. Otherwise the nearest thing in view. */
+  private chooseTarget(sim: Sim): void {
+    const { ship } = this;
+    if (this.target) {
+      if (this.wants(sim, this.target) && this.sees(sim, this.target)) {
+        this.remember(sim, this.target.x, this.target.y);
+        return;
+      }
+      // Gone from view. The last sight of it is what `lastSeen` already holds.
+      this.target = null;
+    }
+    let best = Infinity;
+    for (const other of sim.ships) {
+      if (!this.wants(sim, other) || !this.sees(sim, other)) continue;
+      const distance = Math.hypot(other.x - ship.x, other.y - ship.y);
+      if (distance < best) {
+        best = distance;
+        this.target = other;
+      }
+    }
+    if (this.target) this.remember(sim, this.target.x, this.target.y);
+  }
+
+  private remember(sim: Sim, x: number, y: number): void {
+    const poi = sim.nearestPoi(x, y);
+    this.lastSeen = { poi, ...toPoiAxes(poi, x, y) };
+  }
+
+  /** Closes to fighting distance with its nose leading the target, and fires when lined up. */
+  private fight(sim: Sim, target: Ship): void {
+    const { ship } = this;
+    const { tuning } = sim;
+    this.task = "attacking";
+    const dx = target.x - ship.x;
+    const dy = target.y - ship.y;
+    const distance = Math.hypot(dx, dy) || 1;
+    const { vx, vy } = this.relativeVelocity(target);
+    const flightTime = distance / tuning.shotSpeed;
+    this.look = Math.atan2(dy - vy * flightTime, dx - vx * flightTime);
+    this.flyTo(sim, target, FIGHT_DISTANCE, 0, target);
+    const aimedWithin = Math.atan2(SHIP_RADIUS * 2, distance);
+    const lined = Math.abs(wrapAngle(this.look - ship.angle)) < aimedWithin;
+    ship.controls.fire = lined && distance < tuning.shotSpeed * tuning.shotLife * 0.9;
+  }
+
+  /** Goes to where it last saw something, looking that way. */
+  private search(sim: Sim): void {
+    const { ship } = this;
+    const { poi, x, y } = this.lastSeen!;
+    const spot = poiSpot(poi, x, y);
+    if (Math.hypot(spot.x - ship.x, spot.y - ship.y) < SPOT_REACHED) {
+      this.lastSeen = null;
+      this.fly(sim);
+      return;
+    }
+    this.task = "searching";
+    this.flyTo(sim, spot, 0, PATROL_PASS_SPEED, null);
+  }
+
+  /** Flies from one random spot in the field to the next. */
+  private fly(sim: Sim): void {
+    const { ship } = this;
+    const { field, tuning } = sim;
+    this.task = "patrolling";
+    this.patrolAge += TICK;
+    const reached =
+      this.patrol &&
+      Math.hypot(
+        poiSpot(this.patrol.poi, this.patrol.x, this.patrol.y).x - ship.x,
+        poiSpot(this.patrol.poi, this.patrol.x, this.patrol.y).y - ship.y,
+      ) < SPOT_REACHED;
+    if (!this.patrol || reached || this.patrolAge > PATROL_GIVE_UP_SECONDS) {
+      const distance = tuning.fieldRadius * Math.sqrt(sim.roll());
+      const dir = sim.roll() * Math.PI * 2;
+      this.patrol = { poi: field, x: Math.cos(dir) * distance, y: Math.sin(dir) * distance };
+      this.patrolAge = 0;
+    }
+    this.flyTo(sim, poiSpot(field, this.patrol.x, this.patrol.y), 0, PATROL_PASS_SPEED, null);
+  }
+
+  /** Always looking at its target, or else where it's going, so it sees what's ahead. */
+  protected override flightNose(heading: { x: number; y: number }): number | null {
+    return this.look ?? Math.atan2(heading.y, heading.x);
   }
 }

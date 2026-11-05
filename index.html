@@ -26,9 +26,10 @@
       #panel button.retro.on { background: #2f5a34; border-color: #5fae66; }
       #panel label.toggle { margin-bottom: 3px; cursor: pointer; }
       #panel p { margin: 0 0 6px; color: #7f8ba0; }
-      #shop { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); width: 560px; padding: 10px 12px;
-              background: #0b0f18e8; border: 1px solid #5fae66; }
+      #shop { position: fixed; right: 12px; bottom: 44px; width: 430px; max-height: calc(100vh - 64px); overflow-y: auto;
+              box-sizing: border-box; padding: 10px 12px; background: #0b0f18e8; border: 1px solid #5fae66; }
       #shop[hidden] { display: none; }
+      body:has(#panel:not([hidden])) #shop { right: 302px; }
       #shop h2 { font-size: 12px; margin: 0 0 8px; color: #8fe3a1; text-transform: uppercase; letter-spacing: 1px; }
       #shop button { display: block; width: 100%; text-align: left; background: #1a2233; color: #cfd8e6; border: 1px solid #33405a;
                      padding: 4px 8px; margin-top: 4px; font: inherit; cursor: pointer; }

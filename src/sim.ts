@@ -551,11 +551,10 @@ export class Sim {
 
   /** The player restarts by the field. A drone restarts in the dock, where it would be rebuilt. */
   private respawn(ship: Ship): void {
-    const isPlayer = ship === this.ship;
-    if (isPlayer) this.clickPilot.cancel();
+    if (ship === this.ship) this.clickPilot.cancel();
     const home = this.homeOf(ship);
-    ship.x = isPlayer ? this.startX() : home.x;
-    ship.y = isPlayer ? this.field.y : home.y;
+    ship.x = home.x;
+    ship.y = home.y;
     ship.px = ship.x;
     ship.py = ship.y;
     ship.vx = 0;

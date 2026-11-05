@@ -725,6 +725,16 @@ describe("pirate and defender", () => {
       expect(sim.ship.credits).toBe(-300);
     });
 
+    it("the player's rebuilt ship starts in the dock, safe from what wrecked it", () => {
+      const sim = arena();
+      pin(sim.ship, sim.station.x + 3000, sim.station.y);
+      sim.ship.hull = 1;
+      shoot(sim, sim.ship, { ...sim.ship });
+      run(sim, 0.2);
+      expect(sim.ship.wrecks).toBe(1);
+      expect(sim.isDocked()).toBe(true);
+    });
+
     it("a pirate is rebuilt from its base's pile until the pile runs out", () => {
       const sim = arena({ pirates: 1, rebuildCost: 300, serviceCreditsPerOre: 20, pirateStartOre: 15 });
       const { ship } = sim.fighters[0];

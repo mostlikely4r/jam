@@ -480,6 +480,13 @@ export class Sim {
     );
   }
 
+  /** Whether the player has a line of sight to a ship, by the same rules ships use on each other. */
+  playerSees(other: Ship): boolean {
+    const { ship } = this;
+    if (Math.hypot(other.x - ship.x, other.y - ship.y) > this.tuning.visionRange) return false;
+    return this.clearSight(ship.x, ship.y, other.x, other.y);
+  }
+
   /** A number from 0 to 1, from the same seeded generator as the rest of the world. */
   roll(): number {
     return this.random();

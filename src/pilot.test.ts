@@ -18,6 +18,7 @@ const SOLO = {
   rebuildCost: 0,
   stationStartOre: 100000,
   stationReserveOre: Infinity,
+  detectSeconds: 0,
 };
 
 function run(sim: Sim, seconds: number, each?: () => void): void {
@@ -577,6 +578,51 @@ describe("pirate and defender", () => {
       pin(sim.ship, x + 900, y);
       sim.tuning.sightLines = false;
       expect(pilot.sees(sim, sim.ship)).toBe(true);
+    });
+
+    it("the player's line of sight follows the same rules as a ship's", () => {
+      const sim = arena({ pirates: 1, defenders: 0 });
+      const { ship } = sim.fighters[0];
+      pin(sim.ship, ship.x + 900, ship.y);
+      expect(sim.playerSees(ship)).toBe(true);
+      addRock(sim, ship.x + 450, ship.y, 60);
+      expect(sim.playerSees(ship)).toBe(false);
+      sim.rocks.length = 0;
+      pin(sim.ship, ship.x + DEFAULTS.visionRange + 50, ship.y);
+      expect(sim.playerSees(ship)).toBe(false);
+    });
+
+    it("a pirate has to keep a ship in its cone for a moment to spot it", () => {
+      const sim = arena({ pirates: 1, defenders: 0, shotDamage: 0, detectSeconds: 1 });
+      const pilot = sim.fighters[0];
+      const hold = () => {
+        pilot.ship.angle = 0;
+        pilot.ship.spin = 0;
+        pin(pilot.ship, 0, 0);
+        pin(sim.ship, 900, 0);
+      };
+      run(sim, 0.5, hold);
+      expect(pilot.task).not.toBe("attacking");
+      expect(pilot.spotted(sim, sim.ship)).toBeGreaterThan(0.4);
+      expect(pilot.spotted(sim, sim.ship)).toBeLessThan(0.6);
+      run(sim, 0.6, hold);
+      expect(pilot.task).toBe("attacking");
+      expect(pilot.spotted(sim, sim.ship)).toBe(1);
+    });
+
+    it("spotting fades again if the ship gets out of the cone in time", () => {
+      const sim = arena({ pirates: 1, defenders: 0, shotDamage: 0, detectSeconds: 1 });
+      const pilot = sim.fighters[0];
+      const hold = (dx: number) => () => {
+        pilot.ship.angle = 0;
+        pilot.ship.spin = 0;
+        pin(pilot.ship, 0, 0);
+        pin(sim.ship, dx, 0);
+      };
+      run(sim, 0.5, hold(900));
+      run(sim, 0.25, hold(-900));
+      expect(pilot.spotted(sim, sim.ship)).toBeLessThan(0.4);
+      expect(pilot.task).not.toBe("attacking");
     });
 
     it("a pirate stops attacking a ship that goes behind a rock, and goes to look for it", () => {

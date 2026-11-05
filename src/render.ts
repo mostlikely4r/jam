@@ -5,12 +5,15 @@ import {
   Sim,
   SHIP_RADIUS,
   STATION_HALF,
+  type Poi,
   type PoiReading,
   type Ship,
   type SimEvent,
 } from "./sim";
 
 const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
+/** How long the mark where a pirate was last seen takes to fade away. */
+const GHOST_MILLISECONDS = 30000;
 const PILE_ROWS = 12;
 const PILE_ORE_PER_LUMP = 5;
 const DRONE_COLOR = [180, 200, 120];
@@ -51,6 +54,8 @@ function mod(value: number, size: number): number {
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private particles: Particle[] = [];
+  /** Where the player last saw each pirate, in the axes of what it was near. */
+  private ghosts = new WeakMap<Ship, { poi: Poi; x: number; y: number; seenAt: number }>();
   private stars: Star[] = [];
   private flash = 0;
   private view = { camX: 0, camY: 0, scale: 1, dpr: 1, width: 0, height: 0 };
@@ -404,7 +409,11 @@ export class Renderer {
     this.drawTask(sim, drone, x, y, ship.owner ? "#8fc8ff" : "#f2c572");
   }
 
-  /** Its cone of vision and what it's doing only show with the traffic readouts on. */
+  /**
+   * A pirate only shows when the player has a line of sight to it, and then its cone shows
+   * too. Otherwise there's a fading mark where it was last seen. The traffic readouts show
+   * everything, along with what each ship is doing.
+   */
   private drawFighter(sim: Sim, pilot: FighterPilot, alpha: number): void {
     const { ctx } = this;
     const { ship } = pilot;
@@ -412,7 +421,24 @@ export class Renderer {
     const x = lerp(ship.px, ship.x, alpha);
     const y = lerp(ship.py, ship.y, alpha);
     const pirate = ship.faction === "pirate";
-    if (tuning.showTraffic) {
+    if (pirate && !tuning.showTraffic && !sim.playerSees(ship)) {
+      this.drawGhost(ship);
+      return;
+    }
+    if (pirate) {
+      const poi = sim.nearestPoi(ship.x, ship.y);
+      const dx = ship.x - poi.x;
+      const dy = ship.y - poi.y;
+      const cos = Math.cos(poi.rotation);
+      const sin = Math.sin(poi.rotation);
+      this.ghosts.set(ship, {
+        poi,
+        x: dx * cos + dy * sin,
+        y: -dx * sin + dy * cos,
+        seenAt: performance.now(),
+      });
+    }
+    if (tuning.showTraffic || pirate) {
       const half = ((tuning.visionAngle / 2) * Math.PI) / 180;
       const angle = lerp(ship.prevAngle, ship.angle, alpha);
       ctx.fillStyle = pirate ? "rgba(235, 90, 80, 0.07)" : "rgba(110, 235, 170, 0.07)";
@@ -421,9 +447,47 @@ export class Renderer {
       ctx.arc(x, y, tuning.visionRange, angle - half, angle + half);
       ctx.closePath();
       ctx.fill();
-      this.drawTask(sim, pilot, x, y, pirate ? "#eb5a50" : "#6eebaa");
     }
+    if (tuning.showTraffic) this.drawTask(sim, pilot, x, y, pirate ? "#eb5a50" : "#6eebaa");
     this.drawShip(ship, x, y, alpha, pirate ? PIRATE_COLOR : DEFENDER_COLOR);
+
+    // A ring that closes as it spots the player, and is whole once it has.
+    const spotted = pirate ? pilot.spotted(sim, sim.ship) : 0;
+    if (spotted > 0) {
+      ctx.strokeStyle = "#ff7a6e";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, y, SHIP_RADIUS + 14, -Math.PI / 2, -Math.PI / 2 + spotted * Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  /** A fading mark where a pirate was last seen, carried along with what it was near. */
+  private drawGhost(ship: Ship): void {
+    const ghost = this.ghosts.get(ship);
+    if (!ghost) return;
+    const fade = 1 - (performance.now() - ghost.seenAt) / GHOST_MILLISECONDS;
+    if (fade <= 0) return;
+    const { ctx } = this;
+    const cos = Math.cos(ghost.poi.rotation);
+    const sin = Math.sin(ghost.poi.rotation);
+    const x = ghost.poi.x + ghost.x * cos - ghost.y * sin;
+    const y = ghost.poi.y + ghost.x * sin + ghost.y * cos;
+    ctx.globalAlpha = 0.7 * fade;
+    ctx.strokeStyle = "#eb5a50";
+    ctx.fillStyle = "#eb5a50";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath();
+    ctx.arc(x, y, SHIP_RADIUS + 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = "16px Consolas, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("?", x, y);
+    ctx.textBaseline = "alphabetic";
+    ctx.globalAlpha = 1;
   }
 
   private drawTask(

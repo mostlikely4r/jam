@@ -779,6 +779,8 @@ export class FighterPilot extends ShipPilot {
   /** What it's doing, in words for the display. */
   task = "patrolling";
   private target: Ship | null = null;
+  /** How long each ship has been in view, rising in view and falling out of it. */
+  private spotting = new WeakMap<Ship, number>();
   private lastSeen: { poi: Poi; x: number; y: number } | null = null;
   private patrol: { poi: Poi; x: number; y: number } | null = null;
   private patrolAge = 0;
@@ -800,6 +802,14 @@ export class FighterPilot extends ShipPilot {
     const off = Math.abs(wrapAngle(direction - ship.angle));
     if (off > ((sim.tuning.visionAngle / 2) * Math.PI) / 180) return false;
     return this.inView(sim, other);
+  }
+
+  /** How close it is to spotting a ship, from 0 to 1. */
+  spotted(sim: Sim, other: Ship): number {
+    if (this.target === other) return 1;
+    const { detectSeconds } = sim.tuning;
+    if (detectSeconds <= 0) return 0;
+    return Math.min(1, (this.spotting.get(other) ?? 0) / detectSeconds);
   }
 
   update(sim: Sim): void {
@@ -940,7 +950,7 @@ export class FighterPilot extends ShipPilot {
     return this.ship.faction !== other.faction && (this.ship.faction === "pirate" || other.faction === "pirate");
   }
 
-  /** Stays on its target while it can see it. Otherwise the nearest thing in view. */
+  /** Stays on its target while it can see it. Otherwise the nearest thing in view long enough. */
   private chooseTarget(sim: Sim): void {
     const { ship } = this;
     if (this.target) {
@@ -953,7 +963,14 @@ export class FighterPilot extends ShipPilot {
     }
     let best = Infinity;
     for (const other of sim.ships) {
-      if (!this.wants(sim, other) || !this.sees(sim, other)) continue;
+      if (!this.wants(sim, other)) {
+        this.spotting.delete(other);
+        continue;
+      }
+      const seen = this.sees(sim, other);
+      const time = Math.max(0, (this.spotting.get(other) ?? 0) + (seen ? TICK : -TICK));
+      this.spotting.set(other, time);
+      if (!seen || time < sim.tuning.detectSeconds) continue;
       const distance = Math.hypot(other.x - ship.x, other.y - ship.y);
       if (distance < best) {
         best = distance;

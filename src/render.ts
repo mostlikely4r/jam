@@ -7,6 +7,7 @@ import {
   Sim,
   SHIP_RADIUS,
   STATION_HALF,
+  TICK,
   type Poi,
   type PoiReading,
   type Ship,
@@ -24,6 +25,11 @@ const PILE_ORE_PER_LUMP = 5;
 const DRONE_COLOR = [180, 200, 120];
 const OWNED_DRONE_COLOR = [120, 190, 255];
 const TRAFFIC_COLOR = [150, 155, 165];
+const ORDER_COLOR = "rgba(143, 180, 255, 0.8)";
+/** The order's circle at its destination, in world units. */
+const ORDER_RING = 12;
+/** The circle around the ship for a facing, in world units. */
+const ORDER_SHIP_RING = 30;
 const PIRATE_COLOR = [235, 90, 80];
 const DEFENDER_COLOR = [110, 235, 170];
 /** The hollow marker shows the distance this many seconds ahead at the current closing speed. */
@@ -65,6 +71,15 @@ export class Renderer {
   private stars: Star[] = [];
   private flash = 0;
   private view = { camX: 0, camY: 0, scale: 1, dpr: 1, width: 0, height: 0 };
+  /** A right drag in progress, in screen pixels, for its preview. */
+  drag: {
+    fromX: number;
+    fromY: number;
+    toX: number;
+    toY: number;
+    onShip: boolean;
+    dragged: boolean;
+  } | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d")!;
@@ -83,6 +98,15 @@ export class Renderer {
     return {
       x: camX + (clientX * dpr - width / 2) / scale,
       y: camY + (clientY * dpr - height / 2) / scale,
+    };
+  }
+
+  /** Where a world position is on the screen, as of the last drawn frame. */
+  worldToScreen(x: number, y: number): { x: number; y: number } {
+    const { camX, camY, scale, dpr, width, height } = this.view;
+    return {
+      x: ((x - camX) * scale + width / 2) / dpr,
+      y: ((y - camY) * scale + height / 2) / dpr,
     };
   }
 
@@ -203,6 +227,7 @@ export class Renderer {
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.drawPointers(sim, width, height, scale, dpr);
+    this.drawDrag(scale, dpr, shipX, shipY);
     if (this.flash > 0) {
       ctx.fillStyle = `rgba(255, 70, 50, ${this.flash * 0.35})`;
       ctx.fillRect(0, 0, width, height);
@@ -315,28 +340,67 @@ export class Renderer {
     ctx.restore();
   }
 
+  /**
+   * The order being flown: a circle at the destination, with a line for how it drifts
+   * against the ship, and a line from the ship for a facing it holds.
+   */
   private drawClickTarget(sim: Sim, alpha: number): void {
     const { ctx } = this;
-    const aim = sim.clickPilot.aim();
-    if (aim) {
-      ctx.strokeStyle = "rgba(242, 197, 114, 0.8)";
-      ctx.lineWidth = 1.5;
+    const { ship, clickPilot, tuning } = sim;
+    ctx.strokeStyle = ORDER_COLOR;
+    ctx.lineWidth = 1.5;
+    const face = clickPilot.facing();
+    if (face !== null) {
+      const x = lerp(ship.px, ship.x, alpha);
+      const y = lerp(ship.py, ship.y, alpha);
       ctx.beginPath();
-      ctx.arc(lerp(aim.px, aim.x, alpha), lerp(aim.py, aim.y, alpha), 9, 0, Math.PI * 2);
+      ctx.arc(x, y, ORDER_SHIP_RING, 0, Math.PI * 2);
+      ctx.moveTo(x + Math.cos(face) * ORDER_SHIP_RING, y + Math.sin(face) * ORDER_SHIP_RING);
+      ctx.lineTo(x + Math.cos(face) * ORDER_SHIP_RING * 2, y + Math.sin(face) * ORDER_SHIP_RING * 2);
       ctx.stroke();
     }
-    const target = sim.clickPilot.target();
+    const target = clickPilot.target();
     if (!target) return;
     const x = lerp(target.px, target.x, alpha);
     const y = lerp(target.py, target.y, alpha);
-    ctx.strokeStyle = "rgba(143, 180, 255, 0.8)";
-    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(x, y, 12, 0, Math.PI * 2);
-    ctx.moveTo(x - 18, y);
-    ctx.lineTo(x + 18, y);
-    ctx.moveTo(x, y - 18);
-    ctx.lineTo(x, y + 18);
+    ctx.arc(x, y, ORDER_RING, 0, Math.PI * 2);
+    if (clickPilot.drifting) {
+      // Drawn the way the order was: the destination's motion as seen from the ship.
+      const vx = (target.x - target.px - (ship.x - ship.px)) / TICK;
+      const vy = (target.y - target.py - (ship.y - ship.py)) / TICK;
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + vx * tuning.dragSeconds, y + vy * tuning.dragSeconds);
+    }
+    ctx.stroke();
+  }
+
+  /** The preview of a right drag: what the order will be when it's let go. */
+  private drawDrag(scale: number, dpr: number, shipX: number, shipY: number): void {
+    const { drag, ctx } = this;
+    if (!drag) return;
+    ctx.strokeStyle = ORDER_COLOR;
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath();
+    if (drag.onShip) {
+      const at = this.worldToScreen(shipX, shipY);
+      const cx = at.x * dpr;
+      const cy = at.y * dpr;
+      const ring = ORDER_SHIP_RING * scale;
+      ctx.arc(cx, cy, ring, 0, Math.PI * 2);
+      if (drag.dragged) {
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + (drag.toX - drag.fromX) * dpr, cy + (drag.toY - drag.fromY) * dpr);
+      }
+    } else {
+      const cx = drag.fromX * dpr;
+      const cy = drag.fromY * dpr;
+      ctx.arc(cx, cy, ORDER_RING * scale, 0, Math.PI * 2);
+      if (drag.dragged) {
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(drag.toX * dpr, drag.toY * dpr);
+      }
+    }
     ctx.stroke();
   }
 
@@ -380,7 +444,15 @@ export class Renderer {
       const y = lerp(ore.py, ore.y, alpha);
       if (!visible(x, y, 8)) continue;
       ctx.fillStyle = ORE_COLORS[ore.kind];
-      ctx.fillRect(x - 4, y - 4, 8, 8);
+      if (ore.amount > 1) {
+        // Worth more: bigger, with a bright edge.
+        ctx.fillRect(x - 6, y - 6, 12, 12);
+        ctx.strokeStyle = "#fff6d8";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x - 6, y - 6, 12, 12);
+      } else {
+        ctx.fillRect(x - 4, y - 4, 8, 8);
+      }
     }
   }
 

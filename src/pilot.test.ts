@@ -44,12 +44,15 @@ describe("drone", () => {
   it("mines, hauls to the dock, sells, and goes back for more", () => {
     const sim = new Sim(1, { ...SOLO });
     const { ship } = sim.drones[0];
-    const start = sim.rocks.length;
-    run(sim, 420);
+    let breaks = 0;
+    run(sim, 420, () => {
+      breaks += sim.events.filter((event) => event.type === "break").length;
+    });
     expect(ship.trips).toBeGreaterThanOrEqual(2);
-    expect(ship.credits).toBe(ship.trips * DEFAULTS.droneCargo * DEFAULTS.creditsPerOre);
+    expect(ship.credits).toBe(ship.earned);
+    expect(ship.earned).toBeGreaterThanOrEqual(ship.trips * DEFAULTS.droneCargo * DEFAULTS.creditsPerOre);
     expect(sim.ship.credits).toBe(0);
-    expect(sim.rocks.length).not.toBe(start);
+    expect(breaks).toBeGreaterThan(0);
   }, 30000);
 
   it("only fires what it has, whatever the player's panel says", () => {
@@ -765,6 +768,7 @@ describe("pirate and defender", () => {
       vx: 0,
       vy: 0,
       kind: 0,
+      amount: 1,
       from: sim.ship,
     });
 
@@ -956,7 +960,7 @@ describe("pirate and defender", () => {
   });
 
   describe("the money loop", () => {
-    const ore =(x: number, y: number) => ({ x, y, px: x, py: y, vx: 0, vy: 0, kind: 0 });
+    const ore =(x: number, y: number) => ({ x, y, px: x, py: y, vx: 0, vy: 0, kind: 0, amount: 1 });
 
     function shoot(sim: Sim, ship: Sim["ship"], from: Sim["ship"]): void {
       sim.shots.push({

@@ -1,7 +1,7 @@
 import { Audio } from "./audio";
 import { Renderer } from "./render";
 import { Radio } from "./radio";
-import { MAX_HULL, type Ship, Sim, TICK } from "./sim";
+import { MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
 import { PARTS, partFits, type Part } from "./parts";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
@@ -192,7 +192,6 @@ function buildPanel(): void {
     if (group.title === "New ship") {
       const switches = [
         { key: "floaterStart", label: "Start in the new ship (on restart)" },
-        { key: "clickFaceTravel", label: "Click to move ends facing forward" },
       ] as const;
       for (const { key, label: text } of switches) {
         const toggle = document.createElement("label");
@@ -282,9 +281,9 @@ function readControls(): void {
   const thrust = (forward ? 1 : 0) - (back ? 1 : 0);
   const strafe = (keys.has("KeyD") ? 1 : 0) - (keys.has("KeyA") ? 1 : 0);
   const turn = (turnRight ? 1 : 0) - (turnLeft ? 1 : 0);
-  // Touching the controls takes over from a click order. Until then, the order flies.
-  if (thrust !== 0 || strafe !== 0 || turn !== 0) sim.clickPilot.cancel();
-  if (sim.clickPilot.active) return;
+  // The keys fly while held. The order waits and takes back over once they're let go.
+  if (thrust !== 0 || strafe !== 0 || turn !== 0) sim.clickPilot.handsOn();
+  if (sim.clickPilot.flying) return;
   sim.controls.thrust = thrust;
   sim.controls.strafe = strafe;
   sim.controls.turn = turn;
@@ -314,17 +313,50 @@ window.addEventListener("keydown", (event) => {
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));
 window.addEventListener("blur", () => keys.clear());
+/** Shorter drags than this, in screen pixels, count as a click. */
+const DRAG_PIXELS = 10;
+/** A right drag in progress, in screen pixels. Starting on your own ship makes it a facing. */
+let drag: { fromX: number; fromY: number; toX: number; toY: number; onShip: boolean } | null = null;
+
+/** Whether a screen point is on the player's ship, with some room for a quick click. */
+function onShip(clientX: number, clientY: number): boolean {
+  const at = renderer.worldToScreen(sim.ship.x, sim.ship.y);
+  const reach = Math.max(18, SHIP_RADIUS * tuning.zoom * 1.6);
+  return Math.hypot(clientX - at.x, clientY - at.y) < reach;
+}
+
 canvas.addEventListener("mousedown", (event) => {
   audio.start();
-  if (event.button !== 0 && event.button !== 2) return;
-  const spot = renderer.screenToWorld(event.clientX, event.clientY);
-  if (event.button === 0) sim.orderMove(spot.x, spot.y);
-  else sim.orderTurn(spot.x, spot.y);
+  if (event.button !== 2) return;
+  const { clientX: x, clientY: y } = event;
+  drag = { fromX: x, fromY: y, toX: x, toY: y, onShip: onShip(x, y) };
+});
+window.addEventListener("mouseup", (event) => {
+  if (event.button !== 2 || !drag) return;
+  const { fromX, fromY, onShip: fromShip } = drag;
+  drag = null;
+  // Measured on screen: the view follows the ship, so this is motion as seen from it.
+  const dx = (event.clientX - fromX) / tuning.zoom;
+  const dy = (event.clientY - fromY) / tuning.zoom;
+  const dragged = Math.hypot(event.clientX - fromX, event.clientY - fromY) >= DRAG_PIXELS;
+  if (fromShip) {
+    if (dragged) sim.orderFace(Math.atan2(dy, dx));
+    else sim.orderStop();
+    return;
+  }
+  const spot = renderer.screenToWorld(fromX, fromY);
+  if (dragged) sim.orderMove(spot.x, spot.y, dx / tuning.dragSeconds, dy / tuning.dragSeconds);
+  else sim.orderMove(spot.x, spot.y);
 });
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 /** Where the mouse is on screen, so the turret keeps aiming there as the view moves. */
 let mouse: { x: number; y: number } | null = null;
-canvas.addEventListener("mousemove", (event) => {
+window.addEventListener("mousemove", (event) => {
+  if (drag) {
+    drag.toX = event.clientX;
+    drag.toY = event.clientY;
+  }
+  if (event.target !== canvas) return;
   mouse = { x: event.clientX, y: event.clientY };
 });
 canvas.addEventListener("mouseleave", () => {
@@ -384,6 +416,10 @@ function frame(now: number): void {
   sim.events.length = 0;
   audio.setThrust(!paused && sim.ship.firing.size > 0);
   updateShop();
+  renderer.drag = drag && {
+    ...drag,
+    dragged: Math.hypot(drag.toX - drag.fromX, drag.toY - drag.fromY) >= DRAG_PIXELS,
+  };
   renderer.draw(sim, paused ? 1 : accumulator / TICK, paused ? 0 : seconds);
 
   hudTimer -= seconds;

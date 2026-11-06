@@ -882,7 +882,7 @@ describe("the new ship", () => {
     return { sim, start };
   }
 
-  it("a precision hit releases slow ore near the hit, and the rock stays whole", () => {
+  it("a precision hit frees ore at the hit that drifts with the rock, and the rock stays whole", () => {
     const { sim, start } = shootRock(1, 20);
     const rock = sim.rocks[0];
     let ticks = 0;
@@ -895,7 +895,70 @@ describe("the new ship", () => {
     expect(rock.hp).toBe(start - 1);
     const ore = sim.ores[0];
     expect(Math.hypot(ore.x - rock.x, ore.y - rock.y)).toBeLessThan(rock.radius + 15);
-    expect(Math.hypot(ore.vx, ore.vy)).toBeLessThanOrEqual(GAME_DEFAULTS.preciseOreSpeed + 0.01);
+    expect(ore.vx).toBeCloseTo(rock.vx, 6);
+    expect(ore.vy).toBeCloseTo(rock.vy, 6);
+    expect(ore.amount).toBe(1);
+  });
+
+  it("a break leaves pieces and ore drifting with the rock", () => {
+    const sim = floater({ oreChance: 1, rockToughness: 1 });
+    const rock = sim.makeRock(2, sim.ship.x + 500, sim.ship.y, 12, -7);
+    sim.rocks.push(rock);
+    sim.breakRock(rock, sim.ship, false);
+    expect(sim.rocks.length).toBeGreaterThanOrEqual(2);
+    for (const piece of sim.rocks) {
+      expect(piece.vx).toBeCloseTo(12, 6);
+      expect(piece.vy).toBeCloseTo(-7, 6);
+    }
+    for (let i = 0; i < sim.rocks.length; i++) {
+      for (let j = i + 1; j < sim.rocks.length; j++) {
+        const a = sim.rocks[i];
+        const b = sim.rocks[j];
+        expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(a.radius + b.radius - 0.01);
+      }
+    }
+    expect(sim.ores.length).toBe(3);
+    for (const ore of sim.ores) {
+      expect(ore.vx).toBeCloseTo(12, 6);
+      expect(ore.vy).toBeCloseTo(-7, 6);
+      expect(ore.amount).toBe(1);
+    }
+  });
+
+  it("gun 1 breaks sometimes fling ore off, worth more; gun 2 breaks never do", () => {
+    for (const gun1 of [true, false]) {
+      const sim = floater({ oreChance: 1, flingChance: 0.5, flingOreAmount: 3 });
+      for (let i = 0; i < 40; i++) {
+        const rock = sim.makeRock(2, sim.ship.x + 500, sim.ship.y + i * 200, 0, 0);
+        sim.rocks.push(rock);
+        sim.breakRock(rock, sim.ship, gun1);
+      }
+      const flung = sim.ores.filter((ore) => Math.hypot(ore.vx, ore.vy) > 1);
+      if (gun1) {
+        expect(flung.length).toBeGreaterThan(20);
+        expect(flung.length).toBeLessThan(100);
+        for (const ore of flung) expect(ore.amount).toBe(3);
+      } else {
+        expect(flung).toEqual([]);
+      }
+      for (const ore of sim.ores.filter((o) => !flung.includes(o))) expect(ore.amount).toBe(1);
+    }
+  });
+
+  it("picking up flung ore counts its worth", () => {
+    const sim = floater();
+    sim.ores.push({
+      x: sim.ship.x,
+      y: sim.ship.y,
+      px: sim.ship.x,
+      py: sim.ship.y,
+      vx: 0,
+      vy: 0,
+      kind: 0,
+      amount: 3,
+    });
+    sim.step();
+    expect(sim.ship.ore).toBe(3);
   });
 
   it("every hit wears the rock, so it still breaks in the end", () => {
@@ -913,7 +976,7 @@ describe("the new ship", () => {
     expect(sim.ores.length).toBe(0);
   });
 
-  it("flies to a clicked spot, stops there, and faces the way it was going", () => {
+  it("flies to a clicked spot and stops there, with no final turn", () => {
     const sim = floater();
     const x = sim.ship.x + 300;
     const y = sim.ship.y + 400;
@@ -929,8 +992,6 @@ describe("the new ship", () => {
     expect(Math.hypot(sim.ship.x - x, sim.ship.y - y)).toBeLessThan(60);
     expect(Math.hypot(sim.ship.vx, sim.ship.vy)).toBeLessThan(8);
     expect(top).toBeLessThan(GAME_DEFAULTS.clickSpeed * 1.25);
-    const facing = Math.atan2(400, 300);
-    expect(Math.abs(Math.atan2(Math.sin(sim.ship.angle - facing), Math.cos(sim.ship.angle - facing)))).toBeLessThan(0.15);
   }, 30000);
 
   it("uses only the main thruster and rotation when that's all it has", () => {
@@ -946,8 +1007,8 @@ describe("the new ship", () => {
     expect(used.has("thrusterStrafeLeft")).toBe(false);
   }, 30000);
 
-  it("can leave the nose where the stop left it", () => {
-    const sim = floater({ clickFaceTravel: false });
+  it("leaves the nose where the stop left it", () => {
+    const sim = floater();
     sim.orderMove(sim.ship.x + 500, sim.ship.y);
     let ticks = 0;
     while (sim.clickPilot.active && ticks < Math.round(60 / TICK)) {
@@ -982,6 +1043,8 @@ describe("the new ship", () => {
   it("flies blind without the route planner, and around rocks with it", () => {
     for (const planner of [false, true]) {
       const sim = floater();
+      // Measured at the weight this was tuned for: the planner's margin is thin.
+      sim.ship.parts.delete("clickTurn");
       if (planner) sim.ship.parts.add("clickRoute");
       const rock = sim.makeRock(2, sim.ship.x + 500, sim.ship.y, 0, 0);
       sim.rocks.push(rock);
@@ -1038,6 +1101,7 @@ describe("the new ship", () => {
         vx: 0,
         vy,
         kind: 0,
+        amount: 1,
       });
       return sim;
     }
@@ -1083,16 +1147,12 @@ describe("the new ship", () => {
     });
   });
 
-  describe("click to turn", () => {
-    const angleTo = (sim: Sim, x: number, y: number) =>
-      Math.atan2(y - sim.ship.y, x - sim.ship.x);
+  describe("orders", () => {
     const off = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
-
-    function turner(extra: Partial<typeof DEFAULTS> = {}): Sim {
-      const sim = floater(extra);
-      sim.ship.parts.add("clickTurn");
-      return sim;
-    }
+    const velocity = (sim: Sim) => ({
+      vx: (sim.ship.x - sim.ship.px) / TICK,
+      vy: (sim.ship.y - sim.ship.py) / TICK,
+    });
 
     function finish(sim: Sim, seconds = 60): void {
       let ticks = 0;
@@ -1102,72 +1162,140 @@ describe("the new ship", () => {
       }
     }
 
-    it("faces the spot using rotation only, then lets go", () => {
-      const sim = turner();
-      const x = sim.ship.x - 300;
-      const y = sim.ship.y + 200;
+    it("the new ship starts with move and facing orders", () => {
+      const sim = floater();
+      expect(sim.ship.parts.has("clickMove")).toBe(true);
+      expect(sim.ship.parts.has("clickTurn")).toBe(true);
+    });
+
+    it("a facing with no move turns in place, using rotation only, then lets go", () => {
+      const sim = floater();
       const start = { x: sim.ship.x, y: sim.ship.y };
-      sim.orderTurn(x, y);
+      expect(sim.orderFace(2.4)).toBe(true);
       for (let i = 0; i < Math.round(20 / TICK) && sim.clickPilot.active; i++) {
         sim.step();
         expect(sim.ship.firing.has("thrusterMain")).toBe(false);
       }
       expect(sim.clickPilot.active).toBe(false);
-      expect(off(sim.ship.angle, angleTo(sim, x, y))).toBeLessThan(0.1);
+      expect(off(sim.ship.angle, 2.4)).toBeLessThan(0.1);
       expect(Math.abs(sim.ship.spin)).toBeLessThan(0.2);
       expect(Math.hypot(sim.ship.x - start.x, sim.ship.y - start.y)).toBeLessThan(1);
     }, 30000);
 
-    it("during a move, cancels it and turns right away while coasting", () => {
-      const sim = turner();
+    it("a facing during a move is held while coasting and after arriving", () => {
+      const sim = floater();
+      const face = Math.PI / 2;
+      sim.orderMove(sim.ship.x + 2500, sim.ship.y);
+      sim.orderFace(face);
+      let checked = 0;
+      let ticks = 0;
+      while (sim.clickPilot.active && ticks < Math.round(120 / TICK)) {
+        sim.step();
+        ticks++;
+        const { ship } = sim;
+        // Settled into a coast: not burning and done turning.
+        if (ship.firing.size === 0 && Math.abs(ship.spin) < 0.1 && Math.hypot(ship.vx, ship.vy) > 30) {
+          expect(off(ship.angle, face)).toBeLessThan(0.15);
+          checked++;
+        }
+      }
+      expect(checked).toBeGreaterThan(100);
+      expect(sim.clickPilot.active).toBe(false);
+      expect(off(sim.ship.angle, face)).toBeLessThan(0.1);
+    }, 30000);
+
+    it("a dragged move ends drifting at the drawn velocity, on top of the ship's own", () => {
+      const sim = floater();
+      sim.ship.vx = 20;
+      sim.step();
+      const before = velocity(sim);
+      expect(sim.orderMove(sim.ship.x + 300, sim.ship.y + 300, 0, 15)).toBe(true);
+      finish(sim, 90);
+      expect(sim.clickPilot.active).toBe(false);
+      const after = velocity(sim);
+      expect(Math.abs(after.vx - before.vx)).toBeLessThan(6);
+      expect(Math.abs(after.vy - (before.vy + 15))).toBeLessThan(6);
+    }, 30000);
+
+    it("a dragged move ends near its drifting destination", () => {
+      const sim = floater();
+      sim.orderMove(sim.ship.x + 400, sim.ship.y, 0, -10);
+      const start = sim.clickPilot.target()!;
+      let ticks = 0;
+      let last = start;
+      while (sim.clickPilot.active && ticks < Math.round(90 / TICK)) {
+        last = sim.clickPilot.target() ?? last;
+        sim.step();
+        ticks++;
+      }
+      expect(sim.clickPilot.active).toBe(false);
+      expect(start.y - last.y).toBeGreaterThan(50);
+      expect(Math.hypot(sim.ship.x - last.x, sim.ship.y - last.y)).toBeLessThan(80);
+    }, 30000);
+
+    it("flight keys don't cancel the order: it waits, then takes back over", () => {
+      const sim = floater();
+      const goal = { x: sim.ship.x + 2000, y: sim.ship.y };
+      sim.orderMove(goal.x, goal.y);
+      run(sim, 5);
+      sim.clickPilot.handsOn();
+      sim.controls.turn = 1;
+      sim.controls.thrust = 0;
+      expect(sim.clickPilot.active).toBe(true);
+      expect(sim.clickPilot.flying).toBe(false);
+      run(sim, 0.5);
+      // The player's control stands while the order waits.
+      expect(sim.ship.firing.has("thrusterMain")).toBe(false);
+      expect(sim.controls.turn).toBe(1);
+      sim.controls.turn = 0;
+      run(sim, 0.6);
+      expect(sim.clickPilot.flying).toBe(true);
+      finish(sim, 120);
+      expect(sim.clickPilot.active).toBe(false);
+      expect(Math.hypot(goal.x - sim.ship.x, goal.y - sim.ship.y)).toBeLessThan(60);
+    }, 30000);
+
+    it("a stop with an order cancels it and coasts on", () => {
+      const sim = floater();
       sim.orderMove(sim.ship.x + 2500, sim.ship.y);
       run(sim, 10);
       const speed = Math.hypot(sim.ship.vx, sim.ship.vy);
       expect(speed).toBeGreaterThan(30);
-      const x = sim.ship.x;
-      const y = sim.ship.y + 2000;
-      expect(sim.orderTurn(x, y)).toBe(true);
-      expect(sim.clickPilot.target()).toBeNull();
-      for (let i = 0; i < Math.round(20 / TICK) && sim.clickPilot.active; i++) {
-        sim.step();
-        expect(sim.ship.firing.has("thrusterMain")).toBe(false);
-      }
+      expect(sim.orderStop()).toBe(true);
       expect(sim.clickPilot.active).toBe(false);
+      run(sim, 1);
       expect(Math.hypot(sim.ship.vx, sim.ship.vy)).toBeCloseTo(speed, 0);
-      expect(off(sim.ship.angle, angleTo(sim, x, y))).toBeLessThan(0.15);
     }, 30000);
 
-    it("a new right click replaces the spot", () => {
-      const sim = turner();
-      sim.orderTurn(sim.ship.x - 300, sim.ship.y);
-      run(sim, 0.5);
-      const x = sim.ship.x;
-      const y = sim.ship.y + 300;
-      sim.orderTurn(x, y);
-      finish(sim);
-      expect(off(sim.ship.angle, angleTo(sim, x, y))).toBeLessThan(0.1);
-    }, 30000);
-
-    it("works without click to move", () => {
-      const sim = turner();
-      sim.ship.parts.delete("clickMove");
-      sim.orderTurn(sim.ship.x, sim.ship.y + 300);
-      finish(sim);
+    it("a stop with no order brings the ship to rest", () => {
+      const sim = floater();
+      sim.ship.vx = 40;
+      sim.ship.vy = -20;
+      sim.step();
+      expect(sim.orderStop()).toBe(true);
+      finish(sim, 60);
       expect(sim.clickPilot.active).toBe(false);
-      expect(off(sim.ship.angle, Math.PI / 2)).toBeLessThan(0.1);
+      const { vx, vy } = velocity(sim);
+      expect(Math.hypot(vx, vy)).toBeLessThan(8);
     }, 30000);
 
-    it("a left click during a turn flies there", () => {
-      const sim = turner();
-      sim.orderTurn(sim.ship.x - 300, sim.ship.y);
-      run(sim, 0.5);
-      sim.orderMove(sim.ship.x + 400, sim.ship.y);
-      expect(sim.clickPilot.target()).not.toBeNull();
-      expect(sim.clickPilot.aim()).toBeNull();
+    it("a new move keeps the facing already drawn", () => {
+      const sim = floater();
+      sim.orderMove(sim.ship.x + 2000, sim.ship.y);
+      sim.orderFace(1);
+      sim.orderMove(sim.ship.x, sim.ship.y + 2000);
+      expect(sim.clickPilot.facing()).toBe(1);
+    });
+
+    it("facing needs its part", () => {
+      const sim = floater();
+      sim.ship.parts.delete("clickTurn");
+      expect(sim.orderFace(1)).toBe(false);
+      expect(sim.clickPilot.active).toBe(false);
     });
   });
 
-  it("a left click during a move changes the destination", () => {
+  it("a new move order changes the destination", () => {
     const sim = floater();
     sim.orderMove(sim.ship.x + 2000, sim.ship.y);
     run(sim, 3);
@@ -1176,14 +1304,6 @@ describe("the new ship", () => {
     sim.orderMove(x, y);
     const target = sim.clickPilot.target()!;
     expect(Math.hypot(target.x - x, target.y - y)).toBeLessThan(1);
-  }, 30000);
-
-  it("a right click without click to turn only cancels the move", () => {
-    const sim = floater();
-    sim.orderMove(sim.ship.x + 2000, sim.ship.y);
-    run(sim, 3);
-    expect(sim.orderTurn(sim.ship.x, sim.ship.y + 500)).toBe(false);
-    expect(sim.clickPilot.active).toBe(false);
   }, 30000);
 
   it("needs the part", () => {

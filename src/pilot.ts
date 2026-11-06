@@ -63,6 +63,8 @@ const FACING_SPIN = 0.1;
 const CLICK_STUCK_SECONDS = 30;
 /** Closer than this counts as progress on a click order. */
 const CLICK_PROGRESS = 10;
+/** How long after the last flight key an order takes back over. */
+const HANDS_OFF_SECONDS = 1;
 /** Under this speed there's no braking burn to get ready for. */
 const COAST_TURN_SPEED = 10;
 /** How long after its last sight of a pirate a sheltering ship goes back out. */
@@ -614,12 +616,15 @@ export class DronePilot extends ShipPilot {
 
 interface ClickOrder {
   poi: Poi;
-  /** The spot in the POI's own axes, so it turns with the POI. */
+  /** The destination in the POI's own axes, so it turns with the POI. */
   x: number;
   y: number;
-  /** Only turning to face the spot, without flying anywhere. */
-  turnOnly: boolean;
-  /** Where the nose ends up, or null to leave it where the stop left it. */
+  /** How fast the destination moves, in the POI's own axes. Zero for a spot that stays put. */
+  vx: number;
+  vy: number;
+  /** Flies to the destination. Without it the order only stops or turns, where the ship is. */
+  move: boolean;
+  /** The facing held whenever no burn needs the nose, or null to leave the nose be. */
   face: number | null;
   stage: "flying" | "stopping" | "facing";
   closest: number;
@@ -627,68 +632,147 @@ interface ClickOrder {
 }
 
 /**
- * Flies to a clicked spot: rotate, thrust, coast, rotate to stop, thrust. Or turns to
- * face one. It leaves the gun alone, and only flies while it has an order, so the
- * player can always take over.
+ * Carries out the player's orders: fly to a spot (rotate, thrust, coast, rotate to stop,
+ * thrust), leave it drifting at a drawn speed, stop, or hold a facing. Flight keys take over
+ * while held, and the order picks up again from wherever the ship is once they're let go.
  */
 export class ClickPilot extends ShipPilot {
   private order: ClickOrder | null = null;
+  /** Seconds until the order takes back over from the keys. */
+  private handsOff = 0;
 
   get active(): boolean {
     return this.order !== null;
   }
 
+  /** Has an order and is flying it, not waiting out the player's hands on the keys. */
+  get flying(): boolean {
+    return this.order !== null && this.handsOff <= 0;
+  }
+
   /** What the order is doing, in words for the display. */
   get task(): string {
-    return this.order?.stage ?? "";
+    if (!this.order) return "";
+    return this.handsOff > 0 ? "waiting for the keys" : this.order.stage;
   }
 
   /** Where a flight leads right now, or null without one. */
-  target(): { x: number; y: number; px: number; py: number } | null {
-    if (!this.order || this.order.turnOnly) return null;
-    return poiSpot(this.order.poi, this.order.x, this.order.y);
+  target(): Mover | null {
+    if (!this.order?.move) return null;
+    return this.spot(this.order);
   }
 
-  /** The spot the ship is turning to face, or null without one. */
-  aim(): { x: number; y: number; px: number; py: number } | null {
-    if (!this.order?.turnOnly) return null;
-    return poiSpot(this.order.poi, this.order.x, this.order.y);
+  /** Whether the destination drifts along rather than staying put. */
+  get drifting(): boolean {
+    return !!this.order?.move && (this.order.vx !== 0 || this.order.vy !== 0);
   }
 
-  moveTo(sim: Sim, x: number, y: number): void {
+  /** The facing the order holds, or null. */
+  facing(): number | null {
+    return this.order?.face ?? null;
+  }
+
+  /**
+   * Flies to a world spot. With a drawn velocity the spot moves on after the order, at
+   * the ship's own velocity plus the drawn one, and the ship ends up moving along with it.
+   * A drawn facing carries over from the order before.
+   */
+  moveTo(sim: Sim, x: number, y: number, vx = 0, vy = 0): void {
     const { ship } = this;
     const poi = sim.nearestPoi(x, y);
+    let localVx = 0;
+    let localVy = 0;
+    if (vx !== 0 || vy !== 0) {
+      // The ship's own motion as the POI sees it, so its turning doesn't count.
+      const where = toPoiAxes(poi, ship.x, ship.y);
+      const carried = poiSpot(poi, where.x, where.y);
+      const wx = (ship.x - ship.px - (carried.x - carried.px)) / TICK + vx;
+      const wy = (ship.y - ship.py - (carried.y - carried.py)) / TICK + vy;
+      const cos = Math.cos(poi.rotation);
+      const sin = Math.sin(poi.rotation);
+      localVx = wx * cos + wy * sin;
+      localVy = -wx * sin + wy * cos;
+    }
     this.order = {
       poi,
       ...toPoiAxes(poi, x, y),
-      turnOnly: false,
-      face: sim.tuning.clickFaceTravel ? Math.atan2(y - ship.y, x - ship.x) : null,
+      vx: localVx,
+      vy: localVy,
+      move: true,
+      face: this.order?.face ?? null,
       stage: "flying",
       closest: Infinity,
       stuck: 0,
     };
+    this.handsOff = 0;
   }
 
-  /** Starts turning to face a spot, in place of any other order. */
-  faceSpot(sim: Sim, x: number, y: number): void {
-    const poi = sim.nearestPoi(x, y);
+  /** Comes to rest against the nearest POI, where it is. */
+  stop(sim: Sim): void {
+    const { ship } = this;
+    const poi = sim.nearestPoi(ship.x, ship.y);
     this.order = {
       poi,
-      ...toPoiAxes(poi, x, y),
-      turnOnly: true,
-      face: null,
+      ...toPoiAxes(poi, ship.x, ship.y),
+      vx: 0,
+      vy: 0,
+      move: false,
+      face: this.order?.face ?? null,
+      stage: "stopping",
+      closest: Infinity,
+      stuck: 0,
+    };
+    this.handsOff = 0;
+  }
+
+  /**
+   * Holds a facing: for the rest of a move, during coasts and after arriving. Without a
+   * move it just turns there.
+   */
+  face(sim: Sim, angle: number): void {
+    if (this.order) {
+      this.order.face = angle;
+      return;
+    }
+    const { ship } = this;
+    const poi = sim.nearestPoi(ship.x, ship.y);
+    this.order = {
+      poi,
+      ...toPoiAxes(poi, ship.x, ship.y),
+      vx: 0,
+      vy: 0,
+      move: false,
+      face: angle,
       stage: "facing",
       closest: Infinity,
       stuck: 0,
     };
+    this.handsOff = 0;
+  }
+
+  /** The player is on the keys: they fly, and the order waits until they've let go a while. */
+  handsOn(): void {
+    if (!this.order) return;
+    if (this.handsOff <= 0) {
+      this.clearControls();
+      this.ship.controls.stabilize = true;
+    }
+    this.handsOff = HANDS_OFF_SECONDS;
   }
 
   cancel(): void {
     this.order = null;
+    this.handsOff = 0;
     this.burning = false;
     this.thrusting = false;
     this.clearControls();
     this.ship.controls.stabilize = true;
+  }
+
+  private spot(order: ClickOrder): Mover {
+    const now = poiSpot(order.poi, order.x, order.y);
+    const before = poiSpot(order.poi, order.x - order.vx * TICK, order.y - order.vy * TICK);
+    return { x: now.x, y: now.y, px: before.px, py: before.py };
   }
 
   private clearControls(): void {
@@ -703,28 +787,44 @@ export class ClickPilot extends ShipPilot {
   update(sim: Sim): void {
     const { order, ship } = this;
     if (!order) return;
-    if (!ship.parts.has(order.turnOnly ? "clickTurn" : "clickMove")) {
+    const needs = order.move || order.stage === "stopping" ? "clickMove" : "clickTurn";
+    if (!ship.parts.has(needs)) {
       this.cancel();
       return;
     }
-    this.clearControls();
-    this.correctingDirectly = false;
+    order.x += order.vx * TICK;
+    order.y += order.vy * TICK;
     // Everything near the POI turns with it, so the nose's goal does too.
     if (order.face !== null) order.face += order.poi.turn;
 
-    const target = poiSpot(order.poi, order.x, order.y);
+    if (this.handsOff > 0) {
+      // The keys fly. Once they're let go, the order plans again from wherever that left it.
+      this.handsOff -= TICK;
+      if (order.move) order.stage = "flying";
+      order.closest = Infinity;
+      order.stuck = 0;
+      this.burning = false;
+      this.thrusting = false;
+      return;
+    }
+
+    this.clearControls();
+    this.correctingDirectly = false;
+    const target = this.spot(order);
     const distance = Math.hypot(target.x - ship.x, target.y - ship.y);
     const { vx, vy } = this.relativeVelocity(target);
     const speed = Math.hypot(vx, vy);
 
-    if (distance < order.closest - CLICK_PROGRESS) {
-      order.closest = distance;
-      order.stuck = 0;
-    }
-    order.stuck += TICK;
-    if (order.stuck > CLICK_STUCK_SECONDS) {
-      this.cancel();
-      return;
+    if (order.move) {
+      if (distance < order.closest - CLICK_PROGRESS) {
+        order.closest = distance;
+        order.stuck = 0;
+      }
+      order.stuck += TICK;
+      if (order.stuck > CLICK_STUCK_SECONDS) {
+        this.cancel();
+        return;
+      }
     }
 
     if (order.stage === "flying") {
@@ -733,12 +833,12 @@ export class ClickPilot extends ShipPilot {
     }
     if (order.stage === "stopping") {
       if (speed < STOPPED_SPEED) order.stage = "facing";
-      else this.brake(sim, -vx, -vy, STOPPED_SPEED, null);
+      // The retro switch stops dead against the POI, not against a drifting spot.
+      else if (order.vx !== 0 || order.vy !== 0) this.steer(sim, -vx, -vy, STOPPED_SPEED, order.face);
+      else this.brake(sim, -vx, -vy, STOPPED_SPEED, order.face);
     }
     if (order.stage === "facing") {
-      const face = order.turnOnly
-        ? Math.atan2(target.y - ship.y, target.x - ship.x)
-        : order.face;
+      const { face } = order;
       if (face === null) {
         this.cancel();
         return;
@@ -767,9 +867,13 @@ export class ClickPilot extends ShipPilot {
     return { x: dx / distance, y: dy / distance };
   }
 
-  /** Gets ready for the braking burn: nose against the motion, or along it with a reverse thruster. */
+  /**
+   * A drawn facing, or else gets ready for the braking burn: nose against the motion,
+   * or along it with a reverse thruster.
+   */
   protected override coastNose(vx: number, vy: number): number | null {
     const { ship } = this;
+    if (this.order && this.order.face !== null) return this.order.face;
     if (Math.hypot(vx, vy) < COAST_TURN_SPEED) return null;
     const braking = Math.atan2(-vy, -vx);
     if (!ship.parts.has("reverse")) return braking;

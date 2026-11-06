@@ -85,7 +85,7 @@ export const PARTS: Part[] = [
     short: "gun2",
     price: 250,
     weight: 0.05,
-    description: "Replaces your gun. Slower, and precision hits release slow ore",
+    description: "Replaces your gun. Slower, and hits free ore that stays with the rock. No flung ore",
     tier: 0,
   },
   {
@@ -94,7 +94,7 @@ export const PARTS: Part[] = [
     short: "click",
     price: 400,
     weight: 0.02,
-    description: "Flies you to where you click, straight there",
+    description: "Right click flies you there, straight. Drag to leave with a drift",
     tier: 2,
   },
   {
@@ -122,7 +122,7 @@ export const PARTS: Part[] = [
     short: "turn",
     price: 150,
     weight: 0.02,
-    description: "Right click faces that spot, right away",
+    description: "Drag from your ship to set a facing to hold",
     tier: 2,
   },
   {

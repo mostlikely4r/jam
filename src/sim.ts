@@ -215,6 +215,8 @@ export interface Shot extends Body {
 
 export interface Ore extends Body {
   kind: number;
+  /** How much ore picking it up gives. Flung ore is worth more. */
+  amount: number;
   /** Whose shot broke it loose, if anyone's. */
   from?: Ship | null;
 }
@@ -399,6 +401,7 @@ export class Sim {
     if (model === "floater") {
       this.ship.parts.add("gun2");
       this.ship.parts.add("clickMove");
+      this.ship.parts.add("clickTurn");
     }
     this.clickPilot = new ClickPilot(this.ship);
     this.drones = [];
@@ -859,18 +862,31 @@ export class Sim {
     });
   }
 
-  /** Sends the player's ship to a world position, if it has the part. Returns whether it did. */
-  orderMove(x: number, y: number): boolean {
+  /**
+   * Sends the player's ship to a world position, if it has the part. With a velocity it
+   * arrives moving at that much on top of its velocity now. Returns whether it did.
+   */
+  orderMove(x: number, y: number, vx = 0, vy = 0): boolean {
     if (!this.ship.parts.has("clickMove")) return false;
-    this.clickPilot.moveTo(this, x, y);
+    this.clickPilot.moveTo(this, x, y, vx, vy);
     return true;
   }
 
-  /** Cancels any click order, leaving the ship coasting. With the part, it also turns to face the spot. */
-  orderTurn(x: number, y: number): boolean {
-    this.clickPilot.cancel();
+  /** Holds a facing, during a move's coasts and after it, or turns there if there's no move. */
+  orderFace(angle: number): boolean {
     if (!this.ship.parts.has("clickTurn")) return false;
-    this.clickPilot.faceSpot(this, x, y);
+    this.clickPilot.face(this, angle);
+    return true;
+  }
+
+  /** Cancels the order and coasts, or with no order, stops. Returns whether it did either. */
+  orderStop(): boolean {
+    if (this.clickPilot.active) {
+      this.clickPilot.cancel();
+      return true;
+    }
+    if (!this.ship.parts.has("clickMove")) return false;
+    this.clickPilot.stop(this);
     return true;
   }
 
@@ -1354,7 +1370,7 @@ export class Sim {
     const perTick = dt * this.shipResponse(ship);
     ship.firing.clear();
     // On a click order the pilot decides, or the retro switch would fight its coasting.
-    const usesSwitch = ship === this.ship && !this.clickPilot.active;
+    const usesSwitch = ship === this.ship && !this.clickPilot.flying;
     const retro = ship.parts.has("retro") && (usesSwitch ? tuning.retro : controls.retro);
     const spinAssist = retro || (ship.parts.has("spinStabilizer") && controls.stabilize);
 
@@ -1604,6 +1620,7 @@ export class Sim {
         vx: ship.vx + Math.cos(dir) * kick,
         vy: ship.vy + Math.sin(dir) * kick,
         kind: Math.floor(this.random() * ORE_KINDS),
+        amount: 1,
       });
     }
     ship.ore = 0;
@@ -1721,7 +1738,7 @@ export class Sim {
         if (shot.precise && this.random() < this.tuning.preciseChance) {
           this.releaseOre(x, y, hit, shot.from);
         }
-        if (hit.hp <= 0) this.breakRock(hit, shot.from);
+        if (hit.hp <= 0) this.breakRock(hit, shot.from, !shot.precise);
         continue;
       }
 
@@ -1771,33 +1788,38 @@ export class Sim {
     this.events.push({ type: "shot", x, y });
   }
 
-  /** A precision hit: ore comes loose where the shot landed, moving slowly in any direction. */
+  /** A precision hit: ore comes loose where the shot landed and drifts on with the rock. */
   private releaseOre(x: number, y: number, rock: Rock, from: Ship): void {
-    const dir = this.random() * Math.PI * 2;
-    const kick = this.tuning.preciseOreSpeed * (0.5 + this.random() * 0.5);
     this.ores.push({
       x,
       y,
       px: x,
       py: y,
-      vx: rock.vx + Math.cos(dir) * kick,
-      vy: rock.vy + Math.sin(dir) * kick,
+      vx: rock.vx,
+      vy: rock.vy,
       kind: Math.floor(this.random() * ORE_KINDS),
+      amount: 1,
       from,
     });
   }
 
-  /** Breaks a rock into smaller ones and maybe some ore, marked as freed by `by` if anyone. */
-  breakRock(rock: Rock, by: Ship | null = null): void {
+  /**
+   * Breaks a rock into smaller ones and maybe some ore, marked as freed by `by` if anyone.
+   * Pieces and ore drift on with the rock. A break by gun 1 may fling some ore away, worth more.
+   */
+  breakRock(rock: Rock, by: Ship | null = null, flings = false): void {
+    const { tuning } = this;
     this.rocks.splice(this.rocks.indexOf(rock), 1);
     this.events.push({ type: "break", x: rock.x, y: rock.y, radius: rock.radius });
 
     if (rock.tier > 0) {
       const pieces = 2 + Math.floor(this.random() * 2);
+      const spin = this.random();
       for (let i = 0; i < pieces; i++) {
-        const dir = (i / pieces) * Math.PI * 2 + this.random();
-        const kick = 20 + this.random() * 40;
-        const offset = TIER_RADIUS[rock.tier - 1] * 0.8;
+        const dir = (i / pieces) * Math.PI * 2 + spin;
+        const kick = tuning.rockBreakSpeed * (0.5 + this.random() * 0.5);
+        // Set apart so the pieces just touch, since they don't drift apart by themselves.
+        const offset = TIER_RADIUS[rock.tier - 1] / Math.sin(Math.PI / Math.max(pieces, 2));
         this.rocks.push(
           this.makeRock(
             rock.tier - 1,
@@ -1812,9 +1834,10 @@ export class Sim {
 
     const rolls = rock.tier + 1;
     for (let i = 0; i < rolls; i++) {
-      if (this.random() >= this.tuning.oreChance) continue;
+      if (this.random() >= tuning.oreChance) continue;
       const dir = this.random() * Math.PI * 2;
-      const kick = 15 + this.random() * 45;
+      const flung = flings && this.random() < tuning.flingChance;
+      const kick = flung ? 15 + this.random() * 45 : 0;
       const x = rock.x + Math.cos(dir) * rock.radius * 0.4;
       const y = rock.y + Math.sin(dir) * rock.radius * 0.4;
       this.ores.push({
@@ -1825,6 +1848,7 @@ export class Sim {
         vx: rock.vx + Math.cos(dir) * kick,
         vy: rock.vy + Math.sin(dir) * kick,
         kind: Math.floor(this.random() * ORE_KINDS),
+        amount: flung ? tuning.flingOreAmount : 1,
         from: by,
       });
     }
@@ -1894,7 +1918,7 @@ export class Sim {
         reach,
       );
       if (segment === null) return true;
-      ship.ore++;
+      ship.ore += ore.amount;
       if (this.tuning.chatter) this.chatter.pickedUp(this, ship, ore);
       if (ship === this.ship) this.stats.bestOre = Math.max(this.stats.bestOre, ship.ore);
       this.events.push({ type: "pickup", x: ore.x, y: ore.y, kind: ore.kind });

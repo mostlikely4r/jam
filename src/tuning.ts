@@ -18,6 +18,11 @@ export const DEFAULTS = {
   shotLife: 1.1,
   rockToughness: 6,
   oreChance: 0.45,
+  /** How fast broken pieces drift apart. Zero keeps them moving with the rock. */
+  rockBreakSpeed: 0,
+  /** Gun 1 only: the chance each piece of ore from a break flies off, and what it's worth. */
+  flingChance: 0.3,
+  flingOreAmount: 3,
 
   rockCount: 260,
   fieldRadius: 2600,
@@ -47,12 +52,12 @@ export const DEFAULTS = {
   floaterStart: true,
   floaterEngine: 0.2,
   clickSpeed: 80,
-  clickFaceTravel: true,
+  /** A drag order's line is how far the destination drifts in this many seconds. */
+  dragSeconds: 4,
   gun2ShotsPerSecond: 2,
   preciseChance: 0.25,
   turretTurnSpeed: 150,
   turretRange: 0.3333,
-  preciseOreSpeed: 12,
   tractorRange: 350,
   tractorPull: 120,
   tractorSpeed: 100,
@@ -152,6 +157,9 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
       { key: "shotLife", label: "Shot life (s)", min: 0.2, max: 3, step: 0.05 },
       { key: "rockToughness", label: "Rock toughness", min: 1, max: 20, step: 1 },
       { key: "oreChance", label: "Ore chance", min: 0, max: 1, step: 0.05 },
+      { key: "rockBreakSpeed", label: "Broken pieces drift apart at", min: 0, max: 60, step: 1 },
+      { key: "flingChance", label: "Gun 1: chance break ore flies off", min: 0, max: 1, step: 0.05 },
+      { key: "flingOreAmount", label: "Gun 1: ore a flung piece is worth", min: 1, max: 10, step: 1 },
     ],
   },
   {
@@ -204,11 +212,11 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
     sliders: [
       { key: "floaterEngine", label: "Engine power, all thrusters", min: 0.05, max: 1, step: 0.05 },
       { key: "clickSpeed", label: "Click to move speed", min: 20, max: 400, step: 10 },
+      { key: "dragSeconds", label: "Drag order: seconds of drift the line shows", min: 1, max: 15, step: 0.5 },
       { key: "gun2ShotsPerSecond", label: "Gun 2 shots per second", min: 0.5, max: 7, step: 0.5 },
-      { key: "preciseChance", label: "Gun 2 precision hit chance", min: 0, max: 1, step: 0.05 },
+      { key: "preciseChance", label: "Gun 2 chance a hit frees ore", min: 0, max: 1, step: 0.05 },
       { key: "turretTurnSpeed", label: "Turret turn speed (degrees per second)", min: 30, max: 720, step: 10 },
       { key: "turretRange", label: "Turret share of the gun's range", min: 0.1, max: 1, step: 0.05 },
-      { key: "preciseOreSpeed", label: "Precision ore speed", min: 0, max: 60, step: 1 },
       { key: "tractorRange", label: "Tractor range", min: 50, max: 1500, step: 25 },
       { key: "tractorPull", label: "Tractor pull strength", min: 10, max: 600, step: 10 },
       { key: "tractorSpeed", label: "Tractor ore speed", min: 10, max: 400, step: 10 },

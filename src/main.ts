@@ -55,7 +55,7 @@ let shopState = "";
 function updateShop(): void {
   const { ship } = sim;
   const docked = sim.isDocked();
-  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasOreFor(sim.partPrice(part.id))).join()} ${sim.hasOreFor(tuning.dronePrice)}`;
+  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasOreFor(sim.partPrice(part.id))).join()} ${sim.hasOreFor(tuning.dronePrice)} ${sim.oreShipped}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked;
@@ -72,13 +72,17 @@ function updateShop(): void {
     const button = document.createElement("button");
     button.className = owned ? "owned" : "";
     const inStock = sim.hasOreFor(price);
-    button.disabled = !owned && (!fits || !inStock || ship.credits < price);
+    const open = sim.unlocked(part.id);
+    const toGo = Math.ceil(sim.tierThreshold(part.tier) - sim.oreShipped);
+    button.disabled = !owned && (!fits || !open || !inStock || ship.credits < price);
     button.textContent = owned
       ? `${partKey(index)} SELL ${part.label} for ${price}, -${weight} weight`
       : fits
-        ? inStock
-          ? `${partKey(index)} ${part.label}: ${price} credits, +${weight} weight. ${part.description}`
-          : `${partKey(index)} ${part.label}: the station is out of ore`
+        ? !open
+          ? `${partKey(index)} ${part.label}: not stocked until ${toGo} more ore is shipped`
+          : inStock
+            ? `${partKey(index)} ${part.label}: ${price} credits, +${weight} weight. ${part.description}`
+            : `${partKey(index)} ${part.label}: the station is out of ore`
         : `${partKey(index)} ${part.label}: doesn't fit this ship`;
     button.addEventListener("click", () => {
       tradePart(part);
@@ -90,10 +94,13 @@ function updateShop(): void {
   const full = sim.drones.length >= tuning.droneLimit;
   const drone = document.createElement("button");
   const droneInStock = sim.hasOreFor(tuning.dronePrice);
-  drone.disabled = full || !droneInStock || ship.credits < tuning.dronePrice;
+  const dronesOpen = sim.unlocked("drone");
+  drone.disabled = full || !dronesOpen || !droneInStock || ship.credits < tuning.dronePrice;
   drone.textContent = full
     ? `- New drone: at the limit of ${tuning.droneLimit}`
-    : !droneInStock
+    : !dronesOpen
+      ? `- New drone: not available until ${Math.ceil(sim.tierThreshold(2) - sim.oreShipped)} more ore is shipped`
+      : !droneInStock
       ? "- New drone: the station is out of ore"
       : `- New drone: ${tuning.dronePrice} credits. Earns for you (${sim.drones.length}/${tuning.droneLimit})`;
   drone.addEventListener("click", () => {
@@ -210,6 +217,7 @@ function buildPanel(): void {
         { key: "sightLines", label: "Rocks block sight" },
         { key: "chatter", label: "Radio chatter" },
         { key: "haulers", label: "Haulers buy station ore" },
+        { key: "stationUnlocks", label: "Shop stock unlocks as ore is shipped" },
       ] as const;
       for (const { key, label: text } of switches) {
         const toggle = document.createElement("label");

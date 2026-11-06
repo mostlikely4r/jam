@@ -25,6 +25,8 @@ export interface Part {
   description: string;
   /** The ships it can be fitted to. Without this, any ship. */
   fits?: ShipModel[];
+  /** 0 = sold from the start, 1 and 2 = once haulers have bought enough of the station's ore. */
+  tier: 0 | 1 | 2;
 }
 
 export function partFits(part: Part, model: ShipModel): boolean {
@@ -39,6 +41,7 @@ export const PARTS: Part[] = [
     price: 100,
     weight: 0.05,
     description: "Stops your rotation when you let go",
+    tier: 0,
   },
   {
     id: "reverse",
@@ -47,6 +50,7 @@ export const PARTS: Part[] = [
     price: 200,
     weight: 0.15,
     description: "Brake without flipping",
+    tier: 1,
   },
   {
     id: "strafe",
@@ -55,6 +59,7 @@ export const PARTS: Part[] = [
     price: 300,
     weight: 0.25,
     description: "Move sideways",
+    tier: 1,
   },
   {
     id: "retro",
@@ -63,6 +68,7 @@ export const PARTS: Part[] = [
     price: 300,
     weight: 0.1,
     description: "Cancels drift, using the thrusters you own (X)",
+    tier: 2,
   },
   {
     id: "meters",
@@ -71,6 +77,7 @@ export const PARTS: Part[] = [
     price: 50,
     weight: 0.02,
     description: "Adds readouts to the arrows",
+    tier: 0,
   },
   {
     id: "gun2",
@@ -79,6 +86,7 @@ export const PARTS: Part[] = [
     price: 250,
     weight: 0.05,
     description: "Replaces your gun. Slower, and precision hits release slow ore",
+    tier: 0,
   },
   {
     id: "clickMove",
@@ -87,6 +95,7 @@ export const PARTS: Part[] = [
     price: 400,
     weight: 0.02,
     description: "Flies you to where you click, straight there",
+    tier: 2,
   },
   {
     id: "clickRoute",
@@ -95,6 +104,7 @@ export const PARTS: Part[] = [
     price: 200,
     weight: 0.02,
     description: "Click to move steers around what's in the way",
+    tier: 2,
   },
   {
     id: "tractor",
@@ -104,6 +114,7 @@ export const PARTS: Part[] = [
     weight: 0.1,
     description: "Pulls in loose ore nearby",
     fits: ["floater"],
+    tier: 2,
   },
   {
     id: "clickTurn",
@@ -112,6 +123,7 @@ export const PARTS: Part[] = [
     price: 150,
     weight: 0.02,
     description: "Right click faces that spot, right away",
+    tier: 2,
   },
   {
     id: "turret",
@@ -120,8 +132,24 @@ export const PARTS: Part[] = [
     price: 300,
     weight: 0.1,
     description: "Your gun turns to follow the mouse, with a third of its range",
+    fits: ["floater"],
+    tier: 1,
   },
 ];
 
 /** The order a drone buys in: its gun and engine work first, its comfort comes last. */
 export const DRONE_BUY_ORDER: PartId[] = ["spinStabilizer", "reverse", "strafe", "retro", "meters"];
+
+/**
+ * What traffic and the player's drones buy, in order: only what their autopilot makes good
+ * use of. Click parts and retro add little to it, so they're left out.
+ */
+export const TRAFFIC_BUY_ORDER: Record<ShipModel, PartId[]> = {
+  racer: ["reverse", "strafe", "spinStabilizer"],
+  floater: ["tractor", "turret", "reverse", "strafe", "spinStabilizer"],
+};
+
+/** What unlocks at each tier, for the station to announce. */
+export function partsInTier(tier: 1 | 2): Part[] {
+  return PARTS.filter((part) => part.tier === tier);
+}

@@ -14,6 +14,7 @@ const DEFAULTS = {
   defenders: 0,
   stationStartOre: 100000,
   stationReserveOre: Infinity,
+  stationUnlocks: false,
 };
 
 function fitAll(sim: Sim): Sim {
@@ -829,6 +830,7 @@ describe("the new ship", () => {
       defenders: 0,
       stationStartOre: 100000,
       stationReserveOre: Infinity,
+      stationUnlocks: false,
       rockCount: 0,
       rockInflow: 0,
       testDrones: 0,

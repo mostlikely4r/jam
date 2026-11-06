@@ -177,6 +177,12 @@ export class Chatter {
     this.lineFrom(sim, HAULER_NAME, text, spot.x, spot.y);
   }
 
+  /** The shop got new stock because haulers bought enough ore. */
+  unlocked(sim: Sim, names: string[]): void {
+    const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
+    this.stationSays(sim, `Shipping's paid off. The shop now stocks ${list}.`);
+  }
+
   defenderLaunched(sim: Sim): void {
     this.stationSays(sim, "Defender launching. Stay safe out there.");
   }

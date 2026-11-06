@@ -139,25 +139,34 @@ class ShipPilot {
     const flightTime = distance / tuning.shotSpeed;
     const aim = Math.atan2(dy - vy * flightTime, dx - vx * flightTime);
     const closing = (vx * dx + vy * dy) / distance;
+    // A turret does the aiming, so the nose is free.
+    const turret = ship.parts.has("turret");
+    const nose = turret ? null : aim;
+    if (turret) {
+      ship.aim = { x: ship.x + Math.cos(aim) * distance, y: ship.y + Math.sin(aim) * distance };
+    }
     if (clearance < TOO_CLOSE_DISTANCE) {
       this.steer(
         sim,
         (-dx / distance) * BACK_OFF_SPEED - vx,
         (-dy / distance) * BACK_OFF_SPEED - vy,
         SETTLE_SPEED,
-        aim,
+        nose,
       );
     } else if (closing * COLLISION_WARNING_SECONDS > clearance - TOO_CLOSE_DISTANCE) {
-      this.brake(sim, -vx, -vy, SETTLE_SPEED, aim);
+      this.brake(sim, -vx, -vy, SETTLE_SPEED, nose);
     } else {
       // Coasting past is fine. The gun leads the rock.
-      this.steer(sim, 0, 0, SETTLE_SPEED, aim);
+      this.steer(sim, 0, 0, SETTLE_SPEED, nose);
     }
 
+    const gun = ship.angle + (turret ? ship.turretAngle : 0);
     const spread = Math.atan2(rock.radius * 0.7, distance);
-    const aimed = Math.abs(wrapAngle(aim - ship.angle)) < spread;
-    const inRange = distance < tuning.shotSpeed * tuning.shotLife * 0.9;
-    ship.controls.fire = aimed && inRange && (!this.burning || this.correctingDirectly);
+    const aimed = Math.abs(wrapAngle(aim - gun)) < spread;
+    const range = tuning.shotSpeed * tuning.shotLife * (turret ? tuning.turretRange : 1);
+    const inRange = distance < range * 0.9;
+    const steady = turret || !this.burning || this.correctingDirectly;
+    ship.controls.fire = aimed && inRange && steady;
     return "shooting";
   }
 
@@ -407,8 +416,11 @@ export class DronePilot extends ShipPilot {
   task = "starting";
   /** What it will buy with its earnings, in order. */
   wishlist: PartId[] = DRONE_BUY_ORDER;
-  /** Whether it spends its own money on parts and more drones. */
-  shops = true;
+  /**
+   * What it spends on: a test drone buys its list and then more drones, traffic and the
+   * player's drones buy the upgrades they can use and keep a buffer, or nothing at all.
+   */
+  buys: "drones" | "upgrades" | "nothing" = "drones";
   /** Whether it runs for the station when it sees a pirate. */
   flees = false;
   private fleeing = false;
@@ -430,6 +442,7 @@ export class DronePilot extends ShipPilot {
     controls.retro = false;
     controls.stabilize = false;
     this.correctingDirectly = false;
+    ship.aim = null;
 
     this.watchForPirates(sim);
     if (this.fleeing) {
@@ -491,11 +504,19 @@ export class DronePilot extends ShipPilot {
     }
   }
 
-  /** Buys the next thing on its list if it has the money. Once that's done, a new drone. */
+  /** Buys the next thing on its list if it has the money. A test drone then buys a new drone. */
   private shop(sim: Sim): void {
     const { ship } = this;
-    // It doesn't spend its owner's money without being asked.
-    if (ship.owner || !this.shops) return;
+    if (this.buys === "nothing") return;
+    if (this.buys === "upgrades") {
+      const next = sim.wishlistFor(ship)[0];
+      if (!next) return;
+      // The player's drones spend the player's money, so they leave it a bigger cushion.
+      const buffer = ship.owner ? sim.tuning.droneBuffer : sim.tuning.trafficBuffer;
+      if (sim.accountOf(ship).credits - sim.partPrice(next) >= buffer) sim.buyPart(ship, next);
+      return;
+    }
+    if (ship.owner) return;
     const allowed = this.wishlist.slice(0, sim.tuning.droneParts);
     const next = allowed.find((part) => !ship.parts.has(part));
     if (next) sim.buyPart(ship, next);

@@ -1,5 +1,5 @@
 import { Chatter } from "./chatter";
-import { PARTS, partFits, type PartId, type ShipModel } from "./parts";
+import { PARTS, partFits, partsInTier, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
 import { ClickPilot, DronePilot, FighterPilot } from "./pilot";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
@@ -119,14 +119,26 @@ export interface Rock extends Body {
   shape: number[];
 }
 
-/** A big freighter that comes from far away to buy the station's ore. It flies a fixed path in the station's axes. */
+/**
+ * A big freighter that comes from far away to buy the station's ore. It flies free of the
+ * POIs' carrying, matches the station's turn to lock on at its berth, and unlocks to leave.
+ */
 export interface Hauler {
-  stage: "arriving" | "loading" | "leaving";
+  stage: "arriving" | "docking" | "loading" | "undocking" | "leaving";
   /** Seconds into the current stage. */
   time: number;
-  /** How far along its path, in the station's axes: negative before the berth, positive after. */
-  offset: number;
-  prevOffset: number;
+  x: number;
+  y: number;
+  px: number;
+  py: number;
+  vx: number;
+  vy: number;
+  angle: number;
+  prevAngle: number;
+  /** Where it was relative to the berth when docking began, in the station's axes. */
+  dockOffset: { x: number; y: number; angle: number };
+  /** Which thrusters fired this tick, for drawing: forward and side push, and turning. */
+  thrust: { forward: number; side: number; turn: number };
   cargo: number;
   /** Seconds at the berth with nothing to load. */
   idle: number;
@@ -137,12 +149,33 @@ export const HAULER_LENGTH = 300;
 export const HAULER_WIDTH = 100;
 /** Beside the station, on the side away from the dock, its long side along the station's. */
 const HAULER_BERTH_X = -(STATION_HALF + 40 + HAULER_WIDTH / 2);
-const HAULER_APPROACH = 6000;
-const HAULER_APPROACH_SECONDS = 90;
+/** It starts this far out, on the side of the station away from the field. */
+const HAULER_APPROACH = 9000;
+/** The braking it plans for on the way in, and the most it can push in any direction. */
+const HAULER_BRAKE = 4;
+const HAULER_MAX_ACCEL = 6;
+const HAULER_MAX_SPEED = 300;
+/** Close and slow enough to begin matching the station's turn. */
+const HAULER_DOCK_DISTANCE = 40;
+const HAULER_DOCK_SPEED = 4;
+const HAULER_DOCK_SECONDS = 20;
+/** It stops this far out from its berth, then slides in sideways. */
+const HAULER_STANDOFF = 500;
+/** It keeps its center at least this far from the station's while flying. */
+const HAULER_CLEARANCE = 500;
+/** The least speed it keeps while heading for a detour point, so it flows around. */
+const HAULER_DETOUR_SPEED = 60;
+const HAULER_UNDOCK_SECONDS = 8;
+/** Push away from the station while undocking. */
+const HAULER_UNDOCK_PUSH = 2;
+const HAULER_TURN_RATE = 0.15;
 const HAULER_LEAVE_ACCEL = 3;
-const HAULER_GONE = 8000;
+/** Gone once this far from the station. */
+const HAULER_GONE = 15000;
 /** It leaves after waiting this long with nothing to load. */
 const HAULER_WAIT_SECONDS = 15;
+/** If it hasn't reached the berth by then, it docks from wherever it is. */
+const HAULER_ARRIVAL_LIMIT = 400;
 
 /** A point of interest: it orbits on a fixed path, spins, and carries nearby objects. */
 export interface Poi {
@@ -321,6 +354,8 @@ export class Sim {
   /** Ore the station has bought and is holding. */
   stationOre = 0;
   hauler: Hauler | null = null;
+  /** All the ore haulers have bought this game. It unlocks the shop's tiers. */
+  oreShipped = 0;
   /** Seconds until the next hauler sets out. */
   haulerTimer = 0;
   /** The pirate base's ore. It pays for pirates' repairs, rebuilds and new ships. */
@@ -371,6 +406,7 @@ export class Sim {
     this.stationAccount = { credits: this.tuning.stationStartCredits };
     this.stationOre = this.tuning.stationStartOre;
     this.hauler = null;
+    this.oreShipped = 0;
     this.haulerTimer = this.tuning.haulerFirst;
     this.pirateOre = this.tuning.pirateStartOre;
     this.lostTraffic = [];
@@ -474,7 +510,7 @@ export class Sim {
   /** Traffic flies as it starts out, and doesn't buy anything or grow in number. */
   private addTraffic(x: number, y: number, model: ShipModel): void {
     const pilot = this.makePilot(x, y, model);
-    pilot.shops = false;
+    pilot.buys = "upgrades";
     pilot.flees = true;
     if (model === "floater") pilot.ship.parts.add("gun2");
     this.traffic.push(pilot);
@@ -540,24 +576,74 @@ export class Sim {
 
   /** Where the hauler is in the world, now or as of the previous tick, and which way it points. */
   haulerSpot(previous = false): { x: number; y: number; angle: number } | null {
-    const { hauler, station } = this;
+    const { hauler } = this;
     if (!hauler) return null;
+    return previous
+      ? { x: hauler.px, y: hauler.py, angle: hauler.prevAngle }
+      : { x: hauler.x, y: hauler.y, angle: hauler.angle };
+  }
+
+  /** The berth: where a docked hauler sits and which way it points, now or a tick ago. */
+  haulerBerth(previous = false): { x: number; y: number; angle: number } {
+    const { station } = this;
     const rotation = previous ? station.prevRotation : station.rotation;
     const cx = previous ? station.px : station.x;
     const cy = previous ? station.py : station.y;
-    const along = previous ? hauler.prevOffset : hauler.offset;
-    const cos = Math.cos(rotation);
-    const sin = Math.sin(rotation);
     return {
-      x: cx + HAULER_BERTH_X * cos - along * sin,
-      y: cy + HAULER_BERTH_X * sin + along * cos,
+      x: cx + HAULER_BERTH_X * Math.cos(rotation),
+      y: cy + HAULER_BERTH_X * Math.sin(rotation),
       angle: rotation + Math.PI / 2,
     };
   }
 
+  /** Where a hauler stops before sliding into its berth: straight out from it. */
+  haulerStandoff(previous = false): { x: number; y: number } {
+    const { station } = this;
+    const rotation = previous ? station.prevRotation : station.rotation;
+    const cx = previous ? station.px : station.x;
+    const cy = previous ? station.py : station.y;
+    const out = HAULER_BERTH_X - HAULER_STANDOFF;
+    return { x: cx + out * Math.cos(rotation), y: cy + out * Math.sin(rotation) };
+  }
+
   /**
-   * A hauler sets out on a schedule. It comes in slowing all the way, loads ore above
-   * what the station keeps back, pays for it, then leaves slowly the other way.
+   * The point to steer for on the way to a goal: the goal itself, or if the straight line
+   * would pass through the station, a point beside the station on the near side.
+   */
+  private haulerWaypoint(fromX: number, fromY: number, toX: number, toY: number): { x: number; y: number; detour: boolean } {
+    const { station } = this;
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    const length2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((station.x - fromX) * dx + (station.y - fromY) * dy) / length2));
+    const cx = fromX + dx * t;
+    const cy = fromY + dy * t;
+    if (Math.hypot(cx - station.x, cy - station.y) >= HAULER_CLEARANCE) return { x: toX, y: toY, detour: false };
+    // Go around on the side the line already passes, or the hauler's own side if it's dead on.
+    let ox = cx - station.x;
+    let oy = cy - station.y;
+    if (Math.hypot(ox, oy) < 1) {
+      ox = -dy;
+      oy = dx;
+    }
+    const length = Math.hypot(ox, oy) || 1;
+    const reach = HAULER_CLEARANCE * 1.6;
+    return { x: station.x + (ox / length) * reach, y: station.y + (oy / length) * reach, detour: true };
+  }
+
+  /** The way out and in for haulers: from the station, away from the field. */
+  private haulerLane(): { x: number; y: number } {
+    const dx = this.station.x - this.field.x;
+    const dy = this.station.y - this.field.y;
+    const length = Math.hypot(dx, dy) || 1;
+    return { x: dx / length, y: dy / length };
+  }
+
+  /**
+   * A hauler sets out on a schedule. It comes in from beyond the station, braking all the
+   * way, then matches the station's turn and locks on. It loads ore above what the station
+   * keeps back and pays for it, then unlocks, pushes clear, turns away from the field and
+   * leaves slowly.
    */
   private moveHauler(dt: number): void {
     const { tuning } = this;
@@ -566,11 +652,25 @@ export class Sim {
       this.haulerTimer -= dt;
       if (this.haulerTimer > 0) return;
       this.haulerTimer = tuning.haulerInterval;
+      const berth = this.haulerBerth();
+      const lane = this.haulerLane();
+      const x = berth.x + lane.x * HAULER_APPROACH;
+      const y = berth.y + lane.y * HAULER_APPROACH;
+      const speed = Math.min(HAULER_MAX_SPEED, Math.sqrt(2 * HAULER_BRAKE * HAULER_APPROACH));
+      const angle = Math.atan2(-lane.y, -lane.x);
       this.hauler = {
         stage: "arriving",
         time: 0,
-        offset: -HAULER_APPROACH,
-        prevOffset: -HAULER_APPROACH,
+        x,
+        y,
+        px: x,
+        py: y,
+        vx: (this.station.x - this.station.px) / dt - lane.x * speed,
+        vy: (this.station.y - this.station.py) / dt - lane.y * speed,
+        angle,
+        prevAngle: angle,
+        dockOffset: { x: 0, y: 0, angle: 0 },
+        thrust: { forward: 0, side: 0, turn: 0 },
         cargo: 0,
         idle: 0,
         loadTimer: 0,
@@ -578,41 +678,162 @@ export class Sim {
       return;
     }
     const hauler = this.hauler;
-    hauler.prevOffset = hauler.offset;
+    hauler.px = hauler.x;
+    hauler.py = hauler.y;
+    hauler.prevAngle = hauler.angle;
     hauler.time += dt;
-    if (hauler.stage === "arriving") {
-      const left = Math.max(0, 1 - hauler.time / HAULER_APPROACH_SECONDS);
-      hauler.offset = -HAULER_APPROACH * left * left;
-      if (left > 0) return;
-      hauler.stage = "loading";
-      hauler.time = 0;
-      if (tuning.chatter) this.chatter.haulerBerthed(this);
-      return;
-    }
-    if (hauler.stage === "loading") {
-      const keep = Math.max(tuning.haulerKeep, tuning.stationReserveOre);
-      const canLoad = hauler.cargo < tuning.haulerCapacity && this.stationOre - keep >= 1;
-      if (!canLoad) {
-        hauler.idle += dt;
-      } else {
-        hauler.idle = 0;
-        hauler.loadTimer += dt * tuning.haulerLoadRate;
-        while (hauler.loadTimer >= 1 && hauler.cargo < tuning.haulerCapacity && this.stationOre - keep >= 1) {
-          hauler.loadTimer -= 1;
-          hauler.cargo++;
-          this.stationOre--;
-          this.stationAccount.credits += tuning.haulerPrice;
+    hauler.thrust = { forward: 0, side: 0, turn: 0 };
+    const wrap = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
+    const berth = this.haulerBerth();
+
+    switch (hauler.stage) {
+      case "arriving": {
+        // Flies its own course to a stop just outside its berth: the station's carrying doesn't touch it.
+        const standoff = this.haulerStandoff();
+        const standoffBefore = this.haulerStandoff(true);
+        const goalVx = (standoff.x - standoffBefore.x) / dt;
+        const goalVy = (standoff.y - standoffBefore.y) / dt;
+        const goal = this.haulerWaypoint(hauler.x, hauler.y, standoff.x, standoff.y);
+        const dx = goal.x - hauler.x;
+        const dy = goal.y - hauler.y;
+        const distance = Math.hypot(dx, dy) || 1;
+        const relVx = hauler.vx - goalVx;
+        const relVy = hauler.vy - goalVy;
+        const braking = Math.sqrt(2 * HAULER_BRAKE * distance);
+        const wanted = Math.min(HAULER_MAX_SPEED, goal.detour ? Math.max(HAULER_DETOUR_SPEED, braking) : braking);
+        let ax = ((dx / distance) * wanted - relVx) / dt;
+        let ay = ((dy / distance) * wanted - relVy) / dt;
+        const push = Math.hypot(ax, ay);
+        if (push > HAULER_MAX_ACCEL) {
+          ax *= HAULER_MAX_ACCEL / push;
+          ay *= HAULER_MAX_ACCEL / push;
         }
+        hauler.vx += ax * dt;
+        hauler.vy += ay * dt;
+        hauler.x += hauler.vx * dt;
+        hauler.y += hauler.vy * dt;
+        this.recordHaulerThrust(hauler, ax, ay);
+        const slow = Math.hypot(relVx, relVy) < HAULER_DOCK_SPEED;
+        const there = !goal.detour && distance < HAULER_DOCK_DISTANCE;
+        if ((there && slow) || hauler.time > HAULER_ARRIVAL_LIMIT) {
+          this.startDocking(hauler, berth);
+        }
+        return;
       }
-      if (hauler.cargo >= tuning.haulerCapacity || hauler.idle >= HAULER_WAIT_SECONDS) {
-        hauler.stage = "leaving";
+      case "docking": {
+        // Rotation and side thrusters ease it onto the berth while matching the station's turn.
+        const share = Math.min(1, hauler.time / HAULER_DOCK_SECONDS);
+        const left = 1 - share * share * (3 - 2 * share);
+        const rotation = this.station.rotation;
+        const ox = hauler.dockOffset.x * left;
+        const oy = hauler.dockOffset.y * left;
+        hauler.x = berth.x + ox * Math.cos(rotation) - oy * Math.sin(rotation);
+        hauler.y = berth.y + ox * Math.sin(rotation) + oy * Math.cos(rotation);
+        hauler.angle = berth.angle + hauler.dockOffset.angle * left;
+        hauler.vx = (hauler.x - hauler.px) / dt;
+        hauler.vy = (hauler.y - hauler.py) / dt;
+        if (share < 1) {
+          hauler.thrust.side = -Math.sign(hauler.dockOffset.x) || 0;
+          hauler.thrust.turn = -Math.sign(hauler.dockOffset.angle) || 0;
+          return;
+        }
+        hauler.stage = "loading";
         hauler.time = 0;
-        if (tuning.chatter) this.chatter.haulerLeaving(this, hauler.cargo);
+        if (tuning.chatter) this.chatter.haulerBerthed(this);
+        return;
       }
-      return;
+      case "loading": {
+        hauler.x = berth.x;
+        hauler.y = berth.y;
+        hauler.angle = berth.angle;
+        hauler.vx = (hauler.x - hauler.px) / dt;
+        hauler.vy = (hauler.y - hauler.py) / dt;
+        const keep = Math.max(tuning.haulerKeep, tuning.stationReserveOre);
+        const canLoad = hauler.cargo < tuning.haulerCapacity && this.stationOre - keep >= 1;
+        if (!canLoad) {
+          hauler.idle += dt;
+        } else {
+          hauler.idle = 0;
+          hauler.loadTimer += dt * tuning.haulerLoadRate;
+          while (hauler.loadTimer >= 1 && hauler.cargo < tuning.haulerCapacity && this.stationOre - keep >= 1) {
+            hauler.loadTimer -= 1;
+            hauler.cargo++;
+            this.stationOre--;
+            this.stationAccount.credits += tuning.haulerPrice;
+            this.shipOre();
+          }
+        }
+        if (hauler.cargo >= tuning.haulerCapacity || hauler.idle >= HAULER_WAIT_SECONDS) {
+          hauler.stage = "undocking";
+          hauler.time = 0;
+          if (tuning.chatter) this.chatter.haulerLeaving(this, hauler.cargo);
+        }
+        return;
+      }
+      case "undocking": {
+        // Unlocked: it keeps the motion it had, stops its turn and pushes clear of the station.
+        const away = hauler.angle + Math.PI / 2;
+        const ax = Math.cos(away) * HAULER_UNDOCK_PUSH;
+        const ay = Math.sin(away) * HAULER_UNDOCK_PUSH;
+        hauler.vx += ax * dt;
+        hauler.vy += ay * dt;
+        hauler.x += hauler.vx * dt;
+        hauler.y += hauler.vy * dt;
+        hauler.thrust.side = 1;
+        if (hauler.time >= HAULER_UNDOCK_SECONDS) {
+          hauler.stage = "leaving";
+          hauler.time = 0;
+        }
+        return;
+      }
+      case "leaving": {
+        // Turns toward open space, away from the field and around the station, and only then accelerates.
+        const lane = this.haulerLane();
+        const far = { x: this.station.x + lane.x * HAULER_GONE * 2, y: this.station.y + lane.y * HAULER_GONE * 2 };
+        const goal = this.haulerWaypoint(hauler.x, hauler.y, far.x, far.y);
+        const want = Math.atan2(goal.y - hauler.y, goal.x - hauler.x);
+        const off = wrap(want - hauler.angle);
+        const turn = Math.max(-HAULER_TURN_RATE * dt, Math.min(HAULER_TURN_RATE * dt, off));
+        hauler.angle += turn;
+        if (Math.abs(off) > 0.01) hauler.thrust.turn = Math.sign(off);
+        if (Math.abs(off) < 0.35) {
+          const ax = Math.cos(hauler.angle) * HAULER_LEAVE_ACCEL;
+          const ay = Math.sin(hauler.angle) * HAULER_LEAVE_ACCEL;
+          hauler.vx += ax * dt;
+          hauler.vy += ay * dt;
+          hauler.thrust.forward = 1;
+        }
+        hauler.x += hauler.vx * dt;
+        hauler.y += hauler.vy * dt;
+        if (Math.hypot(hauler.x - this.station.x, hauler.y - this.station.y) > HAULER_GONE) {
+          this.hauler = null;
+        }
+        return;
+      }
     }
-    hauler.offset = 0.5 * HAULER_LEAVE_ACCEL * hauler.time * hauler.time;
-    if (hauler.offset > HAULER_GONE) this.hauler = null;
+  }
+
+  private startDocking(hauler: Hauler, berth: { x: number; y: number; angle: number }): void {
+    const rotation = this.station.rotation;
+    const dx = hauler.x - berth.x;
+    const dy = hauler.y - berth.y;
+    hauler.dockOffset = {
+      x: dx * Math.cos(rotation) + dy * Math.sin(rotation),
+      y: -dx * Math.sin(rotation) + dy * Math.cos(rotation),
+      angle: Math.atan2(Math.sin(hauler.angle - berth.angle), Math.cos(hauler.angle - berth.angle)),
+    };
+    hauler.stage = "docking";
+    hauler.time = 0;
+  }
+
+  /** Which way its thrusters push, in its own axes, for drawing the flames. */
+  private recordHaulerThrust(hauler: Hauler, ax: number, ay: number): void {
+    const cos = Math.cos(hauler.angle);
+    const sin = Math.sin(hauler.angle);
+    const forward = ax * cos + ay * sin;
+    const side = -ax * sin + ay * cos;
+    hauler.thrust.forward = Math.abs(forward) > 0.3 ? Math.sign(forward) : 0;
+    hauler.thrust.side = Math.abs(side) > 0.3 ? Math.sign(side) : 0;
   }
 
   /** Whether the player picks up a radio line: anything in range, and maydays from anywhere. */
@@ -733,14 +954,47 @@ export class Sim {
     return Math.round(part.price * this.tuning.partPriceScale);
   }
 
+  /** How much ore haulers must have bought before a shop tier opens. */
+  tierThreshold(tier: number): number {
+    if (!this.tuning.stationUnlocks || tier === 0) return 0;
+    return tier === 1 ? this.tuning.unlockTier1 : this.tuning.unlockTier2;
+  }
+
+  /** Whether the station's shop has this part, or drones (the third tier), to sell yet. */
+  unlocked(id: PartId | "drone"): boolean {
+    const tier = id === "drone" ? 2 : PARTS.find((part) => part.id === id)!.tier;
+    return this.oreShipped >= this.tierThreshold(tier);
+  }
+
+  /** One more ore shipped. When that opens a tier, the station says so. */
+  private shipOre(): void {
+    const before = this.oreShipped;
+    this.oreShipped++;
+    if (!this.tuning.stationUnlocks || !this.tuning.chatter) return;
+    for (const tier of [1, 2] as const) {
+      const threshold = this.tierThreshold(tier);
+      if (before < threshold && this.oreShipped >= threshold) {
+        const names = partsInTier(tier).map((part) => part.label.toLowerCase());
+        if (tier === 2) names.push("drones");
+        this.chatter.unlocked(this, names);
+      }
+    }
+  }
+
+  /** The parts this ship would buy next, in order, if it could afford them and the shop had them. */
+  wishlistFor(ship: Ship): PartId[] {
+    return TRAFFIC_BUY_ORDER[ship.model].filter((id) => !ship.parts.has(id));
+  }
+
   /** Parts are only sold in the dock. Returns whether the sale went through. */
   buyPart(ship: Ship, id: PartId): boolean {
     const price = this.partPrice(id);
     const part = PARTS.find((candidate) => candidate.id === id)!;
-    if (!partFits(part, ship.model)) return false;
-    if (!this.isDocked(ship) || ship.parts.has(id) || ship.credits < price) return false;
+    if (!partFits(part, ship.model) || !this.unlocked(id)) return false;
+    const account = this.accountOf(ship);
+    if (!this.isDocked(ship) || ship.parts.has(id) || account.credits < price) return false;
     if (!this.hasOreFor(price)) return false;
-    this.chargeForService(ship, price);
+    this.chargeForService(account, price);
     ship.parts.add(id);
     if (id === "retro" && ship === this.ship) this.tuning.retro = true;
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
@@ -762,12 +1016,16 @@ export class Sim {
     const { tuning } = this;
     if (!this.isDocked(buyer) || buyer.credits < tuning.dronePrice) return null;
     if (this.drones.length >= tuning.droneLimit || !this.hasOreFor(tuning.dronePrice)) return null;
+    if (!this.unlocked("drone")) return null;
     this.chargeForService(buyer, tuning.dronePrice);
     const dock = this.dockPoint();
     this.events.push({ type: "sale", x: dock.x, y: dock.y });
     const drone = this.addDrone(dock.x, dock.y);
-    // The player's drones work for the player. Others' drones work for themselves.
-    if (buyer === this.ship) drone.ship.owner = buyer;
+    // The player's drones work for the player, and buy upgrades from what it can spare.
+    if (buyer === this.ship) {
+      drone.ship.owner = buyer;
+      drone.buys = "upgrades";
+    }
     return drone;
   }
 

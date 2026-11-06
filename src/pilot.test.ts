@@ -21,6 +21,7 @@ const SOLO = {
   stationReserveOre: Infinity,
   detectSeconds: 0,
   haulers: false,
+  stationUnlocks: false,
 };
 
 function run(sim: Sim, seconds: number, each?: () => void): void {
@@ -211,6 +212,22 @@ describe("drone", () => {
   }, 30000);
 
   describe("a drone the player bought", () => {
+    it("buys upgrades from the player's money, leaving the player a buffer", () => {
+      const sim = new Sim(1, { ...SOLO, testDrones: 0, rockCount: 0, droneBuffer: 500, dronePrice: 500 });
+      placeInDock(sim, sim.ship);
+      sim.ship.credits = 500;
+      const drone = sim.buyDrone(sim.ship)!;
+      placeInDock(sim, drone.ship);
+      sim.ship.credits = 500 + sim.partPrice("reverse") - 1;
+      run(sim, 1, () => placeInDock(sim, drone.ship));
+      expect(drone.ship.parts.size).toBe(0);
+      sim.ship.credits = 500 + sim.partPrice("reverse");
+      run(sim, 1, () => placeInDock(sim, drone.ship));
+      expect(drone.ship.parts.has("reverse")).toBe(true);
+      expect(sim.ship.credits).toBe(500);
+      expect(drone.ship.credits).toBe(0);
+    });
+
     function owned(extra: Partial<typeof SOLO> = {}): Sim {
       const sim = new Sim(1, { ...SOLO, testDrones: 0, droneLimit: 5, dronePrice: 500, ...extra });
       placeInDock(sim, sim.ship);
@@ -242,13 +259,12 @@ describe("drone", () => {
       expect(ship.upkeep).toBe(20);
     });
 
-    it("doesn't spend the player's money on parts or drones", () => {
-      const sim = owned({ droneParts: 5 });
+    it("never buys drones, and never takes the player below the buffer", () => {
+      const sim = owned({ droneParts: 5, droneBuffer: 500 });
       sim.ship.credits = 5000;
       run(sim, 2);
-      expect(sim.drones[0].ship.parts.size).toBe(0);
       expect(sim.drones.length).toBe(1);
-      expect(sim.ship.credits).toBe(5000);
+      expect(sim.ship.credits).toBeGreaterThanOrEqual(500);
     });
 
     it("leaves other drones keeping their own money", () => {
@@ -270,16 +286,49 @@ describe("drone", () => {
       expect(sim.traffic[1].ship.parts.has("gun2")).toBe(true);
     });
 
-    it("never buys anything", () => {
-      const sim = new Sim(1, { ...SOLO, testDrones: 0, trafficRacers: 1, rockCount: 0 });
+    it("buys the upgrades it can use, never drones, and keeps a buffer", () => {
+      const sim = new Sim(1, { ...SOLO, testDrones: 0, trafficRacers: 1, rockCount: 0, trafficBuffer: 400 });
       const { ship } = sim.traffic[0];
       placeInDock(sim, ship);
-      ship.credits = 100000;
-      run(sim, 2);
+      ship.credits = sim.partPrice("reverse") + 399;
+      run(sim, 1, () => placeInDock(sim, ship));
       expect(ship.parts.size).toBe(0);
+      ship.credits = 100000;
+      run(sim, 2, () => placeInDock(sim, ship));
+      expect([...ship.parts].sort()).toEqual(["reverse", "spinStabilizer", "strafe"]);
       expect(sim.traffic.length).toBe(1);
       expect(sim.drones.length).toBe(0);
     });
+
+    it("new-ship traffic buys a tractor and a turret first", () => {
+      const sim = new Sim(1, { ...SOLO, testDrones: 0, trafficFloaters: 1, rockCount: 0 });
+      const { ship } = sim.traffic[0];
+      placeInDock(sim, ship);
+      ship.credits = sim.partPrice("tractor") + sim.partPrice("turret") + 400;
+      run(sim, 2, () => placeInDock(sim, ship));
+      expect(ship.parts.has("tractor")).toBe(true);
+      expect(ship.parts.has("turret")).toBe(true);
+      expect(ship.parts.has("reverse")).toBe(false);
+    });
+
+    it("traffic with a turret mines with it, aiming without turning", () => {
+      const sim = new Sim(1, {
+        ...SOLO,
+        testDrones: 0,
+        trafficFloaters: 1,
+        rockCount: 60,
+        fieldRadius: 1200,
+        trafficBuffer: 1e9,
+      });
+      const pilot = sim.traffic[0];
+      pilot.ship.parts.add("turret");
+      let turned = 0;
+      run(sim, 240, () => {
+        if (pilot.task === "shooting") turned = Math.max(turned, Math.abs(pilot.ship.turretAngle));
+      });
+      expect(pilot.ship.trips + pilot.ship.ore).toBeGreaterThan(0);
+      expect(turned).toBeGreaterThan(0.3);
+    }, 60000);
 
     it("doesn't count against the player's drone limit", () => {
       const sim = new Sim(1, { ...SOLO, testDrones: 0, trafficRacers: 2, droneLimit: 1, rockCount: 0 });
@@ -774,6 +823,37 @@ describe("pirate and defender", () => {
     });
   });
 
+  describe("shop unlocks", () => {
+    it("tiers open as haulers buy ore, and the station announces them", () => {
+      const sim = arena({ stationUnlocks: true, unlockTier1: 3, unlockTier2: 5, haulers: false });
+      placeInDock(sim, sim.ship);
+      sim.ship.credits = 100000;
+      expect(sim.unlocked("spinStabilizer")).toBe(true);
+      expect(sim.buyPart(sim.ship, "reverse")).toBe(false);
+      expect(sim.unlocked("drone")).toBe(false);
+      const ship = (sim as unknown as { shipOre(): void });
+      const lines: string[] = [];
+      for (let i = 0; i < 3; i++) ship.shipOre.call(sim);
+      for (const event of sim.events) if (event.type === "chatter") lines.push(event.text);
+      expect(sim.buyPart(sim.ship, "reverse")).toBe(true);
+      expect(sim.unlocked("tractor")).toBe(false);
+      for (let i = 0; i < 2; i++) ship.shipOre.call(sim);
+      for (const event of sim.events) if (event.type === "chatter") lines.push(event.text);
+      expect(sim.unlocked("tractor")).toBe(true);
+      expect(sim.unlocked("drone")).toBe(true);
+      expect(lines.some((line) => line.includes("reverse thruster"))).toBe(true);
+      expect(lines.some((line) => line.includes("drones"))).toBe(true);
+    });
+
+    it("the turret only fits the new ship", () => {
+      const sim = arena();
+      placeInDock(sim, sim.ship);
+      sim.ship.credits = 100000;
+      expect(sim.ship.model).toBe("racer");
+      expect(sim.buyPart(sim.ship, "turret")).toBe(false);
+    });
+  });
+
   describe("haulers", () => {
     function haulerWorld(extra: Partial<typeof SOLO> = {}): Sim {
       return arena({
@@ -791,51 +871,82 @@ describe("pirate and defender", () => {
       });
     }
 
-    it("comes in slowing all the way, and stops beside the station", () => {
+    /** Runs until the hauler reaches a stage, or the time runs out. Returns the seconds taken. */
+    function until(sim: Sim, stage: string, limit: number): number {
+      let seconds = 0;
+      while (sim.hauler?.stage !== stage && seconds < limit) {
+        sim.step();
+        sim.events.length = 0;
+        seconds += TICK;
+      }
+      return seconds;
+    }
+
+    it("comes in from away from the field, slowing all the way, then locks on beside the station", () => {
       const sim = haulerWorld();
-      run(sim, 9);
-      expect(sim.hauler).toBeNull();
-      run(sim, 2);
-      expect(sim.hauler?.stage).toBe("arriving");
+      until(sim, "arriving", 20);
+      const start = sim.haulerSpot()!;
+      const fromField = Math.hypot(start.x - sim.field.x, start.y - sim.field.y);
+      expect(fromField).toBeGreaterThan(Math.hypot(sim.station.x - sim.field.x, sim.station.y - sim.field.y));
       const speeds: number[] = [];
-      run(sim, 89, () => {
-        const now = sim.haulerSpot();
-        const before = sim.haulerSpot(true);
-        if (now && before) speeds.push(Math.hypot(now.x - before.x, now.y - before.y) / TICK);
-      });
-      expect(sim.hauler?.stage).toBe("loading");
-      expect(speeds[0]).toBeGreaterThan(speeds[Math.floor(speeds.length / 2)]);
-      expect(speeds[speeds.length - 1]).toBeLessThan(2);
+      let seconds = 0;
+      while (sim.hauler?.stage === "arriving" && seconds < 400) {
+        sim.step();
+        sim.events.length = 0;
+        seconds += TICK;
+        const now = sim.haulerSpot()!;
+        const before = sim.haulerSpot(true)!;
+        speeds.push(Math.hypot(now.x - before.x, now.y - before.y) / TICK);
+      }
+      expect(sim.hauler?.stage).toBe("docking");
+      expect(speeds[10]).toBeGreaterThan(speeds[Math.floor(speeds.length / 2)]);
+      until(sim, "loading", 40);
       const spot = sim.haulerSpot()!;
-      const gap = Math.hypot(spot.x - sim.station.x, spot.y - sim.station.y);
-      expect(gap).toBeLessThan(300);
+      const berth = sim.haulerBerth();
+      expect(Math.hypot(spot.x - berth.x, spot.y - berth.y)).toBeLessThan(1);
       const dock = sim.dockPoint();
       expect(Math.hypot(spot.x - dock.x, spot.y - dock.y)).toBeGreaterThan(400);
     }, 30000);
 
     it("loads only what the station has beyond what it keeps, pays for it, then leaves and is gone", () => {
       const sim = haulerWorld();
-      run(sim, 105);
+      until(sim, "loading", 400);
+      until(sim, "undocking", 60);
       expect(sim.stationOre).toBe(60);
       expect(sim.hauler?.cargo).toBe(40);
       expect(sim.stationAccount.credits).toBe(40 * 15);
-      run(sim, 20);
-      expect(sim.hauler?.stage).toBe("leaving");
-      run(sim, 120);
+      until(sim, "leaving", 40);
+      let seconds = 0;
+      while (sim.hauler && seconds < 400) {
+        sim.step();
+        sim.events.length = 0;
+        seconds += TICK;
+      }
       expect(sim.hauler).toBeNull();
+    }, 30000);
+
+    it("once it unlocks, the station's turning no longer carries it", () => {
+      const sim = haulerWorld();
+      until(sim, "undocking", 500);
+      sim.step();
+      const spot = sim.haulerSpot()!;
+      const before = sim.haulerSpot(true)!;
+      // Undocking: its turn stopped the moment it unlocked.
+      expect(spot.angle).toBeCloseTo(before.angle, 6);
     }, 30000);
 
     it("leaves straight away once full", () => {
       const sim = haulerWorld({ stationStartOre: 1000 });
-      run(sim, 106);
+      until(sim, "loading", 400);
+      const seconds = until(sim, "undocking", 60);
       expect(sim.hauler?.cargo).toBe(50);
-      expect(sim.hauler?.stage).toBe("leaving");
+      expect(seconds).toBeLessThan(6);
     }, 30000);
 
     it("says hello at the berth and goodbye when it leaves", () => {
       const sim = haulerWorld();
       const lines: string[] = [];
-      run(sim, 130, () => {
+      run(sim, 220, () => {
         for (const event of sim.events) if (event.type === "chatter") lines.push(`${event.name}: ${event.text}`);
       });
       expect(lines.some((line) => line.startsWith("Long Haul: At your berth"))).toBe(true);

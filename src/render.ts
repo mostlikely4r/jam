@@ -507,11 +507,22 @@ export class Renderer {
     const side = HAULER_WIDTH / 2;
     ctx.save();
     ctx.translate(x, y);
-    ctx.rotate(lerp(before.angle, now.angle, alpha));
+    ctx.rotate(before.angle + Math.atan2(Math.sin(now.angle - before.angle), Math.cos(now.angle - before.angle)) * alpha);
 
-    // Braking on the way in, pushing on the way out.
-    if (hauler.stage === "arriving") this.drawFlame(half + 4, 0, 0, 3, 14);
-    if (hauler.stage === "leaving") this.drawFlame(-half - 4, 0, Math.PI, 3, 14);
+    // Main engines at the back, braking jets at the front, and side and turning jets along it.
+    const { forward, side: push, turn } = hauler.thrust;
+    if (forward > 0) this.drawFlame(-half - 4, 0, Math.PI, 3, 14);
+    if (forward < 0) this.drawFlame(half + 4, 0, 0, 3, 14);
+    if (push !== 0) {
+      const outward = push > 0 ? -Math.PI / 2 : Math.PI / 2;
+      const y = push > 0 ? -side - 2 : side + 2;
+      this.drawFlame(-half * 0.6, y, outward, 1.5, 6);
+      this.drawFlame(half * 0.6, y, outward, 1.5, 6);
+    }
+    if (turn !== 0) {
+      this.drawFlame(half - 10, turn > 0 ? -side - 2 : side + 2, turn > 0 ? -Math.PI / 2 : Math.PI / 2, 1.2, 5);
+      this.drawFlame(-half + 10, turn > 0 ? side + 2 : -side - 2, turn > 0 ? Math.PI / 2 : -Math.PI / 2, 1.2, 5);
+    }
 
     ctx.fillStyle = "#59647a";
     ctx.fillRect(-half, -side, HAULER_LENGTH, HAULER_WIDTH);

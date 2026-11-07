@@ -10,12 +10,27 @@ const MAX_FRAME_SECONDS = 0.1;
 /** Beyond this, other ships' work can't be heard. */
 const HEARING_DISTANCE = 1500;
 
+/** Panel sections the player has folded away. */
+const COLLAPSED_KEY = "space-game-panel-collapsed";
+const collapsed = new Set<string>(loadCollapsed());
+
+function loadCollapsed(): string[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]");
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
 function loadTuning(): Tuning {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
     const tuning: Tuning = { ...DEFAULTS };
     for (const key of Object.keys(DEFAULTS) as (keyof Tuning)[]) {
-      if (key in saved) Object.assign(tuning, { [key]: saved[key] });
+      // JSON has no infinity: it saves as null.
+      const value = saved[key] === null && DEFAULTS[key] === Infinity ? Infinity : saved[key];
+      if (key in saved && value !== null) Object.assign(tuning, { [key]: value });
     }
     return tuning;
   } catch {
@@ -138,8 +153,20 @@ function buildPanel(): void {
 
   for (const group of GROUPS) {
     const heading = document.createElement("h2");
+    const body = document.createElement("div");
+    const open = !collapsed.has(group.title);
+    heading.className = open ? "group" : "group closed";
     heading.textContent = group.title;
-    panel.append(heading);
+    body.hidden = !open;
+    heading.addEventListener("click", () => {
+      if (collapsed.has(group.title)) collapsed.delete(group.title);
+      else collapsed.add(group.title);
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
+      body.hidden = collapsed.has(group.title);
+      heading.className = body.hidden ? "group closed" : "group";
+    });
+    panel.append(heading, body);
+
     for (const slider of group.sliders) {
       const label = document.createElement("label");
       const row = document.createElement("div");
@@ -148,30 +175,49 @@ function buildPanel(): void {
       name.textContent = slider.label;
       const value = document.createElement("span");
       value.className = "value";
-      value.textContent = String(tuning[slider.key]);
+      const shown = (n: number) => (n === Infinity ? "∞" : String(n));
+      value.textContent = shown(tuning[slider.key]);
       row.append(name, value);
 
+      // With no limit allowed, one step past the maximum stands for infinity.
+      const top = slider.infinite ? slider.max + slider.step : slider.max;
       const input = document.createElement("input");
       input.type = "range";
       input.min = String(slider.min);
-      input.max = String(slider.max);
+      input.max = String(top);
       input.step = String(slider.step);
-      input.value = String(tuning[slider.key]);
+      input.value = String(Math.min(tuning[slider.key], top));
       input.addEventListener("input", () => {
-        tuning[slider.key] = Number(input.value);
-        value.textContent = input.value;
+        const picked = Number(input.value);
+        tuning[slider.key] = slider.infinite && picked >= top ? Infinity : picked;
+        value.textContent = shown(tuning[slider.key]);
         saveTuning();
       });
       // Hand the keyboard straight back to the ship.
       input.addEventListener("change", () => input.blur());
       label.append(row, input);
-      panel.append(label);
+      body.append(label);
+    }
+
+    for (const { key, label: text } of group.switches ?? []) {
+      const toggle = document.createElement("label");
+      toggle.className = "toggle";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = tuning[key];
+      box.addEventListener("change", () => {
+        tuning[key] = box.checked;
+        saveTuning();
+        box.blur();
+      });
+      toggle.append(box, ` ${text}`);
+      body.append(toggle);
     }
 
     if (group.title === "Parts") {
       const note = document.createElement("p");
       note.textContent = "Your ship's parts, free for testing:";
-      panel.append(note);
+      body.append(note);
       for (const part of PARTS) {
         if (!partFits(part, sim.ship.model)) continue;
         const toggle = document.createElement("label");
@@ -185,59 +231,14 @@ function buildPanel(): void {
           box.blur();
         });
         toggle.append(box, ` ${part.label}`);
-        panel.append(toggle);
-      }
-    }
-
-    if (group.title === "New ship") {
-      const switches = [
-        { key: "floaterStart", label: "Start in the new ship (on restart)" },
-      ] as const;
-      for (const { key, label: text } of switches) {
-        const toggle = document.createElement("label");
-        toggle.className = "toggle";
-        const box = document.createElement("input");
-        box.type = "checkbox";
-        box.checked = tuning[key];
-        box.addEventListener("change", () => {
-          tuning[key] = box.checked;
-          saveTuning();
-          box.blur();
-        });
-        toggle.append(box, ` ${text}`);
-        panel.append(toggle);
-      }
-    }
-
-    if (group.title === "Traffic") {
-      const switches = [
-        { key: "showTraffic", label: "Show traffic readouts and arrows" },
-        { key: "trafficFlees", label: "Traffic flees from pirates" },
-        { key: "sightLines", label: "Rocks block sight" },
-        { key: "chatter", label: "Radio chatter" },
-        { key: "haulers", label: "Haulers buy station ore" },
-        { key: "stationUnlocks", label: "Shop stock unlocks as ore is shipped" },
-      ] as const;
-      for (const { key, label: text } of switches) {
-        const toggle = document.createElement("label");
-        toggle.className = "toggle";
-        const box = document.createElement("input");
-        box.type = "checkbox";
-        box.checked = tuning[key];
-        box.addEventListener("change", () => {
-          tuning[key] = box.checked;
-          saveTuning();
-          box.blur();
-        });
-        toggle.append(box, ` ${text}`);
-        panel.append(toggle);
+        body.append(toggle);
       }
     }
 
     if (group.title === "Thrusters") {
       const note = document.createElement("p");
       note.textContent = "Switches for your ship. Reverse and strafe also need their parts.";
-      panel.append(note);
+      body.append(note);
       for (const thruster of THRUSTERS) {
         const toggle = document.createElement("label");
         toggle.className = "toggle";
@@ -250,7 +251,7 @@ function buildPanel(): void {
           box.blur();
         });
         toggle.append(box, ` ${thruster.label}`);
-        panel.append(toggle);
+        body.append(toggle);
       }
     }
   }
@@ -270,6 +271,14 @@ function buildPanel(): void {
     setTimeout(() => (copy.textContent = "Copy values"), 1000);
   });
   panel.append(reset, copy);
+}
+
+/** What the ship's motion is measured against, for the status line. */
+function frameText(): string {
+  const { frame, frameShare } = sim.ship;
+  if (frameShare <= 0) return "Free of any POI";
+  if (frameShare >= 1) return `Moving relative to ${frame.name}`;
+  return `Moving partly relative to ${frame.name} (${Math.round(frameShare * 100)}%)`;
 }
 
 function readControls(): void {
@@ -433,7 +442,7 @@ function frame(now: number): void {
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
       `Ore   ${sim.ship.ore}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
       `Parts ${partList(sim.ship)}  Weight ${sim.shipWeight(sim.ship).toFixed(2)}`,
-      `Moving relative to ${sim.ship.frame.name}${sim.isDocked() ? "  DOCKED" : ""}${sim.clickPilot.active ? `  Click order: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < MAX_HULL && !sim.hasOreFor(tuning.repairCost) ? "  No repairs: the station is out of ore" : ""}`,
+      `${frameText()}${sim.isDocked() ? "  DOCKED" : ""}${sim.clickPilot.active ? `  Click order: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < MAX_HULL && !sim.hasOreFor(tuning.repairCost) ? "  No repairs: the station is out of ore" : ""}`,
       `Rocks ${sim.rocks.length}  Wrecks ${sim.ship.wrecks}`,
       ...sim.drones.flatMap((drone, index) => {
         const { ship } = drone;

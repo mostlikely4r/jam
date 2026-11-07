@@ -26,6 +26,16 @@ export const DEFAULTS = {
 
   rockCount: 260,
   fieldRadius: 2600,
+  /**
+   * Within this distance of a POI's edge, the nearest POI carries things fully. Beyond
+   * it, its pull falls off linearly to nothing at the second distance. Infinity is the
+   * old way: the nearest POI carries everything, everywhere.
+   */
+  poiFullRange: Infinity,
+  poiNoneRange: Infinity,
+  showPoiZones: false,
+  /** Loose ore this far from every POI's edge and every ship is gone for good. */
+  oreForgetDistance: 6000,
   rockDrift: 12,
   rockInflow: 1,
   fieldOrbitRadius: 20000,
@@ -54,6 +64,8 @@ export const DEFAULTS = {
   clickSpeed: 80,
   /** A drag order's line is how far the destination drifts in this many seconds. */
   dragSeconds: 4,
+  /** A drawn drift is measured against what carries things at the spot, not the ship's motion. */
+  dragAbsolute: false,
   gun2ShotsPerSecond: 2,
   preciseChance: 0.25,
   turretTurnSpeed: 150,
@@ -130,15 +142,27 @@ export const THRUSTERS: { id: ThrusterId; label: string }[] = [
   { id: "thrusterRotateRight", label: "Rotate right (E)" },
 ];
 
+export type SwitchKey = {
+  [K in keyof Tuning]: Tuning[K] extends boolean ? K : never;
+}[keyof Tuning];
+
 export interface Slider {
   key: TuningKey;
   label: string;
   min: number;
   max: number;
   step: number;
+  /** One step past the maximum means no limit at all. */
+  infinite?: boolean;
 }
 
-export const GROUPS: { title: string; sliders: Slider[] }[] = [
+export interface Group {
+  title: string;
+  sliders: Slider[];
+  switches?: { key: SwitchKey; label: string }[];
+}
+
+export const GROUPS: Group[] = [
   {
     title: "Thrusters",
     sliders: [
@@ -172,6 +196,27 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
       { key: "fieldOrbitRadius", label: "Orbit size (on restart)", min: 0, max: 60000, step: 1000 },
       { key: "fieldOrbitPeriod", label: "Orbit time (s, 0 = off)", min: 0, max: 7200, step: 60 },
       { key: "fieldRotationPeriod", label: "Rotation time (s, 0 = off)", min: 0, max: 3600, step: 30 },
+    ],
+  },
+  {
+    title: "POI carrying",
+    sliders: [
+      { key: "poiFullRange", label: "Fully carried within (from a POI's edge)", min: 0, max: 10000, step: 100, infinite: true },
+      { key: "poiNoneRange", label: "Not carried beyond", min: 0, max: 20000, step: 100, infinite: true },
+    ],
+    switches: [{ key: "showPoiZones", label: "Show POI zones" }],
+  },
+  {
+    title: "Loose ore",
+    sliders: [
+      {
+        key: "oreForgetDistance",
+        label: "Gone when this far from every POI and ship",
+        min: 1000,
+        max: 20000,
+        step: 500,
+        infinite: true,
+      },
     ],
   },
   {
@@ -221,6 +266,10 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
       { key: "tractorPull", label: "Tractor pull strength", min: 10, max: 600, step: 10 },
       { key: "tractorSpeed", label: "Tractor ore speed", min: 10, max: 400, step: 10 },
     ],
+    switches: [
+      { key: "floaterStart", label: "Start in the new ship (on restart)" },
+      { key: "dragAbsolute", label: "Drag drift is against the POI, not your motion" },
+    ],
   },
   {
     title: "Traffic",
@@ -228,6 +277,14 @@ export const GROUPS: { title: string; sliders: Slider[] }[] = [
       { key: "trafficRacers", label: "First ships (on restart)", min: 0, max: 10, step: 1 },
       { key: "trafficFloaters", label: "New ships (on restart)", min: 0, max: 10, step: 1 },
       { key: "chatterRange", label: "Radio range", min: 300, max: 5000, step: 100 },
+    ],
+    switches: [
+      { key: "showTraffic", label: "Show traffic readouts and arrows" },
+      { key: "trafficFlees", label: "Traffic flees from pirates" },
+      { key: "sightLines", label: "Rocks block sight" },
+      { key: "chatter", label: "Radio chatter" },
+      { key: "haulers", label: "Haulers buy station ore" },
+      { key: "stationUnlocks", label: "Shop stock unlocks as ore is shipped" },
     ],
   },
   {

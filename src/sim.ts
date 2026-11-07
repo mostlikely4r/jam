@@ -55,7 +55,7 @@ export interface Controls {
   stabilize: boolean;
 }
 
-interface Body {
+export interface Body {
   x: number;
   y: number;
   /** Velocity relative to the nearest POI, which also carries the body along. */
@@ -88,8 +88,12 @@ export interface Ship extends Body {
   trips: number;
   wrecks: number;
   damageTaken: number;
-  /** The POI this ship currently moves relative to. */
+  /** The POI that carries this ship the most, or the nearest if none does. */
   frame: Poi;
+  /** How much of that POI's motion carried the ship on the last tick, from 0 to 1. */
+  frameShare: number;
+  /** How far the POIs turned the ship on the last tick. */
+  carriedTurn: number;
   ore: number;
   unloadTimer: number;
   angle: number;
@@ -868,7 +872,7 @@ export class Sim {
    */
   orderMove(x: number, y: number, vx = 0, vy = 0): boolean {
     if (!this.ship.parts.has("clickMove")) return false;
-    this.clickPilot.moveTo(this, x, y, vx, vy);
+    this.clickPilot.moveTo(this, x, y, vx, vy, this.tuning.dragAbsolute);
     return true;
   }
 
@@ -916,6 +920,8 @@ export class Sim {
       wrecks: 0,
       damageTaken: 0,
       frame: this.field,
+      frameShare: 1,
+      carriedTurn: 0,
       ore: 0,
       unloadTimer: 0,
       angle: 0,
@@ -1113,7 +1119,7 @@ export class Sim {
     const pilots = this.pilots;
     for (const pilot of pilots) pilot.update(this);
     this.movePois(dt);
-    this.carryBodies();
+    this.carryBodies(dt);
     this.driftInRocks(dt);
     this.moveRocks(dt);
     this.pullOre(this.ship, dt);
@@ -1159,53 +1165,119 @@ export class Sim {
     poi.y = (poi.parent?.y ?? 0) + Math.sin(poi.orbitAngle) * poi.orbitRadius;
   }
 
+  private get pois(): Poi[] {
+    const { field, station, pirateBase } = this;
+    return pirateBase ? [field, station, pirateBase] : [field, station];
+  }
+
+  /** Distance from a POI's edge, as of the last tick. Negative inside it. */
+  private edgeDistance(poi: Poi, x: number, y: number): number {
+    return Math.hypot(x - poi.px, y - poi.py) - poi.reach;
+  }
+
   /** Nearest by distance from each POI's edge, so a large field claims more space. */
   nearestPoi(x: number, y: number): Poi {
-    const { field, station, pirateBase } = this;
-    const toField = Math.hypot(x - field.px, y - field.py) - field.reach;
-    const toStation = Math.hypot(x - station.px, y - station.py) - station.reach;
-    const nearest = toStation < toField ? station : field;
-    if (!pirateBase) return nearest;
-    const toBase = Math.hypot(x - pirateBase.px, y - pirateBase.py) - pirateBase.reach;
-    return toBase < Math.min(toField, toStation) ? pirateBase : nearest;
+    let nearest = this.field;
+    let best = Infinity;
+    for (const poi of this.pois) {
+      const distance = this.edgeDistance(poi, x, y);
+      if (distance < best) {
+        best = distance;
+        nearest = poi;
+      }
+    }
+    return nearest;
   }
 
   /**
-   * Moves everything rigidly with its nearest POI. Velocities stay relative to
-   * that POI, so crossing to another POI's zone keeps the ship's relative speed.
+   * How much each POI carries a body at a spot, from 0 to 1, in the same order as `pois`.
+   * Within the full range of a POI's edge, the nearest POI carries it all. Further out,
+   * each POI's share falls off linearly to nothing at the outer range, and the shares mix.
+   * Shares that add up to more than 1 are scaled down to 1 in total.
    */
-  private carryBodies(): void {
+  carryShares(x: number, y: number): number[] {
+    const { pois, tuning } = this;
+    const full = tuning.poiFullRange;
+    const none = Math.max(full, tuning.poiNoneRange);
+    const distances = pois.map((poi) => this.edgeDistance(poi, x, y));
+    const nearest = distances.indexOf(Math.min(...distances));
+    if (distances[nearest] <= full) return pois.map((_, i) => (i === nearest ? 1 : 0));
+    const shares = distances.map((distance) =>
+      none === Infinity ? 1 : Math.max(0, Math.min(1, (none - distance) / (none - full))),
+    );
+    const total = shares.reduce((sum, share) => sum + share, 0);
+    return total > 1 ? shares.map((share) => share / total) : shares;
+  }
+
+  /**
+   * Moves everything with the POIs near it, by their shares. Velocities stay relative to
+   * what carries them, so crossing from one POI's zone to another keeps relative speed.
+   */
+  private carryBodies(dt: number): void {
     this.carryShip(this.ship);
     for (const pilot of this.pilots) this.carryShip(pilot.ship);
     for (const rock of this.rocks) {
-      const frame = this.carry(rock);
+      const { turn } = this.carry(rock);
       rock.prevAngle = rock.angle;
-      rock.angle += frame.turn;
+      rock.angle += turn;
     }
     for (const ore of this.ores) this.carry(ore);
     for (const shot of this.shots) this.carry(shot);
+    // An order's destination moves like any loose body at its spot.
+    const spot = this.clickPilot.spot;
+    if (spot) {
+      this.carry(spot);
+      spot.x += spot.vx * dt;
+      spot.y += spot.vy * dt;
+    }
   }
 
   private carryShip(ship: Ship): void {
-    ship.frame = this.carry(ship);
+    const { poi, share, turn } = this.carry(ship);
+    ship.frame = poi;
+    ship.frameShare = share;
+    ship.carriedTurn = turn;
     ship.prevAngle = ship.angle;
-    ship.angle += ship.frame.turn;
+    ship.angle += turn;
   }
 
-  private carry(body: Body): Poi {
-    const poi = this.nearestPoi(body.x, body.y);
-    const cos = Math.cos(poi.turn);
-    const sin = Math.sin(poi.turn);
-    const dx = body.x - poi.px;
-    const dy = body.y - poi.py;
+  /** Carries a body and says which POI carried it most, by how much, and how far it turned. */
+  private carry(body: Body): { poi: Poi; share: number; turn: number } {
+    const { pois } = this;
+    const shares = this.carryShares(body.x, body.y);
+    let moveX = 0;
+    let moveY = 0;
+    let turn = 0;
+    let poi = this.nearestPoi(body.x, body.y);
+    let share = 0;
+    for (let i = 0; i < pois.length; i++) {
+      const weight = shares[i];
+      if (weight === 0) continue;
+      const carrier = pois[i];
+      const cos = Math.cos(carrier.turn);
+      const sin = Math.sin(carrier.turn);
+      const dx = body.x - carrier.px;
+      const dy = body.y - carrier.py;
+      moveX += weight * (carrier.x + dx * cos - dy * sin - body.x);
+      moveY += weight * (carrier.y + dx * sin + dy * cos - body.y);
+      turn += weight * carrier.turn;
+      if (weight > share) {
+        share = weight;
+        poi = carrier;
+      }
+    }
     body.px = body.x;
     body.py = body.y;
-    body.x = poi.x + dx * cos - dy * sin;
-    body.y = poi.y + dx * sin + dy * cos;
-    const { vx, vy } = body;
-    body.vx = vx * cos - vy * sin;
-    body.vy = vx * sin + vy * cos;
-    return poi;
+    body.x += moveX;
+    body.y += moveY;
+    if (turn !== 0) {
+      const cos = Math.cos(turn);
+      const sin = Math.sin(turn);
+      const { vx, vy } = body;
+      body.vx = vx * cos - vy * sin;
+      body.vy = vx * sin + vy * cos;
+    }
+    return { poi, share, turn };
   }
 
   /**
@@ -1343,16 +1415,26 @@ export class Sim {
     }
   }
 
+  /**
+   * Loose ore flies on with nothing pulling it back. Once it's far from every POI and every
+   * ship, so nobody could see it or know where it went, it's gone.
+   */
   private moveOres(dt: number): void {
-    const edge = this.tuning.fieldRadius;
     for (const ore of this.ores) {
-      this.containInField(ore, edge, dt);
       ore.x += ore.vx * dt;
       ore.y += ore.vy * dt;
     }
+    const forget = this.tuning.oreForgetDistance;
+    if (forget === Infinity) return;
+    const ships = [this.ship, ...this.pilots.map((pilot) => pilot.ship)];
+    this.ores = this.ores.filter(
+      (ore) =>
+        this.pois.some((poi) => this.edgeDistance(poi, ore.x, ore.y) < forget) ||
+        ships.some((ship) => Math.hypot(ship.x - ore.x, ship.y - ore.y) < forget),
+    );
   }
 
-  /** Gentle pull so drifting pieces stay in the field during long sessions. */
+  /** Gentle pull so drifting rocks stay in the field during long sessions. */
   private containInField(body: Body, edge: number, dt: number): void {
     const dx = body.x - this.field.x;
     const dy = body.y - this.field.y;

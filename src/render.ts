@@ -203,6 +203,7 @@ export class Renderer {
     this.drawStation(sim, alpha);
     this.drawHauler(sim, alpha);
     this.drawPirateBase(sim, alpha);
+    if (tuning.showPoiZones) this.drawPoiZones(sim, alpha);
     this.drawClickTarget(sim, alpha);
     this.drawRocks(sim, alpha, visible);
     this.drawOres(sim, alpha, visible);
@@ -344,6 +345,37 @@ export class Renderer {
    * The order being flown: a circle at the destination, with a line for how it drifts
    * against the ship, and a line from the ship for a facing it holds.
    */
+  /**
+   * Each POI's carrying zones: a solid ring where it stops carrying fully, a dashed one
+   * where it stops carrying at all. Infinite ranges have no ring.
+   */
+  private drawPoiZones(sim: Sim, alpha: number): void {
+    const { ctx } = this;
+    const { tuning } = sim;
+    const full = tuning.poiFullRange;
+    const none = Math.max(full, tuning.poiNoneRange);
+    const pois = [sim.field, sim.station, ...(sim.pirateBase ? [sim.pirateBase] : [])];
+    ctx.lineWidth = 2;
+    for (const poi of pois) {
+      const x = lerp(poi.px, poi.x, alpha);
+      const y = lerp(poi.py, poi.y, alpha);
+      ctx.strokeStyle = "rgba(200, 160, 255, 0.45)";
+      if (full !== Infinity) {
+        ctx.beginPath();
+        ctx.arc(x, y, poi.reach + full, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if (none !== Infinity && none > full) {
+        ctx.setLineDash([24, 18]);
+        ctx.strokeStyle = "rgba(200, 160, 255, 0.3)";
+        ctx.beginPath();
+        ctx.arc(x, y, poi.reach + none, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
+
   private drawClickTarget(sim: Sim, alpha: number): void {
     const { ctx } = this;
     const { ship, clickPilot, tuning } = sim;

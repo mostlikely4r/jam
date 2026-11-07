@@ -15,6 +15,10 @@
       #panel[hidden] { display: none; }
       #panel h2 { font-size: 12px; margin: 14px 0 6px; color: #8fb4ff; text-transform: uppercase; letter-spacing: 1px; }
       #panel h2:first-child { margin-top: 0; }
+      #panel h2.group { cursor: pointer; user-select: none; }
+      #panel h2.group::before { content: "▾  "; }
+      #panel h2.group.closed::before { content: "▸  "; }
+      #panel h2.group:hover { color: #b9cfff; }
       #panel label { display: block; margin-bottom: 7px; }
       #panel .row { display: flex; justify-content: space-between; }
       #panel .value { color: #ffd479; }

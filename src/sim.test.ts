@@ -1220,11 +1220,12 @@ describe("the new ship", () => {
     it("a dragged move ends near its drifting destination", () => {
       const sim = floater();
       sim.orderMove(sim.ship.x + 400, sim.ship.y, 0, -10);
-      const start = sim.clickPilot.target()!;
+      const start = { ...sim.clickPilot.target()! };
       let ticks = 0;
       let last = start;
       while (sim.clickPilot.active && ticks < Math.round(90 / TICK)) {
-        last = sim.clickPilot.target() ?? last;
+        const now = sim.clickPilot.target();
+        if (now) last = { ...now };
         sim.step();
         ticks++;
       }
@@ -1322,5 +1323,160 @@ describe("the new ship", () => {
     expect(sim.orderMove(sim.ship.x + 50, sim.ship.y)).toBe(true);
     sim.sellPart(sim.ship, "clickMove");
     expect(sim.clickPilot.active).toBe(false);
+  });
+});
+
+describe("POI carrying zones", () => {
+  function zoned(extra: Partial<typeof DEFAULTS> = {}): Sim {
+    return new Sim(1, {
+      ...GAME_DEFAULTS,
+      trafficRacers: 0,
+      trafficFloaters: 0,
+      pirates: 0,
+      defenders: 0,
+      rockCount: 0,
+      rockInflow: 0,
+      testDrones: 0,
+      haulers: false,
+      fieldOrbitRadius: 0,
+      fieldRotationPeriod: 60,
+      ...extra,
+    });
+  }
+  /** A spot straight out from the field's edge, on the side away from the station. */
+  const out = (sim: Sim, distance: number) => ({
+    x: sim.field.x + sim.field.reach + distance,
+    y: sim.field.y,
+  });
+
+  it("by default the nearest POI carries everything, everywhere", () => {
+    const sim = zoned();
+    const spot = out(sim, 50000);
+    expect(sim.carryShares(spot.x, spot.y)[0]).toBe(1);
+  });
+
+  it("carries fully within the full range, fades linearly, and lets go past the outer range", () => {
+    const sim = zoned({ poiFullRange: 1000, poiNoneRange: 3000 });
+    const share = (distance: number) => {
+      const spot = out(sim, distance);
+      return sim.carryShares(spot.x, spot.y)[0];
+    };
+    expect(share(500)).toBe(1);
+    expect(share(2000)).toBeCloseTo(0.5, 2);
+    expect(share(3500)).toBe(0);
+  });
+
+  const looseOre = (x: number, y: number) => ({ x, y, px: x, py: y, vx: 0, vy: 0, kind: 0, amount: 1 });
+
+  it("ore outside every zone isn't turned by the field", () => {
+    const sim = zoned({ poiFullRange: 500, poiNoneRange: 1000 });
+    const spot = out(sim, 1500);
+    const ore = looseOre(spot.x, spot.y);
+    sim.ores.push(ore);
+    run(sim, 5);
+    expect(Math.hypot(ore.x - spot.x, ore.y - spot.y)).toBeLessThan(0.001);
+  });
+
+  it("ore in the full zone turns with the field", () => {
+    const sim = zoned({ poiFullRange: 500, poiNoneRange: 1000 });
+    const spot = out(sim, 200);
+    const ore = looseOre(spot.x, spot.y);
+    sim.ores.push(ore);
+    run(sim, 5);
+    const angle = Math.atan2(ore.y - sim.field.y, ore.x - sim.field.x);
+    expect(angle).toBeCloseTo((2 * Math.PI * 5) / 60, 2);
+  });
+
+  it("the outer range is never inside the full range", () => {
+    const sim = zoned({ poiFullRange: 2000, poiNoneRange: 500 });
+    const spot = out(sim, 1500);
+    expect(sim.carryShares(spot.x, spot.y)[0]).toBe(1);
+  });
+});
+
+describe("drag drift", () => {
+  function moving(extra: Partial<typeof DEFAULTS> = {}): Sim {
+    const sim = new Sim(1, {
+      ...GAME_DEFAULTS,
+      trafficRacers: 0,
+      trafficFloaters: 0,
+      pirates: 0,
+      defenders: 0,
+      rockCount: 0,
+      rockInflow: 0,
+      testDrones: 0,
+      haulers: false,
+      fieldOrbitRadius: 0,
+      fieldRotationPeriod: 0,
+      ...extra,
+    });
+    sim.ship.vx = 30;
+    return sim;
+  }
+
+  it("is on top of the ship's motion by default", () => {
+    const sim = moving();
+    sim.orderMove(sim.ship.x + 500, sim.ship.y, 0, 10);
+    const spot = sim.clickPilot.spot!;
+    expect(spot.vx).toBe(30);
+    expect(spot.vy).toBe(10);
+  });
+
+  it("with the switch, is against the POI alone", () => {
+    const sim = moving({ dragAbsolute: true });
+    sim.orderMove(sim.ship.x + 500, sim.ship.y, 0, 10);
+    const spot = sim.clickPilot.spot!;
+    expect(spot.vx).toBe(0);
+    expect(spot.vy).toBe(10);
+  });
+});
+
+describe("loose ore far out", () => {
+  function open(extra: Partial<typeof DEFAULTS> = {}): Sim {
+    return new Sim(1, {
+      ...GAME_DEFAULTS,
+      trafficRacers: 0,
+      trafficFloaters: 0,
+      pirates: 0,
+      defenders: 0,
+      rockCount: 0,
+      rockInflow: 0,
+      testDrones: 0,
+      haulers: false,
+      fieldOrbitRadius: 0,
+      fieldRotationPeriod: 0,
+      poiFullRange: 0,
+      poiNoneRange: 0,
+      ...extra,
+    });
+  }
+  const flying = (x: number, y: number, vx: number) => ({ x, y, px: x, py: y, vx, vy: 0, kind: 0, amount: 1 });
+
+  it("isn't pulled back toward the field", () => {
+    const sim = open();
+    const ore = flying(sim.field.x + sim.field.reach + 500, sim.field.y, 40);
+    sim.ores.push(ore);
+    run(sim, 5);
+    expect(ore.vx).toBeCloseTo(40, 6);
+  });
+
+  it("is gone once it's far from every POI and ship", () => {
+    const sim = open({ oreForgetDistance: 1000 });
+    sim.ores.push(flying(sim.field.x + sim.field.reach + 900, sim.field.y, 0));
+    sim.ores.push(flying(sim.field.x + sim.field.reach + 1500, sim.field.y, 0));
+    run(sim, 0.1);
+    expect(sim.ores.length).toBe(1);
+    run(sim, 0.1);
+    expect(sim.ores.length).toBe(1);
+  });
+
+  it("stays while a ship is near it", () => {
+    const sim = open({ oreForgetDistance: 1000 });
+    const x = sim.field.x + sim.field.reach + 5000;
+    sim.ship.x = sim.ship.px = x + 300;
+    sim.ship.y = sim.ship.py = sim.field.y;
+    sim.ores.push(flying(x, sim.field.y, 0));
+    run(sim, 0.1);
+    expect(sim.ores.length).toBe(1);
   });
 });

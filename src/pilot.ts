@@ -700,6 +700,23 @@ export class ClickPilot extends ShipPilot {
     this.handsOff = 0;
   }
 
+  /**
+   * Corrects the destination's drift by a small velocity, without starting over. Says the
+   * same thing whatever the ship is doing, since it's measured against the destination.
+   */
+  nudge(vx: number, vy: number): boolean {
+    const { order } = this;
+    if (!order?.move) return false;
+    order.spot.vx += vx;
+    order.spot.vy += vy;
+    order.drifts = true;
+    // Flies again from wherever it is, so it ends up matching the new drift.
+    order.stage = "flying";
+    order.closest = Infinity;
+    order.stuck = 0;
+    return true;
+  }
+
   /** Comes to rest against whatever carries things where the ship is. */
   stop(_sim: Sim): void {
     this.order = {

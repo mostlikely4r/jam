@@ -876,6 +876,11 @@ export class Sim {
     return true;
   }
 
+  /** Adds to the drift of the current move's destination. Returns whether there was one. */
+  orderNudge(vx: number, vy: number): boolean {
+    return this.clickPilot.nudge(vx, vy);
+  }
+
   /** Holds a facing, during a move's coasts and after it, or turns there if there's no move. */
   orderFace(angle: number): boolean {
     if (!this.ship.parts.has("clickTurn")) return false;

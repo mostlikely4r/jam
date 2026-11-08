@@ -1422,6 +1422,42 @@ describe("drag drift", () => {
     expect(spot.vy).toBe(10);
   });
 
+  it("a nudge adds to the destination's drift, whatever the ship is doing", () => {
+    const sim = moving();
+    sim.orderMove(sim.ship.x + 500, sim.ship.y, 0, 10);
+    run(sim, 2);
+    const spot = sim.clickPilot.spot!;
+    const before = { vx: spot.vx, vy: spot.vy };
+    expect(sim.orderNudge(-3, 2)).toBe(true);
+    expect(spot.vx).toBeCloseTo(before.vx - 3, 9);
+    expect(spot.vy).toBeCloseTo(before.vy + 2, 9);
+  });
+
+  it("a nudge needs a move under way", () => {
+    const sim = moving();
+    expect(sim.orderNudge(1, 1)).toBe(false);
+    sim.orderFace(1);
+    expect(sim.orderNudge(1, 1)).toBe(false);
+  });
+
+  it("a nudged move ends matching the corrected drift", () => {
+    const sim = moving();
+    sim.ship.vx = 0;
+    sim.orderMove(sim.ship.x + 300, sim.ship.y, 0, 10);
+    run(sim, 3);
+    sim.orderNudge(5, 0);
+    let ticks = 0;
+    while (sim.clickPilot.active && ticks < Math.round(120 / TICK)) {
+      sim.step();
+      ticks++;
+    }
+    expect(sim.clickPilot.active).toBe(false);
+    const vx = (sim.ship.x - sim.ship.px) / TICK;
+    const vy = (sim.ship.y - sim.ship.py) / TICK;
+    expect(Math.abs(vx - 5)).toBeLessThan(6);
+    expect(Math.abs(vy - 10)).toBeLessThan(6);
+  }, 30000);
+
   it("with the switch, is against the POI alone", () => {
     const sim = moving({ dragAbsolute: true });
     sim.orderMove(sim.ship.x + 500, sim.ship.y, 0, 10);

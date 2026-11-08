@@ -66,6 +66,8 @@ export const DEFAULTS = {
   dragSeconds: 4,
   /** A drawn drift is measured against what carries things at the spot, not the ship's motion. */
   dragAbsolute: false,
+  /** A drag from the destination nudges its drift by this share of what the same drag would set. */
+  nudgeShare: 0.25,
   gun2ShotsPerSecond: 2,
   preciseChance: 0.25,
   turretTurnSpeed: 150,
@@ -258,6 +260,7 @@ export const GROUPS: Group[] = [
       { key: "floaterEngine", label: "Engine power, all thrusters", min: 0.05, max: 1, step: 0.05 },
       { key: "clickSpeed", label: "Click to move speed", min: 20, max: 400, step: 10 },
       { key: "dragSeconds", label: "Drag order: seconds of drift the line shows", min: 1, max: 15, step: 0.5 },
+      { key: "nudgeShare", label: "Nudge from the destination: share of a full drag", min: 0.05, max: 1, step: 0.05 },
       { key: "gun2ShotsPerSecond", label: "Gun 2 shots per second", min: 0.5, max: 7, step: 0.5 },
       { key: "preciseChance", label: "Gun 2 chance a hit frees ore", min: 0, max: 1, step: 0.05 },
       { key: "turretTurnSpeed", label: "Turret turn speed (degrees per second)", min: 30, max: 720, step: 10 },

@@ -1,7 +1,7 @@
 import { Audio } from "./audio";
-import { Renderer } from "./render";
 import { Radio } from "./radio";
 import { MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
+import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { PARTS, partFits, type Part } from "./parts";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
@@ -324,33 +324,50 @@ window.addEventListener("keyup", (event) => keys.delete(event.code));
 window.addEventListener("blur", () => keys.clear());
 /** Shorter drags than this, in screen pixels, count as a click. */
 const DRAG_PIXELS = 10;
-/** A right drag in progress, in screen pixels. Starting on your own ship makes it a facing. */
-let drag: { fromX: number; fromY: number; toX: number; toY: number; onShip: boolean } | null = null;
+/**
+ * A right drag in progress, in screen pixels. What it starts on decides what it does:
+ * your own ship sets a facing, the current destination nudges its drift, space moves.
+ */
+let drag: { fromX: number; fromY: number; toX: number; toY: number; on: DragStart } | null = null;
 
-/** Whether a screen point is on the player's ship, with some room for a quick click. */
-function onShip(clientX: number, clientY: number): boolean {
-  const at = renderer.worldToScreen(sim.ship.x, sim.ship.y);
-  const reach = Math.max(18, SHIP_RADIUS * tuning.zoom * 1.6);
+/** Whether a screen point is on a world position, with room for a quick click. */
+function near(clientX: number, clientY: number, x: number, y: number, radius: number): boolean {
+  const at = renderer.worldToScreen(x, y);
+  const reach = Math.max(18, radius * tuning.zoom * 1.6);
   return Math.hypot(clientX - at.x, clientY - at.y) < reach;
+}
+
+/** What a right press lands on. The ship comes first, as the smaller and more used target. */
+function dragStart(clientX: number, clientY: number): DragStart {
+  if (near(clientX, clientY, sim.ship.x, sim.ship.y, SHIP_RADIUS)) return "ship";
+  const target = sim.clickPilot.target();
+  if (target && near(clientX, clientY, target.x, target.y, ORDER_RING)) return "destination";
+  return "space";
 }
 
 canvas.addEventListener("mousedown", (event) => {
   audio.start();
   if (event.button !== 2) return;
   const { clientX: x, clientY: y } = event;
-  drag = { fromX: x, fromY: y, toX: x, toY: y, onShip: onShip(x, y) };
+  drag = { fromX: x, fromY: y, toX: x, toY: y, on: dragStart(x, y) };
 });
 window.addEventListener("mouseup", (event) => {
   if (event.button !== 2 || !drag) return;
-  const { fromX, fromY, onShip: fromShip } = drag;
+  const { fromX, fromY, on } = drag;
   drag = null;
   // Measured on screen: the view follows the ship, so this is motion as seen from it.
   const dx = (event.clientX - fromX) / tuning.zoom;
   const dy = (event.clientY - fromY) / tuning.zoom;
   const dragged = Math.hypot(event.clientX - fromX, event.clientY - fromY) >= DRAG_PIXELS;
-  if (fromShip) {
+  if (on === "ship") {
     if (dragged) sim.orderFace(Math.atan2(dy, dx));
     else sim.orderStop();
+    return;
+  }
+  if (on === "destination") {
+    // A click on the destination leaves it be.
+    const scale = tuning.nudgeShare / tuning.dragSeconds;
+    if (dragged) sim.orderNudge(dx * scale, dy * scale);
     return;
   }
   const spot = renderer.screenToWorld(fromX, fromY);

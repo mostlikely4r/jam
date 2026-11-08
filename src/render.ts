@@ -27,7 +27,9 @@ const OWNED_DRONE_COLOR = [120, 190, 255];
 const TRAFFIC_COLOR = [150, 155, 165];
 const ORDER_COLOR = "rgba(143, 180, 255, 0.8)";
 /** The order's circle at its destination, in world units. */
-const ORDER_RING = 12;
+export const ORDER_RING = 12;
+/** What a right drag started on. */
+export type DragStart = "ship" | "destination" | "space";
 /** The circle around the ship for a facing, in world units. */
 const ORDER_SHIP_RING = 30;
 const PIRATE_COLOR = [235, 90, 80];
@@ -77,7 +79,7 @@ export class Renderer {
     fromY: number;
     toX: number;
     toY: number;
-    onShip: boolean;
+    on: DragStart;
     dragged: boolean;
   } | null = null;
 
@@ -228,7 +230,7 @@ export class Renderer {
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.drawPointers(sim, width, height, scale, dpr);
-    this.drawDrag(scale, dpr, shipX, shipY);
+    this.drawDrag(sim, scale, dpr, shipX, shipY, alpha);
     if (this.flash > 0) {
       ctx.fillStyle = `rgba(255, 70, 50, ${this.flash * 0.35})`;
       ctx.fillRect(0, 0, width, height);
@@ -397,10 +399,11 @@ export class Renderer {
     const y = lerp(target.py, target.y, alpha);
     ctx.beginPath();
     ctx.arc(x, y, ORDER_RING, 0, Math.PI * 2);
-    if (clickPilot.drifting) {
-      // Drawn the way the order was: the destination's motion as seen from the ship.
-      const vx = (target.x - target.px - (ship.x - ship.px)) / TICK;
-      const vy = (target.y - target.py - (ship.y - ship.py)) / TICK;
+    const spot = clickPilot.spot;
+    if (clickPilot.drifting && spot) {
+      // Measured the way new drags are: against what carries things there, or as seen from the ship.
+      const vx = tuning.dragAbsolute ? spot.vx : (target.x - target.px - (ship.x - ship.px)) / TICK;
+      const vy = tuning.dragAbsolute ? spot.vy : (target.y - target.py - (ship.y - ship.py)) / TICK;
       ctx.moveTo(x, y);
       ctx.lineTo(x + vx * tuning.dragSeconds, y + vy * tuning.dragSeconds);
     }
@@ -408,13 +411,25 @@ export class Renderer {
   }
 
   /** The preview of a right drag: what the order will be when it's let go. */
-  private drawDrag(scale: number, dpr: number, shipX: number, shipY: number): void {
+  private drawDrag(sim: Sim, scale: number, dpr: number, shipX: number, shipY: number, alpha: number): void {
     const { drag, ctx } = this;
     if (!drag) return;
     ctx.strokeStyle = ORDER_COLOR;
     ctx.lineWidth = 1.5 * dpr;
     ctx.beginPath();
-    if (drag.onShip) {
+    const target = sim.clickPilot.target();
+    if (drag.on === "destination" && target) {
+      // The nudge as it will land: from the drifting destination, scaled down.
+      const at = this.worldToScreen(lerp(target.px, target.x, alpha), lerp(target.py, target.y, alpha));
+      const cx = at.x * dpr;
+      const cy = at.y * dpr;
+      const share = sim.tuning.nudgeShare;
+      ctx.arc(cx, cy, ORDER_RING * scale * 1.6, 0, Math.PI * 2);
+      if (drag.dragged) {
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + (drag.toX - drag.fromX) * share * dpr, cy + (drag.toY - drag.fromY) * share * dpr);
+      }
+    } else if (drag.on === "ship") {
       const at = this.worldToScreen(shipX, shipY);
       const cx = at.x * dpr;
       const cy = at.y * dpr;

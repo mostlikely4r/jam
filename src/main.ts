@@ -367,13 +367,15 @@ window.addEventListener("keyup", (event) => keys.delete(event.code));
 window.addEventListener("blur", () => keys.clear());
 /** Shorter drags than this, in screen pixels, count as a click. */
 const DRAG_PIXELS = 10;
+/** A second right click this soon after the first, in the same place, makes a double click. */
+const DOUBLE_CLICK_MS = 350;
 /**
  * A right drag in progress, in screen pixels. What it starts on decides what it does:
  * your own ship sets a facing, the current destination nudges its drift, space moves.
  */
 let drag: { fromX: number; fromY: number; toX: number; toY: number; on: DragStart } | null = null;
-/** Where the left button went down, to tell a click from a drag. */
-let leftPress: { x: number; y: number } | null = null;
+/** The last right click that could be the first half of a double click. */
+let lastClick: { x: number; y: number; time: number } | null = null;
 
 /** Whether a screen point is on a world position, with room for a quick click. */
 function near(clientX: number, clientY: number, x: number, y: number, radius: number): boolean {
@@ -392,21 +394,11 @@ function dragStart(clientX: number, clientY: number): DragStart {
 
 canvas.addEventListener("mousedown", (event) => {
   audio.start();
-  const { clientX: x, clientY: y } = event;
-  if (event.button === 0) leftPress = { x, y };
   if (event.button !== 2) return;
+  const { clientX: x, clientY: y } = event;
   drag = { fromX: x, fromY: y, toX: x, toY: y, on: dragStart(x, y) };
 });
 window.addEventListener("mouseup", (event) => {
-  if (event.button === 0 && leftPress) {
-    const press = leftPress;
-    leftPress = null;
-    if (Math.hypot(event.clientX - press.x, event.clientY - press.y) < DRAG_PIXELS) {
-      const spot = renderer.screenToWorld(press.x, press.y);
-      sim.orderTranslate(spot.x, spot.y);
-    }
-    return;
-  }
   if (event.button !== 2 || !drag) return;
   const { fromX, fromY, on } = drag;
   drag = null;
@@ -414,6 +406,19 @@ window.addEventListener("mouseup", (event) => {
   const dx = (event.clientX - fromX) / tuning.zoom;
   const dy = (event.clientY - fromY) / tuning.zoom;
   const dragged = Math.hypot(event.clientX - fromX, event.clientY - fromY) >= DRAG_PIXELS;
+  // The first click's destination is right here, so this comes before asking what was hit.
+  const first = lastClick;
+  lastClick = null;
+  if (!dragged && on !== "ship") {
+    const spot = renderer.screenToWorld(fromX, fromY);
+    const isDouble =
+      first && event.timeStamp - first.time < DOUBLE_CLICK_MS && Math.hypot(fromX - first.x, fromY - first.y) < DRAG_PIXELS;
+    if (isDouble) {
+      sim.orderMove(spot.x, spot.y);
+      return;
+    }
+    lastClick = { x: fromX, y: fromY, time: event.timeStamp };
+  }
   if (on === "ship") {
     if (dragged) sim.orderFace(Math.atan2(dy, dx));
     else sim.orderStop();
@@ -427,7 +432,7 @@ window.addEventListener("mouseup", (event) => {
   }
   const spot = renderer.screenToWorld(fromX, fromY);
   if (dragged) sim.orderMove(spot.x, spot.y, dx / tuning.dragSeconds, dy / tuning.dragSeconds);
-  else sim.orderMove(spot.x, spot.y);
+  else sim.orderTranslate(spot.x, spot.y);
 });
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 /** Where the mouse is on screen, so the turret keeps aiming there as the view moves. */

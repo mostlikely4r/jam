@@ -94,7 +94,7 @@ export const PARTS: Part[] = [
     short: "click",
     price: 400,
     weight: 0.02,
-    description: "Right click flies you there, straight. Drag to leave with a drift",
+    description: "Right click shifts you there, double click stops there. Drag to leave with a drift",
     tier: 2,
   },
   {

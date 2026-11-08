@@ -71,11 +71,45 @@ function tradeDrone(): void {
   else sim.fundBlueprint(sim.ship, "drone");
 }
 
-/** A locked item's line in the shop: what its blueprint still costs, to pay toward. */
-function blueprintText(id: BlueprintId): string {
+/** One line of the shop. The style names its color, and without one the line is greyed out. */
+interface ShopLine {
+  tag: string;
+  style?: "buy" | "sell" | "unlock" | "partial" | "pending" | "poor";
+  text: string;
+  enabled: boolean;
+}
+
+/** An item the station can't sell yet: paid and on its way, or still to pay for. */
+function lockedLine(id: BlueprintId, label: string): ShopLine {
+  if (sim.blueprintsOrdered.has(id)) {
+    return { tag: "pending", style: "pending", text: `${label}: paid, coming with the next hauler`, enabled: false };
+  }
   const left = sim.blueprintLeft(id);
   const price = sim.blueprintPrice(id);
-  return `${left === price ? `${price} credits` : `${left} of ${price} credits left`} to pay toward it, or wait for the station`;
+  const text = `${label}: ${left === price ? `${price} credits` : `${left} of ${price} credits left`}`;
+  const { credits } = sim.ship;
+  if (credits <= 0) return { tag: "not enough money", style: "poor", text, enabled: false };
+  if (credits < left) return { tag: "unlock partial", style: "partial", text, enabled: true };
+  return { tag: "unlock", style: "unlock", text, enabled: true };
+}
+
+/** An item the station can sell, as far as it has the parts and the buyer has the credits. */
+function saleLine(price: number, label: string, text: string): ShopLine {
+  if (!sim.hasPartsFor(price)) return { tag: "out of parts", text: label, enabled: false };
+  if (sim.ship.credits < price) return { tag: "not enough money", style: "poor", text, enabled: false };
+  return { tag: "buy", style: "buy", text, enabled: true };
+}
+
+function shopButton(key: string, line: ShopLine, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.className = line.style ?? "";
+  button.disabled = !line.enabled;
+  button.textContent = `${key} [${line.tag}] ${line.text}`;
+  button.addEventListener("click", () => {
+    onClick();
+    button.blur();
+  });
+  return button;
 }
 
 let shopState = "";
@@ -83,7 +117,7 @@ let shopState = "";
 function updateShop(): void {
   const { ship } = sim;
   const docked = sim.isDocked();
-  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.blueprints].join()} ${[...sim.blueprintPaid].join()} ${tuning.blueprintScale} ${tuning.stationUnlocks}`;
+  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.blueprints].join()} ${[...sim.blueprintPaid].join()} ${[...sim.blueprintsOrdered].join()} ${tuning.blueprintScale} ${tuning.stationUnlocks}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked;
@@ -97,44 +131,27 @@ function updateShop(): void {
     const fits = partFits(part, ship.model);
     const price = sim.partPrice(part.id);
     const weight = (part.weight * tuning.partWeightScale).toFixed(2);
-    const button = document.createElement("button");
-    button.className = owned ? "owned" : "";
-    const inStock = sim.hasPartsFor(price);
-    const open = sim.unlocked(part.id);
-    button.disabled = !owned && (!fits || (open ? !inStock || ship.credits < price : ship.credits <= 0));
-    button.textContent = owned
-      ? `${partKey(index)} SELL ${part.label} for ${price}, -${weight} weight`
-      : fits
-        ? !open
-          ? `${partKey(index)} ${part.label}: no blueprint yet. ${blueprintText(part.id)}`
-          : inStock
-            ? `${partKey(index)} ${part.label}: ${price} credits, +${weight} weight. ${part.description}`
-            : `${partKey(index)} ${part.label}: the station is out of parts`
-        : `${partKey(index)} ${part.label}: doesn't fit this ship`;
-    button.addEventListener("click", () => {
-      tradePart(part);
-      button.blur();
-    });
-    shop.append(button);
+    const line: ShopLine = owned
+      ? { tag: "sell", style: "sell", text: `${part.label} for ${price}, -${weight} weight`, enabled: true }
+      : !fits
+        ? { tag: "doesn't fit", text: part.label, enabled: false }
+        : !sim.unlocked(part.id)
+          ? lockedLine(part.id, part.label)
+          : saleLine(price, part.label, `${part.label}: ${price} credits, +${weight} weight. ${part.description}`);
+    shop.append(shopButton(partKey(index), line, () => tradePart(part)));
   });
 
   const full = sim.drones.length >= tuning.droneLimit;
-  const drone = document.createElement("button");
-  const droneInStock = sim.hasPartsFor(tuning.dronePrice);
-  const dronesOpen = sim.unlocked("drone");
-  drone.disabled = full || (dronesOpen ? !droneInStock || ship.credits < tuning.dronePrice : ship.credits <= 0);
-  drone.textContent = full
-    ? `- New drone: at the limit of ${tuning.droneLimit}`
-    : !dronesOpen
-      ? `- New drone: no blueprint yet. ${blueprintText("drone")}`
-      : !droneInStock
-      ? "- New drone: the station is out of parts"
-      : `- New drone: ${tuning.dronePrice} credits. Earns for you (${sim.drones.length}/${tuning.droneLimit})`;
-  drone.addEventListener("click", () => {
-    tradeDrone();
-    drone.blur();
-  });
-  shop.append(drone);
+  const droneLine: ShopLine = full
+    ? { tag: "at limit", text: `New drone: ${tuning.droneLimit} of ${tuning.droneLimit}`, enabled: false }
+    : !sim.unlocked("drone")
+      ? lockedLine("drone", "New drone")
+      : saleLine(
+          tuning.dronePrice,
+          "New drone",
+          `New drone: ${tuning.dronePrice} credits. Earns for you (${sim.drones.length}/${tuning.droneLimit})`,
+        );
+  shop.append(shopButton("-", droneLine, tradeDrone));
 }
 
 /** Keys 1 to 9 and then 0 pick a part. The minus key buys a drone. */

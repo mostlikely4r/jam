@@ -370,6 +370,8 @@ export class Sim {
   blueprints = new Set<BlueprintId>();
   /** Credits paid toward blueprints the station doesn't have yet. */
   blueprintPaid = new Map<BlueprintId, number>();
+  /** Blueprints paid in full, waiting for the next hauler to bring them. */
+  blueprintsOrdered = new Set<BlueprintId>();
   /** Seconds until the next hauler sets out. */
   haulerTimer = 0;
   /** The pirate base's ore. It pays for pirates' repairs, rebuilds and new ships. */
@@ -424,6 +426,7 @@ export class Sim {
     this.hauler = null;
     this.blueprints = new Set();
     this.blueprintPaid = new Map();
+    this.blueprintsOrdered = new Set();
     this.haulerTimer = this.tuning.haulerFirst;
     this.pirateOre = this.tuning.pirateStartOre;
     this.lostTraffic = [];
@@ -665,7 +668,11 @@ export class Sim {
   private moveHauler(dt: number): void {
     const { tuning } = this;
     if (!this.hauler) {
-      if (!tuning.haulers) return;
+      if (!tuning.haulers) {
+        // With no haulers running, nothing would ever bring them.
+        this.deliverBlueprints();
+        return;
+      }
       this.haulerTimer -= dt;
       if (this.haulerTimer > 0) return;
       this.haulerTimer = tuning.haulerInterval;
@@ -759,6 +766,7 @@ export class Sim {
         hauler.stage = "loading";
         hauler.time = 0;
         if (tuning.chatter) this.chatter.haulerBerthed(this);
+        this.deliverBlueprints();
         return;
       }
       case "loading": {
@@ -1031,7 +1039,7 @@ export class Sim {
     const paid = (id: BlueprintId) => this.blueprintPaid.get(id) ?? 0;
     const ids: BlueprintId[] = [...PARTS.map((part) => part.id), "drone"];
     return ids
-      .filter((id) => !this.unlocked(id))
+      .filter((id) => !this.unlocked(id) && !this.blueprintsOrdered.has(id))
       .sort(
         (a, b) =>
           paid(b) - paid(a) ||
@@ -1042,22 +1050,32 @@ export class Sim {
 
   /** Puts the ship owner's credits toward a blueprint, as far as they go. Returns whether any went in. */
   fundBlueprint(ship: Ship, id: BlueprintId): boolean {
-    if (this.unlocked(id) || !this.isDocked(ship)) return false;
+    if (this.unlocked(id) || this.blueprintsOrdered.has(id) || !this.isDocked(ship)) return false;
     const account = this.accountOf(ship);
     const amount = Math.min(account.credits, this.blueprintLeft(id));
     if (amount <= 0) return false;
     account.credits -= amount;
     this.blueprintPaid.set(id, (this.blueprintPaid.get(id) ?? 0) + amount);
-    if (this.blueprintLeft(id) === 0) this.gainBlueprint(id);
+    if (this.blueprintLeft(id) === 0) this.orderBlueprint(id);
     return true;
   }
 
-  private gainBlueprint(id: BlueprintId): void {
-    this.blueprints.add(id);
+  private orderBlueprint(id: BlueprintId): void {
     this.blueprintPaid.delete(id);
+    this.blueprintsOrdered.add(id);
+  }
+
+  /** Everything on order arrives at once, and the shop can stock it from then on. */
+  private deliverBlueprints(): void {
+    const arrived = [...this.blueprintsOrdered];
+    if (arrived.length === 0) return;
+    this.blueprintsOrdered.clear();
+    for (const id of arrived) this.blueprints.add(id);
     if (!this.tuning.chatter) return;
-    const name = id === "drone" ? "drones" : PARTS.find((part) => part.id === id)!.label.toLowerCase();
-    this.chatter.unlocked(this, [name]);
+    this.chatter.unlocked(
+      this,
+      arrived.map((id) => (id === "drone" ? "drones" : PARTS.find((part) => part.id === id)!.label.toLowerCase())),
+    );
   }
 
   /** Whatever the station can spare past its cash buffer finishes paying for the next blueprint. */
@@ -1067,7 +1085,7 @@ export class Sim {
     const left = this.blueprintLeft(next);
     if (this.stationAccount.credits - this.tuning.stationCashBuffer < left) return;
     this.stationAccount.credits -= left;
-    this.gainBlueprint(next);
+    this.orderBlueprint(next);
   }
 
   /** The parts this ship would buy next, in order, if it could afford them and the shop had them. */

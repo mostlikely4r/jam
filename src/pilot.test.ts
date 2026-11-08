@@ -878,6 +878,7 @@ describe("pirate and defender", () => {
       sim.ship.credits = 100000;
       sim.fundBlueprint(sim.ship, "tractor");
       expect(sim.ship.credits).toBe(100000 - (price - 100));
+      sim.step();
       expect(sim.unlocked("tractor")).toBe(true);
     });
 
@@ -890,6 +891,41 @@ describe("pirate and defender", () => {
       expect(sim.unlocked("tractor")).toBe(true);
       expect(sim.stationAccount.credits).toBe(300);
     });
+
+    it("a paid blueprint waits for the next hauler to berth, and only then stocks", () => {
+      const sim = shopWorld({ haulers: true, haulerFirst: 1, haulerPartsLoad: 0, chatter: true });
+      sim.ship.credits = 100000;
+      expect(sim.fundBlueprint(sim.ship, "tractor")).toBe(true);
+      const paid = sim.ship.credits;
+      expect(sim.unlocked("tractor")).toBe(false);
+      expect(sim.blueprintsOrdered.has("tractor")).toBe(true);
+      expect(sim.blueprintQueue()).not.toContain("tractor");
+      expect(sim.buyPart(sim.ship, "tractor")).toBe(false);
+      expect(sim.fundBlueprint(sim.ship, "tractor")).toBe(false);
+      expect(sim.ship.credits).toBe(paid);
+
+      let announced = false;
+      for (let seconds = 0; sim.hauler?.stage !== "loading" && seconds < 300; seconds += TICK) {
+        expect(sim.unlocked("tractor")).toBe(false);
+        sim.step();
+        announced ||= sim.events.some((event) => event.type === "chatter" && event.text.includes("tractor"));
+        sim.events.length = 0;
+      }
+      expect(sim.hauler?.stage).toBe("loading");
+      expect(sim.unlocked("tractor")).toBe(true);
+      expect(sim.blueprintsOrdered.size).toBe(0);
+      expect(announced).toBe(true);
+    }, 30000);
+
+    it("a blueprint paid while a hauler sits at the berth waits for the one after", () => {
+      const sim = shopWorld({ haulers: true, haulerFirst: 1, haulerPartsLoad: 0 });
+      for (let seconds = 0; sim.hauler?.stage !== "loading" && seconds < 300; seconds += TICK) sim.step();
+      sim.ship.credits = 100000;
+      sim.fundBlueprint(sim.ship, "tractor");
+      for (let seconds = 0; seconds < 5; seconds += TICK) sim.step();
+      expect(sim.unlocked("tractor")).toBe(false);
+      expect(sim.blueprintsOrdered.has("tractor")).toBe(true);
+    }, 30000);
 
     it("you can only pay in while docked", () => {
       const sim = shopWorld();

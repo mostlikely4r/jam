@@ -180,7 +180,7 @@ export class Chatter {
   /** The shop got new stock because a blueprint was paid for. */
   unlocked(sim: Sim, names: string[]): void {
     const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
-    this.stationSays(sim, `New blueprint in. The shop now stocks ${list}.`);
+    this.stationSays(sim, `New blueprint${names.length > 1 ? "s" : ""} in. The shop now stocks ${list}.`);
   }
 
   defenderLaunched(sim: Sim): void {

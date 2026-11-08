@@ -112,20 +112,34 @@ function shopButton(key: string, line: ShopLine, onClick: () => void): HTMLButto
   return button;
 }
 
+/** The hauler's arrival, in words for the shop's heading. */
+function haulerText(): string {
+  const eta = sim.haulerEta();
+  if (eta === null) return "no hauler coming";
+  if (eta === 0) return "hauler docked";
+  const seconds = Math.ceil(eta);
+  return `hauler in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 let shopState = "";
+// Lives apart from the buttons: its numbers change all the time, and rebuilding
+// the buttons mid-click would lose the click.
+const shopHeading = document.createElement("h2");
 
 function updateShop(): void {
   const { ship } = sim;
   const docked = sim.isDocked();
+  if (docked) {
+    const title = `Dock shop - station ${Math.floor(sim.stationAccount.credits)} credits - ${haulerText()}`;
+    if (shopHeading.textContent !== title) shopHeading.textContent = title;
+  }
   const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.blueprints].join()} ${[...sim.blueprintPaid].join()} ${[...sim.blueprintsOrdered].join()} ${tuning.blueprintScale} ${tuning.stationUnlocks}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked;
   if (!docked) return;
 
-  const heading = document.createElement("h2");
-  heading.textContent = `Dock shop - ${ship.credits} credits - weight ${sim.shipWeight(ship).toFixed(2)}`;
-  shop.replaceChildren(heading);
+  shop.replaceChildren(shopHeading);
   PARTS.forEach((part, index) => {
     const owned = ship.parts.has(part.id);
     const fits = partFits(part, ship.model);

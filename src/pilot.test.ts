@@ -1001,6 +1001,27 @@ describe("pirate and defender", () => {
       expect(Math.hypot(spot.x - dock.x, spot.y - dock.y)).toBeGreaterThan(400);
     }, 30000);
 
+    it("tells roughly when it'll be at the berth", () => {
+      const sim = haulerWorld();
+      const promised = sim.haulerEta()!;
+      const taken = until(sim, "loading", 400);
+      expect(Math.abs(promised - taken)).toBeLessThan(15);
+      expect(sim.haulerEta()).toBe(0);
+      expect(haulerWorld({ haulers: false }).haulerEta()).toBeNull();
+
+      until(sim, "leaving", 200);
+      const left = sim.haulerEta()!;
+      expect(left).toBeGreaterThan(600);
+      let seconds = 0;
+      while (sim.hauler && seconds < 400) {
+        sim.step();
+        sim.events.length = 0;
+        seconds += TICK;
+      }
+      expect(sim.hauler).toBeNull();
+      expect(Math.abs(left - seconds - sim.haulerEta()!)).toBeLessThan(40);
+    }, 30000);
+
     it("clears the station's ore, pays for it, then leaves and is gone", () => {
       const sim = haulerWorld();
       until(sim, "loading", 400);

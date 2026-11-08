@@ -660,6 +660,34 @@ export class Sim {
   }
 
   /**
+   * Rough seconds until a hauler is at the berth: 0 while one is there, null if none is coming.
+   * It brakes all the way in, so the time left follows from the distance left.
+   */
+  haulerEta(): number | null {
+    const { hauler, tuning } = this;
+    const inbound = (distance: number) => Math.sqrt((2 * distance) / HAULER_BRAKE) + HAULER_DOCK_SECONDS;
+    const fromLaunch = tuning.haulerInterval + inbound(HAULER_APPROACH);
+    if (!hauler) return tuning.haulers ? this.haulerTimer + inbound(HAULER_APPROACH) : null;
+    switch (hauler.stage) {
+      case "arriving": {
+        const standoff = this.haulerStandoff();
+        return inbound(Math.hypot(standoff.x - hauler.x, standoff.y - hauler.y));
+      }
+      case "docking":
+        return Math.max(0, HAULER_DOCK_SECONDS - hauler.time);
+      case "loading":
+        return 0;
+      default: {
+        if (!tuning.haulers) return null;
+        // The next one only sets out its interval after this one is out of sight.
+        const left = Math.max(0, HAULER_GONE - Math.hypot(hauler.x - this.station.x, hauler.y - this.station.y));
+        const speed = Math.hypot(hauler.vx, hauler.vy);
+        return (Math.sqrt(speed * speed + 2 * HAULER_LEAVE_ACCEL * left) - speed) / HAULER_LEAVE_ACCEL + fromLaunch;
+      }
+    }
+  }
+
+  /**
    * A hauler sets out on a schedule. It comes in from beyond the station, braking all the
    * way, then matches the station's turn and locks on. It loads ore above what the station
    * keeps back and pays for it, then unlocks, pushes clear, turns away from the field and

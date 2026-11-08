@@ -1217,6 +1217,39 @@ describe("the new ship", () => {
       expect(Math.abs(after.vy - (before.vy + 15))).toBeLessThan(6);
     }, 30000);
 
+    it("a left click shifts the ship over and leaves it moving as it was", () => {
+      const sim = floater();
+      sim.ship.vx = 20;
+      sim.ship.vy = -10;
+      sim.step();
+      const before = velocity(sim);
+      const goal = { x: sim.ship.x + 300, y: sim.ship.y + 300 };
+      expect(sim.orderTranslate(goal.x, goal.y)).toBe(true);
+      expect(sim.clickPilot.drifting).toBe(true);
+      let last = { ...sim.clickPilot.target()! };
+      let ticks = 0;
+      while (sim.clickPilot.active && ticks < Math.round(90 / TICK)) {
+        const now = sim.clickPilot.target();
+        if (now) last = { ...now };
+        sim.step();
+        ticks++;
+      }
+      expect(sim.clickPilot.active).toBe(false);
+      const after = velocity(sim);
+      expect(Math.abs(after.vx - before.vx)).toBeLessThan(6);
+      expect(Math.abs(after.vy - before.vy)).toBeLessThan(6);
+      expect(Math.hypot(sim.ship.x - last.x, sim.ship.y - last.y)).toBeLessThan(80);
+      const seconds = ticks * TICK;
+      expect(Math.abs(last.x - (goal.x + before.vx * seconds))).toBeLessThan(40);
+    }, 30000);
+
+    it("a left click needs the same part as any other move", () => {
+      const sim = floater();
+      sim.ship.parts.delete("clickMove");
+      expect(sim.orderTranslate(sim.ship.x + 300, sim.ship.y)).toBe(false);
+      expect(sim.clickPilot.active).toBe(false);
+    });
+
     it("a dragged move ends near its drifting destination", () => {
       const sim = floater();
       sim.orderMove(sim.ship.x + 400, sim.ship.y, 0, -10);

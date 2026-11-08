@@ -937,6 +937,13 @@ export class Sim {
     return true;
   }
 
+  /** Shifts the ship to a world position and leaves it moving just as it is now. Returns whether it did. */
+  orderTranslate(x: number, y: number): boolean {
+    if (!this.ship.parts.has("clickMove")) return false;
+    this.clickPilot.moveTo(this, x, y, this.ship.vx, this.ship.vy, true);
+    return true;
+  }
+
   /** Adds to the drift of the current move's destination. Returns whether there was one. */
   orderNudge(vx: number, vy: number): boolean {
     return this.clickPilot.nudge(vx, vy);

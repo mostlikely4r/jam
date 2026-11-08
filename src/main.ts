@@ -372,6 +372,8 @@ const DRAG_PIXELS = 10;
  * your own ship sets a facing, the current destination nudges its drift, space moves.
  */
 let drag: { fromX: number; fromY: number; toX: number; toY: number; on: DragStart } | null = null;
+/** Where the left button went down, to tell a click from a drag. */
+let leftPress: { x: number; y: number } | null = null;
 
 /** Whether a screen point is on a world position, with room for a quick click. */
 function near(clientX: number, clientY: number, x: number, y: number, radius: number): boolean {
@@ -390,11 +392,21 @@ function dragStart(clientX: number, clientY: number): DragStart {
 
 canvas.addEventListener("mousedown", (event) => {
   audio.start();
-  if (event.button !== 2) return;
   const { clientX: x, clientY: y } = event;
+  if (event.button === 0) leftPress = { x, y };
+  if (event.button !== 2) return;
   drag = { fromX: x, fromY: y, toX: x, toY: y, on: dragStart(x, y) };
 });
 window.addEventListener("mouseup", (event) => {
+  if (event.button === 0 && leftPress) {
+    const press = leftPress;
+    leftPress = null;
+    if (Math.hypot(event.clientX - press.x, event.clientY - press.y) < DRAG_PIXELS) {
+      const spot = renderer.screenToWorld(press.x, press.y);
+      sim.orderTranslate(spot.x, spot.y);
+    }
+    return;
+  }
   if (event.button !== 2 || !drag) return;
   const { fromX, fromY, on } = drag;
   drag = null;

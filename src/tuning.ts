@@ -82,9 +82,12 @@ export const DEFAULTS = {
   trafficFlees: true,
   chatter: true,
   haulers: true,
+  /** The shop only sells what the station has bought a blueprint for. */
   stationUnlocks: false,
-  unlockTier1: 100,
-  unlockTier2: 300,
+  /** A blueprint's price, as a share of what the part sells for. */
+  blueprintScale: 0.75,
+  /** Credits the station holds back before spending on blueprints. */
+  stationCashBuffer: 300,
   trafficBuffer: 400,
   droneBuffer: 500,
   haulerFirst: 300,
@@ -292,7 +295,7 @@ export const GROUPS: Group[] = [
       { key: "sightLines", label: "Rocks block sight" },
       { key: "chatter", label: "Radio chatter" },
       { key: "haulers", label: "Haulers buy station ore" },
-      { key: "stationUnlocks", label: "Shop stock unlocks as ore is shipped" },
+      { key: "stationUnlocks", label: "Shop needs blueprints the station pays for" },
     ],
   },
   {
@@ -325,8 +328,8 @@ export const GROUPS: Group[] = [
       { key: "haulerPartsLoad", label: "Parts a hauler brings", min: 0, max: 1000, step: 10 },
       { key: "haulerPartPrice", label: "Credits the station pays per part", min: 0, max: 100, step: 1 },
       { key: "haulerLoadRate", label: "Ore and parts moved per second", min: 0.5, max: 20, step: 0.5 },
-      { key: "unlockTier1", label: "Ore shipped to unlock the second shop tier", min: 0, max: 2000, step: 10 },
-      { key: "unlockTier2", label: "Ore shipped to unlock the third shop tier", min: 0, max: 5000, step: 10 },
+      { key: "blueprintScale", label: "Blueprint price, share of the part's price", min: 0, max: 5, step: 0.05 },
+      { key: "stationCashBuffer", label: "Credits the station holds back from blueprints", min: 0, max: 5000, step: 50 },
       { key: "trafficBuffer", label: "Credits traffic keeps before buying parts", min: 0, max: 3000, step: 50 },
       { key: "droneBuffer", label: "Credits your drones leave you before buying parts", min: 0, max: 5000, step: 50 },
     ],

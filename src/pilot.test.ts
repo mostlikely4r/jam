@@ -828,25 +828,75 @@ describe("pirate and defender", () => {
   });
 
   describe("shop unlocks", () => {
-    it("tiers open as haulers buy ore, and the station announces them", () => {
-      const sim = arena({ stationUnlocks: true, unlockTier1: 3, unlockTier2: 5, haulers: false });
+    function shopWorld(extra: Partial<typeof SOLO> = {}): Sim {
+      const sim = arena({ stationUnlocks: true, haulers: false, stationStartCredits: 0, stationCashBuffer: 300, blueprintScale: 0.75, ...extra });
       placeInDock(sim, sim.ship);
+      return sim;
+    }
+
+    it("the first tier is always open, and the rest need a blueprint", () => {
+      const sim = shopWorld();
       sim.ship.credits = 100000;
       expect(sim.unlocked("spinStabilizer")).toBe(true);
-      expect(sim.buyPart(sim.ship, "reverse")).toBe(false);
       expect(sim.unlocked("drone")).toBe(false);
-      const ship = (sim as unknown as { shipOre(): void });
-      const lines: string[] = [];
-      for (let i = 0; i < 3; i++) ship.shipOre.call(sim);
-      for (const event of sim.events) if (event.type === "chatter") lines.push(event.text);
-      expect(sim.buyPart(sim.ship, "reverse")).toBe(true);
-      expect(sim.unlocked("tractor")).toBe(false);
-      for (let i = 0; i < 2; i++) ship.shipOre.call(sim);
-      for (const event of sim.events) if (event.type === "chatter") lines.push(event.text);
+      expect(sim.buyPart(sim.ship, "reverse")).toBe(false);
+      expect(sim.buyDrone(sim.ship)).toBeNull();
+    });
+
+    it("the station buys the next blueprint only from credits beyond its buffer, and announces it", () => {
+      const sim = shopWorld();
+      const first = sim.blueprintQueue()[0];
+      expect(first).toBe("reverse");
+      const price = sim.blueprintPrice(first);
+      sim.stationAccount.credits = 300 + price - 1;
+      sim.step();
+      expect(sim.unlocked(first)).toBe(false);
+      sim.stationAccount.credits = 300 + price;
+      sim.step();
+      expect(sim.unlocked(first)).toBe(true);
+      expect(sim.stationAccount.credits).toBe(300);
+      expect(sim.events.some((event) => event.type === "chatter" && event.text.includes("reverse thruster"))).toBe(true);
+    });
+
+    it("goes through the tiers in order, cheapest first", () => {
+      const sim = shopWorld();
+      const queue = sim.blueprintQueue();
+      const tiers = queue.map((id) => (id === "drone" ? 2 : PARTS.find((part) => part.id === id)!.tier));
+      expect(tiers).toEqual([...tiers].sort());
+      expect(queue[queue.length - 1]).toBe("drone");
+    });
+
+    it("paying toward a blueprint moves it to the front, and paying it all stocks it", () => {
+      const sim = shopWorld();
+      const price = sim.blueprintPrice("tractor");
+      sim.ship.credits = 100;
+      expect(sim.fundBlueprint(sim.ship, "tractor")).toBe(true);
+      expect(sim.ship.credits).toBe(0);
+      expect(sim.blueprintQueue()[0]).toBe("tractor");
+      expect(sim.blueprintLeft("tractor")).toBe(price - 100);
+      expect(sim.fundBlueprint(sim.ship, "tractor")).toBe(false);
+      sim.ship.credits = 100000;
+      sim.fundBlueprint(sim.ship, "tractor");
+      expect(sim.ship.credits).toBe(100000 - (price - 100));
       expect(sim.unlocked("tractor")).toBe(true);
-      expect(sim.unlocked("drone")).toBe(true);
-      expect(lines.some((line) => line.includes("reverse thruster"))).toBe(true);
-      expect(lines.some((line) => line.includes("drones"))).toBe(true);
+    });
+
+    it("the station finishes paying what someone started", () => {
+      const sim = shopWorld();
+      sim.ship.credits = 100;
+      sim.fundBlueprint(sim.ship, "tractor");
+      sim.stationAccount.credits = 300 + sim.blueprintLeft("tractor");
+      sim.step();
+      expect(sim.unlocked("tractor")).toBe(true);
+      expect(sim.stationAccount.credits).toBe(300);
+    });
+
+    it("you can only pay in while docked", () => {
+      const sim = shopWorld();
+      sim.ship.credits = 100;
+      sim.ship.x += 3000;
+      sim.ship.px = sim.ship.x;
+      expect(sim.fundBlueprint(sim.ship, "tractor")).toBe(false);
     });
 
     it("the turret only fits the new ship", () => {

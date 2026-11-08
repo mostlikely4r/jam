@@ -2,7 +2,7 @@ import { Audio } from "./audio";
 import { Radio } from "./radio";
 import { MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
-import { PARTS, partFits, type Part } from "./parts";
+import { type BlueprintId, PARTS, partFits, type Part } from "./parts";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
 const STORAGE_KEY = "flight-test-tuning";
@@ -61,8 +61,21 @@ function restart(): void {
 /** Buys a part, or sells it back if the ship already has it. */
 function tradePart(part: Part): void {
   if (sim.ship.parts.has(part.id)) sim.sellPart(sim.ship, part.id);
-  else sim.buyPart(sim.ship, part.id);
+  else if (sim.unlocked(part.id)) sim.buyPart(sim.ship, part.id);
+  else if (partFits(part, sim.ship.model)) sim.fundBlueprint(sim.ship, part.id);
   if (!panel.hidden) buildPanel();
+}
+
+function tradeDrone(): void {
+  if (sim.unlocked("drone")) sim.buyDrone(sim.ship);
+  else sim.fundBlueprint(sim.ship, "drone");
+}
+
+/** A locked item's line in the shop: what its blueprint still costs, to pay toward. */
+function blueprintText(id: BlueprintId): string {
+  const left = sim.blueprintLeft(id);
+  const price = sim.blueprintPrice(id);
+  return `${left === price ? `${price} credits` : `${left} of ${price} credits left`} to pay toward it, or wait for the station`;
 }
 
 let shopState = "";
@@ -70,7 +83,7 @@ let shopState = "";
 function updateShop(): void {
   const { ship } = sim;
   const docked = sim.isDocked();
-  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${sim.oreShipped}`;
+  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.blueprints].join()} ${[...sim.blueprintPaid].join()} ${tuning.blueprintScale} ${tuning.stationUnlocks}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked;
@@ -88,13 +101,12 @@ function updateShop(): void {
     button.className = owned ? "owned" : "";
     const inStock = sim.hasPartsFor(price);
     const open = sim.unlocked(part.id);
-    const toGo = Math.ceil(sim.tierThreshold(part.tier) - sim.oreShipped);
-    button.disabled = !owned && (!fits || !open || !inStock || ship.credits < price);
+    button.disabled = !owned && (!fits || (open ? !inStock || ship.credits < price : ship.credits <= 0));
     button.textContent = owned
       ? `${partKey(index)} SELL ${part.label} for ${price}, -${weight} weight`
       : fits
         ? !open
-          ? `${partKey(index)} ${part.label}: not stocked until ${toGo} more ore is shipped`
+          ? `${partKey(index)} ${part.label}: no blueprint yet. ${blueprintText(part.id)}`
           : inStock
             ? `${partKey(index)} ${part.label}: ${price} credits, +${weight} weight. ${part.description}`
             : `${partKey(index)} ${part.label}: the station is out of parts`
@@ -110,16 +122,16 @@ function updateShop(): void {
   const drone = document.createElement("button");
   const droneInStock = sim.hasPartsFor(tuning.dronePrice);
   const dronesOpen = sim.unlocked("drone");
-  drone.disabled = full || !dronesOpen || !droneInStock || ship.credits < tuning.dronePrice;
+  drone.disabled = full || (dronesOpen ? !droneInStock || ship.credits < tuning.dronePrice : ship.credits <= 0);
   drone.textContent = full
     ? `- New drone: at the limit of ${tuning.droneLimit}`
     : !dronesOpen
-      ? `- New drone: not available until ${Math.ceil(sim.tierThreshold(2) - sim.oreShipped)} more ore is shipped`
+      ? `- New drone: no blueprint yet. ${blueprintText("drone")}`
       : !droneInStock
       ? "- New drone: the station is out of parts"
       : `- New drone: ${tuning.dronePrice} credits. Earns for you (${sim.drones.length}/${tuning.droneLimit})`;
   drone.addEventListener("click", () => {
-    sim.buyDrone(ship);
+    tradeDrone();
     drone.blur();
   });
   shop.append(drone);
@@ -317,7 +329,7 @@ window.addEventListener("keydown", (event) => {
     if (part) tradePart(part);
   }
   if (event.code === "Equal" && sim.isDocked() && PARTS[10]) tradePart(PARTS[10]);
-  if (event.code === "Minus" && sim.isDocked()) sim.buyDrone(sim.ship);
+  if (event.code === "Minus" && sim.isDocked()) tradeDrone();
   keys.add(event.code);
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));
@@ -482,7 +494,7 @@ function frame(now: number): void {
           )
         : []),
       ...(tuning.showTraffic
-        ? [`Station balance ${sim.stationAccount.credits}  Ore held ${Math.floor(sim.stationOre)}  Parts held ${Math.floor(sim.stationParts)}  Lost traffic ${sim.lostTraffic.length}  Pirate base ore ${Math.floor(sim.pirateOre)}`]
+        ? [`Station balance ${sim.stationAccount.credits}  Ore held ${Math.floor(sim.stationOre)}  Parts held ${Math.floor(sim.stationParts)}  Next blueprint ${sim.blueprintQueue()[0] ?? "none"}  Lost traffic ${sim.lostTraffic.length}  Pirate base ore ${Math.floor(sim.pirateOre)}`]
         : []),
       `FPS   ${Math.round(fps)}${paused ? "  PAUSED" : ""}`,
     ].join("\n");

@@ -1,5 +1,5 @@
 import { Chatter } from "./chatter";
-import { PARTS, partFits, partsInTier, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
+import { type BlueprintId, PARTS, partFits, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
 import { ClickPilot, DronePilot, FighterPilot } from "./pilot";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
@@ -366,8 +366,10 @@ export class Sim {
   /** Parts the station holds. Every service it sells uses them up. */
   stationParts = 0;
   hauler: Hauler | null = null;
-  /** All the ore haulers have bought this game. It unlocks the shop's tiers. */
-  oreShipped = 0;
+  /** Blueprints the station has, so its shop can sell those things. */
+  blueprints = new Set<BlueprintId>();
+  /** Credits paid toward blueprints the station doesn't have yet. */
+  blueprintPaid = new Map<BlueprintId, number>();
   /** Seconds until the next hauler sets out. */
   haulerTimer = 0;
   /** The pirate base's ore. It pays for pirates' repairs, rebuilds and new ships. */
@@ -420,7 +422,8 @@ export class Sim {
     this.stationOre = this.tuning.stationStartOre;
     this.stationParts = this.tuning.stationStartParts;
     this.hauler = null;
-    this.oreShipped = 0;
+    this.blueprints = new Set();
+    this.blueprintPaid = new Map();
     this.haulerTimer = this.tuning.haulerFirst;
     this.pirateOre = this.tuning.pirateStartOre;
     this.lostTraffic = [];
@@ -783,7 +786,6 @@ export class Sim {
               this.stationOre--;
               account.credits += tuning.haulerPrice;
               hauler.earned += tuning.haulerPrice;
-              this.shipOre();
             }
             if (canUnload()) {
               hauler.parts--;
@@ -1004,31 +1006,68 @@ export class Sim {
     return Math.round(part.price * this.tuning.partPriceScale);
   }
 
-  /** How much ore haulers must have bought before a shop tier opens. */
-  tierThreshold(tier: number): number {
-    if (!this.tuning.stationUnlocks || tier === 0) return 0;
-    return tier === 1 ? this.tuning.unlockTier1 : this.tuning.unlockTier2;
+  private blueprintTier(id: BlueprintId): number {
+    return id === "drone" ? 2 : PARTS.find((part) => part.id === id)!.tier;
   }
 
-  /** Whether the station's shop has this part, or drones (the third tier), to sell yet. */
-  unlocked(id: PartId | "drone"): boolean {
-    const tier = id === "drone" ? 2 : PARTS.find((part) => part.id === id)!.tier;
-    return this.oreShipped >= this.tierThreshold(tier);
+  /** Whether the station's shop can sell this. The first tier never needs a blueprint. */
+  unlocked(id: BlueprintId): boolean {
+    return !this.tuning.stationUnlocks || this.blueprintTier(id) === 0 || this.blueprints.has(id);
   }
 
-  /** One more ore shipped. When that opens a tier, the station says so. */
-  private shipOre(): void {
-    const before = this.oreShipped;
-    this.oreShipped++;
-    if (!this.tuning.stationUnlocks || !this.tuning.chatter) return;
-    for (const tier of [1, 2] as const) {
-      const threshold = this.tierThreshold(tier);
-      if (before < threshold && this.oreShipped >= threshold) {
-        const names = partsInTier(tier).map((part) => part.label.toLowerCase());
-        if (tier === 2) names.push("drones");
-        this.chatter.unlocked(this, names);
-      }
-    }
+  blueprintPrice(id: BlueprintId): number {
+    const price = id === "drone" ? this.tuning.dronePrice : this.partPrice(id);
+    return Math.round(price * this.tuning.blueprintScale);
+  }
+
+  /** What's still owed on a blueprint. */
+  blueprintLeft(id: BlueprintId): number {
+    return Math.max(0, this.blueprintPrice(id) - (this.blueprintPaid.get(id) ?? 0));
+  }
+
+  /** The blueprints still to get, next first: most paid toward, then by tier, then cheapest. */
+  blueprintQueue(): BlueprintId[] {
+    if (!this.tuning.stationUnlocks) return [];
+    const paid = (id: BlueprintId) => this.blueprintPaid.get(id) ?? 0;
+    const ids: BlueprintId[] = [...PARTS.map((part) => part.id), "drone"];
+    return ids
+      .filter((id) => !this.unlocked(id))
+      .sort(
+        (a, b) =>
+          paid(b) - paid(a) ||
+          this.blueprintTier(a) - this.blueprintTier(b) ||
+          this.blueprintPrice(a) - this.blueprintPrice(b),
+      );
+  }
+
+  /** Puts the ship owner's credits toward a blueprint, as far as they go. Returns whether any went in. */
+  fundBlueprint(ship: Ship, id: BlueprintId): boolean {
+    if (this.unlocked(id) || !this.isDocked(ship)) return false;
+    const account = this.accountOf(ship);
+    const amount = Math.min(account.credits, this.blueprintLeft(id));
+    if (amount <= 0) return false;
+    account.credits -= amount;
+    this.blueprintPaid.set(id, (this.blueprintPaid.get(id) ?? 0) + amount);
+    if (this.blueprintLeft(id) === 0) this.gainBlueprint(id);
+    return true;
+  }
+
+  private gainBlueprint(id: BlueprintId): void {
+    this.blueprints.add(id);
+    this.blueprintPaid.delete(id);
+    if (!this.tuning.chatter) return;
+    const name = id === "drone" ? "drones" : PARTS.find((part) => part.id === id)!.label.toLowerCase();
+    this.chatter.unlocked(this, [name]);
+  }
+
+  /** Whatever the station can spare past its cash buffer finishes paying for the next blueprint. */
+  private buyBlueprints(): void {
+    const next = this.blueprintQueue()[0];
+    if (!next) return;
+    const left = this.blueprintLeft(next);
+    if (this.stationAccount.credits - this.tuning.stationCashBuffer < left) return;
+    this.stationAccount.credits -= left;
+    this.gainBlueprint(next);
   }
 
   /** The parts this ship would buy next, in order, if it could afford them and the shop had them. */
@@ -1168,6 +1207,7 @@ export class Sim {
       this.repairHull(pilot.ship, dt);
     }
     this.spendStationParts();
+    this.buyBlueprints();
     this.spendPirateOre();
     this.moveHauler(dt);
     if (this.tuning.chatter) this.chatter.update(this, dt);

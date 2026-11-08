@@ -149,7 +149,5 @@ export const TRAFFIC_BUY_ORDER: Record<ShipModel, PartId[]> = {
   floater: ["tractor", "turret", "reverse", "strafe", "spinStabilizer"],
 };
 
-/** What unlocks at each tier, for the station to announce. */
-export function partsInTier(tier: 1 | 2): Part[] {
-  return PARTS.filter((part) => part.tier === tier);
-}
+/** What the station's shop can need a blueprint for. */
+export type BlueprintId = PartId | "drone";

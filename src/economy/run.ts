@@ -37,7 +37,7 @@ function cycle(result: CycleResult): void {
 
 function today(): void {
   const result = runToday(48, 15);
-  console.log("The game today (ore sold at 10, services at 20, spare ore bought by haulers)");
+  console.log("The game before parts (ore sold at 10, services at 20, spare ore bought by haulers)");
   console.log(`  Over ${result.hours} hours: ${n(result.mined)} ore mined, ${n(result.services)} ore used for services`);
   console.log(`  Miners' cash ${n(result.miners)}   Station's cash ${n(result.station)}   Pile ${n(result.pile)}`);
   console.log(`  HOLE: credits from nowhere ${n(result.creditsFromNowhere)}, ore to nowhere ${n(result.oreToNowhere)}\n`);

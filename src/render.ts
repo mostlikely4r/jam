@@ -22,6 +22,10 @@ const HAULER_COLUMNS = 10;
 const HAULER_ROWS = 4;
 const PILE_ROWS = 12;
 const PILE_ORE_PER_LUMP = 5;
+/** Rows of the station's deck that crates of parts can fill. */
+const CRATE_ROWS = 4;
+const CRATE_COLOR = "#7f93b5";
+const CRATE_EDGE = "#c4d2ea";
 const DRONE_COLOR = [180, 200, 120];
 const OWNED_DRONE_COLOR = [120, 190, 255];
 const TRAFFIC_COLOR = [150, 155, 165];
@@ -277,7 +281,24 @@ export class Renderer {
     ctx.lineWidth = 3;
     ctx.strokeRect(-STATION_HALF, -STATION_HALF, size, size);
     this.drawOrePile(sim.stationOre, STATION_HALF);
+    this.drawCrates(sim.stationParts, STATION_HALF);
     ctx.restore();
+  }
+
+  /** Parts as crates along the far edge of the deck, in front of any ore that reaches them. */
+  private drawCrates(parts: number, half: number): void {
+    const { ctx } = this;
+    const crates = Math.min(PILE_ROWS * CRATE_ROWS, Math.ceil(parts / PILE_ORE_PER_LUMP));
+    const pitch = (half * 2) / (PILE_ROWS + 1);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = CRATE_EDGE;
+    for (let i = 0; i < crates; i++) {
+      ctx.fillStyle = CRATE_COLOR;
+      const x = -half + pitch * ((i % PILE_ROWS) + 1);
+      const y = -half + pitch * (Math.floor(i / PILE_ROWS) + 1);
+      ctx.fillRect(x - pitch * 0.36, y - pitch * 0.36, pitch * 0.72, pitch * 0.72);
+      ctx.strokeRect(x - pitch * 0.36, y - pitch * 0.36, pitch * 0.72, pitch * 0.72);
+    }
   }
 
   /** Ore as lumps on a deck around the origin, filling up row by row, with no number to read. */
@@ -659,6 +680,19 @@ export class Renderer {
       const lx = -half + 10 + pitch * (i % HAULER_COLUMNS) + pitch * 0.2;
       const ly = -side + 10 + rowPitch * Math.floor(i / HAULER_COLUMNS) + rowPitch * 0.2;
       ctx.fillRect(lx, ly, pitch * 0.6, rowPitch * 0.6);
+    }
+    // Crates fill from the other end, so ore and parts visibly trade places.
+    const cells = HAULER_ROWS * HAULER_COLUMNS;
+    const crates = Math.min(cells - lumps, Math.ceil(hauler.parts / PILE_ORE_PER_LUMP));
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = CRATE_EDGE;
+    for (let i = 0; i < crates; i++) {
+      const cell = cells - 1 - i;
+      const lx = -half + 10 + pitch * (cell % HAULER_COLUMNS) + pitch * 0.15;
+      const ly = -side + 10 + rowPitch * Math.floor(cell / HAULER_COLUMNS) + rowPitch * 0.15;
+      ctx.fillStyle = CRATE_COLOR;
+      ctx.fillRect(lx, ly, pitch * 0.7, rowPitch * 0.7);
+      ctx.strokeRect(lx, ly, pitch * 0.7, rowPitch * 0.7);
     }
     ctx.restore();
   }

@@ -17,8 +17,8 @@ const SOLO = {
   droneLimit: 1,
   repairCost: 0,
   rebuildCost: 0,
-  stationStartOre: 100000,
-  stationReserveOre: Infinity,
+  stationStartParts: 100000,
+  stationReserveParts: Infinity,
   detectSeconds: 0,
   haulers: false,
   stationUnlocks: false,
@@ -865,11 +865,14 @@ describe("pirate and defender", () => {
         haulerFirst: 10,
         haulerInterval: 600,
         haulerCapacity: 50,
-        haulerKeep: 60,
         haulerPrice: 15,
+        haulerPartsLoad: 100,
+        haulerPartPrice: 16,
         haulerLoadRate: 10,
-        stationReserveOre: 20,
-        stationStartOre: 100,
+        stationReserveParts: 20,
+        stationStartOre: 40,
+        stationStartParts: 100,
+        stationPartsTarget: 100,
         stationStartCredits: 0,
         ...extra,
       });
@@ -912,11 +915,13 @@ describe("pirate and defender", () => {
       expect(Math.hypot(spot.x - dock.x, spot.y - dock.y)).toBeGreaterThan(400);
     }, 30000);
 
-    it("loads only what the station has beyond what it keeps, pays for it, then leaves and is gone", () => {
+    it("clears the station's ore, pays for it, then leaves and is gone", () => {
       const sim = haulerWorld();
       until(sim, "loading", 400);
       until(sim, "undocking", 60);
-      expect(sim.stationOre).toBe(60);
+      expect(sim.stationOre).toBe(0);
+      expect(sim.stationParts).toBe(100);
+      expect(sim.hauler?.parts).toBe(100);
       expect(sim.hauler?.cargo).toBe(40);
       expect(sim.stationAccount.credits).toBe(40 * 15);
       until(sim, "leaving", 40);
@@ -927,6 +932,27 @@ describe("pirate and defender", () => {
         seconds += TICK;
       }
       expect(sim.hauler).toBeNull();
+    }, 30000);
+
+    it("sells parts as far as this visit's ore pays for them, even to a station in debt", () => {
+      for (const start of [0, -5000]) {
+        const sim = haulerWorld({ stationStartParts: 40, stationStartCredits: start });
+        until(sim, "loading", 400);
+        until(sim, "undocking", 60);
+        expect(sim.hauler?.cargo).toBe(40);
+        expect(sim.stationParts).toBe(40 + 37);
+        expect(sim.hauler?.parts).toBe(100 - 37);
+        expect(sim.stationAccount.credits).toBe(start + 40 * 15 - 37 * 16);
+      }
+    }, 30000);
+
+    it("a station with money buys parts up to what it wants, even with no ore to sell", () => {
+      const sim = haulerWorld({ stationStartOre: 0, stationStartParts: 70, stationStartCredits: 1000 });
+      until(sim, "loading", 400);
+      until(sim, "undocking", 60);
+      expect(sim.stationParts).toBe(100);
+      expect(sim.hauler?.parts).toBe(70);
+      expect(sim.stationAccount.credits).toBe(1000 - 30 * 16);
     }, 30000);
 
     it("once it unlocks, the station's turning no longer carries it", () => {
@@ -1045,7 +1071,7 @@ describe("pirate and defender", () => {
     });
 
     it("a pirate is rebuilt from its base's pile until the pile runs out", () => {
-      const sim = arena({ pirates: 1, rebuildCost: 300, serviceCreditsPerOre: 20, pirateStartOre: 15 });
+      const sim = arena({ pirates: 1, rebuildCost: 300, serviceCreditsPerPart: 20, pirateStartOre: 15 });
       const { ship } = sim.fighters[0];
       wreck(sim, ship);
       expect(sim.fighters.length).toBe(1);
@@ -1058,9 +1084,9 @@ describe("pirate and defender", () => {
       const sim = arena({
         pirates: 1,
         pirateLimit: 2,
-        serviceCreditsPerOre: 20,
+        serviceCreditsPerPart: 20,
         defenderPrice: 500,
-        stationReserveOre: 20,
+        stationReserveParts: 20,
         pirateStartOre: 44,
       });
       sim.step();
@@ -1089,16 +1115,16 @@ describe("pirate and defender", () => {
       const sim = arena({
         pirates: 1,
         repairCost: 2,
-        serviceCreditsPerOre: 20,
+        serviceCreditsPerPart: 20,
         pirateStartOre: 1,
-        stationStartOre: 7,
+        stationStartParts: 7,
       });
       const pilot = sim.fighters[0];
       pilot.ship.hull = 50;
       expect(sim.canRepair(pilot.ship)).toBe(true);
       run(sim, 0.5);
       expect(sim.pirateOre).toBeLessThan(1);
-      expect(sim.stationOre).toBe(7);
+      expect(sim.stationParts).toBe(7);
     });
 
     it("a pirate with nothing to hunt mines rocks and takes the ore to its base", () => {
@@ -1145,7 +1171,7 @@ describe("pirate and defender", () => {
       }
       expect(sim.pirateOre).toBe(1);
       expect(ship.credits).toBe(0);
-      expect(sim.stationOre).toBe(SOLO.stationStartOre);
+      expect(sim.stationParts).toBe(SOLO.stationStartParts);
       expect(sim.stationAccount.credits).toBe(DEFAULTS.stationStartCredits);
     }, 30000);
 
@@ -1177,15 +1203,15 @@ describe("pirate and defender", () => {
     describe("the station's ore", () => {
       /** Ore goes 1 to 20 credits of service, so 500 credits is 25 ore and 300 is 15. */
       const STOCK = {
-        serviceCreditsPerOre: 20,
+        serviceCreditsPerPart: 20,
         defenderPrice: 500,
         rebuildCost: 300,
-        stationReserveOre: 20,
-        stationStartOre: 0,
+        stationReserveParts: 20,
+        stationStartParts: 0,
       };
 
       it("builds no defenders, whatever its ore, until a traffic ship is lost", () => {
-        const sim = traffic({ ...STOCK, stationStartOre: 5000 });
+        const sim = traffic({ ...STOCK, stationStartParts: 5000 });
         sim.step();
         expect(sim.fighters.length).toBe(0);
         wreck(sim, sim.traffic[0].ship);
@@ -1193,7 +1219,7 @@ describe("pirate and defender", () => {
       });
 
       it("a defender gets no second one while nothing is lost, and only one while something is", () => {
-        const sim = traffic({ ...STOCK, defenders: 1, trafficRacers: 2, stationStartOre: 5000 });
+        const sim = traffic({ ...STOCK, defenders: 1, trafficRacers: 2, stationStartParts: 5000 });
         sim.step();
         expect(sim.fighters.length).toBe(1);
         wreck(sim, sim.traffic[0].ship);
@@ -1203,7 +1229,7 @@ describe("pirate and defender", () => {
       });
 
       it("a wrecked defender isn't rebuilt, and is replaced only when traffic is lost", () => {
-        const sim = traffic({ ...STOCK, defenders: 1, stationStartOre: 5000 });
+        const sim = traffic({ ...STOCK, defenders: 1, stationStartParts: 5000 });
         wreck(sim, sim.fighters[0].ship);
         run(sim, 1);
         expect(sim.fighters.length).toBe(0);
@@ -1225,10 +1251,10 @@ describe("pirate and defender", () => {
         run(sim, 0.2);
         expect(sim.ship.wrecks).toBe(1);
         expect(sim.ship.credits).toBe(-300);
-        expect(sim.stationOre).toBe(0);
+        expect(sim.stationParts).toBe(0);
       });
 
-      it("ore brings a dead system back: a defender first, then the lost traffic", () => {
+      it("parts bring a dead system back: a defender first, then the lost traffic", () => {
         const sim = traffic({ ...STOCK });
         wreck(sim, sim.traffic[0].ship);
         sim.step();
@@ -1236,31 +1262,46 @@ describe("pirate and defender", () => {
         expect(sim.traffic.length).toBe(0);
 
         // Enough for one thing, and the defender comes first.
-        sim.stationOre = 45;
+        sim.stationParts = 45;
         sim.step();
         expect(sim.fighters.length).toBe(1);
         expect(sim.traffic.length).toBe(0);
 
-        sim.stationOre = 35;
+        sim.stationParts = 35;
         sim.step();
         expect(sim.traffic.map((pilot) => pilot.ship.model)).toEqual(["racer"]);
         expect(sim.isDocked(sim.traffic[0].ship)).toBe(true);
         expect(sim.lostTraffic).toEqual([]);
-        expect(sim.stationOre).toBe(20);
+        expect(sim.stationParts).toBe(20);
       });
 
-      it("the player's sale is what feeds the pile", () => {
-        const sim = traffic({ ...STOCK });
+      it("a delivery of ore revives a dead station once the next hauler has traded it for parts", () => {
+        const sim = traffic({
+          ...STOCK,
+          stationStartOre: 0,
+          stationStartCredits: -2000,
+          haulers: true,
+          haulerFirst: 10,
+          haulerLoadRate: 10,
+          haulerPrice: 15,
+          haulerPartPrice: 16,
+          haulerPartsLoad: 100,
+          stationPartsTarget: 100,
+        });
         wreck(sim, sim.traffic[0].ship);
         placeInDock(sim, sim.ship);
-        sim.ship.ore = 45;
-        run(sim, 60, () => placeInDock(sim, sim.ship));
+        sim.ship.ore = 60;
+        run(sim, 30, () => placeInDock(sim, sim.ship));
         expect(sim.ship.ore).toBe(0);
+        expect(sim.stationOre).toBe(60);
+        expect(sim.fighters.length).toBe(0);
+        run(sim, 400, () => placeInDock(sim, sim.ship));
+        expect(sim.stationOre).toBe(0);
         expect(sim.fighters.length).toBe(1);
       }, 30000);
 
-      it("repairs use ore, stop when it runs out, and start again when more arrives", () => {
-        const sim = arena({ ...STOCK, repairCost: 2, stationStartOre: 1, repairSpeed: 100 });
+      it("repairs use parts, stop when they run out, and start again when more arrive", () => {
+        const sim = arena({ ...STOCK, repairCost: 2, stationStartParts: 1, repairSpeed: 100 });
         placeInDock(sim, sim.ship);
         sim.ship.hull = 50;
         sim.ship.credits = 1000;
@@ -1268,23 +1309,23 @@ describe("pirate and defender", () => {
         expect(sim.ship.hull).toBeGreaterThanOrEqual(59);
         expect(sim.ship.hull).toBeLessThanOrEqual(60);
         expect(sim.canRepair(sim.ship)).toBe(false);
-        sim.stationOre = 100;
+        sim.stationParts = 100;
         run(sim, 2, () => placeInDock(sim, sim.ship));
         expect(sim.ship.hull).toBe(100);
       });
 
       it("a part needs ore in the pile, and selling it back returns the ore", () => {
-        const sim = arena({ ...STOCK, stationReserveOre: Infinity });
+        const sim = arena({ ...STOCK, stationReserveParts: Infinity });
         placeInDock(sim, sim.ship);
         sim.ship.credits = 10000;
         const id = "reverse";
         expect(sim.buyPart(sim.ship, id)).toBe(false);
-        const ore = sim.oreFor(sim.partPrice(id));
-        sim.stationOre = ore;
+        const ore = sim.stockFor(sim.partPrice(id));
+        sim.stationParts = ore;
         expect(sim.buyPart(sim.ship, id)).toBe(true);
-        expect(sim.stationOre).toBe(0);
+        expect(sim.stationParts).toBe(0);
         expect(sim.sellPart(sim.ship, id)).toBe(true);
-        expect(sim.stationOre).toBe(ore);
+        expect(sim.stationParts).toBe(ore);
       });
 
       it("a damaged ship doesn't wait in the dock for ore that may never come", () => {

@@ -190,7 +190,7 @@ export interface TodayResult {
   startCash: number;
 }
 
-/** The game as it is now: ore sold at 10, used for services at 20, spare ore bought by haulers. */
+/** The game before parts: ore sold at 10, used for services at 20, spare ore bought by haulers. */
 export function runToday(hours: number, orePerMinute: number): TodayResult {
   const start = { miners: 1000, station: 300 };
   let miners = start.miners;

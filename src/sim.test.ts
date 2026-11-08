@@ -12,8 +12,8 @@ const DEFAULTS = {
   trafficFloaters: 0,
   pirates: 0,
   defenders: 0,
-  stationStartOre: 100000,
-  stationReserveOre: Infinity,
+  stationStartParts: 100000,
+  stationReserveParts: Infinity,
   stationUnlocks: false,
 };
 
@@ -828,8 +828,8 @@ describe("the new ship", () => {
       trafficFloaters: 0,
       pirates: 0,
       defenders: 0,
-      stationStartOre: 100000,
-      stationReserveOre: Infinity,
+      stationStartParts: 100000,
+      stationReserveParts: Infinity,
       stationUnlocks: false,
       rockCount: 0,
       rockInflow: 0,

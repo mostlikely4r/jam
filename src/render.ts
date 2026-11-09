@@ -294,6 +294,10 @@ export class Renderer {
     for (const deposit of sim.deposits) {
       const x = lerp(deposit.px, deposit.x, alpha);
       const y = lerp(deposit.py, deposit.y, alpha);
+      if (deposit.partsLeft > 0) {
+        this.drawDepositFrame(x, y, deposit.partsUsed / (deposit.partsUsed + deposit.partsLeft));
+        continue;
+      }
       ctx.fillStyle = deposit === here ? "rgba(143, 227, 161, 0.14)" : "rgba(143, 227, 161, 0.05)";
       ctx.strokeStyle = "#8fe3a1";
       ctx.lineWidth = 2;
@@ -313,6 +317,19 @@ export class Renderer {
       this.drawOrePile(deposit.ore, DEPOSIT_HALF);
       ctx.restore();
     }
+  }
+
+  /** A deposit under construction: its outline, with the deck filling in as parts go into it. */
+  private drawDepositFrame(x: number, y: number, built: number): void {
+    const { ctx } = this;
+    const size = DEPOSIT_HALF * 2;
+    ctx.fillStyle = "#6b7280";
+    ctx.fillRect(x - DEPOSIT_HALF, y + DEPOSIT_HALF - size * built, size, size * built);
+    ctx.strokeStyle = "#aab1bd";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([10, 8]);
+    ctx.strokeRect(x - DEPOSIT_HALF, y - DEPOSIT_HALF, size, size);
+    ctx.setLineDash([]);
   }
 
   /** Parts as crates along the far edge of the deck, in front of any ore that reaches them. */

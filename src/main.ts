@@ -82,7 +82,8 @@ interface ShopLine {
 /** An item the station can't sell yet: paid and on its way, or still to pay for. */
 function lockedLine(id: BlueprintId, label: string): ShopLine {
   if (sim.blueprintsOrdered.has(id)) {
-    return { tag: "pending", style: "pending", text: `${label}: paid, coming with the next hauler`, enabled: false };
+    const coming = id === "deposit" ? "being built from the station's parts" : "coming with the next hauler";
+    return { tag: "pending", style: "pending", text: `${label}: paid, ${coming}`, enabled: false };
   }
   const left = sim.blueprintLeft(id);
   const price = sim.blueprintPrice(id);
@@ -170,7 +171,7 @@ function updateShop(): void {
     const title = `Dock shop - station ${Math.floor(sim.stationAccount.credits)} credits - ${haulerText()}`;
     if (shopHeading.textContent !== title) shopHeading.textContent = title;
   }
-  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.blueprints].join()} ${[...sim.blueprintPaid].join()} ${[...sim.blueprintsOrdered].join()} ${tuning.blueprintScale} ${tuning.stationUnlocks}`;
+  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.blueprints].join()} ${[...sim.blueprintPaid].join()} ${[...sim.blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${tuning.blueprintScale} ${tuning.stationUnlocks}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked;
@@ -203,6 +204,11 @@ function updateShop(): void {
           `New drone: ${tuning.dronePrice} credits. Earns for you (${sim.drones.length}/${tuning.droneLimit})`,
         );
   shop.append(shopButton("-", droneLine, tradeDrone));
+
+  const depositLine: ShopLine = sim.unlocked("deposit")
+    ? { tag: "built", text: "Field deposit: open at the field's edge", enabled: false }
+    : lockedLine("deposit", `Field deposit (${tuning.depositParts} parts)`);
+  shop.append(shopButton("·", depositLine, () => sim.fundBlueprint(ship, "deposit")));
 }
 
 /** Keys 1 to 9 and then 0 pick a part. The minus key buys a drone. */
@@ -582,7 +588,7 @@ function frame(now: number): void {
           )
         : []),
       ...(tuning.showTraffic
-        ? [`Station balance ${sim.stationAccount.credits}  Ore held ${Math.floor(sim.stationOre)}  Parts held ${Math.floor(sim.stationParts)}  Next blueprint ${sim.blueprintQueue()[0] ?? "none"}  Lost traffic ${sim.lostTraffic.length}  Pirate base ore ${Math.floor(sim.pirateOre)}`]
+        ? [`Station balance ${sim.stationAccount.credits}  Ore held ${Math.floor(sim.stationOre)}  Parts held ${Math.floor(sim.stationParts)}  Next blueprint ${sim.blueprintQueue()[0] ?? "none"}${sim.deposits.some((deposit) => deposit.partsLeft > 0) ? "  Building deposit" : ""}  Lost traffic ${sim.lostTraffic.length}  Pirate base ore ${Math.floor(sim.pirateOre)}`]
         : []),
       `FPS   ${Math.round(fps)}${paused ? "  PAUSED" : ""}`,
     ].join("\n");

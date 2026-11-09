@@ -102,6 +102,11 @@ export const DEFAULTS = {
   depositSells: 7,
   /** The share of full loads traffic drops at a deposit for no reason but saving the trip. */
   depositDropChance: 0.25,
+  /** Credits to fund a deposit, and the station's parts it's then built from. */
+  depositPrice: 3000,
+  depositParts: 150,
+  /** Parts per second going into construction. */
+  depositBuildRate: 0.5,
   haulerFirst: 300,
   haulerInterval: 600,
   haulerCapacity: 200,
@@ -339,6 +344,9 @@ export const GROUPS: Group[] = [
       { key: "depositPays", label: "Credits it pays per ore", min: 0, max: 50, step: 1 },
       { key: "depositSells", label: "Credits it asks per ore", min: 0, max: 50, step: 1 },
       { key: "depositDropChance", label: "Share of full loads traffic drops", min: 0, max: 1, step: 0.05 },
+      { key: "depositPrice", label: "Credits to fund one", min: 0, max: 20000, step: 100 },
+      { key: "depositParts", label: "Parts to build one", min: 1, max: 1000, step: 10 },
+      { key: "depositBuildRate", label: "Parts per second while building", min: 0.1, max: 10, step: 0.1 },
     ],
     switches: [{ key: "depositFree", label: "Deposit built for free (testing)" }],
   },

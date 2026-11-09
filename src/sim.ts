@@ -198,6 +198,9 @@ export interface Deposit {
   ore: number;
   /** Put there by the testing switch, so it goes when the switch does. */
   fromSwitch: boolean;
+  /** Parts still to come before it opens, and the parts already built into it. */
+  partsLeft: number;
+  partsUsed: number;
 }
 
 export interface Poi {
@@ -1066,15 +1069,18 @@ export class Sim {
   }
 
   private blueprintTier(id: BlueprintId): number {
+    if (id === "deposit") return 3;
     return id === "drone" ? 2 : PARTS.find((part) => part.id === id)!.tier;
   }
 
   /** Whether the station's shop can sell this. The first tier never needs a blueprint. */
   unlocked(id: BlueprintId): boolean {
+    if (id === "deposit") return this.deposits.some((deposit) => deposit.partsLeft <= 0);
     return !this.tuning.stationUnlocks || this.blueprintTier(id) === 0 || this.blueprints.has(id);
   }
 
   blueprintPrice(id: BlueprintId): number {
+    if (id === "deposit") return this.tuning.depositPrice;
     const price = id === "drone" ? this.tuning.dronePrice : this.partPrice(id);
     return Math.round(price * this.tuning.blueprintScale);
   }
@@ -1088,7 +1094,7 @@ export class Sim {
   blueprintQueue(): BlueprintId[] {
     if (!this.tuning.stationUnlocks) return [];
     const paid = (id: BlueprintId) => this.blueprintPaid.get(id) ?? 0;
-    const ids: BlueprintId[] = [...PARTS.map((part) => part.id), "drone"];
+    const ids: BlueprintId[] = [...PARTS.map((part) => part.id), "drone", "deposit"];
     return ids
       .filter((id) => !this.unlocked(id) && !this.blueprintsOrdered.has(id))
       .sort(
@@ -1114,14 +1120,18 @@ export class Sim {
   private orderBlueprint(id: BlueprintId): void {
     this.blueprintPaid.delete(id);
     this.blueprintsOrdered.add(id);
+    if (id === "deposit") this.addDeposit(false, this.tuning.depositParts);
   }
 
   /** Everything on order arrives at once, and the shop can stock it from then on. */
   private deliverBlueprints(): void {
-    const arrived = [...this.blueprintsOrdered];
+    // A project is built here, not brought in.
+    const arrived = [...this.blueprintsOrdered].filter((id) => id !== "deposit");
     if (arrived.length === 0) return;
-    this.blueprintsOrdered.clear();
-    for (const id of arrived) this.blueprints.add(id);
+    for (const id of arrived) {
+      this.blueprintsOrdered.delete(id);
+      this.blueprints.add(id);
+    }
     if (!this.tuning.chatter) return;
     this.chatter.unlocked(
       this,
@@ -1147,17 +1157,20 @@ export class Sim {
     return { x: at.x + (dx / distance) * out, y: at.y + (dy / distance) * out };
   }
 
-  private addDeposit(fromSwitch: boolean): Deposit {
+  private addDeposit(fromSwitch: boolean, partsLeft: number): Deposit {
     const { field: at, station: toward } = this;
     const { x, y } = this.depositSpot(at, toward);
-    const deposit: Deposit = { at, toward, x, y, px: x, py: y, ore: 0, fromSwitch };
+    const deposit: Deposit = { at, toward, x, y, px: x, py: y, ore: 0, fromSwitch, partsLeft, partsUsed: 0 };
     this.deposits.push(deposit);
     return deposit;
   }
 
   /** Keeps each deposit at its spot by its POI, and in step with the testing switch. */
   private moveDeposits(): void {
-    if (this.tuning.depositFree && this.deposits.length === 0) this.addDeposit(true);
+    if (this.tuning.depositFree && this.deposits.length === 0) this.addDeposit(true, 0);
+    if (this.tuning.depositFree) {
+      for (const deposit of this.deposits) if (deposit.partsLeft > 0) this.finishDeposit(deposit);
+    }
     if (!this.tuning.depositFree) this.deposits = this.deposits.filter((deposit) => !deposit.fromSwitch);
     for (const deposit of this.deposits) {
       deposit.px = deposit.x;
@@ -1166,10 +1179,35 @@ export class Sim {
     }
   }
 
-  /** The deposit a ship is close enough to trade with, or null. */
+  private finishDeposit(deposit: Deposit): void {
+    deposit.partsLeft = 0;
+    this.blueprintsOrdered.delete("deposit");
+    if (this.tuning.chatter) this.chatter.depositBuilt(this);
+  }
+
+  /** A funded deposit is built from whatever parts the station can spare past its reserve. */
+  private buildDeposits(dt: number): void {
+    const { depositBuildRate, stationReserveParts } = this.tuning;
+    for (const deposit of this.deposits) {
+      if (deposit.partsLeft <= 0) continue;
+      const spare = this.stationParts - stationReserveParts;
+      const used = Math.min(depositBuildRate * dt, spare, deposit.partsLeft);
+      if (used <= 0) continue;
+      this.stationParts -= used;
+      deposit.partsLeft -= used;
+      deposit.partsUsed += used;
+      if (deposit.partsLeft <= 1e-9) this.finishDeposit(deposit);
+    }
+  }
+
+  /** The open deposit a ship is close enough to trade with, or null. */
   depositAt(ship: Ship = this.ship): Deposit | null {
     const { depositReach } = this.tuning;
-    return this.deposits.find((deposit) => Math.hypot(deposit.x - ship.x, deposit.y - ship.y) < depositReach) ?? null;
+    return (
+      this.deposits.find(
+        (deposit) => deposit.partsLeft <= 0 && Math.hypot(deposit.x - ship.x, deposit.y - ship.y) < depositReach,
+      ) ?? null
+    );
   }
 
   /** The nearest deposit with room that's closer than the dock, for a ship with ore to get rid of. */
@@ -1179,7 +1217,7 @@ export class Sim {
     let found: Deposit | null = null;
     for (const deposit of this.deposits) {
       const distance = Math.hypot(deposit.x - ship.x, deposit.y - ship.y);
-      if (deposit.ore < this.tuning.depositCapacity && distance < best) {
+      if (deposit.partsLeft <= 0 && deposit.ore < this.tuning.depositCapacity && distance < best) {
         best = distance;
         found = deposit;
       }
@@ -1368,6 +1406,7 @@ export class Sim {
     }
     this.spendStationParts();
     this.buyBlueprints();
+    this.buildDeposits(dt);
     this.spendPirateOre();
     this.moveHauler(dt);
     if (this.tuning.chatter) this.chatter.update(this, dt);

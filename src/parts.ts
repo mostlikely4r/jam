@@ -149,5 +149,5 @@ export const TRAFFIC_BUY_ORDER: Record<ShipModel, PartId[]> = {
   floater: ["tractor", "turret", "reverse", "strafe", "spinStabilizer"],
 };
 
-/** What the station's shop can need a blueprint for. */
-export type BlueprintId = PartId | "drone";
+/** What the station saves up for in one queue: blueprints for its shop, and projects it builds. */
+export type BlueprintId = PartId | "drone" | "deposit";

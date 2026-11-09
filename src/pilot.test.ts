@@ -861,9 +861,10 @@ describe("pirate and defender", () => {
     it("goes through the tiers in order, cheapest first", () => {
       const sim = shopWorld();
       const queue = sim.blueprintQueue();
-      const tiers = queue.map((id) => (id === "drone" ? 2 : PARTS.find((part) => part.id === id)!.tier));
+      const tiers = queue.map((id) => (id === "deposit" ? 3 : id === "drone" ? 2 : PARTS.find((part) => part.id === id)!.tier));
       expect(tiers).toEqual([...tiers].sort());
-      expect(queue[queue.length - 1]).toBe("drone");
+      expect(queue[queue.length - 2]).toBe("drone");
+      expect(queue[queue.length - 1]).toBe("deposit");
     });
 
     it("paying toward a blueprint moves it to the front, and paying it all stocks it", () => {
@@ -926,6 +927,108 @@ describe("pirate and defender", () => {
       expect(sim.unlocked("tractor")).toBe(false);
       expect(sim.blueprintsOrdered.has("tractor")).toBe(true);
     }, 30000);
+
+    describe("paying for a field deposit", () => {
+      function projectWorld(extra: Partial<typeof SOLO> = {}): Sim {
+        const sim = shopWorld({
+          depositFree: false,
+          depositPrice: 1000,
+          depositParts: 10,
+          depositBuildRate: 5,
+          depositReach: 150,
+          stationReserveParts: 20,
+          stationStartParts: 100,
+          stationPartsTarget: 100,
+          chatter: true,
+          ...extra,
+        });
+        return sim;
+      }
+
+      function run(sim: Sim, seconds: number): void {
+        for (let time = 0; time < seconds; time += TICK) {
+          sim.step();
+          sim.events.length = 0;
+        }
+      }
+
+      it("takes part payments, and moves to the front of the queue for them", () => {
+        const sim = projectWorld();
+        expect(sim.blueprintQueue().at(-1)).toBe("deposit");
+        sim.ship.credits = 400;
+        expect(sim.fundBlueprint(sim.ship, "deposit")).toBe(true);
+        expect(sim.blueprintLeft("deposit")).toBe(600);
+        expect(sim.blueprintQueue()[0]).toBe("deposit");
+        expect(sim.deposits).toHaveLength(0);
+      });
+
+      it("once funded it's built from the station's parts, and only opens when finished", () => {
+        const sim = projectWorld();
+        sim.ship.credits = 1000;
+        sim.fundBlueprint(sim.ship, "deposit");
+        expect(sim.ship.credits).toBe(0);
+        expect(sim.deposits).toHaveLength(1);
+        expect(sim.unlocked("deposit")).toBe(false);
+        expect(sim.blueprintsOrdered.has("deposit")).toBe(true);
+        expect(sim.blueprintQueue()).not.toContain("deposit");
+        const deposit = sim.deposits[0];
+        sim.ship.x = deposit.x;
+        sim.ship.y = deposit.y;
+        sim.ship.px = deposit.x;
+        sim.ship.py = deposit.y;
+        expect(sim.depositAt()).toBeNull();
+        const partsBefore = sim.stationParts;
+        run(sim, 3);
+        expect(sim.unlocked("deposit")).toBe(true);
+        expect(sim.blueprintsOrdered.has("deposit")).toBe(false);
+        expect(deposit.partsUsed).toBeCloseTo(10, 6);
+        expect(sim.stationParts).toBeCloseTo(partsBefore - 10, 6);
+      });
+
+      it("stops at the station's reserve and waits for more parts", () => {
+        const sim = projectWorld({ stationStartParts: 25, depositParts: 50 });
+        sim.ship.credits = 1000;
+        sim.fundBlueprint(sim.ship, "deposit");
+        run(sim, 20);
+        expect(sim.stationParts).toBeCloseTo(20, 6);
+        expect(sim.deposits[0].partsLeft).toBeCloseTo(45, 6);
+        sim.stationParts = 100;
+        run(sim, 20);
+        expect(sim.unlocked("deposit")).toBe(true);
+      });
+
+      it("the station pays for it itself out of what it can spare", () => {
+        const sim = projectWorld();
+        sim.blueprintPaid.set("deposit", 999);
+        sim.stationAccount.credits = 300;
+        run(sim, 1);
+        expect(sim.blueprintLeft("deposit")).toBe(1);
+        expect(sim.deposits).toHaveLength(0);
+        sim.stationAccount.credits = 301;
+        run(sim, 1);
+        expect(sim.deposits).toHaveLength(1);
+        expect(sim.stationAccount.credits).toBe(300);
+      });
+
+      it("doesn't wait for a hauler, and isn't delivered by one", () => {
+        const sim = projectWorld({ haulers: true, haulerFirst: 1, haulerPartsLoad: 0, depositBuildRate: 0.1, depositParts: 1000 });
+        sim.ship.credits = 1000;
+        sim.fundBlueprint(sim.ship, "deposit");
+        for (let seconds = 0; sim.hauler?.stage !== "loading" && seconds < 300; seconds += TICK) sim.step();
+        expect(sim.unlocked("deposit")).toBe(false);
+        expect(sim.blueprintsOrdered.has("deposit")).toBe(true);
+      }, 30000);
+
+      it("the testing switch finishes one being built", () => {
+        const sim = projectWorld({ depositBuildRate: 0.1, depositParts: 1000 });
+        sim.ship.credits = 1000;
+        sim.fundBlueprint(sim.ship, "deposit");
+        sim.tuning.depositFree = true;
+        sim.step();
+        expect(sim.deposits).toHaveLength(1);
+        expect(sim.unlocked("deposit")).toBe(true);
+      });
+    });
 
     it("you can only pay in while docked", () => {
       const sim = shopWorld();

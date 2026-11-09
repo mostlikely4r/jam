@@ -178,6 +178,10 @@ export class Chatter {
   }
 
   /** The shop got new stock because a blueprint was paid for. */
+  depositBuilt(sim: Sim): void {
+    this.stationSays(sim, "The field deposit is up. Drop your ore there or haul it in.");
+  }
+
   unlocked(sim: Sim, names: string[]): void {
     const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
     this.stationSays(sim, `New blueprint${names.length > 1 ? "s" : ""} in. The shop now stocks ${list}.`);

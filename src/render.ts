@@ -370,7 +370,7 @@ export class Renderer {
     alpha: number,
     showRange: boolean,
   ): void {
-    if (!ship.parts.has("tractor")) return;
+    if (!ship.parts.has("tractor") || ship.ore >= sim.cargoSpace(ship)) return;
     const { ctx } = this;
     const range = sim.tuning.tractorRange;
     ctx.lineWidth = 1;
@@ -783,7 +783,7 @@ export class Renderer {
     ctx.fillStyle = color;
     ctx.font = "14px Consolas, monospace";
     ctx.textAlign = "center";
-    ctx.fillText(`${pilot.task} ${pilot.ship.ore}/${sim.tuning.droneCargo}`, x, y + SHIP_RADIUS + 22);
+    ctx.fillText(`${pilot.task} ${pilot.ship.ore}/${sim.cargoSpace(pilot.ship)}`, x, y + SHIP_RADIUS + 22);
   }
 
   private drawShip(

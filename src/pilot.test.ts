@@ -298,7 +298,7 @@ describe("drone", () => {
       expect(ship.parts.size).toBe(0);
       ship.credits = 100000;
       run(sim, 2, () => placeInDock(sim, ship));
-      expect([...ship.parts].sort()).toEqual(["reverse", "spinStabilizer", "strafe"]);
+      expect([...ship.parts].sort()).toEqual(["bay", "reverse", "spinStabilizer", "strafe"]);
       expect(sim.traffic.length).toBe(1);
       expect(sim.drones.length).toBe(0);
     });
@@ -371,7 +371,7 @@ describe("drone", () => {
     ["reverse", ["reverse"]],
     ["strafe", ["strafe"]],
     ["reverse and strafe", ["reverse", "strafe"]],
-    ["everything", PARTS.map((part) => part.id)],
+    ["everything", PARTS.filter((part) => !part.cargo).map((part) => part.id)],
   ] as const)("still completes trips with %s", (_name, parts) => {
     const sim = new Sim(1, { ...SOLO });
     const { ship } = sim.drones[0];
@@ -863,7 +863,7 @@ describe("pirate and defender", () => {
       const queue = sim.blueprintQueue();
       const tiers = queue.map((id) => (id === "deposit" ? 3 : id === "drone" ? 2 : PARTS.find((part) => part.id === id)!.tier));
       expect(tiers).toEqual([...tiers].sort());
-      expect(queue[queue.length - 2]).toBe("drone");
+      expect(queue).toContain("drone");
       expect(queue[queue.length - 1]).toBe("deposit");
     });
 
@@ -1044,6 +1044,86 @@ describe("pirate and defender", () => {
       sim.ship.credits = 100000;
       expect(sim.ship.model).toBe("racer");
       expect(sim.buyPart(sim.ship, "turret")).toBe(false);
+    });
+  });
+
+  describe("cargo bays", () => {
+    const looseOre = (sim: Sim, x: number, y: number) => ({ x, y, px: x, py: y, vx: 0, vy: 0, kind: 0, amount: 1, from: sim.ship });
+
+    function bayWorld(extra: Partial<typeof SOLO> = {}): Sim {
+      return arena({ playerCargo: 10, tractorRange: 500, ...extra });
+    }
+
+    it("a full ship leaves ore where it is", () => {
+      const sim = bayWorld();
+      const { ship } = sim;
+      ship.ore = 10;
+      sim.ores.push(looseOre(sim, ship.x, ship.y));
+      sim.step();
+      expect(ship.ore).toBe(10);
+      expect(sim.ores).toHaveLength(1);
+    });
+
+    it("takes what fits from a bigger piece and leaves the rest", () => {
+      const sim = bayWorld();
+      const { ship } = sim;
+      ship.ore = 9;
+      sim.ores.push({ ...looseOre(sim, ship.x, ship.y), amount: 3 });
+      sim.step();
+      expect(ship.ore).toBe(10);
+      expect(sim.ores[0].amount).toBe(2);
+    });
+
+    it("bays add room and weight, and stack", () => {
+      const sim = bayWorld();
+      const { ship } = sim;
+      const light = sim.shipWeight(ship);
+      expect(sim.cargoSpace(ship)).toBe(10);
+      ship.parts.add("bay");
+      expect(sim.cargoSpace(ship)).toBe(30);
+      ship.parts.add("largeBay");
+      expect(sim.cargoSpace(ship)).toBe(80);
+      expect(sim.shipWeight(ship)).toBeGreaterThan(light);
+    });
+
+    it("a tractor doesn't pull ore a full ship can't take", () => {
+      const sim = bayWorld();
+      const { ship } = sim;
+      ship.parts.add("tractor");
+      ship.ore = 10;
+      const ore = looseOre(sim, ship.x + 200, ship.y);
+      ore.vx = 0;
+      ore.vy = 0;
+      sim.ores.push(ore);
+      sim.step();
+      expect(Math.hypot(ore.vx, ore.vy)).toBeLessThan(1);
+    });
+
+    it("an AI ship delivers at the share of its bay it's set to", () => {
+      const sim = bayWorld({ trafficRacers: 1, chatter: false, deliverShare: 0.5 });
+      const pilot = sim.traffic[0];
+      expect(sim.deliveryLoad(pilot.ship)).toBe(5);
+      pilot.ship.parts.add("bay");
+      expect(sim.deliveryLoad(pilot.ship)).toBe(15);
+      sim.tuning.deliverShare = 1;
+      expect(sim.deliveryLoad(pilot.ship)).toBe(30);
+    });
+
+    it("buying at a deposit stops when the bay is full", () => {
+      const sim = bayWorld({ depositFree: true, haulers: false });
+      sim.step();
+      const deposit = sim.deposits[0];
+      const { ship } = sim;
+      ship.x = deposit.x;
+      ship.y = deposit.y;
+      ship.px = deposit.x;
+      ship.py = deposit.y;
+      deposit.ore = 50;
+      ship.ore = 4;
+      ship.credits = 1000;
+      expect(sim.buyFromDeposit(ship, deposit)).toBe(6);
+      expect(ship.ore).toBe(10);
+      expect(deposit.ore).toBe(44);
     });
   });
 

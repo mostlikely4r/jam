@@ -139,6 +139,7 @@ function loadLine(deposit: Deposit): ShopLine {
   const { depositSells, creditsPerOre } = tuning;
   const amount = sim.depositBuyable(sim.ship, deposit);
   if (deposit.ore <= 0) return { tag: "empty", text: `Load ore here for ${depositSells} credits each`, enabled: false };
+  if (sim.ship.ore >= sim.cargoSpace(sim.ship)) return { tag: "bay full", text: "No room for more ore", enabled: false };
   if (amount <= 0) return { tag: "not enough money", style: "poor", text: `Load ore here for ${depositSells} credits each`, enabled: false };
   const text = `Load ${amount} ore for ${amount * depositSells} credits. The station pays ${amount * creditsPerOre}`;
   return { tag: "buy", style: "buy", text, enabled: true };
@@ -148,7 +149,7 @@ function updateDepositShop(deposit: Deposit): void {
   const { ship } = sim;
   const title = `Field deposit - holds ${Math.floor(deposit.ore)} of ${tuning.depositCapacity} ore`;
   if (shopHeading.textContent !== title) shopHeading.textContent = title;
-  const state = `deposit ${ship.ore} ${ship.credits} ${deposit.ore} ${tuning.depositPays} ${tuning.depositSells} ${tuning.depositCapacity}`;
+  const state = `deposit ${ship.ore} ${sim.cargoSpace(ship)} ${ship.credits} ${deposit.ore} ${tuning.depositPays} ${tuning.depositSells} ${tuning.depositCapacity}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = false;
@@ -213,6 +214,7 @@ function updateShop(): void {
 
 /** Keys 1 to 9 and then 0 pick a part. The minus key buys a drone. */
 function partKey(index: number): string {
+  if (index > 10) return "·";
   if (index === 10) return "=";
   return index === 9 ? "0" : String(index + 1);
 }
@@ -506,6 +508,11 @@ canvas.addEventListener(
   { passive: false },
 );
 
+function cargoText(ship: Ship): string {
+  const space = sim.cargoSpace(ship);
+  return space === Infinity ? "∞" : String(space);
+}
+
 function partList(ship: Ship): string {
   const owned = PARTS.filter((part) => ship.parts.has(part.id));
   return owned.length > 0 ? owned.map((part) => part.short).join(" ") : "none";
@@ -563,7 +570,7 @@ function frame(now: number): void {
       `Speed ${Math.round(speed)}  (top ${Math.round(sim.stats.topSpeed)})`,
       `Spin  ${Math.round((sim.ship.spin * 180) / Math.PI)} deg/s  Retro ${sim.ship.parts.has("retro") ? (tuning.retro ? "ON" : "off") : "none"}`,
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
-      `Ore   ${sim.ship.ore}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
+      `Ore   ${sim.ship.ore}/${cargoText(sim.ship)}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
       `Parts ${partList(sim.ship)}  Weight ${sim.shipWeight(sim.ship).toFixed(2)}`,
       `${frameText()}${sim.isDocked() ? "  DOCKED" : ""}${sim.clickPilot.active ? `  Click order: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < MAX_HULL && !sim.hasPartsFor(tuning.repairCost) ? "  No repairs: the station is out of parts" : ""}`,
       `Rocks ${sim.rocks.length}  Wrecks ${sim.ship.wrecks}`,
@@ -571,14 +578,14 @@ function frame(now: number): void {
         const { ship } = drone;
         const hull = Math.round((ship.hull / MAX_HULL) * 100);
         return [
-          `${ship.owner ? "YOURS " : ""}Drone ${index + 1} ${drone.task} ${ship.ore}/${tuning.droneCargo}  Hull ${hull}%  ${ship.owner ? `Earned ${ship.earned}` : `Credits ${ship.credits}`}  Trips ${ship.trips}  Wrecks ${ship.wrecks}  Upkeep ${ship.upkeep}`,
+          `${ship.owner ? "YOURS " : ""}Drone ${index + 1} ${drone.task} ${ship.ore}/${cargoText(ship)}  Hull ${hull}%  ${ship.owner ? `Earned ${ship.earned}` : `Credits ${ship.credits}`}  Trips ${ship.trips}  Wrecks ${ship.wrecks}  Upkeep ${ship.upkeep}`,
           `  Parts ${partList(ship)}  Weight ${sim.shipWeight(ship).toFixed(2)}`,
         ];
       }),
       ...(tuning.showTraffic
         ? sim.traffic.map(
             ({ ship, task }, index) =>
-              `Traffic ${index + 1} ${ship.model} ${task} ${ship.ore}/${tuning.droneCargo}  Hull ${Math.round((ship.hull / MAX_HULL) * 100)}%  Credits ${ship.credits}  Trips ${ship.trips}  Wrecks ${ship.wrecks}`,
+              `Traffic ${index + 1} ${ship.model} ${task} ${ship.ore}/${cargoText(ship)}  Hull ${Math.round((ship.hull / MAX_HULL) * 100)}%  Credits ${ship.credits}  Trips ${ship.trips}  Wrecks ${ship.wrecks}`,
           )
         : []),
       ...(tuning.showTraffic

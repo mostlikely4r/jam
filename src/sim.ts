@@ -1231,12 +1231,25 @@ export class Sim {
     return Math.max(0, Math.min(ship.ore, this.tuning.depositCapacity - deposit.ore));
   }
 
+  /** How much cargo a ship has room for: what it starts with plus its bays. */
+  cargoSpace(ship: Ship): number {
+    const { playerCargo, droneCargo } = this.tuning;
+    let space = ship === this.ship ? playerCargo : droneCargo;
+    for (const part of PARTS) if (part.cargo && ship.parts.has(part.id)) space += part.cargo;
+    return space;
+  }
+
+  /** The load an AI ship waits for before heading in to deliver. */
+  deliveryLoad(ship: Ship): number {
+    return Math.max(1, Math.ceil(this.cargoSpace(ship) * this.tuning.deliverShare));
+  }
+
   /** How much ore this ship could buy from the deposit right now. */
   depositBuyable(ship: Ship, deposit: Deposit): number {
     if (this.depositAt(ship) !== deposit) return 0;
     const { depositSells } = this.tuning;
     const affordable = depositSells > 0 ? Math.floor(this.accountOf(ship).credits / depositSells) : Infinity;
-    return Math.max(0, Math.min(deposit.ore, affordable));
+    return Math.max(0, Math.min(deposit.ore, affordable, this.cargoSpace(ship) - ship.ore));
   }
 
   /** Sells all the ore the deposit has room for. The station pays. Returns how much went in. */
@@ -1665,7 +1678,7 @@ export class Sim {
 
   /** Steers loose ore in range toward the ship, so it arrives instead of circling it. */
   private pullOre(ship: Ship, dt: number): void {
-    if (!ship.parts.has("tractor")) return;
+    if (!ship.parts.has("tractor") || ship.ore >= this.cargoSpace(ship)) return;
     const { tractorRange, tractorPull, tractorSpeed } = this.tuning;
     const most = tractorPull * dt;
     for (const ore of this.ores) {
@@ -2259,6 +2272,8 @@ export class Sim {
   private collectOre(ship: Ship): void {
     const reach = SHIP_RADIUS + ORE_RADIUS + PICKUP_MARGIN;
     this.ores = this.ores.filter((ore) => {
+      const room = this.cargoSpace(ship) - ship.ore;
+      if (room <= 0) return true;
       const segment = sweepCircle(
         ore.px - ship.px,
         ore.py - ship.py,
@@ -2267,7 +2282,13 @@ export class Sim {
         reach,
       );
       if (segment === null) return true;
-      ship.ore += ore.amount;
+      const taken = Math.min(ore.amount, room);
+      ship.ore += taken;
+      if (taken < ore.amount) {
+        // What doesn't fit stays out there.
+        ore.amount -= taken;
+        return true;
+      }
       if (this.tuning.chatter) this.chatter.pickedUp(this, ship, ore);
       if (ship === this.ship) this.stats.bestOre = Math.max(this.stats.bestOre, ship.ore);
       this.events.push({ type: "pickup", x: ore.x, y: ore.y, kind: ore.kind });

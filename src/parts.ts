@@ -9,7 +9,9 @@ export type PartId =
   | "clickRoute"
   | "tractor"
   | "clickTurn"
-  | "turret";
+  | "turret"
+  | "bay"
+  | "largeBay";
 
 /** The racer is the quick ship with an arrow shape. The floater is slow and square. */
 export type ShipModel = "racer" | "floater";
@@ -22,6 +24,8 @@ export interface Part {
   price: number;
   /** Added to the ship's weight, which divides all of its thrust. */
   weight: number;
+  /** Added to how much cargo the ship has room for. */
+  cargo?: number;
   description: string;
   /** The ships it can be fitted to. Without this, any ship. */
   fits?: ShipModel[];
@@ -135,6 +139,26 @@ export const PARTS: Part[] = [
     fits: ["floater"],
     tier: 1,
   },
+  {
+    id: "bay",
+    label: "Cargo bay",
+    short: "bay",
+    price: 250,
+    weight: 0.1,
+    cargo: 20,
+    description: "Room for 20 more ore, for a little more weight",
+    tier: 1,
+  },
+  {
+    id: "largeBay",
+    label: "Large cargo bay",
+    short: "bay+",
+    price: 600,
+    weight: 0.25,
+    cargo: 50,
+    description: "Room for 50 more ore, and you'll feel the weight",
+    tier: 2,
+  },
 ];
 
 /** The order a drone buys in: its gun and engine work first, its comfort comes last. */
@@ -145,8 +169,8 @@ export const DRONE_BUY_ORDER: PartId[] = ["spinStabilizer", "reverse", "strafe",
  * use of. Click parts and retro add little to it, so they're left out.
  */
 export const TRAFFIC_BUY_ORDER: Record<ShipModel, PartId[]> = {
-  racer: ["reverse", "strafe", "spinStabilizer"],
-  floater: ["tractor", "turret", "reverse", "strafe", "spinStabilizer"],
+  racer: ["reverse", "strafe", "spinStabilizer", "bay"],
+  floater: ["tractor", "turret", "reverse", "strafe", "spinStabilizer", "bay"],
 };
 
 /** What the station saves up for in one queue: blueprints for its shop, and projects it builds. */

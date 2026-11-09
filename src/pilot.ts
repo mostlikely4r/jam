@@ -462,7 +462,7 @@ export class DronePilot extends ShipPilot {
       this.hauling = false;
       this.dropsThisLoad = false;
     }
-    if (ship.ore >= sim.tuning.droneCargo && !this.hauling) {
+    if (ship.ore >= sim.deliveryLoad(ship) && !this.hauling) {
       this.hauling = true;
       this.dropsThisLoad = sim.deposits.length > 0 && sim.roll() < sim.tuning.depositDropChance;
     }
@@ -1022,7 +1022,7 @@ export class FighterPilot extends ShipPilot {
   private goHome(sim: Sim): boolean {
     const { ship } = this;
     const canPay = ship.ore > 0 || sim.canPayRepair(ship);
-    if (ship.ore >= sim.tuning.droneCargo || (ship.hull < LOW_HULL && canPay)) {
+    if (ship.ore >= sim.deliveryLoad(ship) || (ship.hull < LOW_HULL && canPay)) {
       this.headingHome = true;
     }
     const busy = ship.ore > 0 || sim.canRepair(ship);

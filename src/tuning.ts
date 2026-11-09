@@ -139,7 +139,11 @@ export const DEFAULTS = {
   dronePrice: 500,
   droneLimit: 5,
   droneParts: 5,
+  /** The cargo space AI ships start with, and yours. */
   droneCargo: 10,
+  playerCargo: 30,
+  /** How full its bay an AI ship waits for before delivering. */
+  deliverShare: 1,
   droneCruiseSpeed: 350,
   droneFieldSpeed: 100,
 
@@ -336,6 +340,10 @@ export const GROUPS: Group[] = [
     ],
   },
   {
+    title: "Cargo",
+    sliders: [{ key: "playerCargo", label: "Your ship's cargo space", min: 5, max: 300, step: 5, infinite: true }],
+  },
+  {
     title: "Field deposit",
     sliders: [
       { key: "depositGap", label: "Distance outside the field", min: -2000, max: 3000, step: 50 },
@@ -373,7 +381,8 @@ export const GROUPS: Group[] = [
       { key: "testDrones", label: "Test drones, self-funded (on restart)", min: 0, max: 5, step: 1 },
       { key: "dronePrice", label: "Price of a new drone", min: 0, max: 5000, step: 50 },
       { key: "droneLimit", label: "Most drones allowed", min: 0, max: 10, step: 1 },
-      { key: "droneCargo", label: "Ore per trip", min: 1, max: 50, step: 1 },
+      { key: "droneCargo", label: "Cargo space to start with", min: 1, max: 50, step: 1 },
+      { key: "deliverShare", label: "Delivers when this full", min: 0.1, max: 1, step: 0.05 },
       { key: "droneCruiseSpeed", label: "Cruise speed", min: 100, max: 1000, step: 10 },
       { key: "droneFieldSpeed", label: "Speed in the field", min: 30, max: 300, step: 5 },
     ],

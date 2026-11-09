@@ -1,5 +1,6 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import {
+  DEPOSIT_HALF,
   DOCK_OFFSET,
   HAULER_LENGTH,
   HAULER_WIDTH,
@@ -18,7 +19,8 @@ const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
 /** How long the mark where a pirate was last seen takes to fade away. */
 const GHOST_MILLISECONDS = 30000;
 const PING_SECONDS = 1.4;
-const DEPOSIT_HALF = 70;
+const GUARD_RADIUS = 16;
+const GUARD_BARREL = 30;
 const HAULER_COLUMNS = 10;
 const HAULER_ROWS = 4;
 const PILE_ROWS = 12;
@@ -209,6 +211,7 @@ export class Renderer {
 
     this.drawStation(sim, alpha);
     this.drawDeposits(sim, alpha);
+    this.drawGuards(sim, alpha);
     this.drawHauler(sim, alpha);
     this.drawPirateBase(sim, alpha);
     if (tuning.showPoiZones) this.drawPoiZones(sim, alpha);
@@ -316,6 +319,43 @@ export class Renderer {
       ctx.strokeRect(-DEPOSIT_HALF, -DEPOSIT_HALF, DEPOSIT_HALF * 2, DEPOSIT_HALF * 2);
       this.drawOrePile(deposit.ore, DEPOSIT_HALF);
       ctx.restore();
+    }
+  }
+
+  /** Turrets: faint while being built, with a barrel once finished. POI zones also show their reach. */
+  private drawGuards(sim: Sim, alpha: number): void {
+    const { ctx } = this;
+    for (const battery of sim.batteries) {
+      const built = battery.partsLeft <= 0;
+      ctx.globalAlpha = built ? 1 : 0.25 + (0.5 * battery.partsUsed) / (battery.partsUsed + battery.partsLeft);
+      for (const guard of battery.guns) {
+        const x = lerp(guard.px, guard.x, alpha);
+        const y = lerp(guard.py, guard.y, alpha);
+        ctx.fillStyle = "#6b7280";
+        ctx.strokeStyle = "#aab1bd";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(x, y, GUARD_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        if (!built) continue;
+        const angle = lerp(guard.prevAngle, guard.angle, alpha);
+        ctx.strokeStyle = "#6eeba9";
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.cos(angle) * GUARD_BARREL, y + Math.sin(angle) * GUARD_BARREL);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      if (!sim.tuning.showPoiZones || !built) continue;
+      ctx.strokeStyle = "rgba(110, 235, 170, 0.35)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([24, 18]);
+      ctx.beginPath();
+      ctx.arc(lerp(battery.host.px, battery.host.x, alpha), lerp(battery.host.py, battery.host.y, alpha), sim.tuning.guardRange, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
   }
 

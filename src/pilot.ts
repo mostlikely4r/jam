@@ -911,6 +911,7 @@ export class ClickPilot extends ShipPilot {
 
 /** How close it gets to a target before it stops closing in. */
 const FIGHT_DISTANCE = 300;
+const PATROL_TRIES = 8;
 /** Close enough to a spot it was checking. */
 const SPOT_REACHED = 120;
 /** Keeps moving through patrol points rather than stopping at each. */
@@ -992,6 +993,13 @@ export class FighterPilot extends ShipPilot {
       ship.shotFrom = null;
     }
 
+    if (this.shouldRetreat(sim)) {
+      this.target = null;
+      this.lastSeen = null;
+      this.headingHome = true;
+      if (this.goHome(sim)) return;
+    }
+
     this.chooseTarget(sim);
     if (this.target) {
       this.fight(sim, this.target);
@@ -1016,6 +1024,22 @@ export class FighterPilot extends ShipPilot {
       return;
     }
     this.fly(sim);
+  }
+
+  private get isPirate(): boolean {
+    return this.ship.faction === "pirate";
+  }
+
+  /** A hurt pirate breaks off even mid-fight, as long as going home would get it fixed. */
+  private shouldRetreat(sim: Sim): boolean {
+    const { ship } = this;
+    if (!this.isPirate || !sim.tuning.pirateRetreats || ship.hull >= LOW_HULL) return false;
+    return ship.ore > 0 || sim.canPayRepair(ship);
+  }
+
+  /** Whether a pirate should stay clear of a spot: it only goes under the guns on a chase. */
+  private keepsClear(sim: Sim, x: number, y: number): boolean {
+    return this.isPirate && sim.inGuardRange(x, y);
   }
 
   /** Goes home to sell a full load or repair a low hull. Returns whether it's doing that. */
@@ -1053,7 +1077,7 @@ export class FighterPilot extends ShipPilot {
     if (!this.ore) {
       let best = sim.tuning.visionRange;
       for (const ore of sim.ores) {
-        if (this.ignoredOre.has(ore)) continue;
+        if (this.ignoredOre.has(ore) || this.keepsClear(sim, ore.x, ore.y)) continue;
         const distance = Math.hypot(ore.x - ship.x, ore.y - ship.y);
         if (distance < best) {
           best = distance;
@@ -1080,7 +1104,7 @@ export class FighterPilot extends ShipPilot {
     if (!this.rock) {
       let best = Infinity;
       for (const rock of sim.rocks) {
-        if (this.ignoredRocks.has(rock)) continue;
+        if (this.ignoredRocks.has(rock) || this.keepsClear(sim, rock.x, rock.y)) continue;
         const distance = Math.hypot(rock.x - ship.x, rock.y - ship.y) - rock.radius;
         if (distance < best) {
           best = distance;
@@ -1120,7 +1144,7 @@ export class FighterPilot extends ShipPilot {
       const seen = this.sees(sim, other);
       const time = Math.max(0, (this.spotting.get(other) ?? 0) + (seen ? TICK : -TICK));
       this.spotting.set(other, time);
-      if (!seen || time < sim.tuning.detectSeconds) continue;
+      if (!seen || time < sim.tuning.detectSeconds || this.keepsClear(sim, other.x, other.y)) continue;
       const distance = Math.hypot(other.x - ship.x, other.y - ship.y);
       if (distance < best) {
         best = distance;
@@ -1157,7 +1181,7 @@ export class FighterPilot extends ShipPilot {
     const { ship } = this;
     const { poi, x, y } = this.lastSeen!;
     const spot = poiSpot(poi, x, y);
-    if (Math.hypot(spot.x - ship.x, spot.y - ship.y) < SPOT_REACHED) {
+    if (Math.hypot(spot.x - ship.x, spot.y - ship.y) < SPOT_REACHED || this.keepsClear(sim, spot.x, spot.y)) {
       this.lastSeen = null;
       this.fly(sim);
       return;
@@ -1179,12 +1203,19 @@ export class FighterPilot extends ShipPilot {
         poiSpot(this.patrol.poi, this.patrol.x, this.patrol.y).y - ship.y,
       ) < SPOT_REACHED;
     if (!this.patrol || reached || this.patrolAge > PATROL_GIVE_UP_SECONDS) {
-      const distance = tuning.fieldRadius * Math.sqrt(sim.roll());
-      const dir = sim.roll() * Math.PI * 2;
-      this.patrol = { poi: field, x: Math.cos(dir) * distance, y: Math.sin(dir) * distance };
+      // A few tries at a spot clear of any turrets. A field that's all covered gets patrolled anyway.
+      for (let tries = 0; tries < PATROL_TRIES; tries++) {
+        const distance = tuning.fieldRadius * Math.sqrt(sim.roll());
+        const dir = sim.roll() * Math.PI * 2;
+        const x = Math.cos(dir) * distance;
+        const y = Math.sin(dir) * distance;
+        this.patrol = { poi: field, x, y };
+        const spot = poiSpot(field, x, y);
+        if (!this.keepsClear(sim, spot.x, spot.y)) break;
+      }
       this.patrolAge = 0;
     }
-    this.flyTo(sim, poiSpot(field, this.patrol.x, this.patrol.y), 0, PATROL_PASS_SPEED, null);
+    this.flyTo(sim, poiSpot(field, this.patrol!.x, this.patrol!.y), 0, PATROL_PASS_SPEED, null);
   }
 
   /** Always looking at its target, or else where it's going, so it sees what's ahead. */

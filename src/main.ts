@@ -2,7 +2,7 @@ import { Audio } from "./audio";
 import { Radio } from "./radio";
 import { type Deposit, MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
-import { type BlueprintId, PARTS, partFits, type Part } from "./parts";
+import { type BlueprintId, isProject, PARTS, partFits, type Part } from "./parts";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
 const STORAGE_KEY = "flight-test-tuning";
@@ -82,7 +82,7 @@ interface ShopLine {
 /** An item the station can't sell yet: paid and on its way, or still to pay for. */
 function lockedLine(id: BlueprintId, label: string): ShopLine {
   if (sim.blueprintsOrdered.has(id)) {
-    const coming = id === "deposit" ? "being built from the station's parts" : "coming with the next hauler";
+    const coming = isProject(id) ? "being built from the station's parts" : "coming with the next hauler";
     return { tag: "pending", style: "pending", text: `${label}: paid, ${coming}`, enabled: false };
   }
   const left = sim.blueprintLeft(id);
@@ -172,7 +172,7 @@ function updateShop(): void {
     const title = `Dock shop - station ${Math.floor(sim.stationAccount.credits)} credits - ${haulerText()}`;
     if (shopHeading.textContent !== title) shopHeading.textContent = title;
   }
-  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.blueprints].join()} ${[...sim.blueprintPaid].join()} ${[...sim.blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${tuning.blueprintScale} ${tuning.stationUnlocks}`;
+  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.blueprints].join()} ${[...sim.blueprintPaid].join()} ${[...sim.blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked;
@@ -210,6 +210,17 @@ function updateShop(): void {
     ? { tag: "built", text: "Field deposit: open at the field's edge", enabled: false }
     : lockedLine("deposit", `Field deposit (${tuning.depositParts} parts)`);
   shop.append(shopButton("·", depositLine, () => sim.fundBlueprint(ship, "deposit")));
+
+  const stationGuardLine: ShopLine = sim.unlocked("stationGuards")
+    ? { tag: "built", text: "Station turrets: on guard", enabled: false }
+    : lockedLine("stationGuards", `Station turrets (${tuning.stationGuardParts} parts)`);
+  shop.append(shopButton("·", stationGuardLine, () => sim.fundBlueprint(ship, "stationGuards")));
+
+  let depositGuardLine: ShopLine;
+  if (sim.unlocked("depositGuards")) depositGuardLine = { tag: "built", text: "Deposit turrets: on guard", enabled: false };
+  else if (!sim.unlocked("deposit")) depositGuardLine = { tag: "needs a deposit", text: "Deposit turrets", enabled: false };
+  else depositGuardLine = lockedLine("depositGuards", `Deposit turrets (${tuning.depositGuardParts} parts)`);
+  shop.append(shopButton("·", depositGuardLine, () => sim.fundBlueprint(ship, "depositGuards")));
 }
 
 /** Keys 1 to 9 and then 0 pick a part. The minus key buys a drone. */

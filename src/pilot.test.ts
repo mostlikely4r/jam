@@ -861,10 +861,10 @@ describe("pirate and defender", () => {
     it("goes through the tiers in order, cheapest first", () => {
       const sim = shopWorld();
       const queue = sim.blueprintQueue();
-      const tiers = queue.map((id) => (id === "deposit" ? 3 : id === "drone" ? 2 : PARTS.find((part) => part.id === id)!.tier));
+      const tiers = queue.map((id) => PARTS.find((part) => part.id === id)?.tier ?? (id === "drone" ? 2 : 3));
       expect(tiers).toEqual([...tiers].sort());
       expect(queue).toContain("drone");
-      expect(queue[queue.length - 1]).toBe("deposit");
+      expect(queue.slice(-2)).toEqual(["deposit", "stationGuards"]);
     });
 
     it("paying toward a blueprint moves it to the front, and paying it all stocks it", () => {
@@ -954,7 +954,7 @@ describe("pirate and defender", () => {
 
       it("takes part payments, and moves to the front of the queue for them", () => {
         const sim = projectWorld();
-        expect(sim.blueprintQueue().at(-1)).toBe("deposit");
+        expect(sim.blueprintQueue()[0]).not.toBe("deposit");
         sim.ship.credits = 400;
         expect(sim.fundBlueprint(sim.ship, "deposit")).toBe(true);
         expect(sim.blueprintLeft("deposit")).toBe(600);
@@ -1137,6 +1137,190 @@ describe("pirate and defender", () => {
       expect(sim.buyFromDeposit(ship, deposit)).toBe(6);
       expect(ship.ore).toBe(10);
       expect(deposit.ore).toBe(44);
+    });
+  });
+
+  describe("turrets", () => {
+    function guardWorld(extra: Partial<typeof SOLO> = {}): Sim {
+      const sim = arena({
+        pirates: 1,
+        pirateLimit: 1,
+        defenders: 0,
+        haulers: false,
+        chatter: false,
+        guardsStationFree: true,
+        guardRange: 1200,
+        guardShotsPerSecond: 2,
+        guardTurn: 6,
+        pirateRetreats: true,
+        visionRange: 1500,
+        visionAngle: 360,
+        detectSeconds: 0,
+        ...extra,
+      });
+      sim.step();
+      return sim;
+    }
+
+    const outside = 1600;
+
+    it("shoots a pirate in reach and doesn't shoot one out of reach", () => {
+      const near = guardWorld();
+      const nearPirate = near.fighters[0].ship;
+      run(near, 3, () => pin(nearPirate, near.station.x + 900, near.station.y));
+      expect(nearPirate.damageTaken).toBeGreaterThan(0);
+
+      const far = guardWorld();
+      const farPirate = far.fighters[0].ship;
+      run(far, 3, () => pin(farPirate, far.station.x + outside, far.station.y));
+      expect(farPirate.damageTaken).toBe(0);
+    });
+
+    it("its shots pass everyone but pirates", () => {
+      const sim = guardWorld();
+      const { ship } = sim;
+      pin(ship, sim.station.x + 3000, sim.station.y);
+      const pirate = sim.fighters[0].ship;
+      pin(pirate, ship.x, ship.y + 3000);
+      const from = sim.batteries[0].guns[0].gun;
+      const shot = (x: number, y: number) => ({ x, y, px: x, py: y, vx: 1000, vy: 0, life: 0.2, precise: false, from, guard: true });
+      sim.shots.push(shot(ship.x - 60, ship.y), shot(pirate.x - 60, pirate.y));
+      run(sim, 0.15, () => {
+        pin(ship, sim.station.x + 3000, sim.station.y);
+      });
+      expect(ship.damageTaken).toBe(0);
+      expect(pirate.damageTaken).toBeGreaterThan(0);
+    });
+
+    it("a hurt pirate breaks off a fight and goes home", () => {
+      const sim = guardWorld({ guardsStationFree: false });
+      const pilot = sim.fighters[0];
+      pin(sim.ship, sim.field.x, sim.field.y);
+      pin(pilot.ship, sim.ship.x + 500, sim.ship.y);
+      run(sim, 0.1, () => pin(sim.ship, sim.field.x, sim.field.y));
+      expect(pilot.task).toBe("attacking");
+      pilot.ship.hull = 20;
+      run(sim, 0.1, () => pin(sim.ship, sim.field.x, sim.field.y));
+      expect(pilot.task).toBe("heading home");
+    });
+
+    it("with retreating off, it fights on", () => {
+      const sim = guardWorld({ guardsStationFree: false, pirateRetreats: false });
+      const pilot = sim.fighters[0];
+      pin(sim.ship, sim.field.x, sim.field.y);
+      pin(pilot.ship, sim.ship.x + 500, sim.ship.y);
+      pilot.ship.hull = 20;
+      run(sim, 0.1, () => pin(sim.ship, sim.field.x, sim.field.y));
+      expect(pilot.task).toBe("attacking");
+    });
+
+    it("a healthy pirate won't start on a ship under the guns, but will on one outside them", () => {
+      const inside = guardWorld();
+      const inPilot = inside.fighters[0];
+      const hold = (sim: Sim, shipAt: number) => {
+        pin(sim.ship, sim.station.x + shipAt, sim.station.y);
+        pin(sim.fighters[0].ship, sim.station.x + 2000, sim.station.y);
+      };
+      run(inside, 0.5, () => hold(inside, 1000));
+      expect(inPilot.task).not.toBe("attacking");
+
+      const out = guardWorld();
+      run(out, 0.5, () => hold(out, 1400));
+      expect(out.fighters[0].task).toBe("attacking");
+    });
+
+    it("a pirate already on a chase follows it under the guns", () => {
+      const sim = guardWorld();
+      const pilot = sim.fighters[0];
+      run(sim, 0.2, () => {
+        pin(sim.ship, sim.station.x + 1400, sim.station.y);
+        pin(pilot.ship, sim.station.x + 1900, sim.station.y);
+      });
+      expect(pilot.task).toBe("attacking");
+      run(sim, 0.2, () => {
+        pin(sim.ship, sim.station.x + 1000, sim.station.y);
+        pin(pilot.ship, sim.station.x + 1500, sim.station.y);
+      });
+      expect(pilot.task).toBe("attacking");
+    });
+
+    it("a pirate leaves ore under the guns alone", () => {
+      const sim = guardWorld({ visionAngle: 0 });
+      const pilot = sim.fighters[0];
+      pin(pilot.ship, sim.station.x + 1500, sim.station.y);
+      const ore = { x: sim.station.x + 1000, y: sim.station.y, px: 0, py: 0, vx: 0, vy: 0, kind: 0, amount: 1 };
+      sim.ores.push(ore);
+      run(sim, 0.1);
+      expect(pilot.task).not.toBe("gathering");
+    });
+
+    describe("as projects", () => {
+      function projectWorld(extra: Partial<typeof SOLO> = {}): Sim {
+        const sim = arena({
+          stationUnlocks: true,
+          haulers: false,
+          stationStartCredits: 0,
+          stationCashBuffer: 300,
+          stationReserveParts: 20,
+          stationStartParts: 100,
+          stationPartsTarget: 100,
+          depositBuildRate: 5,
+          stationGuardPrice: 1000,
+          stationGuardParts: 10,
+          depositGuardPrice: 500,
+          depositGuardParts: 5,
+          chatter: false,
+          ...extra,
+        });
+        placeInDock(sim, sim.ship);
+        sim.ship.credits = 5000;
+        return sim;
+      }
+
+      it("station turrets are paid for, built from parts, and only then fire", () => {
+        const sim = projectWorld();
+        expect(sim.fundBlueprint(sim.ship, "stationGuards")).toBe(true);
+        expect(sim.unlocked("stationGuards")).toBe(false);
+        expect(sim.blueprintsOrdered.has("stationGuards")).toBe(true);
+        expect(sim.inGuardRange(sim.station.x, sim.station.y)).toBe(false);
+        const before = sim.stationParts;
+        for (let i = 0; i < Math.round(3 / TICK); i++) {
+          placeInDock(sim, sim.ship);
+          sim.step();
+          sim.events.length = 0;
+        }
+        expect(sim.unlocked("stationGuards")).toBe(true);
+        expect(sim.blueprintsOrdered.has("stationGuards")).toBe(false);
+        expect(sim.stationParts).toBeCloseTo(before - 10, 6);
+        expect(sim.batteries[0].guns).toHaveLength(4);
+        expect(sim.inGuardRange(sim.station.x, sim.station.y)).toBe(true);
+      });
+
+      it("deposit turrets wait for a deposit to stand on", () => {
+        const sim = projectWorld();
+        expect(sim.blueprintQueue()).not.toContain("depositGuards");
+        expect(sim.fundBlueprint(sim.ship, "depositGuards")).toBe(false);
+        sim.tuning.depositFree = true;
+        sim.step();
+        expect(sim.blueprintQueue()).toContain("depositGuards");
+        expect(sim.fundBlueprint(sim.ship, "depositGuards")).toBe(true);
+        expect(sim.batteries[0].host).toBe(sim.deposits[0]);
+      });
+
+      it("deposit turrets go with their deposit, and move with it", () => {
+        const sim = arena({ depositFree: true, guardsDepositFree: true, fieldOrbitPeriod: 600, orbitPeriod: 300, chatter: false, haulers: false });
+        sim.step();
+        sim.step();
+        const battery = sim.batteries[0];
+        const deposit = sim.deposits[0];
+        run(sim, 2);
+        expect(Math.hypot(battery.guns[0].x - deposit.x, battery.guns[0].y - deposit.y)).toBeCloseTo(battery.radius, 6);
+        sim.tuning.depositFree = false;
+        sim.tuning.guardsDepositFree = false;
+        sim.step();
+        sim.step();
+        expect(sim.batteries).toHaveLength(0);
+      });
     });
   });
 

@@ -182,6 +182,10 @@ export class Chatter {
     this.stationSays(sim, "The field deposit is up. Drop your ore there or haul it in.");
   }
 
+  guardsBuilt(sim: Sim, atStation: boolean): void {
+    this.stationSays(sim, atStation ? "Station turrets are online." : "Turrets are up at the field deposit.");
+  }
+
   unlocked(sim: Sim, names: string[]): void {
     const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
     this.stationSays(sim, `New blueprint${names.length > 1 ? "s" : ""} in. The shop now stocks ${list}.`);

@@ -173,5 +173,13 @@ export const TRAFFIC_BUY_ORDER: Record<ShipModel, PartId[]> = {
   floater: ["tractor", "turret", "reverse", "strafe", "spinStabilizer", "bay"],
 };
 
+/** What the station builds on site from its own parts, rather than having a hauler bring it. */
+export const PROJECTS = ["deposit", "stationGuards", "depositGuards"] as const;
+export type ProjectId = (typeof PROJECTS)[number];
+
 /** What the station saves up for in one queue: blueprints for its shop, and projects it builds. */
-export type BlueprintId = PartId | "drone" | "deposit";
+export type BlueprintId = PartId | "drone" | ProjectId;
+
+export function isProject(id: BlueprintId): id is ProjectId {
+  return (PROJECTS as readonly BlueprintId[]).includes(id);
+}

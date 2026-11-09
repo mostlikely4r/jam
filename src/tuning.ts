@@ -107,6 +107,19 @@ export const DEFAULTS = {
   depositParts: 150,
   /** Parts per second going into construction. */
   depositBuildRate: 0.5,
+  /** How far from what they stand on the turrets reach. Pirates treat this as their edge. */
+  guardRange: 1200,
+  guardShotsPerSecond: 1,
+  /** Radians per second. */
+  guardTurn: 3,
+  stationGuardCount: 4,
+  depositGuardCount: 2,
+  stationGuardPrice: 3500,
+  stationGuardParts: 120,
+  depositGuardPrice: 2000,
+  depositGuardParts: 60,
+  guardsStationFree: false,
+  guardsDepositFree: false,
   haulerFirst: 300,
   haulerInterval: 600,
   haulerCapacity: 200,
@@ -126,6 +139,8 @@ export const DEFAULTS = {
   shotDamage: 4,
   pirateStartOre: 40,
   pirateLimit: 1,
+  /** A hurt pirate that can pay for repairs breaks off and goes home, even mid-fight. */
+  pirateRetreats: true,
   stationStartCredits: 300,
   stationStartOre: 40,
   stationStartParts: 40,
@@ -338,6 +353,25 @@ export const GROUPS: Group[] = [
       { key: "stationReserveParts", label: "Parts the station keeps for repairs", min: 0, max: 200, step: 5 },
       { key: "defenderPrice", label: "Credits of parts in a new defender", min: 0, max: 5000, step: 50 },
     ],
+    switches: [{ key: "pirateRetreats", label: "Hurt pirates retreat to repair" }],
+  },
+  {
+    title: "Turrets",
+    sliders: [
+      { key: "guardRange", label: "Reach", min: 300, max: 4000, step: 50 },
+      { key: "guardShotsPerSecond", label: "Shots per second, each", min: 0, max: 7, step: 0.1 },
+      { key: "guardTurn", label: "Turning speed", min: 0.5, max: 12, step: 0.5 },
+      { key: "stationGuardCount", label: "Turrets at the station (when built)", min: 1, max: 8, step: 1 },
+      { key: "depositGuardCount", label: "Turrets at the deposit (when built)", min: 1, max: 8, step: 1 },
+      { key: "stationGuardPrice", label: "Credits to fund the station's", min: 0, max: 20000, step: 100 },
+      { key: "stationGuardParts", label: "Parts to build the station's", min: 1, max: 1000, step: 10 },
+      { key: "depositGuardPrice", label: "Credits to fund the deposit's", min: 0, max: 20000, step: 100 },
+      { key: "depositGuardParts", label: "Parts to build the deposit's", min: 1, max: 1000, step: 10 },
+    ],
+    switches: [
+      { key: "guardsStationFree", label: "Station turrets for free (testing)" },
+      { key: "guardsDepositFree", label: "Deposit turrets for free, once it has a deposit (testing)" },
+    ],
   },
   {
     title: "Cargo",
@@ -354,7 +388,7 @@ export const GROUPS: Group[] = [
       { key: "depositDropChance", label: "Share of full loads traffic drops", min: 0, max: 1, step: 0.05 },
       { key: "depositPrice", label: "Credits to fund one", min: 0, max: 20000, step: 100 },
       { key: "depositParts", label: "Parts to build one", min: 1, max: 1000, step: 10 },
-      { key: "depositBuildRate", label: "Parts per second while building", min: 0.1, max: 10, step: 0.1 },
+      { key: "depositBuildRate", label: "Parts per second while building (every project)", min: 0.1, max: 10, step: 0.1 },
     ],
     switches: [{ key: "depositFree", label: "Deposit built for free (testing)" }],
   },

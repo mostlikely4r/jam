@@ -1,5 +1,5 @@
 import { Chatter } from "./chatter";
-import { type BlueprintId, PARTS, partFits, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
+import { type BlueprintId, isProject, PARTS, partFits, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
 import { ClickPilot, DronePilot, FighterPilot } from "./pilot";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
@@ -11,6 +11,9 @@ const PICKUP_MARGIN = 10;
 const TIER_RADIUS = [18, 34, 60];
 const ORE_KINDS = 3;
 export const STATION_HALF = 150;
+export const DEPOSIT_HALF = 70;
+/** How far from a turret's center its shots start. */
+const GUARD_BARREL = 30;
 /** How far outside the field a pirate starts, on the far side from the station. */
 const PIRATE_START_DISTANCE = 2000;
 /** How long a hit ship keeps calling for help. */
@@ -204,6 +207,31 @@ export interface Deposit {
   partsUsed: number;
 }
 
+/** One gun of a battery. */
+export interface Guard {
+  x: number;
+  y: number;
+  px: number;
+  py: number;
+  angle: number;
+  prevAngle: number;
+  cooldown: number;
+  /** Stands in as the ship its shots came from. It's never in the world itself. */
+  gun: Ship;
+}
+
+/** A set of turrets standing on one thing, built as one project. */
+export interface Battery {
+  id: "stationGuards" | "depositGuards";
+  host: Poi | Deposit;
+  /** How far out from the host's center its guns stand. */
+  radius: number;
+  guns: Guard[];
+  fromSwitch: boolean;
+  partsLeft: number;
+  partsUsed: number;
+}
+
 export interface Poi {
   name: "field" | "station" | "pirate base";
   parent: Poi | null;
@@ -237,6 +265,8 @@ export interface Shot extends Body {
   precise: boolean;
   /** Who fired it. Its own shots can't hit it. */
   from: Ship;
+  /** From a turret: it only hits pirates and rocks, and clears the station. */
+  guard?: boolean;
 }
 
 export interface Ore extends Body {
@@ -391,6 +421,7 @@ export class Sim {
   /** Blueprints paid in full, waiting for the next hauler to bring them. */
   blueprintsOrdered = new Set<BlueprintId>();
   deposits: Deposit[] = [];
+  batteries: Battery[] = [];
   /** Seconds until the next hauler sets out. */
   haulerTimer = 0;
   /** The pirate base's ore. It pays for pirates' repairs, rebuilds and new ships. */
@@ -1070,18 +1101,23 @@ export class Sim {
   }
 
   private blueprintTier(id: BlueprintId): number {
-    if (id === "deposit") return 3;
+    if (isProject(id)) return 3;
     return id === "drone" ? 2 : PARTS.find((part) => part.id === id)!.tier;
   }
 
   /** Whether the station's shop can sell this. The first tier never needs a blueprint. */
   unlocked(id: BlueprintId): boolean {
     if (id === "deposit") return this.deposits.some((deposit) => deposit.partsLeft <= 0);
+    if (id === "stationGuards" || id === "depositGuards") {
+      return this.batteries.some((battery) => battery.id === id && battery.partsLeft <= 0);
+    }
     return !this.tuning.stationUnlocks || this.blueprintTier(id) === 0 || this.blueprints.has(id);
   }
 
   blueprintPrice(id: BlueprintId): number {
     if (id === "deposit") return this.tuning.depositPrice;
+    if (id === "stationGuards") return this.tuning.stationGuardPrice;
+    if (id === "depositGuards") return this.tuning.depositGuardPrice;
     const price = id === "drone" ? this.tuning.dronePrice : this.partPrice(id);
     return Math.round(price * this.tuning.blueprintScale);
   }
@@ -1095,9 +1131,9 @@ export class Sim {
   blueprintQueue(): BlueprintId[] {
     if (!this.tuning.stationUnlocks) return [];
     const paid = (id: BlueprintId) => this.blueprintPaid.get(id) ?? 0;
-    const ids: BlueprintId[] = [...PARTS.map((part) => part.id), "drone", "deposit"];
+    const ids: BlueprintId[] = [...PARTS.map((part) => part.id), "drone", ...PROJECTS];
     return ids
-      .filter((id) => !this.unlocked(id) && !this.blueprintsOrdered.has(id))
+      .filter((id) => this.canOrder(id))
       .sort(
         (a, b) =>
           paid(b) - paid(a) ||
@@ -1106,9 +1142,15 @@ export class Sim {
       );
   }
 
+  /** Whether this can be paid toward now. Turrets for the deposit need a deposit to stand on. */
+  private canOrder(id: BlueprintId): boolean {
+    if (id === "depositGuards" && !this.unlocked("deposit")) return false;
+    return !this.unlocked(id) && !this.blueprintsOrdered.has(id);
+  }
+
   /** Puts the ship owner's credits toward a blueprint, as far as they go. Returns whether any went in. */
   fundBlueprint(ship: Ship, id: BlueprintId): boolean {
-    if (this.unlocked(id) || this.blueprintsOrdered.has(id) || !this.isDocked(ship)) return false;
+    if (!this.canOrder(id) || !this.isDocked(ship)) return false;
     const account = this.accountOf(ship);
     const amount = Math.min(account.credits, this.blueprintLeft(id));
     if (amount <= 0) return false;
@@ -1122,12 +1164,14 @@ export class Sim {
     this.blueprintPaid.delete(id);
     this.blueprintsOrdered.add(id);
     if (id === "deposit") this.addDeposit(false, this.tuning.depositParts);
+    if (id === "stationGuards") this.addBattery(id, false, this.tuning.stationGuardParts);
+    if (id === "depositGuards") this.addBattery(id, false, this.tuning.depositGuardParts);
   }
 
   /** Everything on order arrives at once, and the shop can stock it from then on. */
   private deliverBlueprints(): void {
     // A project is built here, not brought in.
-    const arrived = [...this.blueprintsOrdered].filter((id) => id !== "deposit");
+    const arrived = [...this.blueprintsOrdered].filter((id) => !isProject(id));
     if (arrived.length === 0) return;
     for (const id of arrived) {
       this.blueprintsOrdered.delete(id);
@@ -1187,18 +1231,149 @@ export class Sim {
     if (this.tuning.chatter) this.chatter.depositBuilt(this);
   }
 
-  /** A funded deposit is built from whatever parts the station can spare past its reserve. */
-  private buildDeposits(dt: number): void {
+  private addBattery(id: Battery["id"], fromSwitch: boolean, partsLeft: number): void {
+    const host = id === "stationGuards" ? this.station : this.deposits.find((deposit) => deposit.partsLeft <= 0);
+    if (!host) return;
+    const { stationGuardCount, depositGuardCount } = this.tuning;
+    const count = id === "stationGuards" ? stationGuardCount : depositGuardCount;
+    const radius = (id === "stationGuards" ? STATION_HALF : DEPOSIT_HALF) * Math.SQRT2;
+    const guns: Guard[] = [];
+    for (let i = 0; i < count; i++) {
+      const controls = { thrust: 0, strafe: 0, turn: 0, fire: false, retro: false, stabilize: false };
+      const gun = this.makeShip(host.x, host.y, controls);
+      gun.faction = "defender";
+      guns.push({ x: host.x, y: host.y, px: host.x, py: host.y, angle: 0, prevAngle: 0, cooldown: 0, gun });
+    }
+    const battery: Battery = { id, host, radius, guns, fromSwitch, partsLeft, partsUsed: 0 };
+    this.batteries.push(battery);
+    this.placeGuards(battery);
+    for (const guard of guns) {
+      guard.px = guard.x;
+      guard.py = guard.y;
+    }
+  }
+
+  /** Evenly around the host, starting from a corner, turning as the host does. */
+  private placeGuards(battery: Battery): void {
+    const { host, radius, guns } = battery;
+    const rotation = host.name === "field deposit" ? 0 : host.rotation;
+    guns.forEach((guard, i) => {
+      const angle = rotation + Math.PI / 4 + (i * Math.PI * 2) / guns.length;
+      guard.px = guard.x;
+      guard.py = guard.y;
+      guard.x = host.x + Math.cos(angle) * radius;
+      guard.y = host.y + Math.sin(angle) * radius;
+      guard.gun.x = guard.x;
+      guard.gun.y = guard.y;
+    });
+  }
+
+  private syncFreeBattery(id: Battery["id"], free: boolean): void {
+    const battery = this.batteries.find((candidate) => candidate.id === id);
+    if (free && !battery) this.addBattery(id, true, 0);
+    if (free && battery && battery.partsLeft > 0) this.finishBattery(battery);
+    if (!free && battery?.fromSwitch) this.batteries = this.batteries.filter((other) => other !== battery);
+  }
+
+  /** Keeps the turrets on what they stand on, and in step with the testing switches. */
+  private moveGuards(): void {
+    this.syncFreeBattery("stationGuards", this.tuning.guardsStationFree);
+    this.syncFreeBattery("depositGuards", this.tuning.guardsDepositFree);
+    // Turrets go when the deposit under them does.
+    this.batteries = this.batteries.filter((battery) => {
+      if (battery.host.name !== "field deposit" || this.deposits.includes(battery.host)) return true;
+      this.blueprintsOrdered.delete(battery.id);
+      return false;
+    });
+    for (const battery of this.batteries) this.placeGuards(battery);
+  }
+
+  private finishBattery(battery: Battery): void {
+    battery.partsLeft = 0;
+    this.blueprintsOrdered.delete(battery.id);
+    if (this.tuning.chatter) this.chatter.guardsBuilt(this, battery.id === "stationGuards");
+  }
+
+  /** Whether a spot is inside the reach of any finished turrets. */
+  inGuardRange(x: number, y: number): boolean {
+    const { guardRange } = this.tuning;
+    return this.batteries.some(
+      ({ host, partsLeft }) => partsLeft <= 0 && Math.hypot(host.x - x, host.y - y) < guardRange,
+    );
+  }
+
+  /** Each finished gun turns toward the nearest pirate in reach that it can see, and fires once lined up. */
+  private fireGuards(dt: number): void {
+    const { guardRange, guardShotsPerSecond, guardTurn, shotSpeed } = this.tuning;
+    const pirates = this.fighters
+      .map((pilot) => pilot.ship)
+      .filter((ship) => ship.faction === "pirate" && !this.isHome(ship));
+    for (const battery of this.batteries) {
+      if (battery.partsLeft > 0) continue;
+      const { host } = battery;
+      for (const guard of battery.guns) {
+        guard.cooldown = Math.max(0, guard.cooldown - dt);
+        guard.prevAngle = guard.angle;
+        let target: Ship | null = null;
+        let nearest = Infinity;
+        for (const pirate of pirates) {
+          if (Math.hypot(pirate.x - host.x, pirate.y - host.y) >= guardRange) continue;
+          const distance = Math.hypot(pirate.x - guard.x, pirate.y - guard.y);
+          if (distance < nearest && this.clearSight(guard.x, guard.y, pirate.x, pirate.y)) {
+            nearest = distance;
+            target = pirate;
+          }
+        }
+        if (!target) continue;
+        const flight = nearest / shotSpeed;
+        const aim = Math.atan2(target.y + target.vy * flight - guard.y, target.x + target.vx * flight - guard.x);
+        const off = Math.atan2(Math.sin(aim - guard.angle), Math.cos(aim - guard.angle));
+        const turn = guardTurn * dt;
+        guard.angle += Math.max(-turn, Math.min(turn, off));
+        const lined = Math.abs(off) < Math.atan2(SHIP_RADIUS * 2, nearest);
+        if (lined && guard.cooldown <= 0 && guardShotsPerSecond > 0) {
+          guard.cooldown = 1 / guardShotsPerSecond;
+          this.fireGuard(guard, (guardRange + battery.radius * 2) / shotSpeed);
+        }
+      }
+    }
+  }
+
+  private fireGuard(guard: Guard, life: number): void {
+    const { shotSpeed } = this.tuning;
+    const cos = Math.cos(guard.angle);
+    const sin = Math.sin(guard.angle);
+    const x = guard.x + cos * GUARD_BARREL;
+    const y = guard.y + sin * GUARD_BARREL;
+    this.shots.push({
+      x,
+      y,
+      px: x,
+      py: y,
+      vx: cos * shotSpeed,
+      vy: sin * shotSpeed,
+      life,
+      precise: false,
+      from: guard.gun,
+      guard: true,
+    });
+    this.events.push({ type: "shot", x, y });
+  }
+
+  /** Funded projects are built from whatever parts the station can spare past its reserve. */
+  private buildProjects(dt: number): void {
     const { depositBuildRate, stationReserveParts } = this.tuning;
-    for (const deposit of this.deposits) {
-      if (deposit.partsLeft <= 0) continue;
+    for (const project of [...this.deposits, ...this.batteries]) {
+      if (project.partsLeft <= 0) continue;
       const spare = this.stationParts - stationReserveParts;
-      const used = Math.min(depositBuildRate * dt, spare, deposit.partsLeft);
+      const used = Math.min(depositBuildRate * dt, spare, project.partsLeft);
       if (used <= 0) continue;
       this.stationParts -= used;
-      deposit.partsLeft -= used;
-      deposit.partsUsed += used;
-      if (deposit.partsLeft <= 1e-9) this.finishDeposit(deposit);
+      project.partsLeft -= used;
+      project.partsUsed += used;
+      if (project.partsLeft > 1e-9) continue;
+      if ("guns" in project) this.finishBattery(project);
+      else this.finishDeposit(project);
     }
   }
 
@@ -1399,6 +1574,7 @@ export class Sim {
     for (const pilot of pilots) pilot.update(this);
     this.movePois(dt);
     this.moveDeposits();
+    this.moveGuards();
     this.carryBodies(dt);
     this.driftInRocks(dt);
     this.moveRocks(dt);
@@ -1419,9 +1595,10 @@ export class Sim {
       this.unloadOre(pilot.ship, dt);
       this.repairHull(pilot.ship, dt);
     }
+    this.fireGuards(dt);
     this.spendStationParts();
     this.buyBlueprints();
-    this.buildDeposits(dt);
+    this.buildProjects(dt);
     this.spendPirateOre();
     this.moveHauler(dt);
     if (this.tuning.chatter) this.chatter.update(this, dt);
@@ -2073,7 +2250,7 @@ export class Sim {
 
       let hitShip: Ship | null = null;
       for (const ship of this.ships) {
-        if (ship === shot.from) continue;
+        if (ship === shot.from || (shot.guard && ship.faction !== "pirate")) continue;
         const t = sweepCircle(
           shot.x - ship.x,
           shot.y - ship.y,
@@ -2088,7 +2265,7 @@ export class Sim {
         }
       }
 
-      if (stationHit && stationHit.t < hitT) {
+      if (stationHit && stationHit.t < hitT && !shot.guard) {
         const x = shot.x + shot.vx * dt * stationHit.t;
         const y = shot.y + shot.vy * dt * stationHit.t;
         this.events.push({ type: "hit", x, y });

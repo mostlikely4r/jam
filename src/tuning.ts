@@ -138,7 +138,7 @@ export const DEFAULTS = {
   detectSeconds: 1,
   shotDamage: 4,
   pirateStartOre: 40,
-  pirateLimit: 1,
+  pirateLimit: 2,
   /** A hurt pirate that can pay for repairs breaks off and goes home, even mid-fight. */
   pirateRetreats: true,
   stationStartCredits: 300,

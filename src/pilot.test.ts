@@ -985,6 +985,19 @@ describe("pirate and defender", () => {
         expect(sim.stationParts).toBeCloseTo(partsBefore - 10, 6);
       });
 
+      it("doesn't carry anything until it opens", () => {
+        const sim = projectWorld();
+        sim.ship.credits = 1000;
+        sim.fundBlueprint(sim.ship, "deposit");
+        const deposit = sim.deposits[0];
+        sim.ship.x = deposit.x;
+        sim.ship.y = deposit.y;
+        sim.ship.px = deposit.x;
+        sim.ship.py = deposit.y;
+        sim.step();
+        expect(sim.ship.frame).not.toBe(deposit);
+      });
+
       it("stops at the station's reserve and waits for more parts", () => {
         const sim = projectWorld({ stationStartParts: 25, depositParts: 50 });
         sim.ship.credits = 1000;
@@ -1144,6 +1157,32 @@ describe("pirate and defender", () => {
       sim.step();
       return sim;
     }
+
+    describe("carrying", () => {
+      const moving = { fieldOrbitPeriod: 600, orbitPeriod: 300 };
+
+      it("carries a ship inside its ring along with it", () => {
+        const sim = depositWorld(moving);
+        const deposit = sim.deposits[0];
+        const startX = deposit.x;
+        const startY = deposit.y;
+        moveTo(sim.ship, deposit.x + 50, deposit.y);
+        run(sim, 5, () => false);
+        expect(Math.hypot(deposit.x - startX, deposit.y - startY)).toBeGreaterThan(10);
+        expect(sim.ship.x - deposit.x).toBeCloseTo(50, 6);
+        expect(sim.ship.y - deposit.y).toBeCloseTo(0, 6);
+        expect(sim.ship.frame).toBe(deposit);
+        expect(sim.ship.frameShare).toBe(1);
+      });
+
+      it("leaves a ship outside its ring to the POIs", () => {
+        const sim = depositWorld(moving);
+        const deposit = sim.deposits[0];
+        moveTo(sim.ship, deposit.x + sim.tuning.depositReach + 20, deposit.y);
+        sim.step();
+        expect(sim.ship.frame).not.toBe(deposit);
+      });
+    });
 
     function moveTo(ship: Sim["ship"], x: number, y: number): void {
       ship.x = x;

@@ -88,8 +88,8 @@ export interface Ship extends Body {
   trips: number;
   wrecks: number;
   damageTaken: number;
-  /** The POI that carries this ship the most, or the nearest if none does. */
-  frame: Poi;
+  /** What carries this ship the most: an open deposit it's inside, or a POI, or the nearest if none does. */
+  frame: Poi | Deposit;
   /** How much of that POI's motion carried the ship on the last tick, from 0 to 1. */
   frameShare: number;
   /** How far the POIs turned the ship on the last tick. */
@@ -188,6 +188,7 @@ const HAULER_ARRIVAL_LIMIT = 400;
 /** A point of interest: it orbits on a fixed path, spins, and carries nearby objects. */
 /** A storage platform out by a POI. Any ship can sell ore into it or buy ore out of it. */
 export interface Deposit {
+  name: "field deposit";
   /** The POI it stands by, and the one whose side of that POI it keeps to. */
   at: Poi;
   toward: Poi;
@@ -1160,7 +1161,8 @@ export class Sim {
   private addDeposit(fromSwitch: boolean, partsLeft: number): Deposit {
     const { field: at, station: toward } = this;
     const { x, y } = this.depositSpot(at, toward);
-    const deposit: Deposit = { at, toward, x, y, px: x, py: y, ore: 0, fromSwitch, partsLeft, partsUsed: 0 };
+    const name = "field deposit";
+    const deposit: Deposit = { name, at, toward, x, y, px: x, py: y, ore: 0, fromSwitch, partsLeft, partsUsed: 0 };
     this.deposits.push(deposit);
     return deposit;
   }
@@ -1200,12 +1202,12 @@ export class Sim {
     }
   }
 
-  /** The open deposit a ship is close enough to trade with, or null. */
-  depositAt(ship: Ship = this.ship): Deposit | null {
+  /** The open deposit a ship is close enough to trade with, and which carries it, or null. */
+  depositAt(body: Body = this.ship): Deposit | null {
     const { depositReach } = this.tuning;
     return (
       this.deposits.find(
-        (deposit) => deposit.partsLeft <= 0 && Math.hypot(deposit.x - ship.x, deposit.y - ship.y) < depositReach,
+        (deposit) => deposit.partsLeft <= 0 && Math.hypot(deposit.x - body.x, deposit.y - body.y) < depositReach,
       ) ?? null
     );
   }
@@ -1521,8 +1523,17 @@ export class Sim {
     ship.angle += turn;
   }
 
-  /** Carries a body and says which POI carried it most, by how much, and how far it turned. */
-  private carry(body: Body): { poi: Poi; share: number; turn: number } {
+  /** Carries a body and says what carried it most, by how much, and how far it turned. */
+  private carry(body: Body): { poi: Poi | Deposit; share: number; turn: number } {
+    // Inside an open deposit's ring, it carries everything by itself. It doesn't turn.
+    const deposit = this.depositAt(body);
+    if (deposit) {
+      body.px = body.x;
+      body.py = body.y;
+      body.x += deposit.x - deposit.px;
+      body.y += deposit.y - deposit.py;
+      return { poi: deposit, share: 1, turn: 0 };
+    }
     const { pois } = this;
     const shares = this.carryShares(body.x, body.y);
     let moveX = 0;

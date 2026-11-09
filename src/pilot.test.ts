@@ -1380,6 +1380,45 @@ describe("pirate and defender", () => {
         expect(sim.ship.frameShare).toBe(1);
       });
 
+      function orderDone(sim: Sim): void {
+        run(sim, 30, () => !sim.clickPilot.active);
+        expect(sim.clickPilot.active).toBe(false);
+      }
+
+      it("a stop inside it ends truly at rest, with no drift after", () => {
+        const sim = depositWorld(moving);
+        const deposit = sim.deposits[0];
+        const { ship } = sim;
+        ship.parts.add("clickMove");
+        moveTo(ship, deposit.x + 20, deposit.y);
+        ship.vx = 30;
+        expect(sim.orderStop()).toBe(true);
+        orderDone(sim);
+        expect(sim.depositAt()).toBe(deposit);
+        const dx = ship.x - deposit.x;
+        const dy = ship.y - deposit.y;
+        run(sim, 10, () => false);
+        expect(ship.x - deposit.x).toBeCloseTo(dx, 6);
+        expect(ship.y - deposit.y).toBeCloseTo(dy, 6);
+      });
+
+      it("a move and stop ends on its spot, at rest", () => {
+        const sim = depositWorld(moving);
+        const deposit = sim.deposits[0];
+        const { ship } = sim;
+        ship.parts.add("clickMove");
+        moveTo(ship, deposit.x - 80, deposit.y);
+        expect(sim.orderMove(deposit.x + 60, deposit.y + 30)).toBe(true);
+        const offset = () => ({ x: ship.x - deposit.x, y: ship.y - deposit.y });
+        orderDone(sim);
+        // The spot rides along with the deposit from the moment it's ordered.
+        expect(Math.hypot(offset().x - 60, offset().y - 30)).toBeLessThan(1.5);
+        const held = offset();
+        run(sim, 10, () => false);
+        expect(offset().x).toBeCloseTo(held.x, 6);
+        expect(offset().y).toBeCloseTo(held.y, 6);
+      });
+
       it("leaves a ship outside its ring to the POIs", () => {
         const sim = depositWorld(moving);
         const deposit = sim.deposits[0];

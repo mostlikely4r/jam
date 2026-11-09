@@ -60,6 +60,11 @@ const ARRIVE_DISTANCE = 40;
 const ARRIVE_SPEED = 20;
 /** Under this speed it counts as stopped. */
 const STOPPED_SPEED = 6;
+/** The last gentle stretch of a move that ends at rest: how fast, how quickly it changes, and how close counts. */
+const EASE_SPEED = 12;
+const EASE_ACCELERATION = 40;
+const EASE_RATE = 2;
+const SETTLED_DISTANCE = 0.5;
 const FACING_ANGLE = 0.05;
 const FACING_SPIN = 0.1;
 /** Gives up on a click order that gets no closer for this long, such as a spot inside a rock. */
@@ -652,7 +657,7 @@ interface ClickOrder {
   move: boolean;
   /** The facing held whenever no burn needs the nose, or null to leave the nose be. */
   face: number | null;
-  stage: "flying" | "stopping" | "facing";
+  stage: "flying" | "stopping" | "settling" | "facing";
   closest: number;
   stuck: number;
 }
@@ -857,11 +862,12 @@ export class ClickPilot extends ShipPilot {
       else this.flyTo(sim, target, 0, 0, null);
     }
     if (order.stage === "stopping") {
-      if (speed < STOPPED_SPEED) order.stage = "facing";
+      if (speed < STOPPED_SPEED) order.stage = order.drifts ? "facing" : "settling";
       // The retro switch stops dead against the POI, not against a drifting spot.
       else if (order.drifts) this.steer(sim, -vx, -vy, STOPPED_SPEED, order.face);
       else this.brake(sim, -vx, -vy, STOPPED_SPEED, order.face);
     }
+    if (order.stage === "settling") this.settle(order, target, distance, vx, vy);
     if (order.stage === "facing") {
       const { face } = order;
       if (face === null) {
@@ -872,6 +878,27 @@ export class ClickPilot extends ShipPilot {
       if (off < FACING_ANGLE && Math.abs(ship.spin) < FACING_SPIN) this.cancel();
       else this.turnTo(sim, face);
     }
+  }
+
+  /**
+   * Thrusters can't trim the last few units of speed, so this does without them: a move
+   * eases onto its spot, and either way the ship ends truly at rest against what carries it.
+   */
+  private settle(order: ClickOrder, target: Body, distance: number, vx: number, vy: number): void {
+    const { ship } = this;
+    if (!order.move || distance < SETTLED_DISTANCE) {
+      ship.vx = 0;
+      ship.vy = 0;
+      order.stage = "facing";
+      return;
+    }
+    const speed = Math.min(EASE_SPEED, distance * EASE_RATE);
+    const changeX = ((target.x - ship.x) / distance) * speed - vx;
+    const changeY = ((target.y - ship.y) / distance) * speed - vy;
+    const change = Math.hypot(changeX, changeY);
+    const share = change > 0 ? Math.min(1, (EASE_ACCELERATION * TICK) / change) : 0;
+    ship.vx += changeX * share;
+    ship.vy += changeY * share;
   }
 
   protected override speedLimitHere(sim: Sim): number {

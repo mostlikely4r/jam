@@ -53,6 +53,8 @@ const AVOID_MARGIN = 30;
 const DOCK_ARRIVAL_SLACK = 100;
 /** Below this it heads home early, as long as it can pay for the repair when it gets there. */
 const LOW_HULL = 30;
+/** How close to a deposit it aims for. Trading starts as soon as it's in reach. */
+const DEPOSIT_ARRIVAL = 60;
 /** Within this distance and under this speed, a click order stops flying and starts stopping. */
 const ARRIVE_DISTANCE = 40;
 const ARRIVE_SPEED = 20;
@@ -429,6 +431,8 @@ export class DronePilot extends ShipPilot {
   private fleeing = false;
   private sinceSighting = 0;
   private hauling = false;
+  /** Whether this load goes to a deposit to save the trip. */
+  private dropsThisLoad = false;
   private rock: Rock | null = null;
   private ore: Ore | null = null;
   private retarget = 0;
@@ -454,8 +458,14 @@ export class DronePilot extends ShipPilot {
     }
 
     // Empty means delivered or wrecked. Either way, this load is over.
-    if (ship.ore === 0) this.hauling = false;
-    if (ship.ore >= sim.tuning.droneCargo) this.hauling = true;
+    if (ship.ore === 0) {
+      this.hauling = false;
+      this.dropsThisLoad = false;
+    }
+    if (ship.ore >= sim.tuning.droneCargo && !this.hauling) {
+      this.hauling = true;
+      this.dropsThisLoad = sim.deposits.length > 0 && sim.roll() < sim.tuning.depositDropChance;
+    }
     const canAffordRepair = ship.ore > 0 || sim.canPayRepair(ship);
     if (ship.hull < LOW_HULL && canAffordRepair) this.hauling = true;
 
@@ -488,6 +498,8 @@ export class DronePilot extends ShipPilot {
 
   /** Runs for the dock, whether or not the pirate is still in view, and waits there until it's clear. */
   private flee(sim: Sim): void {
+    // A load banked on the way can't be lost.
+    if (this.dropLoad(sim)) return;
     const dock = sim.dockPoint();
     const before = sim.dockPoint(true);
     if (!sim.isDocked(this.ship)) {
@@ -526,8 +538,21 @@ export class DronePilot extends ShipPilot {
     else sim.buyDrone(ship);
   }
 
+  /** Takes its ore to a deposit nearer than the dock, if there is one. Returns whether it's doing that. */
+  private dropLoad(sim: Sim): boolean {
+    const { ship } = this;
+    if (ship.ore === 0) return false;
+    const deposit = sim.depositFor(ship);
+    if (!deposit) return false;
+    this.task = "to deposit";
+    if (sim.depositAt(ship) === deposit) sim.sellToDeposit(ship, deposit);
+    else this.flyTo(sim, deposit, DEPOSIT_ARRIVAL, 0, null);
+    return true;
+  }
+
   private haul(sim: Sim): void {
     const { ship } = this;
+    if ((this.dropsThisLoad || ship.hull < LOW_HULL) && this.dropLoad(sim)) return;
     if (sim.isDocked(ship)) {
       this.task = "unloading";
       this.hold(sim, sim.dockPoint(), sim.dockPoint(true));

@@ -944,6 +944,129 @@ describe("pirate and defender", () => {
     });
   });
 
+  describe("field deposit", () => {
+    function depositWorld(extra: Partial<typeof SOLO> = {}): Sim {
+      const sim = arena({
+        haulers: false,
+        depositFree: true,
+        depositGap: 300,
+        depositReach: 150,
+        depositCapacity: 300,
+        depositPays: 3,
+        depositSells: 7,
+        depositDropChance: 0,
+        stationStartCredits: 1000,
+        ...extra,
+      });
+      sim.step();
+      return sim;
+    }
+
+    function moveTo(ship: Sim["ship"], x: number, y: number): void {
+      ship.x = x;
+      ship.y = y;
+      ship.px = x;
+      ship.py = y;
+      ship.vx = 0;
+      ship.vy = 0;
+    }
+
+    it("stands just outside the field on the station's side, and goes with the switch", () => {
+      const sim = depositWorld();
+      const deposit = sim.deposits[0];
+      const { field, station } = sim;
+      expect(Math.hypot(deposit.x - field.x, deposit.y - field.y)).toBeCloseTo(field.reach + 300, 3);
+      expect(Math.hypot(deposit.x - station.x, deposit.y - station.y)).toBeLessThan(Math.hypot(field.x - station.x, field.y - station.y));
+      sim.tuning.depositFree = false;
+      sim.step();
+      expect(sim.deposits).toHaveLength(0);
+    });
+
+    it("every credit and ore traces through a drop, a purchase and the station", () => {
+      const sim = depositWorld();
+      const deposit = sim.deposits[0];
+      moveTo(sim.ship, deposit.x, deposit.y);
+      sim.ship.ore = 10;
+      sim.ship.credits = 100;
+      const stationBefore = sim.stationAccount.credits;
+      expect(sim.sellToDeposit(sim.ship, deposit)).toBe(10);
+      expect(sim.ship.credits).toBe(130);
+      expect(deposit.ore).toBe(10);
+      expect(sim.stationAccount.credits).toBe(stationBefore - 30);
+      expect(sim.buyFromDeposit(sim.ship, deposit)).toBe(10);
+      expect(sim.ship.ore).toBe(10);
+      expect(sim.ship.credits).toBe(60);
+      expect(deposit.ore).toBe(0);
+      expect(sim.stationAccount.credits).toBe(stationBefore + 40);
+    });
+
+    it("only takes what fits, only sells what you can pay for, and only in reach", () => {
+      const sim = depositWorld({ depositCapacity: 5 });
+      const deposit = sim.deposits[0];
+      moveTo(sim.ship, deposit.x, deposit.y);
+      sim.ship.ore = 8;
+      expect(sim.sellToDeposit(sim.ship, deposit)).toBe(5);
+      expect(sim.ship.ore).toBe(3);
+      expect(sim.sellToDeposit(sim.ship, deposit)).toBe(0);
+      sim.ship.credits = 15;
+      expect(sim.buyFromDeposit(sim.ship, deposit)).toBe(2);
+      moveTo(sim.ship, deposit.x + 500, deposit.y);
+      sim.ship.credits = 1000;
+      expect(sim.buyFromDeposit(sim.ship, deposit)).toBe(0);
+      sim.ship.ore = 1;
+      expect(sim.sellToDeposit(sim.ship, deposit)).toBe(0);
+    });
+
+    /** A traffic ship with a load, out in the middle of the field. */
+    function loaded(sim: Sim, ore: number): Sim["traffic"][number] {
+      const pilot = sim.traffic[0];
+      moveTo(pilot.ship, sim.field.x, sim.field.y);
+      pilot.ship.ore = ore;
+      return pilot;
+    }
+
+    function run(sim: Sim, seconds: number, done: () => boolean): void {
+      for (let time = 0; time < seconds && !done(); time += TICK) {
+        sim.step();
+        sim.events.length = 0;
+      }
+    }
+
+    it("traffic that chooses to save the trip drops its load and goes back to work", () => {
+      const sim = depositWorld({ trafficRacers: 1, depositDropChance: 1, chatter: false });
+      const pilot = loaded(sim, DEFAULTS.droneCargo);
+      run(sim, 200, () => sim.deposits[0].ore > 0);
+      expect(sim.deposits[0].ore).toBe(DEFAULTS.droneCargo);
+      expect(pilot.ship.ore).toBe(0);
+      expect(pilot.ship.credits).toBeGreaterThanOrEqual(DEFAULTS.droneCargo * 3);
+    }, 30000);
+
+    it("traffic flies a full load home if it doesn't choose the deposit", () => {
+      const sim = depositWorld({ trafficRacers: 1, chatter: false });
+      const pilot = loaded(sim, DEFAULTS.droneCargo);
+      run(sim, 300, () => pilot.ship.trips > 0);
+      expect(pilot.ship.trips).toBe(1);
+      expect(sim.deposits[0].ore).toBe(0);
+    }, 30000);
+
+    it("a badly damaged ship banks its ore on the way", () => {
+      const sim = depositWorld({ trafficRacers: 1, chatter: false });
+      const pilot = loaded(sim, 4);
+      pilot.ship.hull = 10;
+      run(sim, 200, () => sim.deposits[0].ore > 0);
+      expect(sim.deposits[0].ore).toBe(4);
+    }, 30000);
+
+    it("a full deposit sends the load on to the station", () => {
+      const sim = depositWorld({ trafficRacers: 1, depositDropChance: 1, depositCapacity: 2, chatter: false });
+      sim.deposits[0].ore = 2;
+      const pilot = loaded(sim, DEFAULTS.droneCargo);
+      run(sim, 300, () => pilot.ship.trips > 0);
+      expect(pilot.ship.trips).toBe(1);
+      expect(sim.deposits[0].ore).toBe(2);
+    }, 30000);
+  });
+
   describe("haulers", () => {
     function haulerWorld(extra: Partial<typeof SOLO> = {}): Sim {
       return arena({

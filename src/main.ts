@@ -1,6 +1,6 @@
 import { Audio } from "./audio";
 import { Radio } from "./radio";
-import { MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
+import { type Deposit, MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, PARTS, partFits, type Part } from "./parts";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
@@ -126,9 +126,46 @@ let shopState = "";
 // the buttons mid-click would lose the click.
 const shopHeading = document.createElement("h2");
 
+function dropLine(deposit: Deposit): ShopLine {
+  const { depositPays } = tuning;
+  const amount = sim.depositSellable(sim.ship, deposit);
+  if (sim.ship.ore <= 0) return { tag: "no ore", text: `Drop ore here for ${depositPays} credits each`, enabled: false };
+  if (amount <= 0) return { tag: "full", text: "The deposit has no room", enabled: false };
+  return { tag: "sell", style: "sell", text: `Drop ${amount} ore for ${amount * depositPays} credits`, enabled: true };
+}
+
+function loadLine(deposit: Deposit): ShopLine {
+  const { depositSells, creditsPerOre } = tuning;
+  const amount = sim.depositBuyable(sim.ship, deposit);
+  if (deposit.ore <= 0) return { tag: "empty", text: `Load ore here for ${depositSells} credits each`, enabled: false };
+  if (amount <= 0) return { tag: "not enough money", style: "poor", text: `Load ore here for ${depositSells} credits each`, enabled: false };
+  const text = `Load ${amount} ore for ${amount * depositSells} credits. The station pays ${amount * creditsPerOre}`;
+  return { tag: "buy", style: "buy", text, enabled: true };
+}
+
+function updateDepositShop(deposit: Deposit): void {
+  const { ship } = sim;
+  const title = `Field deposit - holds ${Math.floor(deposit.ore)} of ${tuning.depositCapacity} ore`;
+  if (shopHeading.textContent !== title) shopHeading.textContent = title;
+  const state = `deposit ${ship.ore} ${ship.credits} ${deposit.ore} ${tuning.depositPays} ${tuning.depositSells} ${tuning.depositCapacity}`;
+  if (state === shopState) return;
+  shopState = state;
+  shop.hidden = false;
+  shop.replaceChildren(
+    shopHeading,
+    shopButton("1", dropLine(deposit), () => sim.sellToDeposit(ship, deposit)),
+    shopButton("2", loadLine(deposit), () => sim.buyFromDeposit(ship, deposit)),
+  );
+}
+
 function updateShop(): void {
   const { ship } = sim;
   const docked = sim.isDocked();
+  const deposit = docked ? null : sim.depositAt();
+  if (deposit) {
+    updateDepositShop(deposit);
+    return;
+  }
   if (docked) {
     const title = `Dock shop - station ${Math.floor(sim.stationAccount.credits)} credits - ${haulerText()}`;
     if (shopHeading.textContent !== title) shopHeading.textContent = title;
@@ -359,6 +396,9 @@ window.addEventListener("keydown", (event) => {
     const part = PARTS[digit[1] === "0" ? 9 : Number(digit[1]) - 1];
     if (part) tradePart(part);
   }
+  const deposit = sim.isDocked() ? null : sim.depositAt();
+  if (deposit && event.code === "Digit1") sim.sellToDeposit(sim.ship, deposit);
+  if (deposit && event.code === "Digit2") sim.buyFromDeposit(sim.ship, deposit);
   if (event.code === "Equal" && sim.isDocked() && PARTS[10]) tradePart(PARTS[10]);
   if (event.code === "Minus" && sim.isDocked()) tradeDrone();
   keys.add(event.code);

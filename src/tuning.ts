@@ -90,6 +90,18 @@ export const DEFAULTS = {
   stationCashBuffer: 300,
   trafficBuffer: 400,
   droneBuffer: 500,
+  /** Puts a deposit in the world without paying for it, for testing. */
+  depositFree: false,
+  /** How far outside the edge of its POI a deposit sits. */
+  depositGap: 300,
+  /** How close a ship has to be to trade with a deposit. */
+  depositReach: 150,
+  depositCapacity: 300,
+  /** Credits a deposit pays per ore dropped, and asks per ore bought. */
+  depositPays: 3,
+  depositSells: 7,
+  /** The share of full loads traffic drops at a deposit for no reason but saving the trip. */
+  depositDropChance: 0.25,
   haulerFirst: 300,
   haulerInterval: 600,
   haulerCapacity: 200,
@@ -317,6 +329,18 @@ export const GROUPS: Group[] = [
       { key: "stationReserveParts", label: "Parts the station keeps for repairs", min: 0, max: 200, step: 5 },
       { key: "defenderPrice", label: "Credits of parts in a new defender", min: 0, max: 5000, step: 50 },
     ],
+  },
+  {
+    title: "Field deposit",
+    sliders: [
+      { key: "depositGap", label: "Distance outside the field", min: -2000, max: 3000, step: 50 },
+      { key: "depositReach", label: "Reach for trading", min: 50, max: 500, step: 10 },
+      { key: "depositCapacity", label: "Ore it holds", min: 10, max: 2000, step: 10 },
+      { key: "depositPays", label: "Credits it pays per ore", min: 0, max: 50, step: 1 },
+      { key: "depositSells", label: "Credits it asks per ore", min: 0, max: 50, step: 1 },
+      { key: "depositDropChance", label: "Share of full loads traffic drops", min: 0, max: 1, step: 0.05 },
+    ],
+    switches: [{ key: "depositFree", label: "Deposit built for free (testing)" }],
   },
   {
     title: "Haulers",

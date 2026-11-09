@@ -18,6 +18,7 @@ const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
 /** How long the mark where a pirate was last seen takes to fade away. */
 const GHOST_MILLISECONDS = 30000;
 const PING_SECONDS = 1.4;
+const DEPOSIT_HALF = 70;
 const HAULER_COLUMNS = 10;
 const HAULER_ROWS = 4;
 const PILE_ROWS = 12;
@@ -207,6 +208,7 @@ export class Renderer {
       Math.abs(x - camX) < halfW + r && Math.abs(y - camY) < halfH + r;
 
     this.drawStation(sim, alpha);
+    this.drawDeposits(sim, alpha);
     this.drawHauler(sim, alpha);
     this.drawPirateBase(sim, alpha);
     if (tuning.showPoiZones) this.drawPoiZones(sim, alpha);
@@ -283,6 +285,34 @@ export class Renderer {
     this.drawOrePile(sim.stationOre, STATION_HALF);
     this.drawCrates(sim.stationParts, STATION_HALF);
     ctx.restore();
+  }
+
+  /** A small deck with its ore on it, inside the ring where ships can trade with it. */
+  private drawDeposits(sim: Sim, alpha: number): void {
+    const { ctx } = this;
+    const here = sim.depositAt();
+    for (const deposit of sim.deposits) {
+      const x = lerp(deposit.px, deposit.x, alpha);
+      const y = lerp(deposit.py, deposit.y, alpha);
+      ctx.fillStyle = deposit === here ? "rgba(143, 227, 161, 0.14)" : "rgba(143, 227, 161, 0.05)";
+      ctx.strokeStyle = "#8fe3a1";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([14, 10]);
+      ctx.beginPath();
+      ctx.arc(x, y, sim.tuning.depositReach, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.fillStyle = "#6b7280";
+      ctx.fillRect(-DEPOSIT_HALF, -DEPOSIT_HALF, DEPOSIT_HALF * 2, DEPOSIT_HALF * 2);
+      ctx.strokeStyle = "#aab1bd";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(-DEPOSIT_HALF, -DEPOSIT_HALF, DEPOSIT_HALF * 2, DEPOSIT_HALF * 2);
+      this.drawOrePile(deposit.ore, DEPOSIT_HALF);
+      ctx.restore();
+    }
   }
 
   /** Parts as crates along the far edge of the deck, in front of any ore that reaches them. */

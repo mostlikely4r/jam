@@ -186,6 +186,20 @@ const HAULER_WAIT_SECONDS = 15;
 const HAULER_ARRIVAL_LIMIT = 400;
 
 /** A point of interest: it orbits on a fixed path, spins, and carries nearby objects. */
+/** A storage platform out by a POI. Any ship can sell ore into it or buy ore out of it. */
+export interface Deposit {
+  /** The POI it stands by, and the one whose side of that POI it keeps to. */
+  at: Poi;
+  toward: Poi;
+  x: number;
+  y: number;
+  px: number;
+  py: number;
+  ore: number;
+  /** Put there by the testing switch, so it goes when the switch does. */
+  fromSwitch: boolean;
+}
+
 export interface Poi {
   name: "field" | "station" | "pirate base";
   parent: Poi | null;
@@ -372,6 +386,7 @@ export class Sim {
   blueprintPaid = new Map<BlueprintId, number>();
   /** Blueprints paid in full, waiting for the next hauler to bring them. */
   blueprintsOrdered = new Set<BlueprintId>();
+  deposits: Deposit[] = [];
   /** Seconds until the next hauler sets out. */
   haulerTimer = 0;
   /** The pirate base's ore. It pays for pirates' repairs, rebuilds and new ships. */
@@ -427,6 +442,7 @@ export class Sim {
     this.blueprints = new Set();
     this.blueprintPaid = new Map();
     this.blueprintsOrdered = new Set();
+    this.deposits = [];
     this.haulerTimer = this.tuning.haulerFirst;
     this.pirateOre = this.tuning.pirateStartOre;
     this.lostTraffic = [];
@@ -1123,6 +1139,96 @@ export class Sim {
     this.orderBlueprint(next);
   }
 
+  private depositSpot(at: Poi, toward: Poi): { x: number; y: number } {
+    const dx = toward.x - at.x;
+    const dy = toward.y - at.y;
+    const distance = Math.hypot(dx, dy) || 1;
+    const out = at.reach + this.tuning.depositGap;
+    return { x: at.x + (dx / distance) * out, y: at.y + (dy / distance) * out };
+  }
+
+  private addDeposit(fromSwitch: boolean): Deposit {
+    const { field: at, station: toward } = this;
+    const { x, y } = this.depositSpot(at, toward);
+    const deposit: Deposit = { at, toward, x, y, px: x, py: y, ore: 0, fromSwitch };
+    this.deposits.push(deposit);
+    return deposit;
+  }
+
+  /** Keeps each deposit at its spot by its POI, and in step with the testing switch. */
+  private moveDeposits(): void {
+    if (this.tuning.depositFree && this.deposits.length === 0) this.addDeposit(true);
+    if (!this.tuning.depositFree) this.deposits = this.deposits.filter((deposit) => !deposit.fromSwitch);
+    for (const deposit of this.deposits) {
+      deposit.px = deposit.x;
+      deposit.py = deposit.y;
+      Object.assign(deposit, this.depositSpot(deposit.at, deposit.toward));
+    }
+  }
+
+  /** The deposit a ship is close enough to trade with, or null. */
+  depositAt(ship: Ship = this.ship): Deposit | null {
+    const { depositReach } = this.tuning;
+    return this.deposits.find((deposit) => Math.hypot(deposit.x - ship.x, deposit.y - ship.y) < depositReach) ?? null;
+  }
+
+  /** The nearest deposit with room that's closer than the dock, for a ship with ore to get rid of. */
+  depositFor(ship: Ship): Deposit | null {
+    const dock = this.dockPoint();
+    let best = Math.hypot(dock.x - ship.x, dock.y - ship.y);
+    let found: Deposit | null = null;
+    for (const deposit of this.deposits) {
+      const distance = Math.hypot(deposit.x - ship.x, deposit.y - ship.y);
+      if (deposit.ore < this.tuning.depositCapacity && distance < best) {
+        best = distance;
+        found = deposit;
+      }
+    }
+    return found;
+  }
+
+  /** How much ore this ship could sell into the deposit right now. */
+  depositSellable(ship: Ship, deposit: Deposit): number {
+    if (this.depositAt(ship) !== deposit) return 0;
+    return Math.max(0, Math.min(ship.ore, this.tuning.depositCapacity - deposit.ore));
+  }
+
+  /** How much ore this ship could buy from the deposit right now. */
+  depositBuyable(ship: Ship, deposit: Deposit): number {
+    if (this.depositAt(ship) !== deposit) return 0;
+    const { depositSells } = this.tuning;
+    const affordable = depositSells > 0 ? Math.floor(this.accountOf(ship).credits / depositSells) : Infinity;
+    return Math.max(0, Math.min(deposit.ore, affordable));
+  }
+
+  /** Sells all the ore the deposit has room for. The station pays. Returns how much went in. */
+  sellToDeposit(ship: Ship, deposit: Deposit): number {
+    const amount = this.depositSellable(ship, deposit);
+    if (amount <= 0) return 0;
+    const credits = amount * this.tuning.depositPays;
+    ship.ore -= amount;
+    deposit.ore += amount;
+    this.accountOf(ship).credits += credits;
+    this.stationAccount.credits -= credits;
+    ship.earned += credits;
+    if (ship.ore === 0) ship.trips++;
+    this.events.push({ type: "sale", x: ship.x, y: ship.y });
+    return amount;
+  }
+
+  /** Buys all the ore the ship can pay for. The station gets the money. Returns how much came out. */
+  buyFromDeposit(ship: Ship, deposit: Deposit): number {
+    const amount = this.depositBuyable(ship, deposit);
+    if (amount <= 0) return 0;
+    const credits = amount * this.tuning.depositSells;
+    deposit.ore -= amount;
+    ship.ore += amount;
+    this.accountOf(ship).credits -= credits;
+    this.stationAccount.credits += credits;
+    this.events.push({ type: "sale", x: ship.x, y: ship.y });
+    return amount;
+  }
+
   /** The parts this ship would buy next, in order, if it could afford them and the shop had them. */
   wishlistFor(ship: Ship): PartId[] {
     return TRAFFIC_BUY_ORDER[ship.model].filter((id) => !ship.parts.has(id));
@@ -1239,6 +1345,7 @@ export class Sim {
     const pilots = this.pilots;
     for (const pilot of pilots) pilot.update(this);
     this.movePois(dt);
+    this.moveDeposits();
     this.carryBodies(dt);
     this.driftInRocks(dt);
     this.moveRocks(dt);

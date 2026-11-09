@@ -224,8 +224,6 @@ export interface Guard {
 export interface Battery {
   id: "stationGuards" | "depositGuards";
   host: Poi | Deposit;
-  /** How far out from the host's center its guns stand. */
-  radius: number;
   guns: Guard[];
   fromSwitch: boolean;
   partsLeft: number;
@@ -1236,7 +1234,6 @@ export class Sim {
     if (!host) return;
     const { stationGuardCount, depositGuardCount } = this.tuning;
     const count = id === "stationGuards" ? stationGuardCount : depositGuardCount;
-    const radius = (id === "stationGuards" ? STATION_HALF : DEPOSIT_HALF) * Math.SQRT2;
     const guns: Guard[] = [];
     for (let i = 0; i < count; i++) {
       const controls = { thrust: 0, strafe: 0, turn: 0, fire: false, retro: false, stabilize: false };
@@ -1244,7 +1241,7 @@ export class Sim {
       gun.faction = "defender";
       guns.push({ x: host.x, y: host.y, px: host.x, py: host.y, angle: 0, prevAngle: 0, cooldown: 0, gun });
     }
-    const battery: Battery = { id, host, radius, guns, fromSwitch, partsLeft, partsUsed: 0 };
+    const battery: Battery = { id, host, guns, fromSwitch, partsLeft, partsUsed: 0 };
     this.batteries.push(battery);
     this.placeGuards(battery);
     for (const guard of guns) {
@@ -1253,12 +1250,22 @@ export class Sim {
     }
   }
 
-  /** Evenly around the host, starting from a corner, turning as the host does. */
+  /**
+   * Floating, and placed by where things are. On a deposit's ring, starting square to the
+   * way to the station. For the station, in an arc in front of it, facing the field.
+   */
   private placeGuards(battery: Battery): void {
-    const { host, radius, guns } = battery;
-    const rotation = host.name === "field deposit" ? 0 : host.rotation;
+    const { host, guns } = battery;
+    const { depositReach, stationGuardArc, stationGuardDistance } = this.tuning;
+    const atDeposit = host.name === "field deposit";
+    const toward = atDeposit ? host.toward : this.field;
+    const facing = Math.atan2(toward.y - host.y, toward.x - host.x);
+    const radius = atDeposit ? depositReach : stationGuardDistance;
+    const arc = (stationGuardArc * Math.PI) / 180;
     guns.forEach((guard, i) => {
-      const angle = rotation + Math.PI / 4 + (i * Math.PI * 2) / guns.length;
+      const angle = atDeposit
+        ? facing + Math.PI / 2 + (i * Math.PI * 2) / guns.length
+        : facing + (guns.length > 1 ? (i / (guns.length - 1) - 0.5) * arc : 0);
       guard.px = guard.x;
       guard.py = guard.y;
       guard.x = host.x + Math.cos(angle) * radius;
@@ -1298,7 +1305,7 @@ export class Sim {
   inGuardRange(x: number, y: number): boolean {
     const { guardRange } = this.tuning;
     return this.batteries.some(
-      ({ host, partsLeft }) => partsLeft <= 0 && Math.hypot(host.x - x, host.y - y) < guardRange,
+      ({ guns, partsLeft }) => partsLeft <= 0 && guns.some((guard) => Math.hypot(guard.x - x, guard.y - y) < guardRange),
     );
   }
 
@@ -1310,16 +1317,14 @@ export class Sim {
       .filter((ship) => ship.faction === "pirate" && !this.isHome(ship));
     for (const battery of this.batteries) {
       if (battery.partsLeft > 0) continue;
-      const { host } = battery;
       for (const guard of battery.guns) {
         guard.cooldown = Math.max(0, guard.cooldown - dt);
         guard.prevAngle = guard.angle;
         let target: Ship | null = null;
         let nearest = Infinity;
         for (const pirate of pirates) {
-          if (Math.hypot(pirate.x - host.x, pirate.y - host.y) >= guardRange) continue;
           const distance = Math.hypot(pirate.x - guard.x, pirate.y - guard.y);
-          if (distance < nearest && this.clearSight(guard.x, guard.y, pirate.x, pirate.y)) {
+          if (distance < guardRange && distance < nearest && this.clearSight(guard.x, guard.y, pirate.x, pirate.y)) {
             nearest = distance;
             target = pirate;
           }
@@ -1333,7 +1338,7 @@ export class Sim {
         const lined = Math.abs(off) < Math.atan2(SHIP_RADIUS * 2, nearest);
         if (lined && guard.cooldown <= 0 && guardShotsPerSecond > 0) {
           guard.cooldown = 1 / guardShotsPerSecond;
-          this.fireGuard(guard, (guardRange + battery.radius * 2) / shotSpeed);
+          this.fireGuard(guard, guardRange / shotSpeed);
         }
       }
     }

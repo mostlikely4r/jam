@@ -346,16 +346,16 @@ export class Renderer {
         ctx.moveTo(x, y);
         ctx.lineTo(x + Math.cos(angle) * GUARD_BARREL, y + Math.sin(angle) * GUARD_BARREL);
         ctx.stroke();
+        if (!sim.tuning.showPoiZones) continue;
+        ctx.strokeStyle = "rgba(110, 235, 170, 0.35)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([24, 18]);
+        ctx.beginPath();
+        ctx.arc(x, y, sim.tuning.guardRange, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
       ctx.globalAlpha = 1;
-      if (!sim.tuning.showPoiZones || !built) continue;
-      ctx.strokeStyle = "rgba(110, 235, 170, 0.35)";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([24, 18]);
-      ctx.beginPath();
-      ctx.arc(lerp(battery.host.px, battery.host.x, alpha), lerp(battery.host.py, battery.host.y, alpha), sim.tuning.guardRange, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
     }
   }
 

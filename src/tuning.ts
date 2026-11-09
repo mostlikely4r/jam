@@ -113,6 +113,9 @@ export const DEFAULTS = {
   /** Radians per second. */
   guardTurn: 3,
   stationGuardCount: 4,
+  /** The station's turrets float in an arc facing the field: how wide, and how far out. */
+  stationGuardArc: 60,
+  stationGuardDistance: 450,
   depositGuardCount: 2,
   stationGuardPrice: 3500,
   stationGuardParts: 120,
@@ -358,10 +361,12 @@ export const GROUPS: Group[] = [
   {
     title: "Turrets",
     sliders: [
-      { key: "guardRange", label: "Reach", min: 300, max: 4000, step: 50 },
+      { key: "guardRange", label: "Reach, from each turret", min: 300, max: 4000, step: 50 },
       { key: "guardShotsPerSecond", label: "Shots per second, each", min: 0, max: 7, step: 0.1 },
       { key: "guardTurn", label: "Turning speed", min: 0.5, max: 12, step: 0.5 },
       { key: "stationGuardCount", label: "Turrets at the station (when built)", min: 1, max: 8, step: 1 },
+      { key: "stationGuardArc", label: "Width of the station's arc (degrees)", min: 0, max: 360, step: 5 },
+      { key: "stationGuardDistance", label: "Distance from the station", min: 200, max: 2000, step: 50 },
       { key: "depositGuardCount", label: "Turrets at the deposit (when built)", min: 1, max: 8, step: 1 },
       { key: "stationGuardPrice", label: "Credits to fund the station's", min: 0, max: 20000, step: 100 },
       { key: "stationGuardParts", label: "Parts to build the station's", min: 1, max: 1000, step: 10 },

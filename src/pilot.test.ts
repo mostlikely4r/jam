@@ -1162,7 +1162,7 @@ describe("pirate and defender", () => {
       return sim;
     }
 
-    const outside = 1600;
+    const outside = 2000;
 
     it("shoots a pirate in reach and doesn't shoot one out of reach", () => {
       const near = guardWorld();
@@ -1174,6 +1174,21 @@ describe("pirate and defender", () => {
       const farPirate = far.fighters[0].ship;
       run(far, 3, () => pin(farPirate, far.station.x + outside, far.station.y));
       expect(farPirate.damageTaken).toBe(0);
+    });
+
+    it("the station's float in an arc facing the field, so its far side is open", () => {
+      const sim = guardWorld({ stationGuardCount: 4, stationGuardArc: 60, stationGuardDistance: 450 });
+      const { guns } = sim.batteries[0];
+      const facing = Math.atan2(sim.field.y - sim.station.y, sim.field.x - sim.station.x);
+      const offs = guns.map((guard) => {
+        const angle = Math.atan2(guard.y - sim.station.y, guard.x - sim.station.x) - facing;
+        expect(Math.hypot(guard.x - sim.station.x, guard.y - sim.station.y)).toBeCloseTo(450, 6);
+        return (Math.atan2(Math.sin(angle), Math.cos(angle)) * 180) / Math.PI;
+      });
+      expect(Math.min(...offs)).toBeCloseTo(-30, 6);
+      expect(Math.max(...offs)).toBeCloseTo(30, 6);
+      expect(sim.inGuardRange(sim.station.x + Math.cos(facing) * 1400, sim.station.y + Math.sin(facing) * 1400)).toBe(true);
+      expect(sim.inGuardRange(sim.station.x - Math.cos(facing) * 1400, sim.station.y - Math.sin(facing) * 1400)).toBe(false);
     });
 
     it("its shots pass everyone but pirates", () => {
@@ -1217,15 +1232,15 @@ describe("pirate and defender", () => {
     it("a healthy pirate won't start on a ship under the guns, but will on one outside them", () => {
       const inside = guardWorld();
       const inPilot = inside.fighters[0];
-      const hold = (sim: Sim, shipAt: number) => {
+      const hold = (sim: Sim, shipAt: number, pirateAt: number) => {
         pin(sim.ship, sim.station.x + shipAt, sim.station.y);
-        pin(sim.fighters[0].ship, sim.station.x + 2000, sim.station.y);
+        pin(sim.fighters[0].ship, sim.station.x + pirateAt, sim.station.y);
       };
-      run(inside, 0.5, () => hold(inside, 1000));
+      run(inside, 0.5, () => hold(inside, 1000, 2000));
       expect(inPilot.task).not.toBe("attacking");
 
       const out = guardWorld();
-      run(out, 0.5, () => hold(out, 1400));
+      run(out, 0.5, () => hold(out, 1800, 2500));
       expect(out.fighters[0].task).toBe("attacking");
     });
 
@@ -1233,8 +1248,8 @@ describe("pirate and defender", () => {
       const sim = guardWorld();
       const pilot = sim.fighters[0];
       run(sim, 0.2, () => {
-        pin(sim.ship, sim.station.x + 1400, sim.station.y);
-        pin(pilot.ship, sim.station.x + 1900, sim.station.y);
+        pin(sim.ship, sim.station.x + 1800, sim.station.y);
+        pin(pilot.ship, sim.station.x + 2300, sim.station.y);
       });
       expect(pilot.task).toBe("attacking");
       run(sim, 0.2, () => {
@@ -1314,7 +1329,13 @@ describe("pirate and defender", () => {
         const battery = sim.batteries[0];
         const deposit = sim.deposits[0];
         run(sim, 2);
-        expect(Math.hypot(battery.guns[0].x - deposit.x, battery.guns[0].y - deposit.y)).toBeCloseTo(battery.radius, 6);
+        for (const guard of battery.guns) {
+          const dx = guard.x - deposit.x;
+          const dy = guard.y - deposit.y;
+          expect(Math.hypot(dx, dy)).toBeCloseTo(sim.tuning.depositReach, 6);
+          // Square to the way to the station.
+          expect(dx * (sim.station.x - deposit.x) + dy * (sim.station.y - deposit.y)).toBeCloseTo(0, 3);
+        }
         sim.tuning.depositFree = false;
         sim.tuning.guardsDepositFree = false;
         sim.step();

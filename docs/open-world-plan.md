@@ -31,7 +31,7 @@ Read it all before starting. Work the phases in order.
 | Stability | Not promised. Places may run dry or die. Places must be able to appear and disappear while the game runs (colonisation is a later feature, not in this plan) |
 | Unseen pirates | Losses are real at every level of detail, by a plausible rule |
 | Levels of detail | Three: full, an in-between level for recently seen surroundings, and a simple level once enough time has passed that a jump back can't look strange. The in-between level starts as a kept, static scene (section 3.5), with room to make it a real simulation later |
-| Bodies | Stars, planets and moons are solid. Each has a zone of death around it: a ship that goes in is pulled down and lost. There is no gravity outside that zone |
+| Bodies | Stars, planets and moons are solid. Each has a zone of death around it that pulls ships in; a ship can fight its way out. There is no gravity outside that zone. Crashing is real, and a very basic landing is allowed (section 3.10) |
 | Orbits | Nested. A place orbits a body or another place |
 | Map | Wanted, and part of this plan (section 3.8) |
 
@@ -335,21 +335,38 @@ Stars, planets and moons are solid discs in the play area. Each has a `radius` a
 `deathRadius` (start with 1.5 times the radius). Suggested radii: moon 3,000 to 6,000,
 planet 15,000 to 30,000, star 80,000 to 150,000.
 
-- **Outside the zone of death there is no gravity at all.**
-- **Inside it, a ship is pulled toward the centre**, with a pull that starts at the edge and
-  grows toward the surface. By default the pull at the edge is already more than the
-  strongest engine, so going in means the ship is lost (`bodyPullAtEdge`, tunable, so the
-  user can try a zone you can still claw out of). The pull is a real acceleration the player
-  sees act on the ship, not a scripted death.
-- Touching the surface wrecks the ship through the normal wreck code, except that the cargo
-  is destroyed and not dropped. That is ore leaving the world: count it in the ledger as
-  "lost to bodies".
-- Rocks, loose ore and shots that reach a surface are removed the same way. Only ships are pulled.
-- The edge of the zone is always drawn, in the game and on the map, and the edge marker for
-  a body warns when the ship's current path leads into it. Danger must be visible coming.
-- No place may orbit inside a zone of death, and no live area may place a ship in one. The
-  world loader checks the first; a test checks the second.
-- Landing and real gravity remain later ideas.
+**What this is for, in the user's words:** "oh shit there's an actual planet", "oh shit it is
+pulling me in", "oh shit I am going to crash on something huge", where before there were
+only some asteroids, a station and the space between. Judge every choice below by whether
+it serves those three moments. It is a feeling to deliver, not a hazard system to complete.
+
+- **There is an actual planet.** A body must read as huge and as a thing, not a flat circle:
+  a surface with visible detail so the ship's motion against it shows, a curved edge that
+  fills the screen up close, and a glow that reaches out to the edge of the zone so the
+  player sees it before the surface. The body's edge marker shows distance and closing
+  speed like any other, from far enough out to brake.
+- **It is pulling me in.** Outside the zone there is no gravity at all. Inside, a ship is
+  pulled toward the centre by a real acceleration the player sees act on the ship. The pull
+  is zero at the edge and grows to `bodyPullAtSurface` at the surface. **A ship can fight
+  its way out.** Start with a pull at the surface of about 1.5 times the floater's main
+  engine: the floater escapes from the outer part of the zone and not from deep in it, and
+  the quick ship escapes from anywhere. So engines and upgrades decide how close you dare go.
+- **I am going to crash on something huge.** A body is a rock that cannot break. Hitting it
+  uses the existing impact rules (`safeImpactSpeed`, `damagePerSpeed`) and the normal wreck
+  code. A wreck's ore drops as usual and lies near the surface, inside the zone, for anyone
+  willing to go in for it. Nothing leaves the ledger.
+- **Landing, kept very basic.** Touching the surface below the safe impact speed is a
+  landing: the ship rests there, carried by the body, and the pull no longer moves it.
+  Thrusting away lifts off. Nothing else happens on the ground: no trade, no repair, no
+  view change. Bodies do not turn.
+- Only ships are pulled. Rocks and shots that reach a surface are removed; loose ore stops there.
+- Pilots never enter a zone on purpose and steer out if they find themselves in one. Routes
+  keep clear of zones (section 3.9), so no ship meets a body while unseen.
+- The edge of the zone is always drawn, in the game and on the map, and the body's marker
+  warns when the ship's current path leads into it. Danger must be visible coming.
+- No place may orbit inside a zone, and no live area may place a ship in one. The world
+  loader checks the first; a test checks the second.
+- Gravity outside the zone, and anything to do on the ground, remain later ideas.
 
 ## 4. Files
 
@@ -400,13 +417,15 @@ Ask the user whether they are finished before doing anything. Then branch `open-
 - `paths.ts`, the tree of carriers with finite zones, the world definition, `classicWorld`.
 - A small test world: one star, two planets, three moons, three clusters.
 - Renderer: camera-relative drawing, solid bodies with their zones of death, markers by relevance.
-- Zones of death: the pull, the wreck at the surface, the warning.
+- Zones of death: the look of a body, the pull, the crash, the basic landing, the warning.
 - Travel for pilots and `orderTravel` for the player, with routes around bodies.
 - The map, without jumping yet: bodies, orbits, places, the player's ship, select and travel.
 - **Done when**: flight tests pass unchanged at an offset of 2×10⁸; a floater pilot flies moon
   to moon in 60 to 90 s and planet to planet in 5 to 7 min and docks; a ship drifting in deep
-  space is not moved by anything; a ship just outside a zone of death feels no pull, and one
-  inside with the default pull cannot get out and is wrecked at the surface; a pilot sent to
+  space is not moved by anything; a ship just outside a zone of death feels no pull; a floater at
+  rest just inside the edge can thrust out, and one at rest near the surface cannot and
+  comes down; a fast arrival wrecks the ship and leaves its ore at the surface; a slow one
+  lands, stays put as the body moves, and lifts off again; a pilot sent to
   a place directly behind a planet goes around it, in 100 runs with the bodies at random
   points of their orbits; the fast-collision test passes. Still all live.
 - **Ask the user to play it.** This is the first time the game is bigger than one sector, and
@@ -465,7 +484,7 @@ Then:
 ## 6. Not in this plan
 
 Saving and loading. Colonisation and new stations being built. Gravity outside the zones of
-death, landing. A simulated in-between level. Map extras (fog, filters, trade overlays).
+death, anything to do once landed. A simulated in-between level. Map extras (fog, filters, trade overlays).
 New ship types. Taking control of other ships. Balancing the economy. Any change to
 how flying feels. If one of these seems needed to finish a phase, stop and ask.
 
@@ -481,6 +500,7 @@ how flying feels. If one of these seems needed to finish a phase, stop and ask.
 - Confirmed by the user after reading the first version: the static kept scene, the live
   radius, the second star without a factory, the player's unattended ship being as exposed as
   any other.
-- Choices made here without asking the user, which they may overturn: the zone of death
-  cannot be escaped by default; cargo lost to a body is destroyed; only ships are pulled;
+- Choices made here without asking the user, which they may overturn: the pull at a
+  surface is 1.5 times the floater's engine; a wreck's ore stays at the surface; landing is
+  just resting there; bodies do not turn; only ships are pulled;
   the map shows other ships only with `showTraffic` on; scene memory of 10 minutes.

@@ -1,5 +1,7 @@
 # Builds the game and publishes it to GitHub Pages on every push to main,
-# so the playable page always matches the code.
+# so the playable page always matches the code. The tests run alongside as their own
+# check: some simulate minutes of the world and can run long on shared machines, so
+# they report problems without holding the page back.
 name: Publish to GitHub Pages
 
 on:
@@ -26,11 +28,22 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test
+      # Type-checks, then builds.
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
 
   deploy:
     needs: build

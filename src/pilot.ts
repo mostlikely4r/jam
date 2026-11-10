@@ -969,7 +969,8 @@ export class ClickPilot extends ShipPilot {
       else this.flyTo(sim, target, 0, 0, null);
     }
     if (order.stage === "stopping") {
-      if (speed < STOPPED_SPEED) order.stage = order.drifts ? "facing" : "settling";
+      // Either way it trims what speed is left: to rest, or to exactly the drawn drift.
+      if (speed < STOPPED_SPEED) order.stage = "settling";
       // The retro switch stops dead against the POI, not against a drifting spot.
       else if (order.drifts) this.steer(sim, -vx, -vy, STOPPED_SPEED, order.face);
       else this.brake(sim, -vx, -vy, STOPPED_SPEED, order.face);
@@ -999,7 +1000,8 @@ export class ClickPilot extends ShipPilot {
     const flip = this.flipSeconds(sim);
     const landing = direct ? SETTLED_DISTANCE : LANDING_TURNING;
     if (distance < landing && Math.hypot(vx, vy) < LANDING_SPEED) order.landed = true;
-    const easing = order.move && !order.landed;
+    // A drifting destination isn't eased onto, just matched: it carries on moving.
+    const easing = order.move && !order.drifts && !order.landed;
     let wantX = 0;
     let wantY = 0;
     if (easing) {

@@ -1231,8 +1231,9 @@ describe("the new ship", () => {
       finish(sim, 90);
       expect(sim.clickPilot.active).toBe(false);
       const after = velocity(sim);
-      expect(Math.abs(after.vx - before.vx)).toBeLessThan(6);
-      expect(Math.abs(after.vy - (before.vy + 15))).toBeLessThan(6);
+      // Trimmed at part throttle, so it matches the drift, not just comes close.
+      expect(Math.abs(after.vx - before.vx)).toBeLessThan(0.05);
+      expect(Math.abs(after.vy - (before.vy + 15))).toBeLessThan(0.05);
     }, 30000);
 
     it("a left click shifts the ship over and leaves it moving as it was", () => {

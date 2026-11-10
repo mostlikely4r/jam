@@ -10,17 +10,21 @@ const MAX_FRAME_SECONDS = 0.1;
 /** Beyond this, other ships' work can't be heard. */
 const HEARING_DISTANCE = 1500;
 
-/** Panel sections the player has folded away. */
-const COLLAPSED_KEY = "space-game-panel-collapsed";
-const collapsed = new Set<string>(loadCollapsed());
+/** Panel sections the player has opened. Every section starts closed. */
+const OPEN_KEY = "space-game-panel-open";
+const opened = new Set<string>(loadOpened());
 
-function loadCollapsed(): string[] {
+function loadOpened(): string[] {
   try {
-    const saved = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]");
+    const saved = JSON.parse(localStorage.getItem(OPEN_KEY) ?? "[]");
     return Array.isArray(saved) ? saved : [];
   } catch {
     return [];
   }
+}
+
+function saveOpened(): void {
+  localStorage.setItem(OPEN_KEY, JSON.stringify([...opened]));
 }
 
 function loadTuning(): Tuning {
@@ -253,15 +257,15 @@ function buildPanel(): void {
   for (const group of GROUPS) {
     const heading = document.createElement("h2");
     const body = document.createElement("div");
-    const open = !collapsed.has(group.title);
+    const open = opened.has(group.title);
     heading.className = open ? "group" : "group closed";
     heading.textContent = group.title;
     body.hidden = !open;
     heading.addEventListener("click", () => {
-      if (collapsed.has(group.title)) collapsed.delete(group.title);
-      else collapsed.add(group.title);
-      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
-      body.hidden = collapsed.has(group.title);
+      if (opened.has(group.title)) opened.delete(group.title);
+      else opened.add(group.title);
+      saveOpened();
+      body.hidden = !opened.has(group.title);
       heading.className = body.hidden ? "group closed" : "group";
     });
     panel.append(heading, body);
@@ -360,6 +364,8 @@ function buildPanel(): void {
   reset.addEventListener("click", () => {
     Object.assign(tuning, DEFAULTS);
     saveTuning();
+    opened.clear();
+    saveOpened();
     buildPanel();
   });
   const copy = document.createElement("button");

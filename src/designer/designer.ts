@@ -7,7 +7,9 @@ import {
   orbitSpeed,
   parentOf,
   parseWorld,
+  pathTo,
   positions,
+  reachOf,
   seedWorld,
   spinAngle,
   stringifyWorld,
@@ -16,6 +18,8 @@ import {
   type World,
   type WorldNode,
 } from "./world";
+import { planRoute, type Flight, type Route } from "../route";
+import { DEFAULTS } from "../tuning";
 
 /** The game's zoom limits, for the screen boxes. */
 const DEFAULT_ZOOM = 0.8;
@@ -23,6 +27,12 @@ const MAX_OUT_ZOOM = 0.35;
 const DRAFT_KEY = "jam-world-draft";
 const SPEEDS = [1, 10, 60, 600, 3600, 36000];
 const CLICK_PIXELS = 5;
+/** Ships to time a route with, from the game's own numbers. */
+const FLIGHTS: Record<string, { label: string; flight: Flight }> = {
+  floater: { label: "Floater, burn and brake", flight: { accel: DEFAULTS.thrust * DEFAULTS.floaterEngine, cruise: Infinity } },
+  racer: { label: "Racer, burn and brake", flight: { accel: DEFAULTS.thrust, cruise: Infinity } },
+  traffic: { label: "Traffic at cruise speed", flight: { accel: DEFAULTS.thrust, cruise: DEFAULTS.droneCruiseSpeed } },
+};
 
 const COLORS: Record<NodeKind, string> = {
   star: "#ffd56a",
@@ -63,6 +73,7 @@ const STYLE = `
 #designer .status { color: #8fb4ff; min-height: 1.2em; }
 #designer .time { position: absolute; left: 354px; bottom: 12px; display: flex; gap: 6px; align-items: center; color: #cfd8e6; }
 #designer .time span { min-width: 150px; }
+#designer .route { font-size: 12px; color: #9fd8ff; white-space: pre-line; margin-top: 6px; }
 `;
 
 function readableTime(seconds: number): string {
@@ -117,6 +128,13 @@ export class Designer {
   private lastFrame = 0;
   private drag: { x: number; y: number; moved: boolean } | null = null;
   private passTimer = 0;
+  /** The place a route is previewed to from the selected object, and how it's flown. */
+  private routeTo: WorldNode | null = null;
+  private flightKind = "floater";
+  private route: { route: Route; around: WorldNode } | null = null;
+  private routeTimer = 0;
+  private readonly routeBox: HTMLDivElement;
+  private readonly routeText: HTMLDivElement;
 
   constructor(private readonly onClose: () => void) {
     const style = document.createElement("style");
@@ -136,6 +154,9 @@ export class Designer {
     this.tree.className = "tree";
     this.editor = document.createElement("div");
     this.passes = document.createElement("div");
+    this.routeBox = document.createElement("div");
+    this.routeText = document.createElement("div");
+    this.routeText.className = "route";
     this.status = document.createElement("div");
     this.status.className = "status";
     side.append(
@@ -145,6 +166,10 @@ export class Designer {
       this.title("Objects"),
       this.tree,
       this.editor,
+      this.title("Route"),
+      this.text("A trip from the selected object to another, aiming at where it will be on arrival and keeping out of the pull of the body they share. Live as time plays."),
+      this.routeBox,
+      this.routeText,
       this.title("Close passes"),
       this.text("Closest the selected object comes to each body's pull (or surface), over a full cycle."),
       this.passes,
@@ -299,7 +324,80 @@ export class Designer {
       }),
     );
     this.buildEditor();
+    this.buildRouteBox();
     this.passTimer = 0;
+  }
+
+  private buildRouteBox(): void {
+    const places = walk(this.world)
+      .map((entry) => entry.node)
+      .filter((node) => node !== this.selected && node !== this.world.root);
+    if (this.routeTo && !places.includes(this.routeTo)) this.routeTo = null;
+    const to = document.createElement("select");
+    to.append(new Option("(no route)", ""));
+    for (const node of places) to.append(new Option(`to ${node.name}`, node.id, false, node === this.routeTo));
+    to.addEventListener("change", () => {
+      this.routeTo = places.find((node) => node.id === to.value) ?? null;
+      this.routeTimer = 0;
+    });
+    const ship = document.createElement("select");
+    for (const [key, { label }] of Object.entries(FLIGHTS)) ship.append(new Option(label, key, false, key === this.flightKind));
+    ship.addEventListener("change", () => {
+      this.flightKind = ship.value;
+      this.routeTimer = 0;
+    });
+    const row = document.createElement("div");
+    row.className = "row";
+    row.append(to, ship);
+    this.routeBox.replaceChildren(row);
+    this.routeTimer = 0;
+  }
+
+  /**
+   * What a route is planned around: the nearest object both ends sit under (or one end, if
+   * the other orbits it). The trip is worked out in its frame, and kept out of it if it's a body.
+   */
+  private sharedParent(a: WorldNode, b: WorldNode): WorldNode {
+    const pa = pathTo(this.world, a);
+    const pb = pathTo(this.world, b);
+    let shared = 0;
+    while (shared < pa.length && shared < pb.length && pa[shared] === pb[shared]) shared++;
+    return pa[shared - 1] ?? this.world.root;
+  }
+
+  private updateRoute(): void {
+    const target = this.routeTo;
+    if (!target || target === this.selected) {
+      this.route = null;
+      this.routeText.textContent = "";
+      return;
+    }
+    const around = this.sharedParent(this.selected, target);
+    // Everything in the body's own frame, where it stands still.
+    const relative = (node: WorldNode) => (t: number) => {
+      const at = positions(this.world, t);
+      const p = at.get(node)!;
+      const c = at.get(around)!;
+      return { x: p.x - c.x, y: p.y - c.y };
+    };
+    // A place doesn't block, and a trip to or from the body itself has nothing to go round.
+    const blocks = isBody(around.kind) && this.selected !== around && target !== around;
+    const radius = blocks ? reachOf(around) : 0;
+    const route = planRoute(relative(this.selected), relative(target), this.t, radius, FLIGHTS[this.flightKind].flight);
+    this.route = { route, around };
+    const what = around.pull > around.radius ? "pull" : "surface";
+    const lines = [
+      `Trip ${readableTime(route.arrive - route.depart)}, ${readableDistance(route.path.length)} units`,
+      route.matching > 1 ? `  of which ${readableTime(route.matching)} is matching the target's speed` : "",
+      route.path.bends
+        ? `Goes round ${around.name}, keeping out of its ${what}`
+        : blocks
+          ? `Straight: ${around.name} isn't in the way`
+          : `Straight, worked out relative to ${around.name}`,
+      route.path.clipped ? `An end is inside ${around.name}'s ${what}, so it only keeps clear of what fits` : "",
+      route.settled ? "" : "Doesn't settle: the target keeps running away from this ship",
+    ];
+    this.routeText.textContent = lines.filter(Boolean).join("\n");
   }
 
   private select(node: WorldNode): void {
@@ -578,6 +676,11 @@ export class Designer {
       this.passTimer = -1;
       this.updatePasses();
     }
+    this.routeTimer -= seconds;
+    if (this.routeTimer <= 0) {
+      this.routeTimer = 0.1;
+      this.updateRoute();
+    }
     this.clock.textContent = `t = ${readableTime(this.t)}`;
     this.draw();
     requestAnimationFrame((next) => this.frame(next));
@@ -707,8 +810,42 @@ export class Designer {
       ctx.fillText(node.name, p.x + pr * 0.7 + 4, p.y - pr * 0.7 - 4);
     }
 
+    this.drawRoute(at);
     this.drawScreenBoxes();
     this.drawScaleBar();
+  }
+
+  /** The previewed route, from where the selected object is now to where the target will be. */
+  private drawRoute(at: Map<WorldNode, { x: number; y: number }>): void {
+    if (!this.route || !this.routeTo) return;
+    const { ctx } = this;
+    const { route, around } = this.route;
+    const centre = at.get(around)!;
+    const screen = route.path.points.map((point) => this.toScreen(centre.x + point.x, centre.y + point.y));
+    ctx.strokeStyle = "#5fd8ff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    screen.forEach((point, i) => (i === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    // Where the target is now, joined to where the route meets it.
+    const now = at.get(this.routeTo)!;
+    const nowScreen = this.toScreen(now.x, now.y);
+    const aim = screen[screen.length - 1];
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = "rgba(95, 216, 255, 0.5)";
+    ctx.beginPath();
+    ctx.moveTo(nowScreen.x, nowScreen.y);
+    ctx.lineTo(aim.x, aim.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = "#5fd8ff";
+    ctx.beginPath();
+    ctx.moveTo(aim.x - 6, aim.y - 6);
+    ctx.lineTo(aim.x + 6, aim.y + 6);
+    ctx.moveTo(aim.x + 6, aim.y - 6);
+    ctx.lineTo(aim.x - 6, aim.y + 6);
+    ctx.stroke();
   }
 
   /** The game's view at its default zoom and fully zoomed out, centred where this view is. */

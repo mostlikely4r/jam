@@ -20,6 +20,11 @@ const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
 /** How long the mark where a pirate was last seen takes to fade away. */
 const GHOST_MILLISECONDS = 30000;
 const PING_SECONDS = 1.4;
+/** A ping from off screen: how long it shows, how deep it reaches in and how much of the edge it covers, as shares of the screen, and how far off its direction may be. */
+const EDGE_PING_SECONDS = 2;
+const EDGE_PING_DEPTH = 0.1;
+const EDGE_PING_SPAN = 0.45;
+const EDGE_PING_SPREAD = Math.PI / 3;
 const GUARD_RADIUS = 16;
 const GUARD_BARREL = 30;
 const HAULER_COLUMNS = 10;
@@ -75,7 +80,8 @@ function mod(value: number, size: number): number {
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private particles: Particle[] = [];
-  private pings: { speaker: Ship | null; x: number; y: number; mayday: boolean; age: number }[] = [];
+  /** `bend` turns an off-screen ping's direction a little, so it says roughly where, not exactly. */
+  private pings: { speaker: Ship | null; x: number; y: number; mayday: boolean; age: number; bend: number }[] = [];
   /** Where the player last saw each pirate, in the axes of what it was near. */
   private ghosts = new WeakMap<Ship, { poi: Poi; x: number; y: number; seenAt: number }>();
   private stars: Star[] = [];
@@ -120,9 +126,13 @@ export class Renderer {
     };
   }
 
-  /** A ring that grows from whoever just spoke on the radio. */
+  /**
+   * A ring that grows from whoever just spoke on the radio. From off screen, the edge of a
+   * big ring reaches in from roughly that side instead.
+   */
   addPing(line: { speaker: Ship | null; x: number; y: number; mayday: boolean }): void {
-    this.pings.push({ ...line, age: 0 });
+    const { speaker, x, y, mayday } = line;
+    this.pings.push({ speaker, x, y, mayday, age: 0, bend: (Math.random() - 0.5) * EDGE_PING_SPREAD });
   }
 
   addEvents(events: SimEvent[]): void {
@@ -239,6 +249,7 @@ export class Renderer {
     this.drawShip(ship, shipX, shipY, alpha, [200, 215, 235]);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.drawEdgePings(alpha);
     this.drawPointers(sim, width, height, scale, dpr);
     this.drawDrag(sim, scale, dpr, shipX, shipY, alpha);
     if (this.flash > 0) {
@@ -703,20 +714,74 @@ export class Renderer {
     }
   }
 
+  /** Where a ping comes from right now, and where that is on the canvas. */
+  private pingSpot(ping: Renderer["pings"][number], alpha: number) {
+    const { speaker } = ping;
+    const x = speaker ? lerp(speaker.px, speaker.x, alpha) : ping.x;
+    const y = speaker ? lerp(speaker.py, speaker.y, alpha) : ping.y;
+    const { camX, camY, scale, width, height } = this.view;
+    const screenX = (x - camX) * scale + width / 2;
+    const screenY = (y - camY) * scale + height / 2;
+    const onScreen = screenX >= 0 && screenX <= width && screenY >= 0 && screenY <= height;
+    return { x, y, screenX, screenY, onScreen };
+  }
+
+  private pingColor(ping: Renderer["pings"][number]): string {
+    return ping.mayday ? "#ff6b5c" : ping.speaker ? "#a8d8ff" : "#8fe3a1";
+  }
+
   private drawPings(alpha: number, frameSeconds: number): void {
     const { ctx } = this;
-    this.pings = this.pings.filter((ping) => ping.age < PING_SECONDS);
+    this.pings = this.pings.filter((ping) => ping.age < Math.max(PING_SECONDS, EDGE_PING_SECONDS));
     for (const ping of this.pings) {
       ping.age += frameSeconds;
-      const speaker = ping.speaker;
-      const x = speaker ? lerp(speaker.px, speaker.x, alpha) : ping.x;
-      const y = speaker ? lerp(speaker.py, speaker.y, alpha) : ping.y;
+      const { x, y, onScreen } = this.pingSpot(ping, alpha);
+      if (!onScreen || ping.age >= PING_SECONDS) continue;
       const share = Math.min(1, ping.age / PING_SECONDS);
       ctx.globalAlpha = (1 - share) * 0.8;
-      ctx.strokeStyle = ping.mayday ? "#ff6b5c" : speaker ? "#a8d8ff" : "#8fe3a1";
+      ctx.strokeStyle = this.pingColor(ping);
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(x, y, SHIP_RADIUS + 6 + share * (ping.mayday ? 160 : 70), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /**
+   * For lines from off screen: the edge of a big ring pushes in a little way from roughly
+   * the side it came from, covering part of that edge, then fades. In canvas pixels.
+   */
+  private drawEdgePings(alpha: number): void {
+    const { ctx } = this;
+    const { width, height, dpr } = this.view;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    for (const ping of this.pings) {
+      if (ping.age >= EDGE_PING_SECONDS) continue;
+      const { screenX, screenY, onScreen } = this.pingSpot(ping, alpha);
+      if (onScreen) continue;
+      const angle = Math.atan2(screenY - centerY, screenX - centerX) + ping.bend;
+      const dx = Math.cos(angle);
+      const dy = Math.sin(angle);
+      // How far from the middle of the screen to its edge, this way.
+      const toEdge = Math.min(
+        Math.abs(dx) > 1e-6 ? centerX / Math.abs(dx) : Infinity,
+        Math.abs(dy) > 1e-6 ? centerY / Math.abs(dy) : Infinity,
+      );
+      const share = Math.min(1, ping.age / EDGE_PING_SECONDS);
+      const reach = Math.min(width, height) * EDGE_PING_DEPTH * Math.sqrt(share);
+      // A ring this big pokes in `reach` deep across about EDGE_PING_SPAN of the screen.
+      const span = Math.min(width, height) * EDGE_PING_SPAN;
+      const depth = Math.min(width, height) * EDGE_PING_DEPTH;
+      const radius = (span * span) / 4 / (2 * depth) + depth / 2;
+      const ringX = centerX + dx * (toEdge - reach + radius);
+      const ringY = centerY + dy * (toEdge - reach + radius);
+      ctx.globalAlpha = (1 - share) * 0.85;
+      ctx.strokeStyle = this.pingColor(ping);
+      ctx.lineWidth = 3 * dpr;
+      ctx.beginPath();
+      ctx.arc(ringX, ringY, radius, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.globalAlpha = 1;

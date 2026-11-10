@@ -1,3 +1,4 @@
+import { ShipDemo } from "./demo";
 import { Audio } from "./audio";
 import { Radio } from "./radio";
 import { type Deposit, MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
@@ -56,6 +57,58 @@ const dev = new URLSearchParams(location.search).has("dev");
 renderer.dev = dev;
 hud.hidden = !dev;
 const pauseBox = document.querySelector("#pause .box") as HTMLDivElement;
+const startOverlay = document.getElementById("start") as HTMLDivElement;
+const startBox = document.querySelector("#start .box") as HTMLDivElement;
+/** The live demos behind the start menu's ship cards, while it's open. */
+let demos: ShipDemo[] = [];
+
+const SHIPS: { model: "racer" | "floater"; name: string; pitch: string }[] = [
+  { model: "racer", name: "Racer", pitch: "Quick and twitchy. Hands on the keys, shoot rocks on the move." },
+  { model: "floater", name: "Floater", pitch: "Slow and steady, flown with the mouse. Click where to go and let it drift there." },
+];
+
+/** The start menu: pick a ship to begin. The game waits behind it. */
+function showStart(): void {
+  paused = true;
+  pauseOverlay.hidden = true;
+  startOverlay.hidden = false;
+  const title = document.createElement("h1");
+  title.textContent = "JAM";
+  const sub = document.createElement("p");
+  sub.className = "sub";
+  sub.textContent = "Just another asteroid miner. Pick your ship.";
+  const cards = document.createElement("div");
+  cards.className = "cards";
+  demos = [];
+  for (const ship of SHIPS) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const view = document.createElement("canvas");
+    const name = document.createElement("h2");
+    name.textContent = ship.name;
+    const pitch = document.createElement("p");
+    pitch.textContent = ship.pitch;
+    const fly = document.createElement("button");
+    fly.textContent = `Fly the ${ship.name}`;
+    card.append(view, name, pitch, fly);
+    card.addEventListener("click", () => chooseShip(ship.model));
+    cards.append(card);
+    demos.push(new ShipDemo(view, ship.model));
+  }
+  const hint = document.createElement("p");
+  hint.className = "hint";
+  hint.textContent = "Esc or P pauses, with the controls under Help.";
+  startBox.replaceChildren(title, sub, cards, hint);
+}
+
+function chooseShip(model: "racer" | "floater"): void {
+  tuning.floaterStart = model === "floater";
+  saveTuning();
+  restart();
+  demos = [];
+  startOverlay.hidden = true;
+  paused = false;
+}
 const pauseOverlay = document.getElementById("pause") as HTMLDivElement;
 
 /** The player's own settings, kept apart from the tuning. */
@@ -173,8 +226,7 @@ function showPage(page: "main" | "help" | "settings"): void {
         newGame.textContent = "New game - your ship and money are lost. Click again to start over";
         return;
       }
-      restart();
-      setPaused(false);
+      showStart();
     }, "danger");
     pauseBox.replaceChildren(
       title,
@@ -622,6 +674,8 @@ function readControls(seconds: number): void {
 
 window.addEventListener("keydown", (event) => {
   audio.start();
+  // Picking a ship comes first.
+  if (!startOverlay.hidden) return;
   if (event.code === "Escape" || event.code === "KeyP") {
     if (!event.repeat) setPaused(!paused);
     return;
@@ -773,6 +827,7 @@ function frame(now: number): void {
   lastTime = now;
   if (seconds > 0) fps += (1 / seconds - fps) * 0.05;
 
+  for (const demo of demos) demo.update(seconds);
   readControls(paused ? 0 : seconds);
   sim.ship.aim = mouse ? renderer.screenToWorld(mouse.x, mouse.y) : null;
   if (!paused) {
@@ -849,6 +904,7 @@ function frame(now: number): void {
 }
 
 buildPanel();
+showStart();
 requestAnimationFrame(frame);
 
 // Same commands a player uses, for automated tests and LLMs driving the game.

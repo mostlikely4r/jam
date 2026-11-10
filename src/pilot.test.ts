@@ -458,6 +458,8 @@ describe("pirate and defender", () => {
 
   it("a pirate chases and kills what it sees, and the wreck is charged", () => {
     const sim = arena({ pirates: 1, defenders: 0, rebuildCost: 300 });
+    // Pirates go for cargo, so the ship it should go after carries some.
+    sim.ship.ore = 5;
     const pilot = sim.fighters[0];
     const { ship } = pilot;
     ship.angle = 0;
@@ -474,6 +476,8 @@ describe("pirate and defender", () => {
 
   it("a pirate goes to the last place it saw a ship, then back to patrolling", () => {
     const sim = arena({ pirates: 1, defenders: 0, shotDamage: 0 });
+    // Pirates go for cargo, so the ship it should go after carries some.
+    sim.ship.ore = 5;
     const pilot = sim.fighters[0];
     const { ship } = pilot;
     ship.angle = 0;
@@ -587,6 +591,8 @@ describe("pirate and defender", () => {
 
   it("a rebuilt pirate forgets what it was doing", () => {
     const sim = arena({ pirates: 1, defenders: 0, shotDamage: 0 });
+    // Pirates go for cargo, so the ship it should go after carries some.
+    sim.ship.ore = 5;
     const pilot = sim.fighters[0];
     pilot.ship.angle = 0;
     pin(sim.ship, pilot.ship.x + 700, pilot.ship.y);
@@ -648,6 +654,8 @@ describe("pirate and defender", () => {
 
     it("a pirate has to keep a ship in its cone for a moment to spot it", () => {
       const sim = arena({ pirates: 1, defenders: 0, shotDamage: 0, detectSeconds: 1 });
+      // Pirates go for cargo, so the ship it should go after carries some.
+      sim.ship.ore = 5;
       const pilot = sim.fighters[0];
       const hold = () => {
         pilot.ship.angle = 0;
@@ -681,6 +689,8 @@ describe("pirate and defender", () => {
 
     it("a pirate stops attacking a ship that goes behind a rock, and goes to look for it", () => {
       const sim = arena({ pirates: 1, defenders: 0, shotDamage: 0 });
+      // Pirates go for cargo, so the ship it should go after carries some.
+      sim.ship.ore = 5;
       const pilot = sim.fighters[0];
       const { x, y } = pilot.ship;
       pilot.ship.angle = 0;
@@ -701,6 +711,8 @@ describe("pirate and defender", () => {
       const startY = sim.station.y;
       pin(pilot.ship, startX, startY);
       pilot.ship.angle = 0;
+      // A pirate is only a danger to a ship with cargo.
+      pilot.ship.ore = 5;
       pin(pirate, startX - 800, startY - 800);
       return { sim, pilot, pirate, startX, startY };
     }
@@ -724,6 +736,8 @@ describe("pirate and defender", () => {
     it("traffic stays in the dock while a pirate is in view", () => {
       const { sim, pilot, pirate } = chased();
       placeInDock(sim, pilot.ship);
+      // Marked, so unloading its cargo in the dock doesn't make it safe.
+      pilot.ship.marked = true;
       run(sim, 40, () => pin(pirate, sim.station.x + 1000, sim.station.y));
       expect(pilot.task).toBe("sheltering");
       expect(sim.isDocked(pilot.ship)).toBe(true);
@@ -747,6 +761,142 @@ describe("pirate and defender", () => {
       expect(sim.drones).toContain(pilot);
       run(sim, 0.1);
       expect(pilot.task).not.toBe("fleeing");
+    });
+  });
+
+  describe("aggro", () => {
+    type Ship = Sim["ship"];
+    /** A shot just behind `target`, about to fly into it, fired by `from`. */
+    function hit(sim: Sim, from: Ship, target: Ship): void {
+      const x = target.x - 30;
+      sim.shots.push({ x, y: target.y, px: x, py: target.y, vx: 800, vy: 0, life: 1, precise: false, from });
+    }
+    /** Steps the world, keeping what was said. */
+    function listen(sim: Sim, seconds: number, each?: () => void): string[] {
+      const said: string[] = [];
+      for (let i = 0; i < Math.round(seconds / TICK); i++) {
+        sim.step();
+        each?.();
+        for (const event of sim.events) if (event.type === "chatter") said.push(event.text);
+        sim.events.length = 0;
+      }
+      return said;
+    }
+    /** A pirate with the player close in front of it. */
+    function facing(extra: Partial<typeof SOLO> = {}) {
+      const sim = arena({ pirates: 1, defenders: 0, shotDamage: 0, detectSeconds: 0, ...extra });
+      const pilot = sim.fighters[0];
+      const hold = () => {
+        pilot.ship.angle = 0;
+        pilot.ship.spin = 0;
+        pin(pilot.ship, 0, 0);
+        pin(sim.ship, 700, 0);
+      };
+      return { sim, pilot, hold };
+    }
+
+    it("a pirate leaves an empty ship alone, and goes for one with cargo", () => {
+      const empty = facing();
+      run(empty.sim, 0.5, empty.hold);
+      expect(empty.pilot.task).not.toBe("attacking");
+      const loaded = facing();
+      loaded.sim.ship.ore = 5;
+      run(loaded.sim, 0.5, loaded.hold);
+      expect(loaded.pilot.task).toBe("attacking");
+    });
+
+    it("one hit on any pirate marks you with all of them, empty hold or not, until you die", () => {
+      const { sim, pilot, hold } = facing({ pirates: 2 });
+      const other = sim.fighters[1].ship;
+      const each = () => {
+        hold();
+        pin(other, -4000, 0);
+      };
+      each();
+      hit(sim, sim.ship, other);
+      const said = listen(sim, 0.5, each);
+      expect(sim.ship.marked).toBe(true);
+      expect(said).toContain("You'll regret that.");
+      // The pirate that wasn't hit goes for the empty ship too.
+      expect(pilot.task).toBe("attacking");
+      sim.tuning.shotDamage = 500;
+      hit(sim, pilot.ship, sim.ship);
+      listen(sim, 0.1, each);
+      expect(sim.ship.wrecks).toBe(1);
+      expect(sim.ship.marked).toBe(false);
+    });
+
+    it("traffic that hits a pirate is marked too, and empty traffic doesn't run from pirates otherwise", () => {
+      const sim = arena({ pirates: 1, trafficRacers: 1, shotDamage: 0 });
+      const pirate = sim.fighters[0].ship;
+      const traffic = sim.traffic[0].ship;
+      expect(sim.threatens(pirate, traffic)).toBe(false);
+      traffic.ore = 1;
+      expect(sim.threatens(pirate, traffic)).toBe(true);
+      traffic.ore = 0;
+      // Out in the open, clear of the station.
+      pin(pirate, -4000, 0);
+      pin(traffic, -3400, 0);
+      hit(sim, traffic, pirate);
+      run(sim, 0.1);
+      expect(traffic.marked).toBe(true);
+      expect(sim.threatens(pirate, traffic)).toBe(true);
+    });
+
+    it("a few hits close together get you reported once the victim reaches the station", () => {
+      const sim = arena({ trafficRacers: 1, defenders: 1, shotDamage: 0 });
+      const pilot = sim.traffic[0];
+      const dock = sim.dockPoint();
+      pin(pilot.ship, dock.x + 1200, dock.y);
+      pin(sim.ship, dock.x + 5000, dock.y);
+      let said: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        hit(sim, sim.ship, pilot.ship);
+        said = said.concat(listen(sim, 0.2));
+      }
+      expect(said).toContain("Stop shooting at me! I'm reporting you.");
+      expect(pilot.task).toBe("fleeing");
+      expect(sim.ship.wanted).toBe(false);
+      for (let i = 0; i < 60 && !sim.ship.wanted; i++) said = said.concat(listen(sim, 1, () => pin(sim.ship, dock.x + 5000, dock.y)));
+      expect(sim.ship.wanted).toBe(true);
+      expect(said.some((text) => text.includes("You're wanted"))).toBe(true);
+      // Traffic now flees you, and the defender wants you, but the dock still lets you in.
+      expect(sim.threatens(sim.ship, pilot.ship)).toBe(true);
+    }, 30000);
+
+    it("hits spread out are forgotten", () => {
+      const sim = arena({ trafficRacers: 1, shotDamage: 0, grudgeFadeSeconds: 10 });
+      const pilot = sim.traffic[0];
+      for (let i = 0; i < 4; i++) {
+        hit(sim, sim.ship, pilot.ship);
+        listen(sim, 12);
+        expect(pilot.task).not.toBe("fleeing");
+      }
+      expect(sim.ship.wanted).toBe(false);
+    }, 30000);
+
+    it("the law and your own drones don't report", () => {
+      const sim = arena({ testDrones: 1, defenders: 1, shotDamage: 0 });
+      const drone = sim.drones[0];
+      drone.ship.owner = sim.ship;
+      const defender = sim.fighters[0].ship;
+      sim.ship.wanted = true;
+      for (let i = 0; i < 5; i++) {
+        hit(sim, sim.ship, drone.ship);
+        hit(sim, defender, sim.ship);
+        listen(sim, 0.2);
+      }
+      expect(drone.task).not.toBe("fleeing");
+      expect(defender.wanted).toBe(false);
+      sim.ship.wanted = false;
+      // Out of the dock, where shots can reach it.
+      for (let i = 0; i < 3; i++) {
+        pin(defender, 0, 0);
+        hit(sim, sim.ship, defender);
+        listen(sim, 0.2);
+      }
+      // The defender is the station's own: its word is enough.
+      expect(sim.ship.wanted).toBe(true);
     });
   });
 
@@ -1222,6 +1372,8 @@ describe("pirate and defender", () => {
         ...extra,
       });
       sim.step();
+      // Pirates go for cargo, so the player carries some.
+      sim.ship.ore = 5;
       return sim;
     }
 

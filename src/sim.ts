@@ -111,6 +111,10 @@ export interface Ship extends Body {
   aim: { x: number; y: number } | null;
   /** Thrusters that fired on the last tick, and how hard: 0 to 1 of their full output. */
   firing: Map<ThrusterId, number>;
+  /** It hit a pirate, so every pirate attacks it on sight, cargo or not. Until it dies. */
+  marked: boolean;
+  /** Reported for attacking traffic: defenders come for it and traffic flees it. Until it dies. */
+  wanted: boolean;
 }
 
 export interface Rock extends Body {
@@ -430,6 +434,10 @@ export class Sim {
   lostTraffic: ShipModel[] = [];
   /** The ship most recently hit by a shot, if that was recent. */
   distress: { ship: Ship; age: number } | null = null;
+  /** Seconds since the world began, for things that fade. */
+  private clock = 0;
+  /** When each ship was hit by each other ship, for the hits not yet forgotten. */
+  private grudges = new WeakMap<Ship, Map<Ship, number[]>>();
   /** Flies the player's ship to a clicked spot, if it has the part. */
   clickPilot!: ClickPilot;
   rocks: Rock[] = [];
@@ -1057,6 +1065,8 @@ export class Sim {
       prevTurretAngle: 0,
       aim: null,
       firing: new Map(),
+      marked: false,
+      wanted: false,
     };
   }
 
@@ -1078,6 +1088,9 @@ export class Sim {
     ship.ore = 0;
     ship.unloadTimer = 0;
     ship.firing.clear();
+    // A new ship starts with a clean name.
+    ship.marked = false;
+    ship.wanted = false;
   }
 
   /** Every part adds weight, which divides all of the ship's thrust. */
@@ -1573,6 +1586,7 @@ export class Sim {
   /** Advance one fixed tick. Display rate and time speedup never change its size. */
   step(): void {
     const dt = TICK;
+    this.clock += dt;
     if (this.distress) {
       this.distress.age += dt;
       if (this.distress.age > DISTRESS_SECONDS) this.distress = null;
@@ -2320,9 +2334,66 @@ export class Sim {
     ship.shotFrom = { x: shot.from.x, y: shot.from.y };
     this.distress = { ship, age: 0 };
     if (this.tuning.chatter) this.chatter.shot(this, ship, shot.from);
+    this.judgeHit(ship, shot.from);
     const player = ship === this.ship;
     this.events.push({ type: "impact", x: ship.x, y: ship.y, damage, player });
     if (ship.hull <= 0) this.wreckShip(ship);
+  }
+
+  /**
+   * Anyone hitting anyone gets a response. One hit on a pirate marks the shooter with every
+   * pirate. A few hits on anyone else, close enough together, get the shooter reported, and
+   * from then on it counts as a pirate to the station. Pirates are outlaws already, and the
+   * defender is the law, so neither is judged.
+   */
+  private judgeHit(victim: Ship, attacker: Ship): void {
+    if (attacker === victim || attacker.faction === "pirate") return;
+    if (victim.faction === "pirate") {
+      if (attacker.marked) return;
+      attacker.marked = true;
+      if (this.tuning.chatter) this.chatter.marked(this, victim, attacker);
+      return;
+    }
+    if (attacker.faction === "defender" || attacker.wanted) return;
+    // The player can't report anyone yet, and a drone doesn't report its owner.
+    if (victim === this.ship || victim.owner === attacker) return;
+    let grudges = this.grudges.get(victim);
+    if (!grudges) {
+      grudges = new Map();
+      this.grudges.set(victim, grudges);
+    }
+    const forgotten = this.clock - this.tuning.grudgeFadeSeconds;
+    const hits = (grudges.get(attacker) ?? []).filter((at) => at > forgotten);
+    hits.push(this.clock);
+    grudges.set(attacker, hits);
+    if (hits.length < this.tuning.trafficPatience) return;
+    grudges.delete(attacker);
+    // The defender is the station's own, so its word is enough. Anyone else runs home to tell.
+    if (victim.faction === "defender") {
+      this.reportWanted(attacker, victim);
+      return;
+    }
+    const pilot = [...this.traffic, ...this.drones].find((candidate) => candidate.ship === victim);
+    if (!pilot) return;
+    pilot.report(attacker);
+    if (this.tuning.chatter) this.chatter.reporting(this, victim, attacker);
+  }
+
+  /** The station hears that `attacker` went after `victim`: from now on it's wanted. */
+  reportWanted(attacker: Ship, victim: Ship): void {
+    if (attacker.wanted || attacker.faction === "pirate") return;
+    attacker.wanted = true;
+    if (this.tuning.chatter) this.chatter.reported(this, attacker, victim);
+  }
+
+  /**
+   * Whether `attacker` is a danger to `target`. A pirate is to anyone with ore aboard or
+   * marked, and traffic treats a wanted ship as one.
+   */
+  threatens(attacker: Ship, target: Ship): boolean {
+    if (attacker === target || attacker.hull <= 0) return false;
+    if (attacker.faction === "pirate") return target.faction !== "pirate" && (target.ore > 0 || target.marked);
+    return attacker.wanted;
   }
 
   private fireShots(ship: Ship): void {

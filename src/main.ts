@@ -605,7 +605,7 @@ function frame(now: number): void {
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
       `Ore   ${sim.ship.ore}/${cargoText(sim.ship)}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
       `Parts ${partList(sim.ship)}  Weight ${sim.shipWeight(sim.ship).toFixed(2)}`,
-      `${frameText()}${sim.isDocked() ? "  DOCKED" : ""}${sim.clickPilot.active ? `  Click order: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < MAX_HULL && !sim.hasPartsFor(tuning.repairCost) ? "  No repairs: the station is out of parts" : ""}`,
+      `${frameText()}${sim.isDocked() ? "  DOCKED" : ""}${sim.ship.marked ? "  MARKED by pirates" : ""}${sim.ship.wanted ? "  WANTED by the station" : ""}${sim.clickPilot.active ? `  Click order: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < MAX_HULL && !sim.hasPartsFor(tuning.repairCost) ? "  No repairs: the station is out of parts" : ""}`,
       `Rocks ${sim.rocks.length}  Wrecks ${sim.ship.wrecks}`,
       ...sim.drones.flatMap((drone, index) => {
         const { ship } = drone;

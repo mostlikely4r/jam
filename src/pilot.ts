@@ -445,6 +445,8 @@ export class DronePilot extends ShipPilot {
   buys: "drones" | "upgrades" | "nothing" = "drones";
   /** Whether it runs for the station when it sees a pirate. */
   flees = false;
+  /** A ship that attacked it, which it's running home to report. */
+  private reporting: Ship | null = null;
   private fleeing = false;
   private sinceSighting = 0;
   private hauling = false;
@@ -498,15 +500,25 @@ export class DronePilot extends ShipPilot {
     else this.mine(sim);
   }
 
+  /** Runs home to tell the station who attacked it. */
+  report(attacker: Ship): void {
+    this.reporting = attacker;
+    this.fleeing = true;
+    this.sinceSighting = 0;
+  }
+
+  /** Flees anything in view that's a danger to it: a pirate, if it carries ore or is marked, or a wanted ship. */
   private watchForPirates(sim: Sim): void {
+    if (this.reporting) {
+      this.fleeing = true;
+      return;
+    }
     if (!this.flees || !sim.tuning.trafficFlees) {
       this.fleeing = false;
       return;
     }
     this.sinceSighting += TICK;
-    const sighted = sim.fighters.some(
-      ({ ship }) => ship.faction === "pirate" && this.inView(sim, ship),
-    );
+    const sighted = sim.ships.some((other) => sim.threatens(other, this.ship) && this.inView(sim, other));
     if (sighted) {
       this.fleeing = true;
       this.sinceSighting = 0;
@@ -526,6 +538,11 @@ export class DronePilot extends ShipPilot {
     }
     this.task = "sheltering";
     this.hold(sim, dock, before);
+    if (this.reporting) {
+      sim.reportWanted(this.reporting, this.ship);
+      this.reporting = null;
+      this.sinceSighting = 0;
+    }
     if (this.sinceSighting > FLEE_CALM_SECONDS) {
       // What it was doing before has gone stale, and isn't its own fault.
       this.fleeing = false;
@@ -1232,7 +1249,9 @@ export class FighterPilot extends ShipPilot {
 
   private wants(sim: Sim, other: Ship): boolean {
     if (other === this.ship || other.hull <= 0 || sim.isDocked(other)) return false;
-    return this.ship.faction !== other.faction && (this.ship.faction === "pirate" || other.faction === "pirate");
+    // A pirate goes for cargo, or for whoever marked themselves by shooting one.
+    if (this.ship.faction === "pirate") return sim.threatens(this.ship, other);
+    return other.faction === "pirate" || other.wanted;
   }
 
   /** Stays on its target while it can see it. Otherwise the nearest thing in view long enough. */

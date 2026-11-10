@@ -217,6 +217,38 @@ export class Chatter {
     this.lineFrom(sim, HAULER_NAME, text, spot.x, spot.y);
   }
 
+  /** What a ship is called on the radio, where the player is just "you". */
+  private called(sim: Sim, ship: Ship): string {
+    return ship === sim.ship ? "you" : this.nameOf(sim, ship);
+  }
+
+  /** Someone shot a pirate, and now every pirate knows. */
+  marked(sim: Sim, pirate: Ship, attacker: Ship): void {
+    const text = attacker === sim.ship ? "You'll regret that." : `Big mistake, ${this.nameOf(sim, attacker)}.`;
+    this.say(sim, pirate, text);
+  }
+
+  /** A ship that took one hit too many runs for the station to tell. */
+  reporting(sim: Sim, victim: Ship, attacker: Ship): void {
+    const text =
+      attacker === sim.ship
+        ? "Stop shooting at me! I'm reporting you."
+        : `${this.nameOf(sim, attacker)} is firing on me! Heading in to report it.`;
+    this.say(sim, victim, text);
+  }
+
+  /** The station puts out word of a wanted ship, to everyone. */
+  reported(sim: Sim, attacker: Ship, victim: Ship): void {
+    const defender = sim.fighters.some((pilot) => pilot.ship.faction === "defender");
+    const who = this.called(sim, attacker);
+    const law = defender ? " Defender, go get them." : "";
+    const text =
+      attacker === sim.ship
+        ? `${this.nameOf(sim, victim)} reports you fired on them. You're wanted.${law}`
+        : `All ships, ${who} attacked ${this.nameOf(sim, victim)} and is wanted.${law}`;
+    this.stationSays(sim, text, true);
+  }
+
   /** A ship other than the player bought a part at the station. */
   bought(sim: Sim, ship: Ship, part: string): void {
     const name = this.nameOf(sim, ship);

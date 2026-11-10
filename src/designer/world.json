@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "root": {
+    "id": "star",
+    "name": "Star",
+    "kind": "star",
+    "radius": 150000,
+    "pull": 600000,
+    "orbitRadius": 0,
+    "orbitPeriod": 0,
+    "orbitPhase": 0,
+    "spinPeriod": 0,
+    "children": [
+      {
+        "id": "planet",
+        "name": "Planet",
+        "kind": "planet",
+        "radius": 12000,
+        "pull": 30000,
+        "orbitRadius": 3000000,
+        "orbitPeriod": 129600,
+        "orbitPhase": 0,
+        "spinPeriod": 21600,
+        "children": [
+          {
+            "id": "field",
+            "name": "Field",
+            "kind": "field",
+            "radius": 5200,
+            "pull": 0,
+            "orbitRadius": 20000,
+            "orbitPeriod": 3600,
+            "orbitPhase": 0,
+            "spinPeriod": 1800,
+            "children": [
+              {
+                "id": "station",
+                "name": "Station",
+                "kind": "station",
+                "radius": 300,
+                "pull": 0,
+                "orbitRadius": 10200,
+                "orbitPeriod": 900,
+                "orbitPhase": 180,
+                "spinPeriod": 300,
+                "children": []
+              },
+              {
+                "id": "pirates",
+                "name": "Pirate base",
+                "kind": "pirate base",
+                "radius": 200,
+                "pull": 0,
+                "orbitRadius": 9200,
+                "orbitPeriod": 900,
+                "orbitPhase": 0,
+                "spinPeriod": 0,
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

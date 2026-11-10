@@ -1,4 +1,5 @@
 import { ShipDemo } from "./demo";
+import { Designer } from "./designer/designer";
 import { loadGame, saveGame, saveInfo, type SaveSlot } from "./save";
 import { Audio } from "./audio";
 import { Radio } from "./radio";
@@ -58,6 +59,21 @@ const dev = new URLSearchParams(location.search).has("dev");
 renderer.dev = dev;
 hud.hidden = !dev;
 const pauseBox = document.querySelector("#pause .box") as HTMLDivElement;
+/** Dev only: the system designer, a separate view for laying out stars, planets and places. */
+const designer = dev
+  ? new Designer(() => {
+      keys.clear();
+      // Opened from the pause menu: go back to it.
+      if (paused) setPaused(true);
+    })
+  : null;
+
+function openDesigner(): void {
+  if (!designer) return;
+  keys.clear();
+  pauseOverlay.hidden = true;
+  designer.open();
+}
 const startOverlay = document.getElementById("start") as HTMLDivElement;
 const startBox = document.querySelector("#start .box") as HTMLDivElement;
 /** The live demos behind the start menu's ship cards, while it's open. */
@@ -205,6 +221,8 @@ function saveSettings(): void {
 const keys = new Set<string>();
 let paused = false;
 let timeScale = 1;
+/** The menu is up, or the designer covers the game. */
+const pausedNow = () => paused || (designer?.isOpen ?? false);
 
 function restart(): void {
   seed++;
@@ -329,6 +347,7 @@ function showPage(page: "main" | "help" | "settings"): void {
       load,
       newGame,
     );
+    if (designer) pauseBox.append(menuButton("System designer (dev, O)", openDesigner));
     return;
   }
   if (page === "help") {
@@ -771,6 +790,12 @@ window.addEventListener("keydown", (event) => {
   audio.start();
   // Picking a ship comes first.
   if (!startOverlay.hidden) return;
+  // The designer has its own keys, and the game holds still behind it.
+  if (designer?.isOpen) return;
+  if (designer && event.code === "KeyO" && !event.repeat) {
+    openDesigner();
+    return;
+  }
   if (event.code === "Escape" || event.code === "KeyP") {
     if (!event.repeat) setPaused(!paused);
     return;
@@ -923,6 +948,7 @@ let fps = 60;
 let hudTimer = 0;
 
 function frame(now: number): void {
+  const paused = pausedNow();
   const seconds = Math.min(MAX_FRAME_SECONDS, (now - lastTime) / 1000);
   lastTime = now;
   if (seconds > 0) fps += (1 / seconds - fps) * 0.05;

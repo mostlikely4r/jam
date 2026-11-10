@@ -1,0 +1,754 @@
+import {
+  BODY_KINDS,
+  PLACE_KINDS,
+  closestApproach,
+  isBody,
+  makeChild,
+  orbitSpeed,
+  parentOf,
+  parseWorld,
+  positions,
+  seedWorld,
+  spinAngle,
+  stringifyWorld,
+  walk,
+  type NodeKind,
+  type World,
+  type WorldNode,
+} from "./world";
+
+/** The game's zoom limits, for the screen boxes. */
+const DEFAULT_ZOOM = 0.8;
+const MAX_OUT_ZOOM = 0.35;
+const DRAFT_KEY = "jam-world-draft";
+const SPEEDS = [1, 10, 60, 600, 3600, 36000];
+const CLICK_PIXELS = 5;
+
+const COLORS: Record<NodeKind, string> = {
+  star: "#ffd56a",
+  planet: "#6f9fd8",
+  moon: "#a9b2c0",
+  asteroid: "#9a8a74",
+  anchor: "#7f8ba0",
+  field: "#d8c37a",
+  station: "#8fe3a1",
+  "pirate base": "#ff7a6b",
+};
+
+const STYLE = `
+#designer { position: fixed; inset: 0; z-index: 50; background: #05070d; display: flex; }
+#designer[hidden] { display: none; }
+#designer canvas { position: static; flex: 1; min-width: 0; height: 100%; cursor: grab; }
+#designer canvas.dragging { cursor: grabbing; }
+#designer .side { width: 340px; box-sizing: border-box; padding: 12px 14px; overflow-y: auto; background: #0b0f18; border-right: 1px solid #222a3a; }
+#designer h1 { font-size: 15px; margin: 0 0 2px; color: #8fb4ff; letter-spacing: 2px; }
+#designer h2 { font-size: 12px; margin: 16px 0 6px; color: #8fe3a1; text-transform: uppercase; letter-spacing: 1px; }
+#designer p { margin: 0 0 6px; color: #7f8ba0; }
+#designer button, #designer select, #designer input { background: #1a2233; color: #cfd8e6; border: 1px solid #33405a; font: inherit; padding: 4px 7px; }
+#designer button { cursor: pointer; margin: 0 4px 4px 0; }
+#designer button:hover { background: #26324a; }
+#designer button.danger { color: #e88a8a; border-color: #a84f4f; }
+#designer .tree button { display: block; width: 100%; text-align: left; margin: 0 0 2px; border-color: transparent; background: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#designer .tree button.on { background: #26324a; border-color: #4a5b80; }
+#designer .tree .kind { color: #6a7486; }
+#designer label { display: block; margin: 8px 0 0; }
+#designer label input, #designer label select { width: 100%; box-sizing: border-box; margin-top: 2px; }
+#designer .hint { display: block; color: #ffd479; font-size: 12px; min-height: 1em; }
+#designer .row { display: flex; gap: 4px; margin-top: 8px; }
+#designer .row select { flex: 1; }
+#designer .pass { font-size: 12px; margin: 2px 0; }
+#designer .pass.bad { color: #ff8a7c; }
+#designer .pass.close { color: #f0d86a; }
+#designer .pass.ok { color: #8fe3a1; }
+#designer .status { color: #8fb4ff; min-height: 1.2em; }
+#designer .time { position: absolute; left: 354px; bottom: 12px; display: flex; gap: 6px; align-items: center; color: #cfd8e6; }
+#designer .time span { min-width: 150px; }
+`;
+
+function readableTime(seconds: number): string {
+  const s = Math.abs(seconds);
+  if (s === 0) return "still";
+  const sign = seconds < 0 ? "-" : "";
+  if (s < 120) return `${sign}${Math.round(s)} s`;
+  if (s < 7200) return `${sign}${(s / 60).toFixed(1)} min`;
+  if (s < 3 * 86400) return `${sign}${(s / 3600).toFixed(1)} h`;
+  return `${sign}${(s / 86400).toFixed(1)} days`;
+}
+
+function readableDistance(units: number): string {
+  const u = Math.abs(units);
+  if (u >= 1e6) return `${(units / 1e6).toFixed(2)} M`;
+  if (u >= 1e4) return `${(units / 1e3).toFixed(1)} k`;
+  return `${Math.round(units)}`;
+}
+
+/** A clean number for the scale bar: 1, 2 or 5 times a power of ten. */
+function niceLength(target: number): number {
+  const power = Math.pow(10, Math.floor(Math.log10(target)));
+  const lead = target / power;
+  return (lead >= 5 ? 5 : lead >= 2 ? 2 : 1) * power;
+}
+
+/**
+ * A dev-only view for laying out the star system: a tree of bodies and places, their
+ * sizes, orbits and spins, played forward in time, next to boxes the size of the game's
+ * screen. It edits a world file and leaves the running game alone.
+ */
+export class Designer {
+  readonly element: HTMLDivElement;
+  private readonly canvas: HTMLCanvasElement;
+  private readonly ctx: CanvasRenderingContext2D;
+  private readonly tree: HTMLDivElement;
+  private readonly editor: HTMLDivElement;
+  private readonly passes: HTMLDivElement;
+  private readonly status: HTMLDivElement;
+  private readonly clock: HTMLSpanElement;
+  private readonly playButton: HTMLButtonElement;
+  private world: World;
+  private selected: WorldNode;
+  private follow: WorldNode | null;
+  private t = 0;
+  private playing = false;
+  private speed = 600;
+  private cx = 0;
+  private cy = 0;
+  /** Screen pixels per world unit. */
+  private scale = 0.005;
+  private lastFrame = 0;
+  private drag: { x: number; y: number; moved: boolean } | null = null;
+  private passTimer = 0;
+
+  constructor(private readonly onClose: () => void) {
+    const style = document.createElement("style");
+    style.textContent = STYLE;
+    document.head.append(style);
+
+    this.world = this.loadDraft() ?? seedWorld();
+    this.selected = walk(this.world).find((entry) => isBody(entry.node.kind) && entry.node !== this.world.root)?.node ?? this.world.root;
+    this.follow = this.selected;
+
+    this.element = document.createElement("div");
+    this.element.id = "designer";
+    this.element.hidden = true;
+    const side = document.createElement("div");
+    side.className = "side";
+    this.tree = document.createElement("div");
+    this.tree.className = "tree";
+    this.editor = document.createElement("div");
+    this.passes = document.createElement("div");
+    this.status = document.createElement("div");
+    this.status.className = "status";
+    side.append(
+      this.title("System designer", "h1"),
+      this.text("Dev only. Edits the world file, not the running game. O or Esc goes back."),
+      this.button("Back to the game", () => this.close()),
+      this.title("Objects"),
+      this.tree,
+      this.editor,
+      this.title("Close passes"),
+      this.text("Closest the selected object comes to each body's pull (or surface), over a full cycle."),
+      this.passes,
+      this.title("World file"),
+      this.button("Save to file", () => void this.saveFile()),
+      this.button("Load from file", () => void this.loadFile()),
+      this.button("Start over from today's game", () => this.replace(seedWorld()), "danger"),
+      this.status,
+    );
+
+    this.canvas = document.createElement("canvas");
+    this.ctx = this.canvas.getContext("2d")!;
+
+    const time = document.createElement("div");
+    time.className = "time";
+    this.playButton = this.button("Play", () => this.setPlaying(!this.playing));
+    const speed = document.createElement("select");
+    for (const value of SPEEDS) speed.append(new Option(`${value}x`, String(value), false, value === this.speed));
+    speed.addEventListener("change", () => (this.speed = Number(speed.value)));
+    this.clock = document.createElement("span");
+    time.append(this.playButton, speed, this.button("Time 0", () => (this.t = 0)), this.clock);
+
+    this.element.append(side, this.canvas, time);
+    document.body.append(this.element);
+    this.listen();
+    this.rebuild();
+  }
+
+  get isOpen(): boolean {
+    return !this.element.hidden;
+  }
+
+  open(): void {
+    this.element.hidden = false;
+    this.lastFrame = performance.now();
+    this.fitView();
+    requestAnimationFrame((now) => this.frame(now));
+  }
+
+  close(): void {
+    this.element.hidden = true;
+    this.setPlaying(false);
+    this.onClose();
+  }
+
+  // --- Small DOM helpers -------------------------------------------------------------
+
+  private title(text: string, level: "h1" | "h2" = "h2"): HTMLElement {
+    const element = document.createElement(level);
+    element.textContent = text;
+    return element;
+  }
+
+  private text(text: string): HTMLParagraphElement {
+    const element = document.createElement("p");
+    element.textContent = text;
+    return element;
+  }
+
+  private button(text: string, onClick: () => void, className = ""): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.textContent = text;
+    button.className = className;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  // --- State ------------------------------------------------------------------------
+
+  private loadDraft(): World | null {
+    try {
+      const text = localStorage.getItem(DRAFT_KEY);
+      return text ? parseWorld(text) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Every edit is kept in the browser at once, so a reload loses nothing. */
+  private changed(): void {
+    try {
+      localStorage.setItem(DRAFT_KEY, stringifyWorld(this.world));
+    } catch {
+      // Storage off or full: the file buttons still work.
+    }
+    this.passTimer = 0.25;
+  }
+
+  private replace(world: World): void {
+    this.world = world;
+    this.selected = world.root.children[0] ?? world.root;
+    this.follow = this.selected;
+    this.changed();
+    this.rebuild();
+    this.fitView();
+  }
+
+  private async saveFile(): Promise<void> {
+    try {
+      const response = await fetch("/__world", { method: "POST", body: stringifyWorld(this.world) });
+      this.status.textContent = response.ok ? "Saved to src/designer/world.json" : `Couldn't save (${response.status})`;
+    } catch {
+      this.status.textContent = "Couldn't save: run the game with npm run dev";
+    }
+  }
+
+  private async loadFile(): Promise<void> {
+    try {
+      const response = await fetch("/__world");
+      const world = response.ok ? parseWorld(await response.text()) : null;
+      if (!world) {
+        this.status.textContent = response.status === 404 ? "No world file saved yet" : "Couldn't read the world file";
+        return;
+      }
+      this.replace(world);
+      this.status.textContent = "Loaded src/designer/world.json";
+    } catch {
+      this.status.textContent = "Couldn't load: run the game with npm run dev";
+    }
+  }
+
+  private setPlaying(on: boolean): void {
+    this.playing = on;
+    this.playButton.textContent = on ? "Pause" : "Play";
+  }
+
+  /** Frames the followed object with room for its orbit and children. */
+  private fitView(): void {
+    const node = this.follow ?? this.selected;
+    const extent = Math.max(
+      node.radius,
+      isBody(node.kind) ? node.pull : 0,
+      ...node.children.map((child) => child.orbitRadius + child.radius),
+    );
+    const { width, height } = this.canvas.getBoundingClientRect();
+    if (width > 0 && extent > 0) this.scale = (Math.min(width, height) * 0.45) / extent;
+  }
+
+  // --- Side panel -------------------------------------------------------------------
+
+  private rebuild(): void {
+    this.tree.replaceChildren(
+      ...walk(this.world).map(({ node, depth }) => {
+        const button = this.button("", () => this.select(node));
+        button.style.paddingLeft = `${6 + depth * 14}px`;
+        button.className = node === this.selected ? "on" : "";
+        const kind = document.createElement("span");
+        kind.className = "kind";
+        kind.textContent = `  ${node.kind}`;
+        button.append(node.name, kind);
+        return button;
+      }),
+    );
+    this.buildEditor();
+    this.passTimer = 0;
+  }
+
+  private select(node: WorldNode): void {
+    this.selected = node;
+    this.rebuild();
+  }
+
+  /** How big a distance looks in the game, measured in screens. */
+  private screens(units: number): string {
+    const { innerWidth } = window;
+    const near = (units * DEFAULT_ZOOM) / innerWidth;
+    const far = (units * MAX_OUT_ZOOM) / innerWidth;
+    return `${near.toFixed(1)} screens wide (${far.toFixed(1)} zoomed out)`;
+  }
+
+  private buildEditor(): void {
+    const node = this.selected;
+    const isRoot = node === this.world.root;
+    const body = isBody(node.kind);
+    const parts: HTMLElement[] = [this.title(node.name)];
+
+    const name = document.createElement("input");
+    name.value = node.name;
+    name.addEventListener("change", () => {
+      node.name = name.value;
+      this.changed();
+      this.rebuild();
+    });
+    parts.push(this.labelled("Name", name));
+
+    const kind = document.createElement("select");
+    for (const value of [...BODY_KINDS, ...PLACE_KINDS]) kind.append(new Option(value, value, false, value === node.kind));
+    kind.addEventListener("change", () => {
+      node.kind = kind.value as NodeKind;
+      this.changed();
+      this.rebuild();
+    });
+    parts.push(this.labelled("Kind (bodies are solid and filled; the rest are places)", kind));
+
+    parts.push(this.number(node, "radius", body ? "Radius (surface)" : "Radius (size)", (v) => `${this.screens(v * 2)} across`));
+    if (body) parts.push(this.number(node, "pull", "Pull reaches out to (from the centre, 0 for none)", (v) => (v > 0 ? `${readableDistance(v - node.radius)} beyond the surface` : "no pull")));
+    if (!isRoot) {
+      parts.push(this.number(node, "orbitRadius", "Orbit radius (from the parent's centre)", (v) => `${readableDistance(v)}; ${readableDistance(v - (parentOf(this.world, node)?.radius ?? 0))} from its surface`));
+      parts.push(this.number(node, "orbitPeriod", "Orbit period, seconds (negative goes the other way)", (v) => `${readableTime(v)} per orbit, ${orbitSpeed({ ...node, orbitPeriod: v }).toFixed(1)} units/s`));
+      parts.push(this.number(node, "orbitPhase", "Start angle on the orbit, degrees", () => ""));
+    }
+    parts.push(this.number(node, "spinPeriod", "Spin period, seconds (negative turns the other way)", (v) => `${readableTime(v)} per turn`));
+
+    const addKind = document.createElement("select");
+    for (const value of [...BODY_KINDS, ...PLACE_KINDS]) addKind.append(new Option(value, value));
+    addKind.value = node.kind === "star" ? "planet" : node.kind === "planet" ? "moon" : "anchor";
+    const row = document.createElement("div");
+    row.className = "row";
+    row.append(
+      addKind,
+      this.button("Add child", () => {
+        const child = makeChild(this.world, node, addKind.value as NodeKind);
+        node.children.push(child);
+        this.selected = child;
+        this.changed();
+        this.rebuild();
+      }),
+    );
+    parts.push(row);
+    const actions = document.createElement("div");
+    actions.className = "row";
+    actions.append(
+      this.button("Follow", () => {
+        this.follow = node;
+        this.fitView();
+      }),
+    );
+    if (!isRoot) {
+      actions.append(
+        this.button(
+          "Delete with children",
+          () => {
+            const parent = parentOf(this.world, node)!;
+            parent.children = parent.children.filter((child) => child !== node);
+            if (this.follow && !walk(this.world).some((entry) => entry.node === this.follow)) this.follow = parent;
+            this.selected = parent;
+            this.changed();
+            this.rebuild();
+          },
+          "danger",
+        ),
+      );
+    }
+    parts.push(actions);
+    this.editor.replaceChildren(...parts);
+  }
+
+  private labelled(text: string, input: HTMLElement): HTMLLabelElement {
+    const label = document.createElement("label");
+    label.append(text, input);
+    return label;
+  }
+
+  private number(
+    node: WorldNode,
+    key: "radius" | "pull" | "orbitRadius" | "orbitPeriod" | "orbitPhase" | "spinPeriod",
+    text: string,
+    hint: (value: number) => string,
+  ): HTMLLabelElement {
+    const input = document.createElement("input");
+    input.type = "number";
+    input.step = "any";
+    input.value = String(node[key]);
+    const help = document.createElement("span");
+    help.className = "hint";
+    help.textContent = hint(node[key]);
+    input.addEventListener("input", () => {
+      const value = Number(input.value);
+      if (input.value === "" || !Number.isFinite(value)) return;
+      node[key] = value;
+      help.textContent = hint(value);
+      this.changed();
+    });
+    const label = this.labelled(text, input);
+    label.append(help);
+    return label;
+  }
+
+  /** Close passes for the selected object against every body it isn't part of. */
+  private updatePasses(): void {
+    const selected = this.selected;
+    const entries = walk(this.world);
+    const inside = (node: WorldNode, container: WorldNode) => {
+      let at: WorldNode | null = node;
+      while (at) {
+        if (at === container) return true;
+        at = parentOf(this.world, at);
+      }
+      return false;
+    };
+    const rows: { name: string; gap: number; at: number }[] = [];
+    for (const { node } of entries) {
+      if (node === selected || !isBody(node.kind)) continue;
+      // Its own children orbit inside it on purpose, and a body's own parents are the frame it moves in.
+      if (inside(node, selected)) continue;
+      const pass = closestApproach(this.world, node, selected);
+      rows.push({ name: node.name, ...pass });
+    }
+    rows.sort((a, b) => a.gap - b.gap);
+    const shown = rows.slice(0, 6);
+    if (shown.length === 0) {
+      this.passes.replaceChildren(this.text("No bodies to pass."));
+      return;
+    }
+    this.passes.replaceChildren(
+      ...shown.map(({ name, gap, at }) => {
+        const line = document.createElement("div");
+        const screen = window.innerWidth / MAX_OUT_ZOOM;
+        line.className = `pass ${gap < 0 ? "bad" : gap < screen ? "close" : "ok"}`;
+        line.textContent =
+          gap < 0
+            ? `${name}: inside by ${readableDistance(-gap)} (at ${readableTime(at)})`
+            : `${name}: clear by ${readableDistance(gap)} (closest at ${readableTime(at)})`;
+        return line;
+      }),
+    );
+  }
+
+  // --- Input ------------------------------------------------------------------------
+
+  private listen(): void {
+    window.addEventListener("keydown", (event) => {
+      if (!this.isOpen) return;
+      const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement;
+      if (event.code === "Escape" || (event.code === "KeyO" && !typing)) {
+        event.preventDefault();
+        this.close();
+      } else if (event.code === "Space" && !typing) {
+        event.preventDefault();
+        this.setPlaying(!this.playing);
+      }
+    });
+    this.canvas.addEventListener("mousedown", (event) => {
+      this.drag = { x: event.clientX, y: event.clientY, moved: false };
+    });
+    window.addEventListener("mousemove", (event) => {
+      if (!this.drag || !this.isOpen) return;
+      const dx = event.clientX - this.drag.x;
+      const dy = event.clientY - this.drag.y;
+      if (!this.drag.moved && Math.hypot(dx, dy) < CLICK_PIXELS) return;
+      if (!this.drag.moved) {
+        // Grabbing the view lets go of whatever it followed, from where it is now.
+        this.drag.moved = true;
+        this.canvas.classList.add("dragging");
+        if (this.follow) {
+          const at = positions(this.world, this.t).get(this.follow)!;
+          this.cx = at.x;
+          this.cy = at.y;
+          this.follow = null;
+        }
+      }
+      this.cx -= dx / this.scale;
+      this.cy -= dy / this.scale;
+      this.drag.x = event.clientX;
+      this.drag.y = event.clientY;
+    });
+    window.addEventListener("mouseup", (event) => {
+      if (!this.drag) return;
+      const clicked = !this.drag.moved;
+      this.drag = null;
+      this.canvas.classList.remove("dragging");
+      if (clicked && event.target === this.canvas) {
+        const hit = this.hit(event.offsetX, event.offsetY);
+        if (hit) this.select(hit);
+      }
+    });
+    this.canvas.addEventListener("dblclick", (event) => {
+      const hit = this.hit(event.offsetX, event.offsetY);
+      if (hit) {
+        this.follow = hit;
+        this.select(hit);
+      }
+    });
+    this.canvas.addEventListener(
+      "wheel",
+      (event) => {
+        event.preventDefault();
+        const factor = event.deltaY > 0 ? 1 / 1.15 : 1.15;
+        const next = Math.min(20, Math.max(1e-7, this.scale * factor));
+        if (!this.follow) {
+          // Keep the point under the mouse where it is.
+          const { width, height } = this.canvas.getBoundingClientRect();
+          const wx = this.cx + (event.offsetX - width / 2) / this.scale;
+          const wy = this.cy + (event.offsetY - height / 2) / this.scale;
+          this.cx = wx - (event.offsetX - width / 2) / next;
+          this.cy = wy - (event.offsetY - height / 2) / next;
+        }
+        this.scale = next;
+      },
+      { passive: false },
+    );
+  }
+
+  /** The object under a screen point: the smallest one whose circle (or a 10 px dot) contains it. */
+  private hit(sx: number, sy: number): WorldNode | null {
+    const at = positions(this.world, this.t);
+    let best: WorldNode | null = null;
+    let bestSize = Infinity;
+    for (const [node, pos] of at) {
+      const p = this.toScreen(pos.x, pos.y);
+      const r = Math.max(10, node.radius * this.scale);
+      if (Math.hypot(sx - p.x, sy - p.y) <= r && node.radius < bestSize) {
+        best = node;
+        bestSize = node.radius;
+      }
+    }
+    return best;
+  }
+
+  // --- Drawing ----------------------------------------------------------------------
+
+  private width = 0;
+  private height = 0;
+
+  private toScreen(x: number, y: number): { x: number; y: number } {
+    return { x: this.width / 2 + (x - this.cx) * this.scale, y: this.height / 2 + (y - this.cy) * this.scale };
+  }
+
+  private frame(now: number): void {
+    if (!this.isOpen) return;
+    const seconds = Math.min(0.1, (now - this.lastFrame) / 1000);
+    this.lastFrame = now;
+    if (this.playing) this.t += seconds * this.speed;
+    if (this.passTimer > 0) {
+      this.passTimer -= seconds;
+      if (this.passTimer <= 0) {
+        this.passTimer = -1;
+        this.updatePasses();
+      }
+    } else if (this.passTimer === 0) {
+      this.passTimer = -1;
+      this.updatePasses();
+    }
+    this.clock.textContent = `t = ${readableTime(this.t)}`;
+    this.draw();
+    requestAnimationFrame((next) => this.frame(next));
+  }
+
+  private draw(): void {
+    const { canvas, ctx } = this;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    this.width = rect.width;
+    this.height = rect.height;
+    if (canvas.width !== Math.round(rect.width * dpr) || canvas.height !== Math.round(rect.height * dpr)) {
+      canvas.width = Math.round(rect.width * dpr);
+      canvas.height = Math.round(rect.height * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#05070d";
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    const at = positions(this.world, this.t);
+    if (this.follow) {
+      const pos = at.get(this.follow);
+      if (pos) {
+        this.cx = pos.x;
+        this.cy = pos.y;
+      } else {
+        this.follow = null;
+      }
+    }
+    const entries = walk(this.world);
+    const diagonal = Math.hypot(this.width, this.height);
+    const ring = (x: number, y: number, r: number) => {
+      const p = this.toScreen(x, y);
+      const pr = r * this.scale;
+      const centre = Math.hypot(p.x - this.width / 2, p.y - this.height / 2);
+      // Skip rings too small to see or wholly off screen, either outside it or around it.
+      if (pr < 1 || centre - pr > diagonal || pr - centre > diagonal) return false;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, pr, 0, Math.PI * 2);
+      return true;
+    };
+
+    // Orbits.
+    ctx.lineWidth = 1;
+    for (const { node, parent } of entries) {
+      if (!parent) continue;
+      const p = at.get(parent)!;
+      if (!ring(p.x, p.y, node.orbitRadius)) continue;
+      ctx.strokeStyle = node === this.selected ? "rgba(143, 180, 255, 0.6)" : "rgba(143, 180, 255, 0.16)";
+      ctx.stroke();
+    }
+
+    // Pull zones.
+    ctx.setLineDash([8, 6]);
+    for (const { node } of entries) {
+      if (!isBody(node.kind) || node.pull <= node.radius) continue;
+      const p = at.get(node)!;
+      if (!ring(p.x, p.y, node.pull)) continue;
+      ctx.fillStyle = "rgba(255, 110, 80, 0.04)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255, 110, 80, 0.45)";
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // Bodies and places.
+    for (const { node } of entries) {
+      const pos = at.get(node)!;
+      const p = this.toScreen(pos.x, pos.y);
+      const pr = node.radius * this.scale;
+      const color = COLORS[node.kind];
+      if (p.x < -pr - 50 || p.y < -pr - 50 || p.x > this.width + pr + 50 || p.y > this.height + pr + 50) continue;
+      if (pr < 3) {
+        ctx.fillStyle = color;
+        ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+      } else if (isBody(node.kind)) {
+        if (ring(pos.x, pos.y, node.radius)) {
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.85;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        } else if (Math.hypot(p.x - this.width / 2, p.y - this.height / 2) < pr) {
+          // Zoomed in so far that the surface is off screen all round: all of it is body.
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.85;
+          ctx.fillRect(0, 0, this.width, this.height);
+          ctx.globalAlpha = 1;
+        }
+      } else if (ring(pos.x, pos.y, node.radius)) {
+        ctx.setLineDash(node.kind === "anchor" ? [3, 5] : node.kind === "field" ? [10, 6] : []);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.lineWidth = 1;
+      }
+      // A line from the centre shows the spin.
+      if (pr > 8 && node.spinPeriod !== 0) {
+        const angle = spinAngle(node, this.t);
+        const length = Math.min(pr, diagonal);
+        ctx.strokeStyle = isBody(node.kind) ? "rgba(5, 7, 13, 0.6)" : color;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x + Math.cos(angle) * length, p.y + Math.sin(angle) * length);
+        ctx.stroke();
+      }
+      if (node === this.selected) {
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.max(pr, 3) + 5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+    }
+
+    // Labels, once they have room to be told apart.
+    ctx.font = "12px ui-monospace, Consolas, monospace";
+    for (const { node, parent } of entries) {
+      const spread = parent ? node.orbitRadius * this.scale : Infinity;
+      if (node !== this.selected && spread < 40) continue;
+      const pos = at.get(node)!;
+      const p = this.toScreen(pos.x, pos.y);
+      if (p.x < 0 || p.y < 0 || p.x > this.width || p.y > this.height) continue;
+      const pr = Math.max(4, Math.min(node.radius * this.scale, 40));
+      ctx.fillStyle = node === this.selected ? "#ffffff" : COLORS[node.kind];
+      ctx.fillText(node.name, p.x + pr * 0.7 + 4, p.y - pr * 0.7 - 4);
+    }
+
+    this.drawScreenBoxes();
+    this.drawScaleBar();
+  }
+
+  /** The game's view at its default zoom and fully zoomed out, centred where this view is. */
+  private drawScreenBoxes(): void {
+    const { ctx } = this;
+    const boxes: [number, string][] = [
+      [DEFAULT_ZOOM, "game screen"],
+      [MAX_OUT_ZOOM, "zoomed out fully"],
+    ];
+    for (const [zoom, label] of boxes) {
+      const w = (window.innerWidth / zoom) * this.scale;
+      const h = (window.innerHeight / zoom) * this.scale;
+      if (w < 6) continue;
+      const x = this.width / 2 - w / 2;
+      const y = this.height / 2 - h / 2;
+      ctx.strokeStyle = zoom === DEFAULT_ZOOM ? "rgba(255, 255, 255, 0.55)" : "rgba(255, 255, 255, 0.28)";
+      ctx.setLineDash(zoom === DEFAULT_ZOOM ? [] : [4, 4]);
+      ctx.strokeRect(x, y, w, h);
+      ctx.setLineDash([]);
+      if (w > 90) {
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.fillText(label, x + 4, y - 5);
+      }
+    }
+  }
+
+  private drawScaleBar(): void {
+    const { ctx } = this;
+    const length = niceLength(160 / this.scale);
+    const px = length * this.scale;
+    const x = 20;
+    const y = this.height - 50;
+    ctx.strokeStyle = "#cfd8e6";
+    ctx.beginPath();
+    ctx.moveTo(x, y - 4);
+    ctx.lineTo(x, y);
+    ctx.lineTo(x + px, y);
+    ctx.lineTo(x + px, y - 4);
+    ctx.stroke();
+    ctx.fillStyle = "#cfd8e6";
+    ctx.fillText(`${readableDistance(length)} units`, x, y - 8);
+  }
+}

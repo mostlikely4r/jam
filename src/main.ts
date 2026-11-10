@@ -207,39 +207,46 @@ function restart(): void {
   buildPanel();
 }
 
-/** The keys and mouse, in groups, for the help page. */
-const HELP: [string, [string, string][]][] = [
+/**
+ * The keys and mouse, in groups, for the help page. A line only shows once it's of use:
+ * its part is fitted, or its place has been found. JAM is meant to be discovered.
+ */
+type HelpLine = [key: string, what: string, shown?: () => boolean];
+const has = (id: Part["id"]) => () => sim.ship.parts.has(id);
+const found = (place: string) => () => sim.discovered.has(place);
+const HELP: [string, HelpLine[]][] = [
   [
     "Flying",
     [
-      ["W / S", "Thrust forward and back (back needs the reverse thruster)"],
-      ["A / D", "Strafe left and right (needs strafe thrusters)"],
+      ["W", "Thrust"],
+      ["S", "Thrust backward", has("reverse")],
+      ["A / D", "Strafe left and right", has("strafe")],
       ["Q / E or arrows", "Rotate"],
       ["Shift + a flight key", "Ramp that thruster up gently, and back down when you let go"],
-      ["X", "Retro on or off: holds you still against what you're near (needs the part)"],
+      ["X", "Retro on or off: holds you still against what you're near", has("retro")],
       ["Space", "Fire"],
       ["Mouse wheel", "Zoom"],
     ],
   ],
   [
-    "Mouse orders (need the click parts)",
+    "Mouse orders",
     [
-      ["Right click", "Shift there, keeping your motion"],
-      ["Double right click", "Move there and stop"],
-      ["Right drag", "Move there and keep drifting the way you drew"],
-      ["Right drag from your ship", "Hold a facing"],
-      ["Right drag from the destination", "Nudge its drift"],
-      ["Right click your ship", "Stop, or cancel an order"],
-      ["Flight keys", "Take over for a moment; the order carries on after"],
+      ["Right click", "Shift there, keeping your motion", has("clickMove")],
+      ["Double right click", "Move there and stop", has("clickMove")],
+      ["Right drag", "Move there and keep drifting the way you drew", has("clickMove")],
+      ["Right drag from your ship", "Hold a facing", has("clickTurn")],
+      ["Right drag from the destination", "Nudge its drift", has("clickMove")],
+      ["Right click your ship", "Stop, or cancel an order", has("clickMove")],
+      ["Flight keys", "Take over for a moment; the order carries on after", has("clickMove")],
     ],
   ],
   [
     "Trading",
     [
-      ["In the dock: 1 to 9, 0, =", "Buy or sell a part"],
-      ["In the dock: -", "Buy a drone"],
-      ["At a deposit: 1 / 2", "Drop your ore / load ore to haul"],
-      ["Elsewhere: 1", "Buy ore where someone's selling"],
+      ["In the dock: 1 to 9, 0, =", "Buy or sell a part", found("dock")],
+      ["In the dock: -", "Buy a drone", () => sim.discovered.has("dock") && sim.unlocked("drone")],
+      ["At a deposit: 1 / 2", "Drop your ore / load ore to haul", found("deposit")],
+      ["Where someone's selling ore: 1", "Buy a load", found("seller")],
     ],
   ],
   [
@@ -324,10 +331,12 @@ function showPage(page: "main" | "help" | "settings"): void {
     intro.textContent =
       "Shoot rocks to break off ore, fly through it to pick it up, and sell it in the station's dock. Spend what you earn on parts.";
     const parts: HTMLElement[] = [title, sub, intro];
-    for (const [group, rows] of HELP) {
+    for (const [group, lines] of HELP) {
+      const shown = lines.filter(([, , show]) => !show || show());
+      if (shown.length === 0) continue;
       parts.push(heading(group));
       const table = document.createElement("table");
-      for (const [key, what] of rows) {
+      for (const [key, what] of shown) {
         const row = table.insertRow();
         row.insertCell().textContent = key;
         row.insertCell().textContent = what;

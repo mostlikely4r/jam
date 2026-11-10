@@ -494,6 +494,8 @@ export class Sim {
   station!: Poi;
   events: SimEvent[] = [];
   stats: Stats = { bestOre: 0, topSpeed: 0 };
+  /** Places the player has found: the dock, a deposit, a seller. What help shows grows with it. */
+  discovered = new Set<string>();
   /** The world's own random numbers, from a state that can be saved. */
   private randomState = { a: 1 };
   private random = (): number => nextRandom(this.randomState);
@@ -544,6 +546,7 @@ export class Sim {
       field: this.field,
       station: this.station,
       stats: this.stats,
+      discovered: this.discovered,
       inflowTimer: this.inflowTimer,
       randomState: this.randomState,
     };
@@ -583,6 +586,7 @@ export class Sim {
       "station", "stats", "inflowTimer", "randomState",
     ] as const;
     for (const key of plain) if (key in data) Object.assign(this, { [key]: data[key] });
+    this.discovered = data.discovered ?? new Set();
     this.clickPilot = new ClickPilot(this.ship);
     this.chatter = new Chatter(this.randomState.a);
     this.grudges = new WeakMap();
@@ -597,6 +601,7 @@ export class Sim {
     this.ores = [];
     this.events = [];
     this.stats = { bestOre: this.stats.bestOre, topSpeed: 0 };
+    this.discovered = new Set();
     this.inflowTimer = 1;
     this.placePois();
     this.resetPlayerControls();
@@ -1732,6 +1737,7 @@ export class Sim {
   step(): void {
     const dt = TICK;
     this.clock += dt;
+    this.discover();
     if (this.distress) {
       this.distress.age += dt;
       if (this.distress.age > DISTRESS_SECONDS) this.distress = null;
@@ -2531,6 +2537,14 @@ export class Sim {
     const { depositSells } = this.tuning;
     const affordable = depositSells > 0 ? Math.floor(this.accountOf(ship).credits / depositSells) : Infinity;
     return Math.max(0, Math.min(Math.floor(this.pirateOre), affordable, this.cargoSpace(ship)));
+  }
+
+  /** Notes the places the player has reached. */
+  private discover(): void {
+    const { ship, discovered } = this;
+    if (this.isDocked(ship)) discovered.add("dock");
+    if (this.depositAt(ship)) discovered.add("deposit");
+    if (this.atPirateBase(ship)) discovered.add("seller");
   }
 
   /** Whether a ship is close enough to the pirate base to trade there. */

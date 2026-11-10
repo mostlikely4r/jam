@@ -41,6 +41,20 @@ describe("save and load", () => {
     expect(into.ship.hull).toBeGreaterThan(0);
   }, 30000);
 
+  it("remembers the places found, which a new game forgets", () => {
+    const sim = new Sim(1, { ...DEFAULTS });
+    expect(sim.discovered.has("dock")).toBe(false);
+    sim.ship.x = sim.dockPoint().x;
+    sim.ship.y = sim.dockPoint().y;
+    sim.step();
+    expect(sim.discovered.has("dock")).toBe(true);
+    const into = new Sim(2, { ...DEFAULTS });
+    roundTrip(sim, into);
+    expect(into.discovered.has("dock")).toBe(true);
+    into.reset(3);
+    expect(into.discovered.size).toBe(0);
+  });
+
   it("a ship saved before a field existed gets it as new", () => {
     const sim = new Sim(1, { ...DEFAULTS });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

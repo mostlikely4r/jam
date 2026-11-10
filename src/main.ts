@@ -158,7 +158,12 @@ function showStart(): void {
   const hint = document.createElement("p");
   hint.className = "hint";
   hint.textContent = "Esc or P pauses, with the controls under Help.";
-  startBox.replaceChildren(title, sub, ...saveButtons(), cards, hint);
+  // A phone or tablet with no mouse can start a game, then not fly it. Better to say so first.
+  const touchOnly = !matchMedia("(any-pointer: fine)").matches;
+  const notice = document.createElement("p");
+  notice.className = "notice";
+  notice.textContent = "JAM needs a keyboard and mouse. Come back on a computer.";
+  startBox.replaceChildren(title, sub, ...(touchOnly ? [notice] : []), ...saveButtons(), cards, hint);
 }
 
 function chooseShip(model: "racer" | "floater"): void {

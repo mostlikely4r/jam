@@ -9,6 +9,8 @@ export interface ChatterLine {
   y: number;
   /** Heard at any distance. */
   mayday: boolean;
+  /** Station news for everyone: heard at any distance, without the alarm. */
+  broadcast: boolean;
 }
 
 const TRAFFIC_NAMES = [
@@ -27,12 +29,29 @@ const TRAFFIC_NAMES = [
 ];
 
 const HAULER_NAME = "Long Haul";
-const DOCKING = [
-  "Hold's full, heading in to dock.",
+export const HEADING_BACK = [
+  "Hold's full, heading back.",
   "Coming home with a load.",
-  "Inbound to the station.",
-  "That's a full hold. Heading in.",
+  "That's a full hold. Turning for the station.",
+  "Packing it in for now. Heading back.",
 ];
+export const APPROACH = [
+  "On approach, requesting dock.",
+  "Station in sight. Requesting a berth.",
+  "Coming up on the dock now.",
+  "Final approach. Permission to dock?",
+];
+export const OUTBOUND = [
+  "Heading back out to the field.",
+  "Unloaded. Back to the rocks.",
+  "Off to the field again.",
+  "Empty hold. Going back out.",
+];
+const ALL_CLEAR = ["Looks clear. Heading back out.", "Think it's gone. Back to work.", "Quiet again. I'm going back out."];
+const SEE_OFF = ["Good hunting, {name}.", "Fly safe, {name}.", "Clear skies, {name}."];
+export const BOUGHT = ["Just fitted a {part}.", "New {part} on board. Let's see what it can do.", "Treated myself to a {part}."];
+const BOUGHT_OWNED = ["Fitted a {part}, on your account.", "Bought a {part} with your credits."];
+const BOUGHT_REPLY = ["Enjoy the {part}, {name}.", "Pleasure doing business, {name}."];
 const FIELD = [
   "Quiet day in the field.",
   "Plenty of rock out here.",
@@ -54,6 +73,11 @@ export const THANKS = [
 const GREETING = ["Welcome back.", "Good to see you again.", "Dock's open when you need it.", "Welcome home."];
 
 const DOCKING_COOLDOWN = 60;
+const OUTBOUND_COOLDOWN = 60;
+/** Close enough to the dock to ask for it, the same distance the station greets the player at. */
+const APPROACH_DISTANCE = 900;
+/** Tasks a ship does at the station, and the ones that mean it's back in the field. */
+const AT_STATION = new Set(["unloading", "repairing", "sheltering"]);
 const FLEEING_COOLDOWN = 30;
 const MAYDAY_COOLDOWN = 30;
 const THANKS_COOLDOWN = 180;
@@ -82,6 +106,8 @@ export class Chatter {
   private stationCooldowns = new Map<string, number>();
   private nextFieldTalk = new WeakMap<Ship, number>();
   private replies: { at: number; text: string }[] = [];
+  /** Ships that asked for the dock on this trip home. */
+  private approached = new WeakSet<Ship>();
   private playerFar = true;
   private random: () => number;
 
@@ -116,10 +142,24 @@ export class Chatter {
       const before = this.tasks.get(ship);
       this.tasks.set(ship, task);
       const name = this.nameOf(sim, ship);
-      if (task !== before && task === "to station" && ship.ore > 0) {
-        if (this.ready(ship, "docking", DOCKING_COOLDOWN)) {
-          this.say(sim, ship, this.pick(DOCKING));
+      const dock = sim.dockPoint();
+      const nearDock = Math.hypot(ship.x - dock.x, ship.y - dock.y) < APPROACH_DISTANCE;
+      if (task !== "to station") this.approached.delete(ship);
+      if (task === "to station" && ship.ore > 0 && nearDock && !this.approached.has(ship)) {
+        // Close in: it asks for the dock, and the station clears it.
+        this.approached.add(ship);
+        if (this.ready(ship, "approach", DOCKING_COOLDOWN)) {
+          this.say(sim, ship, this.pick(APPROACH));
           this.reply(`Roger, ${name}, cleared to dock.`);
+        }
+      } else if (task !== before && task === "to station" && ship.ore > 0) {
+        // Turning for home, out in the field. Nobody needs to answer that.
+        if (this.ready(ship, "heading back", DOCKING_COOLDOWN)) this.say(sim, ship, this.pick(HEADING_BACK));
+      } else if (task !== before && before !== undefined && AT_STATION.has(before) && FIELD_TASKS.has(task)) {
+        // Leaving the station for the field. Once there are other places, this says which.
+        if (this.ready(ship, "outbound", OUTBOUND_COOLDOWN)) {
+          this.say(sim, ship, this.pick(before === "sheltering" ? ALL_CLEAR : OUTBOUND));
+          this.reply(this.pick(SEE_OFF).replace("{name}", name));
         }
       } else if (task !== before && task === "fleeing") {
         if (this.ready(ship, "fleeing", FLEEING_COOLDOWN)) {
@@ -177,22 +217,29 @@ export class Chatter {
     this.lineFrom(sim, HAULER_NAME, text, spot.x, spot.y);
   }
 
-  /** The shop got new stock because a blueprint was paid for. */
+  /** A ship other than the player bought a part at the station. */
+  bought(sim: Sim, ship: Ship, part: string): void {
+    const name = this.nameOf(sim, ship);
+    this.say(sim, ship, this.pick(ship.owner ? BOUGHT_OWNED : BOUGHT).replace("{part}", part));
+    if (!ship.owner) this.reply(this.pick(BOUGHT_REPLY).replace("{part}", part).replace("{name}", name));
+  }
+
+  /** News that matters out in the field goes out to everyone, not just those near the station. */
   depositBuilt(sim: Sim): void {
-    this.stationSays(sim, "The field deposit is up. Drop your ore there or haul it in.");
+    this.stationSays(sim, "The field deposit is up. Drop your ore there or haul it in.", true);
   }
 
   guardsBuilt(sim: Sim, atStation: boolean): void {
-    this.stationSays(sim, atStation ? "Station turrets are online." : "Turrets are up at the field deposit.");
+    this.stationSays(sim, atStation ? "Station turrets are online." : "Turrets are up at the field deposit.", true);
   }
 
   unlocked(sim: Sim, names: string[]): void {
     const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
-    this.stationSays(sim, `New blueprint${names.length > 1 ? "s" : ""} in. The shop now stocks ${list}.`);
+    this.stationSays(sim, `New blueprint${names.length > 1 ? "s" : ""} in. The shop now stocks ${list}.`, true);
   }
 
   defenderLaunched(sim: Sim): void {
-    this.stationSays(sim, "Defender launching. Stay safe out there.");
+    this.stationSays(sim, "Defender launching. Stay safe out there.", true);
   }
 
   trafficReplaced(sim: Sim, ship: Ship): void {
@@ -222,16 +269,17 @@ export class Chatter {
       x: ship.x,
       y: ship.y,
       mayday,
+      broadcast: false,
     });
   }
 
   private lineFrom(sim: Sim, name: string, text: string, x: number, y: number): void {
-    sim.events.push({ type: "chatter", speaker: null, name, text, x, y, mayday: false });
+    sim.events.push({ type: "chatter", speaker: null, name, text, x, y, mayday: false, broadcast: false });
   }
 
-  private stationSays(sim: Sim, text: string): void {
+  private stationSays(sim: Sim, text: string, broadcast = false): void {
     const dock = sim.dockPoint();
-    sim.events.push({ type: "chatter", speaker: null, name: "Station", text, x: dock.x, y: dock.y, mayday: false });
+    sim.events.push({ type: "chatter", speaker: null, name: "Station", text, x: dock.x, y: dock.y, mayday: false, broadcast });
   }
 
   private reply(text: string): void {

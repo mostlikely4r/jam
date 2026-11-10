@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { THANKS } from "./chatter";
+import { APPROACH, BOUGHT, HEADING_BACK, OUTBOUND, THANKS } from "./chatter";
 import { PARTS } from "./parts";
 import { DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, MAX_HULL, Sim, TICK } from "./sim";
@@ -807,15 +807,55 @@ describe("pirate and defender", () => {
       expect(sim.hears({ ...mayday!, mayday: false })).toBe(false);
     });
 
-    it("traffic heading in to dock gets a reply from the station", () => {
+    it("traffic turning for home says so, then asks for the dock once close and is cleared", () => {
       const sim = arena({ trafficRacers: 1 });
       const pilot = sim.traffic[0];
-      pin(pilot.ship, sim.station.x + 2500, sim.station.y);
-      pilot.ship.ore = DEFAULTS.droneCargo;
-      const heard = listen(sim, 3);
       const name = sim.chatter.nameOf(sim, pilot.ship);
-      expect(heard.some((line) => line.speaker === pilot.ship)).toBe(true);
-      expect(heard.some((line) => line.speaker === null && line.text.includes(name))).toBe(true);
+      const dock = sim.dockPoint();
+      pin(pilot.ship, dock.x + 2500, dock.y);
+      pilot.ship.ore = DEFAULTS.droneCargo;
+      const far = listen(sim, 3, () => pin(pilot.ship, dock.x + 2500, dock.y));
+      expect(far.some((line) => line.speaker === pilot.ship && HEADING_BACK.includes(line.text))).toBe(true);
+      expect(far.some((line) => line.speaker === null && line.text.includes(name))).toBe(false);
+      const near = listen(sim, 3, () => pin(pilot.ship, dock.x + 600, dock.y));
+      expect(near.some((line) => line.speaker === pilot.ship && APPROACH.includes(line.text))).toBe(true);
+      expect(near.some((line) => line.speaker === null && line.text === `Roger, ${name}, cleared to dock.`)).toBe(true);
+    });
+
+    it("traffic leaving the station for the field says so, and the station sees it off", () => {
+      const sim = arena({ trafficRacers: 1 });
+      const pilot = sim.traffic[0];
+      const name = sim.chatter.nameOf(sim, pilot.ship);
+      const dock = sim.dockPoint();
+      pin(pilot.ship, dock.x, dock.y);
+      pilot.ship.ore = DEFAULTS.droneCargo;
+      const heard = listen(sim, 60);
+      const out = heard.findIndex((line) => line.speaker === pilot.ship && OUTBOUND.includes(line.text));
+      expect(out).toBeGreaterThanOrEqual(0);
+      expect(heard.slice(out).some((line) => line.speaker === null && line.text.includes(name))).toBe(true);
+    });
+
+    it("traffic buying a part says what it bought, and the station answers", () => {
+      const sim = arena({ trafficRacers: 1 });
+      const pilot = sim.traffic[0];
+      const dock = sim.dockPoint();
+      pin(pilot.ship, dock.x, dock.y);
+      pilot.ship.credits = 100000;
+      expect(sim.buyPart(pilot.ship, "reverse")).toBe(true);
+      const heard = listen(sim, 2);
+      const said = heard.find((line) => line.speaker === pilot.ship);
+      expect(said?.text).toContain("reverse thruster");
+      expect(BOUGHT.some((text) => said!.text === text.replace("{part}", "reverse thruster"))).toBe(true);
+      expect(heard.some((line) => line.speaker === null && line.text.includes(sim.chatter.nameOf(sim, pilot.ship)))).toBe(true);
+    });
+
+    it("station news goes out to everyone, other station talk only nearby", () => {
+      const sim = arena({});
+      pin(sim.ship, sim.station.x + 50000, sim.station.y);
+      sim.chatter.depositBuilt(sim);
+      const news = sim.events.find((event) => event.type === "chatter");
+      expect(news && sim.hears(news)).toBe(true);
+      expect(news && sim.hears({ ...news, broadcast: false })).toBe(false);
     });
 
     it("says nothing with the switch off", () => {

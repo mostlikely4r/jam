@@ -293,6 +293,8 @@ export type SimEvent =
       text: string;
       /** Heard at any distance. */
       mayday: boolean;
+      /** Station news for everyone: heard at any distance, without the alarm. */
+      broadcast: boolean;
     };
 
 export interface Stats {
@@ -953,9 +955,9 @@ export class Sim {
     hauler.thrust.side = Math.abs(side) > 0.3 ? Math.sign(side) : 0;
   }
 
-  /** Whether the player picks up a radio line: anything in range, and maydays from anywhere. */
-  hears(line: { x: number; y: number; mayday: boolean }): boolean {
-    if (line.mayday) return true;
+  /** Whether the player picks up a radio line: anything in range, and maydays and station news from anywhere. */
+  hears(line: { x: number; y: number; mayday: boolean; broadcast?: boolean }): boolean {
+    if (line.mayday || line.broadcast) return true;
     return Math.hypot(line.x - this.ship.x, line.y - this.ship.y) <= this.tuning.chatterRange;
   }
 
@@ -1479,6 +1481,7 @@ export class Sim {
     ship.parts.add(id);
     if (id === "retro" && ship === this.ship) this.tuning.retro = true;
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
+    if (ship !== this.ship && this.tuning.chatter) this.chatter.bought(this, ship, part.label.toLowerCase());
     return true;
   }
 

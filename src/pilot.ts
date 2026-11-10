@@ -1,6 +1,7 @@
 import { DRONE_BUY_ORDER, type PartId } from "./parts";
 import {
   type Body,
+  type Deposit,
   type Ore,
   type Poi,
   type Rock,
@@ -452,6 +453,10 @@ export class DronePilot extends ShipPilot {
   private hauling = false;
   /** Whether this load goes to a deposit to save the trip. */
   private dropsThisLoad = false;
+  /** Where it's going to buy a load, if it's making a buying run. */
+  trading: Deposit | "pirate base" | null = null;
+  /** Whether it has decided on this stay at the dock whether to make a buying run. */
+  private decidedTrade = false;
   private rock: Rock | null = null;
   private ore: Ore | null = null;
   private retarget = 0;
@@ -496,8 +501,60 @@ export class DronePilot extends ShipPilot {
     }
     if (ship.ore === 0 && sim.isDocked(ship)) this.shop(sim);
 
+    if (!this.hauling && ship.ore === 0) {
+      this.chooseTrade(sim);
+      if (this.trading) {
+        this.trade(sim);
+        return;
+      }
+    }
     if (this.hauling) this.haul(sim);
     else this.mine(sim);
+  }
+
+  /**
+   * Leaving the dock with an empty hold, traffic sometimes buys a load to bring back
+   * instead of mining one. It decides once per stay.
+   */
+  private chooseTrade(sim: Sim): void {
+    const { ship } = this;
+    const docked = sim.isDocked(ship);
+    if (!docked) this.decidedTrade = false;
+    if (!docked || this.decidedTrade || this.trading || ship.owner || this.buys !== "upgrades") return;
+    this.decidedTrade = true;
+    const source = sim.tradeSource(ship);
+    if (source && sim.roll() < sim.tuning.tradeChance) this.trading = source;
+  }
+
+  /** Flies to where it's buying, buys a full hold, and from there it's an ordinary haul home. */
+  private trade(sim: Sim): void {
+    const { ship } = this;
+    const source = this.trading!;
+    this.task = "to buy";
+    if (source === "pirate base") {
+      const base = sim.pirateBase;
+      if (!base || sim.pirateOre < sim.cargoSpace(ship)) {
+        this.trading = null;
+        return;
+      }
+      if (sim.atPirateBase(ship)) this.bought(sim.buyFromPirateBase(ship));
+      else this.flyTo(sim, base, sim.tuning.pirateBaseReach / 2, 0, null);
+      return;
+    }
+    if (!sim.deposits.includes(source) || source.ore < sim.cargoSpace(ship)) {
+      this.trading = null;
+      return;
+    }
+    if (sim.depositAt(ship) === source) this.bought(sim.buyFromDeposit(ship, source));
+    else this.flyTo(sim, source, DEPOSIT_ARRIVAL, 0, null);
+  }
+
+  private bought(amount: number): void {
+    this.trading = null;
+    if (amount <= 0) return;
+    // A bought load goes home to sell, not into the next deposit.
+    this.hauling = true;
+    this.dropsThisLoad = false;
   }
 
   /** Runs home to tell the station who attacked it. */

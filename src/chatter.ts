@@ -49,6 +49,9 @@ export const OUTBOUND = [
   "Off to the field again.",
   "Empty hold. Going back out.",
 ];
+const TO_DEPOSIT = ["Off to pick up a load at the deposit.", "Making a run to the deposit.", "Going to fetch some ore from the deposit."];
+const TO_PIRATES = ["Making a run to the pirate base. Wish me luck.", "Heading out to buy from the pirates.", "Going shopping at the pirate base."];
+const PIRATE_WARNING = ["Watch yourself out there, {name}.", "Your funeral, {name}.", "Keep your hold empty till you're there, {name}."];
 const ALL_CLEAR = ["Looks clear. Heading back out.", "Think it's gone. Back to work.", "Quiet again. I'm going back out."];
 const SEE_OFF = ["Good hunting, {name}.", "Fly safe, {name}.", "Clear skies, {name}."];
 export const BOUGHT = ["Just fitted a {part}.", "New {part} on board. Let's see what it can do.", "Treated myself to a {part}."];
@@ -157,6 +160,13 @@ export class Chatter {
       } else if (task !== before && task === "to station" && ship.ore > 0) {
         // Turning for home, out in the field. Nobody needs to answer that.
         if (this.ready(ship, "heading back", DOCKING_COOLDOWN)) this.say(sim, ship, this.pick(HEADING_BACK));
+      } else if (task !== before && task === "to buy" && pilot.trading) {
+        // Off to buy a load. The station has an opinion about buying from pirates.
+        if (this.ready(ship, "outbound", OUTBOUND_COOLDOWN)) {
+          const pirates = pilot.trading === "pirate base";
+          this.say(sim, ship, pirates ? this.pick(TO_PIRATES) : this.pick(TO_DEPOSIT));
+          this.reply((pirates ? this.pick(PIRATE_WARNING) : this.pick(SEE_OFF)).replace("{name}", name));
+        }
       } else if (task !== before && before !== undefined && AT_STATION.has(before) && FIELD_TASKS.has(task)) {
         // Leaving the station for the field. Once there are other places, this says which.
         if (this.ready(ship, "outbound", OUTBOUND_COOLDOWN)) {

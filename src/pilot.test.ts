@@ -786,6 +786,69 @@ describe("pirate and defender", () => {
       expect(sim.pirateOre).toBe(100 - space);
     });
 
+    /** Traffic in the dock with money and an empty hold, about to decide where to go. */
+    function trader(sim: Sim) {
+      const pilot = sim.traffic[0];
+      placeInDock(sim, pilot.ship);
+      pilot.ship.credits = 3000;
+      pilot.ship.ore = 0;
+      return pilot;
+    }
+
+    it("traffic leaving the dock with money can buy a full load at the deposit and bring it home", () => {
+      const sim = arena({
+        trafficRacers: 1,
+        haulers: false,
+        chatter: false,
+        depositFree: true,
+        depositGap: 300,
+        depositReach: 150,
+        tradeChance: 1,
+      });
+      sim.step();
+      const deposit = sim.deposits[0];
+      deposit.ore = 100;
+      const pilot = trader(sim);
+      const tasks = new Set<string>();
+      for (let i = 0; i < Math.round(200 / TICK) && pilot.ship.trips === 0; i++) {
+        sim.step();
+        sim.events.length = 0;
+        tasks.add(pilot.task);
+      }
+      expect(tasks.has("to buy")).toBe(true);
+      // A full hold, as big as it is after shopping in the dock.
+      expect(deposit.ore).toBe(100 - sim.cargoSpace(pilot.ship));
+      expect(pilot.ship.trips).toBe(1);
+    }, 30000);
+
+    it("traffic can buy from the pirates, who leave it alone on the way in", () => {
+      const sim = baseWorld({ trafficRacers: 1, tradeChance: 1, pirateStartOre: 100, pirateStartCredits: 0 });
+      const pilot = trader(sim);
+      for (let i = 0; i < Math.round(200 / TICK) && sim.pirateCredits === 0; i++) {
+        sim.step();
+        sim.events.length = 0;
+      }
+      const load = sim.cargoSpace(pilot.ship);
+      expect(pilot.ship.ore).toBe(load);
+      expect(sim.pirateCredits).toBe(load * DEFAULTS.depositSells);
+      expect(pilot.ship.damageTaken).toBe(0);
+    }, 30000);
+
+    it("traffic won't buy from the pirates while marked, or for a while after they killed it", () => {
+      const sim = baseWorld({ trafficRacers: 1, pirateStartOre: 100, pirateGrudgeSeconds: 100 });
+      const pilot = trader(sim);
+      expect(sim.tradeSource(pilot.ship)).toBe("pirate base");
+      pilot.ship.marked = true;
+      expect(sim.tradeSource(pilot.ship)).toBeNull();
+      pilot.ship.marked = false;
+      pilot.ship.pirateKilledAt = sim.now;
+      expect(sim.tradeSource(pilot.ship)).toBeNull();
+      pilot.ship.pirateKilledAt = sim.now - 101;
+      expect(sim.tradeSource(pilot.ship)).toBe("pirate base");
+      pilot.ship.credits = 10;
+      expect(sim.tradeSource(pilot.ship)).toBeNull();
+    });
+
     it("the black market comes in, buys what's left, and leaves the way it came", () => {
       const sim = baseWorld({ pirateStartOre: 40, pirateStartCredits: 0, blackMarketFirst: 1, blackMarketPays: 5 });
       const stages = new Set<string>();

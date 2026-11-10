@@ -115,6 +115,8 @@ export interface Ship extends Body {
   marked: boolean;
   /** Reported for attacking traffic: defenders come for it and traffic flees it. Until it dies. */
   wanted: boolean;
+  /** When a pirate last wrecked it, or null. It won't trade with pirates for a while after. */
+  pirateKilledAt: number | null;
 }
 
 export interface Rock extends Body {
@@ -480,6 +482,10 @@ export class Sim {
   distress: { ship: Ship; age: number } | null = null;
   /** Seconds since the world began, for things that fade. */
   private clock = 0;
+
+  get now(): number {
+    return this.clock;
+  }
   /** When each ship was hit by each other ship, for the hits not yet forgotten. */
   private grudges = new WeakMap<Ship, Map<Ship, number[]>>();
   /** Flies the player's ship to a clicked spot, if it has the part. */
@@ -1115,6 +1121,7 @@ export class Sim {
       firing: new Map(),
       marked: false,
       wanted: false,
+      pirateKilledAt: null,
     };
   }
 
@@ -2398,6 +2405,32 @@ export class Sim {
     }
   }
 
+  /**
+   * Where traffic leaving the station with an empty hold could buy a full load: an open
+   * deposit or the pirate base with enough stock, if it can pay and keep its buffer. It won't
+   * go to the pirates while marked, or for a while after they killed it. Nearest first.
+   */
+  tradeSource(ship: Ship): Deposit | "pirate base" | null {
+    const { tuning } = this;
+    const load = this.cargoSpace(ship);
+    if (load <= 0 || this.accountOf(ship).credits - load * tuning.depositSells < tuning.trafficBuffer) return null;
+    let best = Infinity;
+    let found: Deposit | "pirate base" | null = null;
+    for (const deposit of this.deposits) {
+      const distance = Math.hypot(deposit.x - ship.x, deposit.y - ship.y);
+      if (deposit.partsLeft <= 0 && deposit.ore >= load && distance < best) {
+        best = distance;
+        found = deposit;
+      }
+    }
+    const base = this.pirateBase;
+    const grudge = ship.pirateKilledAt !== null && this.clock - ship.pirateKilledAt < tuning.pirateGrudgeSeconds;
+    if (base && this.pirateOre >= load && !ship.marked && !grudge) {
+      if (Math.hypot(base.x - ship.x, base.y - ship.y) < best) found = "pirate base";
+    }
+    return found;
+  }
+
   /** How much ore the pirate base would sell this ship: only to an empty hold, close by. */
   pirateBaseBuyable(ship: Ship): number {
     const base = this.pirateBase;
@@ -2541,6 +2574,7 @@ export class Sim {
     this.judgeHit(ship, shot.from);
     const player = ship === this.ship;
     this.events.push({ type: "impact", x: ship.x, y: ship.y, damage, player });
+    if (ship.hull <= 0 && shot.from.faction === "pirate") ship.pirateKilledAt = this.clock;
     if (ship.hull <= 0) this.wreckShip(ship);
   }
 

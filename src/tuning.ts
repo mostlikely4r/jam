@@ -26,8 +26,8 @@ export const DEFAULTS = {
   flingChance: 0.3,
   flingOreAmount: 3,
 
-  rockCount: 260,
-  fieldRadius: 2600,
+  rockCount: 520,
+  fieldRadius: 5200,
   /**
    * Within this distance of a POI's edge, the nearest POI carries things fully. Beyond
    * it, its pull falls off linearly to nothing at the second distance. Infinity is the
@@ -45,6 +45,8 @@ export const DEFAULTS = {
   fieldRotationPeriod: 1800,
 
   stationDistance: 5000,
+  /** How far beyond the field's edge the pirate base sits, on the far side from the station. */
+  pirateBaseDistance: 4000,
   orbitPeriod: 900,
   stationRotationPeriod: 300,
   dockDrag: 0.25,
@@ -91,6 +93,8 @@ export const DEFAULTS = {
   /** Credits the station holds back before spending on blueprints. */
   stationCashBuffer: 300,
   trafficBuffer: 400,
+  /** Where traffic starts: this share of the field's radius past its middle, away from the player's start. */
+  trafficStartShare: 0.4,
   /** The chance that traffic leaving the station with money makes a buying run instead of mining. */
   tradeChance: 0.5,
   /** After pirates kill a ship, how many seconds before it will buy from them again. */
@@ -299,6 +303,7 @@ export const GROUPS: Group[] = [
     title: "Station",
     sliders: [
       { key: "stationDistance", label: "Distance (on restart)", min: 1000, max: 15000, step: 100 },
+      { key: "pirateBaseDistance", label: "Pirate base distance from the field (on restart)", min: 500, max: 15000, step: 100 },
       { key: "orbitPeriod", label: "Orbit time (s, 0 = off)", min: 0, max: 3600, step: 30 },
       { key: "stationRotationPeriod", label: "Rotation time (s, 0 = off)", min: 0, max: 3600, step: 30 },
       { key: "dockDrag", label: "Dock slowdown", min: 0, max: 3, step: 0.05 },

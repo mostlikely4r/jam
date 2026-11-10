@@ -437,7 +437,7 @@ describe("motion relative to the nearest POI", () => {
   it("keeps relative speed when crossing into another POI's zone", () => {
     const sim = emptySim();
     // Halfway between the field's edge and the station's reach.
-    sim.ship.x = -4870;
+    sim.ship.x = -sim.tuning.fieldRadius - 2270;
     sim.ship.y = 0;
     sim.ship.vx = -100;
     sim.step();

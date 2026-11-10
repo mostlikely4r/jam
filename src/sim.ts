@@ -15,7 +15,6 @@ export const DEPOSIT_HALF = 70;
 /** How far from a turret's center its shots start. */
 const GUARD_BARREL = 30;
 /** How far outside the field a pirate starts, on the far side from the station. */
-const PIRATE_START_DISTANCE = 2000;
 /** How long a hit ship keeps calling for help. */
 const DISTRESS_SECONDS = 10;
 /** Size of the pirates' round docking zone. */
@@ -561,7 +560,7 @@ export class Sim {
     for (let i = 0; i < count; i++) {
       const y = this.field.y + (i + 1) * 70 * (i % 2 === 0 ? 1 : -1);
       if (i < this.tuning.testDrones) this.addDrone(this.startX(), y);
-      else this.addTraffic(this.startX(), y, models[i - this.tuning.testDrones]);
+      else this.addTraffic(this.trafficStartX(), y, models[i - this.tuning.testDrones]);
     }
     const clear = 260;
     for (let i = 0; i < this.tuning.rockCount; i++) {
@@ -597,7 +596,7 @@ export class Sim {
         ? this.makePoi(
             "pirate base",
             this.field,
-            tuning.fieldRadius + PIRATE_START_DISTANCE,
+            tuning.fieldRadius + tuning.pirateBaseDistance,
             0,
             PIRATE_BASE_RADIUS,
           )
@@ -1082,6 +1081,14 @@ export class Sim {
 
   private startX(): number {
     return this.field.x - this.tuning.fieldRadius - 200;
+  }
+
+  /**
+   * Traffic starts at work deep in the field, well out of the player's sight, so the world
+   * shows itself bit by bit: first on the radio, then in person.
+   */
+  private trafficStartX(): number {
+    return this.field.x + this.tuning.fieldRadius * this.tuning.trafficStartShare;
   }
 
   private makeShip(x: number, y: number, controls: Controls, model: ShipModel = "racer"): Ship {

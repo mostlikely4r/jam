@@ -569,7 +569,8 @@ export class DronePilot extends ShipPilot {
 
   private haul(sim: Sim): void {
     const { ship } = this;
-    if ((this.dropsThisLoad || ship.hull < LOW_HULL) && this.dropLoad(sim)) return;
+    // A damaged ship is going to the station for repairs anyway, so it sells its load there too.
+    if (this.dropsThisLoad && ship.hull >= LOW_HULL && this.dropLoad(sim)) return;
     if (sim.isDocked(ship)) {
       this.task = "unloading";
       this.hold(sim, sim.dockPoint(), sim.dockPoint(true));

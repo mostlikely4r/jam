@@ -1592,12 +1592,13 @@ describe("pirate and defender", () => {
       expect(sim.deposits[0].ore).toBe(0);
     }, 30000);
 
-    it("a badly damaged ship banks its ore on the way", () => {
-      const sim = depositWorld({ trafficRacers: 1, chatter: false });
-      const pilot = loaded(sim, 4);
+    it("a badly damaged ship takes its load to the station it's going to for repairs", () => {
+      const sim = depositWorld({ trafficRacers: 1, depositDropChance: 1, chatter: false });
+      const pilot = loaded(sim, DEFAULTS.droneCargo);
       pilot.ship.hull = 10;
-      run(sim, 200, () => sim.deposits[0].ore > 0);
-      expect(sim.deposits[0].ore).toBe(4);
+      run(sim, 300, () => pilot.ship.trips > 0);
+      expect(pilot.ship.trips).toBe(1);
+      expect(sim.deposits[0].ore).toBe(0);
     }, 30000);
 
     it("a full deposit sends the load on to the station", () => {

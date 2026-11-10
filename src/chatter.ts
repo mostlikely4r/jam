@@ -29,6 +29,8 @@ const TRAFFIC_NAMES = [
 ];
 
 const HAULER_NAME = "Long Haul";
+const BLACK_MARKET_NAME = "No Name";
+const BLACK_MARKET_HELLO = ["Open for business. What've you got?", "Usual terms. Ore for parts.", "Make it quick."];
 export const HEADING_BACK = [
   "Hold's full, heading back.",
   "Coming home with a load.",
@@ -201,6 +203,26 @@ export class Chatter {
     if (from.faction !== "pirate" || ship.faction === "pirate" || ship === sim.ship) return;
     if (!this.ready(ship, "mayday", MAYDAY_COOLDOWN)) return;
     this.say(sim, ship, this.pick(ship.faction === "defender" ? ENGAGED : MAYDAY), true);
+  }
+
+  blackMarketArrived(sim: Sim): void {
+    const spot = sim.blackMarket;
+    if (!spot) return;
+    this.lineFrom(sim, BLACK_MARKET_NAME, this.pick(BLACK_MARKET_HELLO), spot.x, spot.y);
+  }
+
+  blackMarketLeaving(sim: Sim, cargo: number): void {
+    const spot = sim.blackMarket;
+    if (!spot) return;
+    const text = cargo > 0 ? `${cargo} ore aboard. No questions asked.` : "Nothing for us. Wasted trip.";
+    this.lineFrom(sim, BLACK_MARKET_NAME, text, spot.x, spot.y);
+  }
+
+  /** The pirates bought a new hull: there will be one more of them. */
+  blackMarketHull(sim: Sim): void {
+    const spot = sim.blackMarket;
+    if (!spot) return;
+    this.lineFrom(sim, BLACK_MARKET_NAME, "One hull, as ordered. Fly it well.", spot.x, spot.y);
   }
 
   haulerBerthed(sim: Sim): void {

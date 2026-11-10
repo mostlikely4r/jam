@@ -764,6 +764,58 @@ describe("pirate and defender", () => {
     });
   });
 
+  describe("pirate base trade", () => {
+    function baseWorld(extra: Partial<typeof SOLO> = {}): Sim {
+      return arena({ pirates: 1, pirateLimit: 1, chatter: false, blackMarketFirst: 10000, ...extra });
+    }
+
+    it("sells a full hold at the deposit's price, only to an empty hold close by", () => {
+      const sim = baseWorld({ pirateStartOre: 100, pirateStartCredits: 0 });
+      const base = sim.pirateBase!;
+      sim.ship.credits = 1000;
+      pin(sim.ship, base.x + 3000, base.y);
+      expect(sim.buyFromPirateBase(sim.ship)).toBe(0);
+      pin(sim.ship, base.x + 300, base.y);
+      sim.ship.ore = 1;
+      expect(sim.buyFromPirateBase(sim.ship)).toBe(0);
+      sim.ship.ore = 0;
+      const space = sim.cargoSpace(sim.ship);
+      expect(sim.buyFromPirateBase(sim.ship)).toBe(space);
+      expect(sim.ship.credits).toBe(1000 - space * DEFAULTS.depositSells);
+      expect(sim.pirateCredits).toBe(space * DEFAULTS.depositSells);
+      expect(sim.pirateOre).toBe(100 - space);
+    });
+
+    it("the black market comes in, buys what's left, and leaves the way it came", () => {
+      const sim = baseWorld({ pirateStartOre: 40, pirateStartCredits: 0, blackMarketFirst: 1, blackMarketPays: 5 });
+      const stages = new Set<string>();
+      for (let i = 0; i < Math.round(200 / TICK); i++) {
+        sim.step();
+        sim.events.length = 0;
+        if (sim.blackMarket) stages.add(sim.blackMarket.stage);
+        else if (stages.has("leaving")) break;
+      }
+      expect([...stages]).toEqual(["arriving", "berthed", "leaving"]);
+      expect(sim.blackMarket).toBeNull();
+      expect(sim.pirateOre).toBe(0);
+      expect(sim.pirateCredits).toBe(200);
+    }, 30000);
+
+    it("pirates at home buy parts from it, then a new hull once all are fitted, up to the most", () => {
+      const sim = baseWorld({ pirateStartCredits: 100000, blackMarketFirst: 1, pirateCapMax: 2 });
+      const first = sim.fighters[0].ship;
+      const base = sim.pirateBase!;
+      for (let i = 0; i < Math.round(200 / TICK); i++) {
+        sim.step();
+        sim.events.length = 0;
+        for (const pilot of sim.fighters) pin(pilot.ship, base.x, base.y);
+      }
+      expect(sim.pirateWishlist(first)).toEqual([]);
+      expect(sim.pirateCap).toBe(2);
+      expect(sim.fighters.filter((pilot) => pilot.ship.faction === "pirate").length).toBe(2);
+    }, 30000);
+  });
+
   describe("aggro", () => {
     type Ship = Sim["ship"];
     /** A shot just behind `target`, about to fly into it, fired by `from`. */
@@ -2016,33 +2068,32 @@ describe("pirate and defender", () => {
       expect(sim.isDocked()).toBe(true);
     });
 
-    it("a pirate is rebuilt from its base's pile until the pile runs out", () => {
-      const sim = arena({ pirates: 1, rebuildCost: 300, serviceCreditsPerPart: 20, pirateStartOre: 15 });
+    it("a pirate is rebuilt from its base's money until the money runs out", () => {
+      const sim = arena({ pirates: 1, pirateLimit: 1, rebuildCost: 300, pirateStartCredits: 300 });
       const { ship } = sim.fighters[0];
       wreck(sim, ship);
       expect(sim.fighters.length).toBe(1);
-      expect(sim.pirateOre).toBe(0);
+      expect(sim.pirateCredits).toBe(0);
       wreck(sim, ship);
       expect(sim.fighters.length).toBe(0);
     });
 
-    it("the base builds pirates from ore beyond its reserve, up to its limit", () => {
+    it("the base builds pirates from money beyond its reserve, up to its cap", () => {
       const sim = arena({
         pirates: 1,
         pirateLimit: 2,
-        serviceCreditsPerPart: 20,
         defenderPrice: 500,
-        stationReserveParts: 20,
-        pirateStartOre: 44,
+        pirateReserve: 400,
+        pirateStartCredits: 899,
       });
       sim.step();
       expect(sim.fighters.length).toBe(1);
-      sim.pirateOre = 45;
+      sim.pirateCredits = 900;
       sim.step();
       expect(sim.fighters.length).toBe(2);
       expect(sim.fighters[1].ship.faction).toBe("pirate");
-      expect(sim.pirateOre).toBe(20);
-      sim.pirateOre = 500;
+      expect(sim.pirateCredits).toBe(400);
+      sim.pirateCredits = 10000;
       sim.step();
       expect(sim.fighters.length).toBe(2);
     });
@@ -2057,19 +2108,19 @@ describe("pirate and defender", () => {
       expect(one.task).not.toBe("attacking");
     });
 
-    it("a pirate repairs from its base's pile, and the station's is left alone", () => {
+    it("a pirate repairs with its base's money, and the station's parts are left alone", () => {
       const sim = arena({
         pirates: 1,
+        pirateLimit: 1,
         repairCost: 2,
-        serviceCreditsPerPart: 20,
-        pirateStartOre: 1,
+        pirateStartCredits: 3,
         stationStartParts: 7,
       });
       const pilot = sim.fighters[0];
       pilot.ship.hull = 50;
       expect(sim.canRepair(pilot.ship)).toBe(true);
       run(sim, 0.5);
-      expect(sim.pirateOre).toBeLessThan(1);
+      expect(sim.pirateCredits).toBeLessThan(2);
       expect(sim.stationParts).toBe(7);
     });
 

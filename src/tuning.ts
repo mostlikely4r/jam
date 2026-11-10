@@ -151,6 +151,19 @@ export const DEFAULTS = {
   shotDamage: 4,
   pirateStartOre: 40,
   pirateLimit: 2,
+  /** The pirate base's starting money, and what it keeps back for rebuilds before buying anything. */
+  pirateStartCredits: 800,
+  pirateReserve: 300,
+  /** Once every pirate is fully fitted, the base buys new hulls from the black market, up to this many pirates. */
+  pirateCapMax: 4,
+  pirateHullPrice: 1000,
+  /** Range for buying ore at the pirate base. */
+  pirateBaseReach: 400,
+  /** The black market: when it first calls, how often, what it pays per ore and how much it takes. */
+  blackMarketFirst: 450,
+  blackMarketInterval: 600,
+  blackMarketPays: 5,
+  blackMarketCapacity: 300,
   /** A hurt pirate that can pay for repairs breaks off and goes home, even mid-fight. */
   pirateRetreats: true,
   stationStartCredits: 300,
@@ -357,7 +370,16 @@ export const GROUPS: Group[] = [
       { key: "detectSeconds", label: "Seconds in the cone before being spotted", min: 0, max: 5, step: 0.25 },
       { key: "shotDamage", label: "Damage per shot to a ship", min: 0, max: 50, step: 1 },
       { key: "pirateStartOre", label: "Pirate base starting ore (on restart)", min: 0, max: 500, step: 5 },
-      { key: "pirateLimit", label: "Most pirates the base builds up to", min: 0, max: 10, step: 1 },
+      { key: "pirateLimit", label: "Pirates the base starts out fielding", min: 0, max: 10, step: 1 },
+      { key: "pirateCapMax", label: "Most pirates it can grow to", min: 0, max: 10, step: 1 },
+      { key: "pirateStartCredits", label: "Pirate base starting credits (on restart)", min: 0, max: 5000, step: 50 },
+      { key: "pirateReserve", label: "Credits the pirate base keeps for rebuilds", min: 0, max: 2000, step: 50 },
+      { key: "pirateHullPrice", label: "Black market price of a new pirate hull", min: 0, max: 5000, step: 50 },
+      { key: "pirateBaseReach", label: "Range for buying ore at the pirate base", min: 200, max: 1000, step: 25 },
+      { key: "blackMarketFirst", label: "Seconds until the black market first calls", min: 0, max: 3000, step: 30 },
+      { key: "blackMarketInterval", label: "Seconds between black market calls (0: never)", min: 0, max: 3000, step: 30 },
+      { key: "blackMarketPays", label: "Black market pays per ore", min: 0, max: 20, step: 1 },
+      { key: "blackMarketCapacity", label: "Black market hold", min: 0, max: 1000, step: 10 },
       { key: "stationStartCredits", label: "Station starting balance (on restart)", min: 0, max: 5000, step: 100 },
       { key: "stationStartOre", label: "Station starting ore (on restart)", min: 0, max: 500, step: 10 },
       { key: "stationStartParts", label: "Station starting parts (on restart)", min: 0, max: 500, step: 10 },

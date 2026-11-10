@@ -160,6 +160,43 @@ export interface Hauler {
   loadTimer: number;
 }
 
+/**
+ * The black market's freighter. It calls at the pirate base now and then, buys the ore the
+ * base hasn't sold, and sells the pirates parts and new hulls. Everything it pays comes from
+ * outside, and everything it's paid leaves with it.
+ */
+export interface BlackMarket {
+  stage: "arriving" | "berthed" | "leaving";
+  /** Seconds into the current stage. */
+  time: number;
+  x: number;
+  y: number;
+  px: number;
+  py: number;
+  /** Which way it points, along its lane. */
+  angle: number;
+  /** Speed along its lane, away from the base. */
+  speed: number;
+  /** Whether it's burning this tick: 1 speeding up, -1 braking, 0 coasting. */
+  burn: number;
+  cargo: number;
+  loadTimer: number;
+}
+
+export const BLACK_MARKET_LENGTH = 220;
+export const BLACK_MARKET_WIDTH = 70;
+/** Where it berths, beyond the base's edge on the far side from the station. */
+const BLACK_MARKET_BERTH = PIRATE_BASE_RADIUS + BLACK_MARKET_WIDTH;
+/** It comes in from this far out and is gone again beyond it. */
+const BLACK_MARKET_APPROACH = 6000;
+const BLACK_MARKET_SPEED = 300;
+const BLACK_MARKET_ACCELERATION = 60;
+/** How long it stays to trade. */
+const BLACK_MARKET_STAY = 60;
+const BLACK_MARKET_LOAD_RATE = 10;
+/** What pirates fit, in the order they buy it. */
+const PIRATE_PARTS: PartId[] = ["spinStabilizer", "reverse", "strafe", "retro"];
+
 export const HAULER_LENGTH = 300;
 export const HAULER_WIDTH = 100;
 /** Beside the station, on the side away from the dock, its long side along the station's. */
@@ -428,8 +465,15 @@ export class Sim {
   batteries: Battery[] = [];
   /** Seconds until the next hauler sets out. */
   haulerTimer = 0;
-  /** The pirate base's ore. It pays for pirates' repairs, rebuilds and new ships. */
+  /** Ore at the pirate base, for sale to empty holds and to the black market. */
   pirateOre = 0;
+  /** The pirate base's money. It pays for repairs, rebuilds, new pirates and parts. */
+  pirateCredits = 0;
+  /** How many pirates the base fields. It grows once every pirate is fully fitted. */
+  pirateCap = 0;
+  blackMarket: BlackMarket | null = null;
+  /** Seconds until the black market next sets out. */
+  blackMarketTimer = 0;
   /** Traffic gone for good, waiting for the station to replace it. */
   lostTraffic: ShipModel[] = [];
   /** The ship most recently hit by a shot, if that was recent. */
@@ -488,6 +532,10 @@ export class Sim {
     this.deposits = [];
     this.haulerTimer = this.tuning.haulerFirst;
     this.pirateOre = this.tuning.pirateStartOre;
+    this.pirateCredits = this.tuning.pirateStartCredits;
+    this.pirateCap = this.tuning.pirateLimit;
+    this.blackMarket = null;
+    this.blackMarketTimer = this.tuning.blackMarketFirst;
     this.lostTraffic = [];
     this.fighters = [];
     for (let i = 0; i < this.tuning.pirates; i++) {
@@ -1621,8 +1669,9 @@ export class Sim {
     this.spendStationParts();
     this.buyBlueprints();
     this.buildProjects(dt);
-    this.spendPirateOre();
+    this.spendPirateCredits();
     this.moveHauler(dt);
+    this.moveBlackMarket(dt);
     if (this.tuning.chatter) this.chatter.update(this, dt);
   }
 
@@ -2155,13 +2204,13 @@ export class Sim {
     this.dropOre(ship);
     const { rebuildCost } = this.tuning;
     const account = this.accountOf(ship);
-    // A pirate is rebuilt from its base's pile, or it's gone for good.
+    // A pirate is rebuilt from its base's money, or it's gone for good.
     if (ship.faction === "pirate") {
-      if (this.pirateOre < this.stockFor(rebuildCost)) {
+      if (this.pirateCredits < rebuildCost) {
         this.removeShip(ship);
         return;
       }
-      this.pirateOre -= this.stockFor(rebuildCost);
+      this.pirateCredits -= rebuildCost;
       ship.upkeep += rebuildCost;
       this.respawn(ship);
       return;
@@ -2211,16 +2260,171 @@ export class Sim {
     if (this.distress?.ship === ship) this.distress = null;
   }
 
-  /** The pirate base builds more pirates from ore beyond its reserve, up to its limit. */
-  private spendPirateOre(): void {
+  private get pirateShips(): Ship[] {
+    return this.fighters.filter((pilot) => pilot.ship.faction === "pirate").map((pilot) => pilot.ship);
+  }
+
+  /** The pirate base builds more pirates from money beyond its reserve, up to its cap. */
+  private spendPirateCredits(): void {
     const { tuning, pirateBase } = this;
     if (!pirateBase || tuning.defenderPrice <= 0) return;
-    const pirates = this.fighters.filter((pilot) => pilot.ship.faction === "pirate").length;
-    if (pirates >= tuning.pirateLimit) return;
-    const price = this.stockFor(tuning.defenderPrice);
-    if (this.pirateOre - tuning.stationReserveParts < price) return;
-    this.pirateOre -= price;
+    if (this.pirateShips.length >= this.pirateCap) return;
+    if (this.pirateCredits - tuning.pirateReserve < tuning.defenderPrice) return;
+    this.pirateCredits -= tuning.defenderPrice;
     this.addFighter(pirateBase.x, pirateBase.y, "pirate");
+  }
+
+  /** The parts a pirate still lacks that would fit it, in the order the base buys them. */
+  pirateWishlist(ship: Ship): PartId[] {
+    return PIRATE_PARTS.filter((id) => !ship.parts.has(id) && partFits(PARTS.find((part) => part.id === id)!, ship.model));
+  }
+
+  /**
+   * While the black market is berthed, the base buys parts for the pirates at home, one at
+   * a time. Once every pirate has everything and the base is at its cap, it buys a new hull,
+   * which raises the cap, up to the most it may have.
+   */
+  private tradeWithBlackMarket(): void {
+    const { tuning } = this;
+    const spare = this.pirateCredits - tuning.pirateReserve;
+    const pirates = this.pirateShips;
+    for (const ship of pirates) {
+      if (!this.isHome(ship)) continue;
+      const next = this.pirateWishlist(ship)[0];
+      if (!next) continue;
+      const price = this.partPrice(next);
+      if (spare < price) return;
+      this.pirateCredits -= price;
+      ship.parts.add(next);
+      ship.upkeep += price;
+      this.events.push({ type: "sale", x: ship.x, y: ship.y });
+      return;
+    }
+    const fitted = pirates.every((ship) => this.pirateWishlist(ship).length === 0);
+    if (!fitted || pirates.length < this.pirateCap || this.pirateCap >= tuning.pirateCapMax) return;
+    if (spare < tuning.pirateHullPrice) return;
+    this.pirateCredits -= tuning.pirateHullPrice;
+    this.pirateCap++;
+    if (tuning.chatter) this.chatter.blackMarketHull(this);
+  }
+
+  /** Where the black market berths at the pirate base, and the way it comes and goes. */
+  private blackMarketLane(): { x: number; y: number; dx: number; dy: number } | null {
+    const base = this.pirateBase;
+    if (!base) return null;
+    const away = Math.hypot(base.x - this.station.x, base.y - this.station.y) || 1;
+    const dx = (base.x - this.station.x) / away;
+    const dy = (base.y - this.station.y) / away;
+    return { x: base.x + dx * BLACK_MARKET_BERTH, y: base.y + dy * BLACK_MARKET_BERTH, dx, dy };
+  }
+
+  /**
+   * The black market comes in along its lane, braking all the way, berths beside the pirate
+   * base to trade for a while, then speeds off the way it came. It keeps pace with the base.
+   */
+  private moveBlackMarket(dt: number): void {
+    const { tuning } = this;
+    const lane = this.blackMarketLane();
+    if (!lane) return;
+    let market = this.blackMarket;
+    if (!market) {
+      if (tuning.blackMarketInterval <= 0) return;
+      this.blackMarketTimer -= dt;
+      if (this.blackMarketTimer > 0) return;
+      this.blackMarketTimer = tuning.blackMarketInterval;
+      const x = lane.x + lane.dx * BLACK_MARKET_APPROACH;
+      const y = lane.y + lane.dy * BLACK_MARKET_APPROACH;
+      market = { stage: "arriving", time: 0, x, y, px: x, py: y, angle: 0, speed: 0, burn: 0, cargo: 0, loadTimer: 0 };
+      this.blackMarket = market;
+    }
+    market.px = market.x;
+    market.py = market.y;
+    market.time += dt;
+    market.burn = 0;
+    // Its place along the lane: how far out from the berth.
+    let out = (market.x - lane.x) * lane.dx + (market.y - lane.y) * lane.dy;
+    if (market.stage === "arriving") {
+      // Inward is negative speed. Brakes so it stops right at the berth.
+      const most = Math.min(BLACK_MARKET_SPEED, Math.sqrt(2 * BLACK_MARKET_ACCELERATION * Math.max(0, out)));
+      const want = -most;
+      const change = Math.max(-BLACK_MARKET_ACCELERATION * dt, Math.min(BLACK_MARKET_ACCELERATION * dt, want - market.speed));
+      if (Math.abs(change) > 1e-9) market.burn = change > 0 === market.speed < 0 ? -1 : 1;
+      market.speed += change;
+      out = Math.max(0, out + market.speed * dt);
+      if (out <= 0.5) {
+        out = 0;
+        market.speed = 0;
+        market.stage = "berthed";
+        market.time = 0;
+        if (tuning.chatter) this.chatter.blackMarketArrived(this);
+      }
+    } else if (market.stage === "berthed") {
+      out = 0;
+      this.loadBlackMarket(market, dt);
+      this.tradeWithBlackMarket();
+      if (market.time >= BLACK_MARKET_STAY) {
+        market.stage = "leaving";
+        market.time = 0;
+        if (tuning.chatter) this.chatter.blackMarketLeaving(this, market.cargo);
+      }
+    } else {
+      market.speed = Math.min(BLACK_MARKET_SPEED, market.speed + BLACK_MARKET_ACCELERATION * dt);
+      market.burn = market.speed < BLACK_MARKET_SPEED ? 1 : 0;
+      out += market.speed * dt;
+      if (out > BLACK_MARKET_APPROACH) {
+        this.blackMarket = null;
+        return;
+      }
+    }
+    // Along the lane from the berth, which moves with the base.
+    market.x = lane.x + lane.dx * out;
+    market.y = lane.y + lane.dy * out;
+    market.angle = Math.atan2(lane.dy, lane.dx) + (market.stage === "leaving" ? 0 : Math.PI);
+  }
+
+  /** It buys the base's ore at its own price, paid to the pirates, up to what it holds. */
+  private loadBlackMarket(market: BlackMarket, dt: number): void {
+    const { tuning } = this;
+    market.loadTimer += dt * BLACK_MARKET_LOAD_RATE;
+    while (market.loadTimer >= 1) {
+      market.loadTimer -= 1;
+      if (this.pirateOre < 1 || market.cargo >= tuning.blackMarketCapacity) {
+        market.loadTimer = 0;
+        return;
+      }
+      this.pirateOre--;
+      market.cargo++;
+      this.pirateCredits += tuning.blackMarketPays;
+    }
+  }
+
+  /** How much ore the pirate base would sell this ship: only to an empty hold, close by. */
+  pirateBaseBuyable(ship: Ship): number {
+    const base = this.pirateBase;
+    if (!base || ship.faction === "pirate" || ship.ore > 0) return 0;
+    if (Math.hypot(ship.x - base.x, ship.y - base.y) > this.tuning.pirateBaseReach) return 0;
+    const { depositSells } = this.tuning;
+    const affordable = depositSells > 0 ? Math.floor(this.accountOf(ship).credits / depositSells) : Infinity;
+    return Math.max(0, Math.min(Math.floor(this.pirateOre), affordable, this.cargoSpace(ship)));
+  }
+
+  /** Whether a ship is close enough to the pirate base to trade there. */
+  atPirateBase(ship: Ship = this.ship): boolean {
+    const base = this.pirateBase;
+    return !!base && Math.hypot(ship.x - base.x, ship.y - base.y) <= this.tuning.pirateBaseReach;
+  }
+
+  /** Buys a full hold from the pirate base, at the deposit's price. Returns how much. */
+  buyFromPirateBase(ship: Ship): number {
+    const amount = this.pirateBaseBuyable(ship);
+    if (amount <= 0) return 0;
+    const credits = amount * this.tuning.depositSells;
+    this.pirateOre -= amount;
+    ship.ore += amount;
+    this.accountOf(ship).credits -= credits;
+    this.pirateCredits += credits;
+    this.events.push({ type: "sale", x: ship.x, y: ship.y });
+    return amount;
   }
 
   /**
@@ -2527,7 +2731,7 @@ export class Sim {
   /** Whether the ship has the money for a hull point, and its dock the ore. */
   canPayRepair(ship: Ship): boolean {
     const { repairCost } = this.tuning;
-    if (ship.faction === "pirate") return this.pirateOre >= this.stockFor(repairCost);
+    if (ship.faction === "pirate") return this.pirateCredits >= repairCost;
     if (!this.hasPartsFor(repairCost)) return false;
     return ship.faction === "defender" || this.accountOf(ship).credits >= repairCost;
   }
@@ -2548,7 +2752,7 @@ export class Sim {
     while (ship.repairTimer >= 1 && this.canRepair(ship)) {
       ship.repairTimer -= 1;
       ship.hull = Math.min(MAX_HULL, ship.hull + 1);
-      if (ship.faction === "pirate") this.pirateOre -= this.stockFor(tuning.repairCost);
+      if (ship.faction === "pirate") this.pirateCredits -= tuning.repairCost;
       else this.chargeForService(this.accountOf(ship), tuning.repairCost);
       ship.upkeep += tuning.repairCost;
     }

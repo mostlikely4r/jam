@@ -1,6 +1,8 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
 import {
+  BLACK_MARKET_LENGTH,
+  BLACK_MARKET_WIDTH,
   DEPOSIT_HALF,
   DOCK_OFFSET,
   HAULER_LENGTH,
@@ -224,6 +226,7 @@ export class Renderer {
     this.drawDeposits(sim, alpha);
     this.drawGuards(sim, alpha);
     this.drawHauler(sim, alpha);
+    this.drawBlackMarket(sim, alpha);
     this.drawPirateBase(sim, alpha);
     if (tuning.showPoiZones) this.drawPoiZones(sim, alpha);
     this.drawClickTarget(sim, alpha);
@@ -785,6 +788,30 @@ export class Renderer {
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
+  }
+
+  /** The black market's freighter: dark, with a red stripe, and flames when it burns. */
+  private drawBlackMarket(sim: Sim, alpha: number): void {
+    const market = sim.blackMarket;
+    if (!market) return;
+    const { ctx } = this;
+    const half = BLACK_MARKET_LENGTH / 2;
+    ctx.save();
+    ctx.translate(lerp(market.px, market.x, alpha), lerp(market.py, market.y, alpha));
+    ctx.rotate(market.angle);
+    // Burning forward speeds it up; braking fires from the nose.
+    if (market.burn > 0) this.drawFlame(-half - 4, 0, Math.PI, 3, 12);
+    if (market.burn < 0) this.drawFlame(half + 4, 0, 0, 3, 12);
+    ctx.fillStyle = "#2a2226";
+    ctx.strokeStyle = "#7a3a3a";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.rect(-half, -BLACK_MARKET_WIDTH / 2, BLACK_MARKET_LENGTH, BLACK_MARKET_WIDTH);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#b8483c";
+    ctx.fillRect(-half, -4, BLACK_MARKET_LENGTH, 8);
+    ctx.restore();
   }
 
   /** A long freighter, its cargo shown as lumps that fill it as it loads. */

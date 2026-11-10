@@ -164,12 +164,37 @@ function updateDepositShop(deposit: Deposit): void {
   );
 }
 
+function updatePirateShop(): void {
+  const { ship } = sim;
+  const title = `Pirate base - ${Math.floor(sim.pirateOre)} ore for sale at ${tuning.depositSells} each`;
+  if (shopHeading.textContent !== title) shopHeading.textContent = title;
+  const amount = sim.pirateBaseBuyable(ship);
+  const state = `pirate ${ship.ore} ${sim.cargoSpace(ship)} ${ship.credits} ${Math.floor(sim.pirateOre)} ${tuning.depositSells}`;
+  if (state === shopState) return;
+  shopState = state;
+  shop.hidden = false;
+  const each = tuning.depositSells;
+  const line: ShopLine =
+    ship.ore > 0
+      ? { tag: "hold not empty", style: "poor", text: "They only sell to an empty hold", enabled: false }
+      : sim.pirateOre < 1
+        ? { tag: "empty", text: `Ore here costs ${each} credits each`, enabled: false }
+        : amount <= 0
+          ? { tag: "not enough money", style: "poor", text: `Ore here costs ${each} credits each`, enabled: false }
+          : { tag: "buy", style: "buy", text: `Load ${amount} ore for ${amount * each} credits. The station pays ${amount * tuning.creditsPerOre}`, enabled: true };
+  shop.replaceChildren(shopHeading, shopButton("1", line, () => sim.buyFromPirateBase(ship)));
+}
+
 function updateShop(): void {
   const { ship } = sim;
   const docked = sim.isDocked();
   const deposit = docked ? null : sim.depositAt();
   if (deposit) {
     updateDepositShop(deposit);
+    return;
+  }
+  if (!docked && sim.atPirateBase()) {
+    updatePirateShop();
     return;
   }
   if (docked) {
@@ -446,6 +471,7 @@ window.addEventListener("keydown", (event) => {
   const deposit = sim.isDocked() ? null : sim.depositAt();
   if (deposit && event.code === "Digit1") sim.sellToDeposit(sim.ship, deposit);
   if (deposit && event.code === "Digit2") sim.buyFromDeposit(sim.ship, deposit);
+  if (!deposit && !sim.isDocked() && sim.atPirateBase() && event.code === "Digit1") sim.buyFromPirateBase(sim.ship);
   if (event.code === "Equal" && sim.isDocked() && PARTS[10]) tradePart(PARTS[10]);
   if (event.code === "Minus" && sim.isDocked()) tradeDrone();
   keys.add(event.code);
@@ -634,7 +660,7 @@ function frame(now: number): void {
           )
         : []),
       ...(tuning.showTraffic
-        ? [`Station balance ${sim.stationAccount.credits}  Ore held ${Math.floor(sim.stationOre)}  Parts held ${Math.floor(sim.stationParts)}  Next blueprint ${sim.blueprintQueue()[0] ?? "none"}${sim.deposits.some((deposit) => deposit.partsLeft > 0) ? "  Building deposit" : ""}  Lost traffic ${sim.lostTraffic.length}  Pirate base ore ${Math.floor(sim.pirateOre)}`]
+        ? [`Station balance ${sim.stationAccount.credits}  Ore held ${Math.floor(sim.stationOre)}  Parts held ${Math.floor(sim.stationParts)}  Next blueprint ${sim.blueprintQueue()[0] ?? "none"}${sim.deposits.some((deposit) => deposit.partsLeft > 0) ? "  Building deposit" : ""}  Lost traffic ${sim.lostTraffic.length}  Pirate base ore ${Math.floor(sim.pirateOre)} credits ${Math.floor(sim.pirateCredits)} pirates ${sim.fighters.filter((pilot) => pilot.ship.faction === "pirate").length}/${sim.pirateCap}${sim.blackMarket ? `  Black market ${sim.blackMarket.stage}` : ""}`]
         : []),
       `FPS   ${Math.round(fps)}${paused ? "  PAUSED" : ""}`,
     ].join("\n");

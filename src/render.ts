@@ -22,6 +22,13 @@ const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
 /** How long the mark where a pirate was last seen takes to fade away. */
 const GHOST_MILLISECONDS = 30000;
 const PING_SECONDS = 1.4;
+/** After a wreck the view stays on it, fades to black, and fades back in on the rebuilt ship. */
+const WRECK_WATCH_SECONDS = 2;
+const WRECK_FADE_SECONDS = 0.4;
+/** Cargo lumps drawn on a ship when its hold is full. */
+const CARGO_LUMPS = 9;
+/** A pointer to a place only shows within this many screen widths of it. */
+const POINTER_SCREENS = 2;
 /** A ping from off screen: how long it shows, how deep it reaches in and how much of the edge it covers, as shares of the screen, and how far off its direction may be. */
 const EDGE_PING_SECONDS = 2;
 const EDGE_PING_DEPTH = 0.1;
@@ -88,6 +95,19 @@ export class Renderer {
   private ghosts = new WeakMap<Ship, { poi: Poi; x: number; y: number; seenAt: number }>();
   private stars: Star[] = [];
   private flash = 0;
+  /** Shows what strangers shouldn't need: pointers to every ship. */
+  dev = false;
+  /** The player's wreck, watched for a moment before the view returns to the rebuilt ship. */
+  private wreck: { x: number; y: number; age: number } | null = null;
+  /** The world being drawn, for details drawn deep inside. */
+  private sim: Sim | null = null;
+  /** Each ship's own scatter of cargo lumps. */
+  private cargoSeeds = new WeakMap<Ship, number>();
+
+  /** Whether the player is watching their wreck, and shouldn't be flying. */
+  get watchingWreck(): boolean {
+    return this.wreck !== null && this.wreck.age < WRECK_WATCH_SECONDS + WRECK_FADE_SECONDS;
+  }
   private view = { camX: 0, camY: 0, scale: 1, dpr: 1, width: 0, height: 0 };
   /** A right drag in progress, in screen pixels, for its preview. */
   drag: {
@@ -158,7 +178,10 @@ export class Renderer {
           break;
         case "wreck":
           this.burst(event.x, event.y, 50, "#ffb36b", 320, 1, 3);
-          if (event.player) this.flash = 0.7;
+          if (event.player) {
+            this.flash = 0.7;
+            this.wreck = { x: event.x, y: event.y, age: 0 };
+          }
           break;
         case "shot":
           break;
@@ -206,8 +229,12 @@ export class Renderer {
     const { ship, tuning } = sim;
     const shipX = lerp(ship.px, ship.x, alpha);
     const shipY = lerp(ship.py, ship.y, alpha);
-    const camX = shipX + ship.vx * tuning.lookahead;
-    const camY = shipY + ship.vy * tuning.lookahead;
+    this.sim = sim;
+    if (this.wreck) this.wreck.age += frameSeconds;
+    if (this.wreck && this.wreck.age > WRECK_WATCH_SECONDS + WRECK_FADE_SECONDS * 2) this.wreck = null;
+    const onWreck = this.wreck !== null && this.wreck.age < WRECK_WATCH_SECONDS + WRECK_FADE_SECONDS;
+    const camX = onWreck ? this.wreck!.x : shipX + ship.vx * tuning.lookahead;
+    const camY = onWreck ? this.wreck!.y : shipY + ship.vy * tuning.lookahead;
     const scale = tuning.zoom * dpr;
     this.view = { camX, camY, scale, dpr, width, height };
 
@@ -255,6 +282,15 @@ export class Renderer {
     this.drawEdgePings(alpha);
     this.drawPointers(sim, width, height, scale, dpr);
     this.drawDrag(sim, scale, dpr, shipX, shipY, alpha);
+    if (this.wreck) {
+      // Black at the switch from the wreck to the rebuilt ship, fading either side of it.
+      const fromSwitch = Math.abs(this.wreck.age - (WRECK_WATCH_SECONDS + WRECK_FADE_SECONDS));
+      const dark = Math.max(0, 1 - fromSwitch / WRECK_FADE_SECONDS);
+      if (dark > 0) {
+        ctx.fillStyle = `rgba(0, 0, 0, ${dark})`;
+        ctx.fillRect(0, 0, width, height);
+      }
+    }
     if (this.flash > 0) {
       ctx.fillStyle = `rgba(255, 70, 50, ${this.flash * 0.35})`;
       ctx.fillRect(0, 0, width, height);
@@ -988,6 +1024,7 @@ export class Renderer {
       ctx.closePath();
       ctx.fill();
     }
+    this.drawCargo(ship);
     if (ship.parts.has("turret")) {
       const turn = Math.atan2(
         Math.sin(ship.turretAngle - ship.prevTurretAngle),
@@ -1006,6 +1043,47 @@ export class Renderer {
       ctx.stroke();
     }
     ctx.restore();
+    this.drawStanding(ship, x, y);
+  }
+
+  /** Lumps of ore on the hull, more the fuller the hold, scattered the same way each time for this ship. */
+  private drawCargo(ship: Ship): void {
+    const sim = this.sim;
+    if (!sim || ship.ore <= 0) return;
+    const { ctx } = this;
+    const share = Math.min(1, ship.ore / Math.max(1, sim.cargoSpace(ship)));
+    const lumps = Math.max(1, Math.round(share * CARGO_LUMPS));
+    let seed = this.cargoSeeds.get(ship);
+    if (seed === undefined) {
+      seed = Math.floor(Math.random() * 1e6);
+      this.cargoSeeds.set(ship, seed);
+    }
+    const r = SHIP_RADIUS;
+    for (let i = 0; i < lumps; i++) {
+      const a = hash(seed + i * 3);
+      const b = hash(seed + i * 3 + 1);
+      const size = 1.6 + hash(seed + i * 3 + 2) * 1.4;
+      ctx.fillStyle = ORE_COLORS[(seed + i) % ORE_COLORS.length];
+      ctx.fillRect(-r * 0.7 + a * r * 1.1 - size / 2, (b - 0.5) * r * 0.9 - size / 2, size, size);
+    }
+  }
+
+  /** A faint red ring while pirates have marked the ship, and a blinking light while it's wanted. */
+  private drawStanding(ship: Ship, x: number, y: number): void {
+    const { ctx } = this;
+    if (ship.marked) {
+      ctx.strokeStyle = "rgba(235, 90, 80, 0.45)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, SHIP_RADIUS + 7, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (ship.wanted && Math.floor(performance.now() / 400) % 2 === 0) {
+      ctx.fillStyle = "#ff4a3d";
+      ctx.beginPath();
+      ctx.arc(x, y - SHIP_RADIUS - 9, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   /** Exhaust in the ship's local space: `direction` is where the flame points. */
@@ -1028,14 +1106,20 @@ export class Renderer {
     const viewHalfWidth = width / 2 / scale;
     const viewHalfHeight = height / 2 / scale;
     const meters = sim.ship.parts.has("meters");
+    // Only the big places anyone knows about, and only once they're close.
+    const near = viewHalfWidth * 2 * POINTER_SCREENS;
     const field = sim.readPoi(sim.field, viewHalfWidth, viewHalfHeight);
-    if (field.distance > 0) {
+    if (field.distance > 0 && (field.distance < near || this.dev)) {
       this.drawPointer(field, "#8fb4ff", "field", 0.34, meters, width, height, dpr);
     }
     const station = sim.readPoi(sim.station, viewHalfWidth, viewHalfHeight);
-    if (station.distance > 0) {
-      this.drawPointer(station, "#8fe3a1", "station", 0.22, meters, width, height, dpr);
+    if (station.distance > 0 && (station.distance < near || this.dev)) {
+      // It flashes once the hold is full: time to go and sell.
+      const full = sim.ship.ore >= sim.cargoSpace(sim.ship);
+      const lit = full && Math.floor(performance.now() / 350) % 2 === 0;
+      this.drawPointer(station, lit ? "#f4fff6" : "#8fe3a1", "station", 0.22, meters, width, height, dpr);
     }
+    if (!this.dev) return;
     for (let i = 0; i < sim.drones.length; i++) {
       const drone = sim.drones[i];
       const reading = sim.readShip(drone.ship, viewHalfWidth, viewHalfHeight);
@@ -1143,4 +1227,10 @@ export class Renderer {
     ctx.lineTo(x - 3 * dpr, 5 * dpr);
     ctx.closePath();
   }
+}
+
+/** A repeatable number from 0 to 1 for a whole number. */
+function hash(n: number): number {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
 }

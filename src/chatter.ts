@@ -88,6 +88,8 @@ const MAYDAY_COOLDOWN = 30;
 const THANKS_COOLDOWN = 180;
 const GREETING_COOLDOWN = 120;
 const STATION_REPLY_DELAY = 1.5;
+/** Long enough for the wreck to play out on screen first. */
+const PLAYER_REBUILT_DELAY = 2.6;
 const FIELD_CHATTER_MIN = 150;
 const FIELD_CHATTER_MAX = 360;
 /** Ore picked up at least this far from the player counts as taken, not shared. */
@@ -346,8 +348,15 @@ export class Chatter {
     sim.events.push({ type: "chatter", speaker: null, name: "Station", text, x: dock.x, y: dock.y, mayday: false, broadcast });
   }
 
-  private reply(text: string): void {
-    this.replies.push({ at: this.time + STATION_REPLY_DELAY, text });
+  private reply(text: string, delay = STATION_REPLY_DELAY): void {
+    this.replies.push({ at: this.time + delay, text });
+  }
+
+  /** The player's ship was wrecked and rebuilt in the dock. Said once the wreck has been watched. */
+  playerRebuilt(cost: number, cleared: boolean): void {
+    const price = cost > 0 ? ` That's ${cost} credits.` : "";
+    const record = cleared ? " Fresh hull, clean record." : "";
+    this.reply(`We've rebuilt your ship.${price}${record}`, PLAYER_REBUILT_DELAY);
   }
 
   private ready(ship: Ship, kind: string, cooldown: number): boolean {

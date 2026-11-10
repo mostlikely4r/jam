@@ -2121,6 +2121,22 @@ describe("pirate and defender", () => {
       expect(sim.ship.credits).toBe(-300);
     });
 
+    it("once the wreck has played out, the station says what the new ship cost and that the record is clean", () => {
+      const sim = arena({ rebuildCost: 300 });
+      pin(sim.ship, sim.station.x + 3000, sim.station.y);
+      sim.ship.hull = 1;
+      sim.ship.marked = true;
+      shoot(sim, sim.ship, { ...sim.ship });
+      const said: string[] = [];
+      for (let i = 0; i < Math.round(4 / TICK); i++) {
+        sim.step();
+        for (const event of sim.events) if (event.type === "chatter") said.push(event.text);
+        sim.events.length = 0;
+      }
+      expect(sim.ship.wrecks).toBe(1);
+      expect(said).toContain("We've rebuilt your ship. That's 300 credits. Fresh hull, clean record.");
+    });
+
     it("the player's rebuilt ship starts in the dock, safe from what wrecked it", () => {
       const sim = arena();
       pin(sim.ship, sim.station.x + 3000, sim.station.y);

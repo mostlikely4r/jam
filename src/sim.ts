@@ -2236,7 +2236,9 @@ export class Sim {
     }
     this.chargeForService(account, rebuildCost);
     ship.upkeep += rebuildCost;
+    const cleared = ship.marked || ship.wanted;
     this.respawn(ship);
+    if (player && this.tuning.chatter) this.chatter.playerRebuilt(rebuildCost, cleared);
   }
 
   /** A wreck's cargo stays in the world for anyone to collect. */

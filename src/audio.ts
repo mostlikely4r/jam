@@ -3,6 +3,8 @@ import type { SimEvent } from "./sim";
 /** Placeholder synthesized sounds. Feel is hard to judge in silence. */
 export class Audio {
   muted = false;
+  /** Master volume, 0 to 1. */
+  volume = 0.5;
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private engine: GainNode | null = null;
@@ -17,7 +19,7 @@ export class Audio {
     const ctx = new AudioContext();
     this.ctx = ctx;
     this.master = ctx.createGain();
-    this.master.gain.value = 0.5;
+    this.master.gain.value = this.muted ? 0 : this.volume;
     this.master.connect(ctx.destination);
 
     const length = ctx.sampleRate;
@@ -39,7 +41,16 @@ export class Audio {
 
   toggleMute(): void {
     this.muted = !this.muted;
-    if (this.master) this.master.gain.value = this.muted ? 0 : 0.5;
+    this.applyGain();
+  }
+
+  setVolume(volume: number): void {
+    this.volume = volume;
+    this.applyGain();
+  }
+
+  private applyGain(): void {
+    if (this.master) this.master.gain.value = this.muted ? 0 : this.volume;
   }
 
   setThrust(active: boolean): void {

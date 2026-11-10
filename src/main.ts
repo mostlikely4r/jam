@@ -51,6 +51,36 @@ const panel = document.getElementById("panel") as HTMLDivElement;
 const shop = document.getElementById("shop") as HTMLDivElement;
 const renderer = new Renderer(canvas);
 const audio = new Audio();
+/** `?dev` on the address shows the tuning panel, the status lines and every pointer. */
+const dev = new URLSearchParams(location.search).has("dev");
+renderer.dev = dev;
+hud.hidden = !dev;
+const pauseBox = document.querySelector("#pause .box") as HTMLDivElement;
+const pauseOverlay = document.getElementById("pause") as HTMLDivElement;
+
+/** The player's own settings, kept apart from the tuning. */
+const SETTINGS_KEY = "jam-settings";
+const settings = loadSettings();
+audio.volume = settings.volume;
+audio.muted = settings.muted;
+
+function loadSettings(): { volume: number; muted: boolean } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}");
+    return {
+      volume: typeof saved.volume === "number" ? saved.volume : 0.5,
+      muted: saved.muted === true,
+    };
+  } catch {
+    return { volume: 0.5, muted: false };
+  }
+}
+
+function saveSettings(): void {
+  settings.volume = audio.volume;
+  settings.muted = audio.muted;
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
 
 const keys = new Set<string>();
 let paused = false;
@@ -60,6 +90,141 @@ function restart(): void {
   seed++;
   sim.reset(seed);
   buildPanel();
+}
+
+/** The keys and mouse, in groups, for the help page. */
+const HELP: [string, [string, string][]][] = [
+  [
+    "Flying",
+    [
+      ["W / S", "Thrust forward and back (back needs the reverse thruster)"],
+      ["A / D", "Strafe left and right (needs strafe thrusters)"],
+      ["Q / E or arrows", "Rotate"],
+      ["Shift + a flight key", "Ramp that thruster up gently, and back down when you let go"],
+      ["X", "Retro on or off: holds you still against what you're near (needs the part)"],
+      ["Space", "Fire"],
+      ["Mouse wheel", "Zoom"],
+    ],
+  ],
+  [
+    "Mouse orders (need the click parts)",
+    [
+      ["Right click", "Shift there, keeping your motion"],
+      ["Double right click", "Move there and stop"],
+      ["Right drag", "Move there and keep drifting the way you drew"],
+      ["Right drag from your ship", "Hold a facing"],
+      ["Right drag from the destination", "Nudge its drift"],
+      ["Right click your ship", "Stop, or cancel an order"],
+      ["Flight keys", "Take over for a moment; the order carries on after"],
+    ],
+  ],
+  [
+    "Trading",
+    [
+      ["In the dock: 1 to 9, 0, =", "Buy or sell a part"],
+      ["In the dock: -", "Buy a drone"],
+      ["At a deposit: 1 / 2", "Drop your ore / load ore to haul"],
+      ["Elsewhere: 1", "Buy ore where someone's selling"],
+    ],
+  ],
+  [
+    "Game",
+    [
+      ["Esc or P", "Pause, and this menu"],
+      ["M", "Mute"],
+    ],
+  ],
+];
+
+let confirmingNewGame = false;
+
+/** Pauses with the menu open, or resumes with it closed. */
+function setPaused(on: boolean): void {
+  paused = on;
+  pauseOverlay.hidden = !on;
+  if (on) showPage("main");
+}
+
+function menuButton(text: string, onClick: () => void, className = ""): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.textContent = text;
+  button.className = className;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function heading(text: string, level: "h1" | "h2" = "h2"): HTMLElement {
+  const element = document.createElement(level);
+  element.textContent = text;
+  return element;
+}
+
+function showPage(page: "main" | "help" | "settings"): void {
+  const title = heading("JAM", "h1");
+  const sub = document.createElement("p");
+  sub.className = "sub";
+  sub.textContent = "Just another asteroid miner";
+  const back = menuButton("Back", () => showPage("main"), "back");
+  if (page === "main") {
+    confirmingNewGame = false;
+    const newGame = menuButton("New game", () => {
+      if (!confirmingNewGame) {
+        confirmingNewGame = true;
+        newGame.textContent = "New game - your ship and money are lost. Click again to start over";
+        return;
+      }
+      restart();
+      setPaused(false);
+    }, "danger");
+    pauseBox.replaceChildren(
+      title,
+      sub,
+      menuButton("Resume", () => setPaused(false)),
+      menuButton("Help", () => showPage("help")),
+      menuButton("Settings", () => showPage("settings")),
+      newGame,
+    );
+    return;
+  }
+  if (page === "help") {
+    const intro = document.createElement("p");
+    intro.textContent =
+      "Shoot rocks to break off ore, fly through it to pick it up, and sell it in the station's dock. Spend what you earn on parts.";
+    const parts: HTMLElement[] = [title, sub, intro];
+    for (const [group, rows] of HELP) {
+      parts.push(heading(group));
+      const table = document.createElement("table");
+      for (const [key, what] of rows) {
+        const row = table.insertRow();
+        row.insertCell().textContent = key;
+        row.insertCell().textContent = what;
+      }
+      parts.push(table);
+    }
+    pauseBox.replaceChildren(...parts, back);
+    return;
+  }
+  const volume = document.createElement("input");
+  volume.type = "range";
+  volume.min = "0";
+  volume.max = "100";
+  volume.value = String(Math.round(audio.volume * 100));
+  volume.addEventListener("input", () => {
+    audio.setVolume(Number(volume.value) / 100);
+    saveSettings();
+  });
+  const volumeLabel = document.createElement("label");
+  volumeLabel.textContent = "Volume";
+  const mute = document.createElement("label");
+  const muteBox = document.createElement("input");
+  muteBox.type = "checkbox";
+  muteBox.checked = audio.muted;
+  muteBox.addEventListener("change", () => {
+    if (muteBox.checked !== audio.muted) audio.toggleMute();
+    saveSettings();
+  });
+  mute.append(muteBox, " Mute (M)");
+  pauseBox.replaceChildren(title, sub, heading("Settings"), volumeLabel, volume, mute, back);
 }
 
 /** Buys a part, or sells it back if the ship already has it. */
@@ -438,6 +603,11 @@ function updateThrottle(seconds: number): void {
 
 function readControls(seconds: number): void {
   updateThrottle(seconds);
+  // Watching the wreck: the rebuilt ship waits in the dock until the view gets there.
+  if (renderer.watchingWreck) {
+    Object.assign(sim.controls, { thrust: 0, strafe: 0, turn: 0, fire: false });
+    return;
+  }
   sim.controls.fire = keys.has("Space");
   const thrust = throttle.forward - throttle.back;
   const strafe = throttle.right - throttle.left;
@@ -452,16 +622,25 @@ function readControls(seconds: number): void {
 
 window.addEventListener("keydown", (event) => {
   audio.start();
+  if (event.code === "Escape" || event.code === "KeyP") {
+    if (!event.repeat) setPaused(!paused);
+    return;
+  }
+  if (event.code === "KeyM" && !event.repeat) {
+    audio.toggleMute();
+    saveSettings();
+    return;
+  }
+  // The menu is up: the game waits.
+  if (paused) return;
   if (event.code === "Tab") {
     event.preventDefault();
-    panel.hidden = !panel.hidden;
+    if (dev) panel.hidden = !panel.hidden;
     return;
   }
   if (event.code === "Space" || event.code.startsWith("Arrow")) event.preventDefault();
   if (event.repeat) return;
-  if (event.code === "KeyR") restart();
-  if (event.code === "KeyP") paused = !paused;
-  if (event.code === "KeyM") audio.toggleMute();
+  if (event.code === "KeyR" && dev) restart();
   if (event.code === "KeyX") setRetro(!tuning.retro);
   const digit = /^Digit([0-9])$/.exec(event.code);
   if (digit && sim.isDocked()) {
@@ -477,7 +656,11 @@ window.addEventListener("keydown", (event) => {
   keys.add(event.code);
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));
-window.addEventListener("blur", () => keys.clear());
+window.addEventListener("blur", () => {
+  keys.clear();
+  // Gone to another window: the game shouldn't carry on without you.
+  if (!paused) setPaused(true);
+});
 /** Shorter drags than this, in screen pixels, count as a click. */
 const DRAG_PIXELS = 10;
 /** A second right click this soon after the first, in the same place, makes a double click. */
@@ -507,7 +690,7 @@ function dragStart(clientX: number, clientY: number): DragStart {
 
 canvas.addEventListener("mousedown", (event) => {
   audio.start();
-  if (event.button !== 2) return;
+  if (event.button !== 2 || renderer.watchingWreck) return;
   const { clientX: x, clientY: y } = event;
   drag = { fromX: x, fromY: y, toX: x, toY: y, on: dragStart(x, y) };
 });
@@ -627,7 +810,7 @@ function frame(now: number): void {
   renderer.draw(sim, paused ? 1 : accumulator / TICK, paused ? 0 : seconds);
 
   hudTimer -= seconds;
-  if (hudTimer <= 0) {
+  if (dev && hudTimer <= 0) {
     hudTimer = 0.1;
     const speed = Math.hypot(sim.ship.vx, sim.ship.vy);
     const hullBars = Math.max(0, Math.ceil((sim.ship.hull / MAX_HULL) * 10));

@@ -602,6 +602,16 @@ export class DronePilot extends ShipPilot {
     this.brake(sim, -ship.vx, -ship.vy, NEAR_TOLERANCE, null);
   }
 
+  /**
+   * Traffic leaves ore near the player alone unless its own shot broke it loose. The
+   * player's drones work for the player, so they take it.
+   */
+  private leavesForPlayer(sim: Sim, ore: Ore): boolean {
+    const { ship } = this;
+    if (ship.owner || ore.from === ship) return false;
+    return Math.hypot(ore.x - sim.ship.x, ore.y - sim.ship.y) < sim.tuning.trafficOreGap;
+  }
+
   private chooseTargets(sim: Sim): void {
     const { ship } = this;
     this.targetAge += TICK;
@@ -614,7 +624,7 @@ export class DronePilot extends ShipPilot {
       this.rock = null;
       this.retarget = 0;
     }
-    if (this.ore && !sim.ores.includes(this.ore)) {
+    if (this.ore && (!sim.ores.includes(this.ore) || this.leavesForPlayer(sim, this.ore))) {
       this.ore = null;
       this.retarget = 0;
     }
@@ -630,7 +640,7 @@ export class DronePilot extends ShipPilot {
     this.ore = null;
     let best = ORE_SIGHT;
     for (const ore of sim.ores) {
-      if (this.ignored.has(ore)) continue;
+      if (this.ignored.has(ore) || this.leavesForPlayer(sim, ore)) continue;
       const distance = Math.hypot(ore.x - ship.x, ore.y - ship.y);
       if (distance < best) {
         best = distance;

@@ -91,6 +91,8 @@ export const DEFAULTS = {
   /** Credits the station holds back before spending on blueprints. */
   stationCashBuffer: 300,
   trafficBuffer: 400,
+  /** Traffic leaves ore it didn't break loose alone within this distance of the player: the size of the dock area. */
+  trafficOreGap: 150,
   droneBuffer: 500,
   /** Puts a deposit in the world without paying for it, for testing. */
   depositFree: false,
@@ -413,6 +415,7 @@ export const GROUPS: Group[] = [
       { key: "blueprintScale", label: "Blueprint price, share of the part's price", min: 0, max: 5, step: 0.05 },
       { key: "stationCashBuffer", label: "Credits the station holds back from blueprints", min: 0, max: 5000, step: 50 },
       { key: "trafficBuffer", label: "Credits traffic keeps before buying parts", min: 0, max: 3000, step: 50 },
+      { key: "trafficOreGap", label: "Traffic leaves others' ore this close to you alone", min: 0, max: 1000, step: 25 },
       { key: "droneBuffer", label: "Credits your drones leave you before buying parts", min: 0, max: 5000, step: 50 },
     ],
   },

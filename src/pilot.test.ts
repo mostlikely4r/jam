@@ -784,6 +784,29 @@ describe("pirate and defender", () => {
       expect(second.filter((line) => THANKS.includes(line.text))).toEqual([]);
     });
 
+    it("traffic leaves ore near the player alone unless it broke it loose itself; your drones take it", () => {
+      const cases = [
+        { name: "near you, not its own", near: true, own: false, drone: false, taken: false },
+        { name: "near you, its own", near: true, own: true, drone: false, taken: true },
+        { name: "far from you", near: false, own: false, drone: false, taken: true },
+        { name: "near you, your drone", near: true, own: false, drone: true, taken: true },
+      ];
+      for (const test of cases) {
+        const sim = test.drone ? arena({ testDrones: 1 }) : arena({ trafficRacers: 1 });
+        const ship = test.drone ? sim.drones[0].ship : sim.traffic[0].ship;
+        if (test.drone) ship.owner = sim.ship;
+        const ore = { ...looseOre(sim, ship.x + 300, ship.y), from: test.own ? ship : null };
+        sim.ores.push(ore);
+        const playerAt = () => pin(sim.ship, ore.x, ore.y + (test.near ? 120 : 3000));
+        playerAt();
+        run(sim, 15, () => {
+          playerAt();
+          return false;
+        });
+        expect(!sim.ores.includes(ore), test.name).toBe(test.taken);
+      }
+    });
+
     it("no thanks for ore picked up right next to the player, or ore nobody shot", () => {
       const sim = arena({ trafficRacers: 1 });
       const { ship } = sim.traffic[0];

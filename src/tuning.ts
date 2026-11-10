@@ -94,6 +94,8 @@ export const DEFAULTS = {
   /** Hits from one ship before traffic runs home to report it, and how many seconds each hit takes to be forgotten. */
   trafficPatience: 3,
   grudgeFadeSeconds: 60,
+  /** A victim this close to a defender reports to it there and then, instead of flying home. */
+  witnessRange: 800,
   /** Traffic leaves ore it didn't break loose alone within this distance of the player: the size of the dock area. */
   trafficOreGap: 150,
   droneBuffer: 500,
@@ -420,6 +422,7 @@ export const GROUPS: Group[] = [
       { key: "trafficBuffer", label: "Credits traffic keeps before buying parts", min: 0, max: 3000, step: 50 },
       { key: "trafficPatience", label: "Hits from one ship before traffic reports it", min: 1, max: 10, step: 1 },
       { key: "grudgeFadeSeconds", label: "Seconds for each hit to be forgotten", min: 5, max: 600, step: 5 },
+      { key: "witnessRange", label: "Distance at which a victim reports to a defender in person", min: 0, max: 3000, step: 50 },
       { key: "trafficOreGap", label: "Traffic leaves others' ore this close to you alone", min: 0, max: 1000, step: 25 },
       { key: "droneBuffer", label: "Credits your drones leave you before buying parts", min: 0, max: 5000, step: 50 },
     ],

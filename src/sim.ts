@@ -2373,10 +2373,24 @@ export class Sim {
       this.reportWanted(attacker, victim);
       return;
     }
+    // With the law right there, there's no need to run home.
+    if (this.defenderNear(victim)) {
+      this.reportWanted(attacker, victim);
+      return;
+    }
     const pilot = [...this.traffic, ...this.drones].find((candidate) => candidate.ship === victim);
     if (!pilot) return;
     pilot.report(attacker);
     if (this.tuning.chatter) this.chatter.reporting(this, victim, attacker);
+  }
+
+  /** Whether a defender is close enough to `ship` to take a report in person. */
+  defenderNear(ship: Ship): boolean {
+    const { witnessRange } = this.tuning;
+    return this.fighters.some(
+      ({ ship: defender }) =>
+        defender.faction === "defender" && defender.hull > 0 && Math.hypot(defender.x - ship.x, defender.y - ship.y) < witnessRange,
+    );
   }
 
   /** The station hears that `attacker` went after `victim`: from now on it's wanted. */

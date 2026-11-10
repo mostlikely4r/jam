@@ -510,8 +510,14 @@ export class DronePilot extends ShipPilot {
   /** Flees anything in view that's a danger to it: a pirate, if it carries ore or is marked, or a wanted ship. */
   private watchForPirates(sim: Sim): void {
     if (this.reporting) {
-      this.fleeing = true;
-      return;
+      // Meets a defender on the way, such as one coming to its call: it tells that one.
+      if (sim.defenderNear(this.ship)) {
+        sim.reportWanted(this.reporting, this.ship);
+        this.reporting = null;
+      } else {
+        this.fleeing = true;
+        return;
+      }
     }
     if (!this.flees || !sim.tuning.trafficFlees) {
       this.fleeing = false;

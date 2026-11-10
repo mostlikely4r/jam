@@ -864,6 +864,26 @@ describe("pirate and defender", () => {
       expect(sim.threatens(sim.ship, pilot.ship)).toBe(true);
     }, 30000);
 
+    it("a victim near a defender reports to it on the spot", () => {
+      const sim = arena({ trafficRacers: 1, defenders: 1, shotDamage: 0 });
+      const pilot = sim.traffic[0];
+      const defender = sim.fighters[0].ship;
+      const spot = () => {
+        pin(sim.ship, -9000, 3000);
+        pin(defender, -6600, 0);
+      };
+      pin(pilot.ship, -6000, 0);
+      spot();
+      let said: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        hit(sim, sim.ship, pilot.ship);
+        said = said.concat(listen(sim, 0.2, spot));
+      }
+      expect(sim.ship.wanted).toBe(true);
+      expect(said.some((text) => text.includes("You're wanted"))).toBe(true);
+      expect(said).not.toContain("Stop shooting at me! I'm reporting you.");
+    });
+
     it("hits spread out are forgotten", () => {
       const sim = arena({ trafficRacers: 1, shotDamage: 0, grudgeFadeSeconds: 10 });
       const pilot = sim.traffic[0];

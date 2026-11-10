@@ -1,8 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { APPROACH, BOUGHT, HEADING_BACK, OUTBOUND, THANKS } from "./chatter";
 import { PARTS } from "./parts";
 import { DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, MAX_HULL, Sim, TICK } from "./sim";
+
+/**
+ * These tests run minutes of simulation without ever letting the worker look at its
+ * messages: awaiting between tests only drains promises. A reply from the main process then
+ * sits unread past Vitest's timeout and the run ends with "Timeout calling onTaskUpdate".
+ * A real turn of the event loop after each test lets those replies through.
+ */
+afterEach(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
 /** One drone that stays bare unless a test says otherwise. */
 const SOLO = {

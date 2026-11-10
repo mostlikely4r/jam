@@ -30,7 +30,10 @@ Read it all before starting. Work the phases in order.
 | Kinds of place | Today's kinds (mining station, asteroid field, pirate base, field deposit), a trade hub and a factory. Room for more kinds later |
 | Stability | Not promised. Places may run dry or die. Places must be able to appear and disappear while the game runs (colonisation is a later feature, not in this plan) |
 | Unseen pirates | Losses are real at every level of detail, by a plausible rule |
-| Levels of detail | Three: full, an in-between level for recently seen surroundings, and a simple level once enough time has passed that a jump back can't look strange |
+| Levels of detail | Three: full, an in-between level for recently seen surroundings, and a simple level once enough time has passed that a jump back can't look strange. The in-between level starts as a kept, static scene (section 3.5), with room to make it a real simulation later |
+| Bodies | Stars, planets and moons are solid. Each has a zone of death around it: a ship that goes in is pulled down and lost. There is no gravity outside that zone |
+| Orbits | Nested. A place orbits a body or another place |
+| Map | Wanted, and part of this plan (section 3.8) |
 
 ### Standing rules of this project
 
@@ -166,6 +169,12 @@ date from what the coarse simulation did in the meantime, instead of being built
 gives the user's three levels with one set of unseen rules to write, test and tune, so pirates
 have one plausible system when unseen rather than two that can disagree.
 
+The kept scene is static: nothing in it moves while the camera is away. The user accepted this
+as a first version and wants the option of a real in-between simulation later. Keep that door
+open: put the remembered level behind one small interface in `detail.ts` (`keep(scene)`,
+`advance(scene, seconds)`, `restore(scene)`), where `advance` does nothing for now. A later
+version can step the scene there without touching the live or coarse code.
+
 **Live area.** A circle around the focus: things enter at 40,000 and leave at 60,000, so
 nothing flickers at the edge. A field is in if any part of it is. Ships enter and leave one by
 one; places enter and leave with their rocks. Nothing may appear or vanish within sight: the
@@ -283,9 +292,20 @@ that produced them.
 - `world.jump(target)` sets the focus, turns everything outside the new live area into
   remembered scenes, and brings the new surroundings to live. Aim for under 100 ms.
 - The player's controls only act while the focus is the player's ship.
-- Interface for now: a plain list in the tab menu of places and ships to jump to, a key to
-  return to the player's ship, and `jump`, `places`, `agents` on the `window` commands.
-  A map is a separate later feature. Do not build one.
+- `jump`, `places`, `agents` go on the `window` commands, and a key returns to the player's ship.
+- **The map** is how the player picks a destination and a jump target. Paths being a formula
+  of time makes it cheap: it draws the same data at a different scale. Keep it plain:
+  - A full-screen overlay on a key (M). The game keeps running behind it.
+  - Zoom from one cluster out to all stars, and drag to pan. It opens centred on the focus.
+  - It draws bodies with their zones of death, orbit circles, places with names, the
+    player's ship and owned drones, and the route of the current travel order.
+  - Other ships are drawn only when the existing `showTraffic` switch is on. The player has
+    no readout of traffic today, and the map must not quietly become one.
+  - Click a place or ship to select it. Two actions on the selection: "travel here" (the
+    travel order, if the ship has the click parts; otherwise it only sets the marker) and
+    "look here" (jump).
+  - Hovering a place shows distance and the trip time for the player's ship.
+  - No fog, no filters, no icons beyond simple shapes. `src/map.ts`, separate from `render.ts`.
 - Edge markers: show the places of the current cluster, the bodies above it, and a chosen
   destination, not all places in the world.
 
@@ -296,6 +316,13 @@ that produced them.
   flip, counter-burn, and hand over to the existing approach near the place.
 - The player gets the same as an order (`orderTravel(placeId)`) through `ClickPilot`, when
   the ship has the click parts. Flying it by hand must work with no extra help.
+- **Routes go around bodies.** A leg is a short list of points: if the straight line would
+  pass through a body's zone of death plus a margin, add a point beside the body on the near
+  side, as `haulerWaypoint` already does for the station. Bodies move, so test the line
+  against where each body will be when the ship passes it. `legs.ts` returns the points and
+  the total time; the coarse simulation follows the same points, so no ship is ever lost to a
+  body while unseen. Live pilots check their route again every few seconds and treat a zone
+  of death ahead like a rock to avoid, only much larger.
 - At the midpoint of a star crossing a ship moves about 65,000 units a second, or about 540 a
   tick. Collision sweeps already exist; add a test that a ship at that speed cannot pass
   through a rock or a station.
@@ -304,10 +331,25 @@ that produced them.
 
 ### 3.10 Bodies on screen
 
-Stars, planets and moons are drawn as large discs under the play area and are not solid.
-Ships fly over them. This avoids route planning around bodies and wrecking on a planet in a
-first version. Gravity, landing and solid bodies are later ideas the design must not block:
-keep a radius on every body.
+Stars, planets and moons are solid discs in the play area. Each has a `radius` and a
+`deathRadius` (start with 1.5 times the radius). Suggested radii: moon 3,000 to 6,000,
+planet 15,000 to 30,000, star 80,000 to 150,000.
+
+- **Outside the zone of death there is no gravity at all.**
+- **Inside it, a ship is pulled toward the centre**, with a pull that starts at the edge and
+  grows toward the surface. By default the pull at the edge is already more than the
+  strongest engine, so going in means the ship is lost (`bodyPullAtEdge`, tunable, so the
+  user can try a zone you can still claw out of). The pull is a real acceleration the player
+  sees act on the ship, not a scripted death.
+- Touching the surface wrecks the ship through the normal wreck code, except that the cargo
+  is destroyed and not dropped. That is ore leaving the world: count it in the ledger as
+  "lost to bodies".
+- Rocks, loose ore and shots that reach a surface are removed the same way. Only ships are pulled.
+- The edge of the zone is always drawn, in the game and on the map, and the edge marker for
+  a body warns when the ship's current path leads into it. Danger must be visible coming.
+- No place may orbit inside a zone of death, and no live area may place a ship in one. The
+  world loader checks the first; a test checks the second.
+- Landing and real gravity remain later ideas.
 
 ## 4. Files
 
@@ -322,6 +364,7 @@ src/world/agents.ts     Agent, Step, nextStep()
 src/world/legs.ts       leg duration and position along a leg
 src/world/coarse.ts     the unseen simulation
 src/world/detail.ts     live <-> remembered <-> summary, scene keeping
+src/map.ts              the map overlay
 src/world/rates.ts      measured rates for the coarse simulation
 src/world/calibrate.ts  npm run calibrate
 ```
@@ -356,11 +399,16 @@ Ask the user whether they are finished before doing anything. Then branch `open-
 ### Phase 2: bodies, paths and distance
 - `paths.ts`, the tree of carriers with finite zones, the world definition, `classicWorld`.
 - A small test world: one star, two planets, three moons, three clusters.
-- Renderer: camera-relative drawing, body discs, markers by relevance.
-- Travel for pilots and `orderTravel` for the player.
+- Renderer: camera-relative drawing, solid bodies with their zones of death, markers by relevance.
+- Zones of death: the pull, the wreck at the surface, the warning.
+- Travel for pilots and `orderTravel` for the player, with routes around bodies.
+- The map, without jumping yet: bodies, orbits, places, the player's ship, select and travel.
 - **Done when**: flight tests pass unchanged at an offset of 2×10⁸; a floater pilot flies moon
   to moon in 60 to 90 s and planet to planet in 5 to 7 min and docks; a ship drifting in deep
-  space is not moved by anything; the fast-collision test passes. Still all live.
+  space is not moved by anything; a ship just outside a zone of death feels no pull, and one
+  inside with the default pull cannot get out and is wrecked at the surface; a pilot sent to
+  a place directly behind a planet goes around it, in 100 runs with the bodies at random
+  points of their orbits; the fast-collision test passes. Still all live.
 - **Ask the user to play it.** This is the first time the game is bigger than one sector, and
   what travel feels like decides whether the distances in section 1 are right.
 
@@ -381,7 +429,7 @@ Start with the cheapest test of the whole idea, before building the switching:
 
 Then:
 - The live area, scenes, the four transitions in section 3.5, `world.focus`, `world.jump`,
-  the jump list.
+  and "look here" on the map, which now also draws unseen ships from their steps.
 - **Done when**:
   - The ledger is identical before and after every transition, in a test that jumps back and
     forth 50 times at random moments.
@@ -416,8 +464,9 @@ Then:
 
 ## 6. Not in this plan
 
-A map. Saving and loading. Colonisation and new stations being built. Gravity, solid bodies,
-landing. New ship types. Taking control of other ships. Balancing the economy. Any change to
+Saving and loading. Colonisation and new stations being built. Gravity outside the zones of
+death, landing. A simulated in-between level. Map extras (fog, filters, trade overlays).
+New ship types. Taking control of other ships. Balancing the economy. Any change to
 how flying feels. If one of these seems needed to finish a phase, stop and ask.
 
 ## 7. Working rules
@@ -429,7 +478,9 @@ how flying feels. If one of these seems needed to finish a phase, stop and ask.
 - New values go in `src/tuning.ts` with a line in the tab menu, as the others do.
 - When a choice changes what the player sees or feels and this plan doesn't settle it, ask the
   user one question at a time. Expect them to push back on anything that looks faked.
-- Choices made here without asking the user, which they may overturn: bodies are not solid;
-  one unseen simulation with a kept scene rather than two unseen simulations; scene memory of
-  10 minutes; live radius of 40,000 to 60,000; the second star has no factory; the player's
-  unattended ship is as exposed as any other.
+- Confirmed by the user after reading the first version: the static kept scene, the live
+  radius, the second star without a factory, the player's unattended ship being as exposed as
+  any other.
+- Choices made here without asking the user, which they may overturn: the zone of death
+  cannot be escaped by default; cargo lost to a body is destroyed; only ships are pulled;
+  the map shows other ships only with `showTraffic` on; scene memory of 10 minutes.

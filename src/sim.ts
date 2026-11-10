@@ -230,6 +230,11 @@ const HAULER_WAIT_SECONDS = 15;
 /** If it hasn't reached the berth by then, it docks from wherever it is. */
 const HAULER_ARRIVAL_LIMIT = 400;
 
+/** Radians per second for a period in seconds. Zero or less stands still, as it always has here. */
+function orbitRate(period: number): number {
+  return period > 0 ? (Math.PI * 2) / period : 0;
+}
+
 /** A point of interest: it orbits on a fixed path, spins, and carries nearby objects. */
 /** A storage platform out by a POI. Any ship can sell ore into it or buy ore out of it. */
 export interface Deposit {
@@ -279,8 +284,13 @@ export interface Poi {
   y: number;
   px: number;
   py: number;
+  /** Where it is on its orbit now. Worked out from the clock each tick, never added up. */
   orbitAngle: number;
   orbitRadius: number;
+  /** The orbit angle at clock 0, so the angle at any time is phase + rate × time. */
+  orbitPhase: number;
+  /** The period the phase was worked out for. A change of period moves the phase, not the POI. */
+  orbitPeriod: number;
   rotation: number;
   prevRotation: number;
   /** Size used when working out which POI is nearest. */
@@ -669,13 +679,14 @@ export class Sim {
 
   private placePois(): void {
     const { tuning } = this;
-    this.field = this.makePoi("field", null, tuning.fieldOrbitRadius, 0, tuning.fieldRadius);
+    this.field = this.makePoi("field", null, tuning.fieldOrbitRadius, 0, tuning.fieldOrbitPeriod, tuning.fieldRadius);
     // Starts behind the ship's starting point, on the far side from the rocks.
     this.station = this.makePoi(
       "station",
       this.field,
       tuning.fieldRadius + tuning.stationDistance,
       Math.PI,
+      tuning.orbitPeriod,
       STATION_REACH,
     );
     // Orbits at the same pace as the station, so it stays on the far side of the field.
@@ -686,6 +697,7 @@ export class Sim {
             this.field,
             tuning.fieldRadius + tuning.pirateBaseDistance,
             0,
+            tuning.orbitPeriod,
             PIRATE_BASE_RADIUS,
           )
         : null;
@@ -696,6 +708,7 @@ export class Sim {
     parent: Poi | null,
     orbitRadius: number,
     orbitAngle: number,
+    orbitPeriod: number,
     reach: number,
   ): Poi {
     const x = (parent?.x ?? 0) + Math.cos(orbitAngle) * orbitRadius;
@@ -709,6 +722,9 @@ export class Sim {
       py: y,
       orbitAngle,
       orbitRadius,
+      // The clock keeps running through a restart, so the phase counts back from now.
+      orbitPhase: orbitAngle - orbitRate(orbitPeriod) * this.clock,
+      orbitPeriod,
       rotation: 0,
       prevRotation: 0,
       reach,
@@ -1787,15 +1803,30 @@ export class Sim {
   }
 
   private movePoi(poi: Poi, orbitPeriod: number, rotationPeriod: number, dt: number): void {
-    const rate = (period: number) => (period > 0 ? (Math.PI * 2) / period : 0);
     poi.px = poi.x;
     poi.py = poi.y;
     poi.prevRotation = poi.rotation;
-    poi.orbitAngle += rate(orbitPeriod) * dt;
-    poi.turn = rate(rotationPeriod) * dt;
+    // A new period (a tuning change, or a save from before phases) carries on from where it
+    // was a tick ago at the new pace, rather than jumping to where the new pace would put it.
+    if (poi.orbitPeriod !== orbitPeriod || !Number.isFinite(poi.orbitPhase)) {
+      poi.orbitPhase = poi.orbitAngle - orbitRate(orbitPeriod) * (this.clock - dt);
+      poi.orbitPeriod = orbitPeriod;
+    }
+    poi.orbitAngle = poi.orbitPhase + orbitRate(orbitPeriod) * this.clock;
+    poi.turn = orbitRate(rotationPeriod) * dt;
     poi.rotation += poi.turn;
     poi.x = (poi.parent?.x ?? 0) + Math.cos(poi.orbitAngle) * poi.orbitRadius;
     poi.y = (poi.parent?.y ?? 0) + Math.sin(poi.orbitAngle) * poi.orbitRadius;
+  }
+
+  /**
+   * Where a POI's centre will be at a given time on the clock (see `now`), if no tuning
+   * changes before then. Lets a pilot aim at where a place will be on arrival.
+   */
+  poiAt(poi: Poi, time: number): { x: number; y: number } {
+    const parent = poi.parent ? this.poiAt(poi.parent, time) : { x: 0, y: 0 };
+    const angle = poi.orbitPhase + orbitRate(poi.orbitPeriod) * time;
+    return { x: parent.x + Math.cos(angle) * poi.orbitRadius, y: parent.y + Math.sin(angle) * poi.orbitRadius };
   }
 
   private get pois(): Poi[] {

@@ -241,6 +241,74 @@ describe("station", () => {
     expect(Math.min(moved, Math.PI * 2 - moved)).toBeCloseTo(Math.PI / 2, 2);
   });
 
+  describe("orbits worked out from time", () => {
+    /** The field circling the system's centre, the station and pirate base circling the field. */
+    function orbiting(): Sim {
+      return new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, pirates: 1, fieldOrbitPeriod: 600, orbitPeriod: 300 });
+    }
+
+    it("puts each POI where the formula says, hours in", () => {
+      const sim = orbiting();
+      run(sim, 3600);
+      for (const poi of [sim.field, sim.station, sim.pirateBase!]) {
+        const at = sim.poiAt(poi, sim.now);
+        expect(at.x).toBeCloseTo(poi.x, 6);
+        expect(at.y).toBeCloseTo(poi.y, 6);
+      }
+    });
+
+    it("tells where a POI will be, matching where it gets to", () => {
+      const sim = orbiting();
+      run(sim, 10);
+      const ahead = sim.poiAt(sim.station, sim.now + 90);
+      run(sim, 90);
+      expect(sim.station.x).toBeCloseTo(ahead.x, 4);
+      expect(sim.station.y).toBeCloseTo(ahead.y, 4);
+    });
+
+    it("changes pace smoothly when the period is tuned mid-orbit", () => {
+      const sim = orbiting();
+      run(sim, 100);
+      const radius = sim.station.orbitRadius;
+      sim.tuning.orbitPeriod = 120;
+      let biggest = 0;
+      for (let i = 0; i < 240; i++) {
+        const { x, y } = sim.station;
+        const fx = sim.field.x;
+        const fy = sim.field.y;
+        sim.step();
+        // Only the station's own motion around the field.
+        biggest = Math.max(biggest, Math.hypot(sim.station.x - sim.field.x - (x - fx), sim.station.y - sim.field.y - (y - fy)));
+      }
+      expect(biggest).toBeCloseTo(((2 * Math.PI * radius) / 120) * TICK, 3);
+    });
+
+    it("starts a restarted world's POIs where a new world's start", () => {
+      const fresh = orbiting();
+      const sim = orbiting();
+      run(sim, 500);
+      sim.reset(1);
+      sim.step();
+      fresh.step();
+      expect(sim.station.x).toBeCloseTo(fresh.station.x, 6);
+      expect(sim.station.y).toBeCloseTo(fresh.station.y, 6);
+    });
+
+    it("carries on smoothly from a save made before orbits had a phase", () => {
+      const sim = orbiting();
+      run(sim, 200);
+      const { x, y } = sim.station;
+      for (const poi of [sim.field, sim.station] as Partial<Poi>[]) {
+        delete poi.orbitPhase;
+        delete poi.orbitPeriod;
+      }
+      sim.step();
+      const step = Math.hypot(sim.station.x - x, sim.station.y - y);
+      expect(step).toBeLessThan(5);
+      expect(sim.station.orbitPhase).toBeTypeOf("number");
+    });
+  });
+
   it("does not let a very fast ship pass through the solid box", () => {
     const sim = emptySim();
     sim.tuning.damagePerSpeed = 0;

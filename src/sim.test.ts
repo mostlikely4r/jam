@@ -394,6 +394,24 @@ describe("motion relative to the nearest POI", () => {
     expect(Math.hypot(a.x - start[0], a.y - start[1])).toBeGreaterThan(100);
   });
 
+  it("a part command is a part throttle: that share of the push, and a smaller flame", () => {
+    const full = new Sim(1, { ...DEFAULTS, retro: false });
+    const part = new Sim(1, { ...DEFAULTS, retro: false });
+    for (const sim of [full, part]) {
+      sim.ship.vx = 0;
+      sim.ship.vy = 0;
+      sim.ship.angle = 0;
+      sim.ship.spin = 0;
+    }
+    full.controls.thrust = 1;
+    part.controls.thrust = 0.25;
+    full.step();
+    part.step();
+    expect(part.ship.vx).toBeCloseTo(full.ship.vx * 0.25, 9);
+    expect(full.ship.firing.get("thrusterMain")).toBeCloseTo(1, 9);
+    expect(part.ship.firing.get("thrusterMain")).toBeCloseTo(0.25, 9);
+  });
+
   it("retro holds still relative to the POI without firing", () => {
     const sim = movingSim();
     sim.tuning.retro = true;
@@ -450,7 +468,7 @@ describe("parts", () => {
     sim.controls.strafe = 0;
     sim.controls.turn = 1;
     sim.step();
-    expect([...sim.ship.firing].sort()).toEqual(["thrusterMain", "thrusterRotateRight"]);
+    expect([...sim.ship.firing.keys()].sort()).toEqual(["thrusterMain", "thrusterRotateRight"]);
   });
 
   it("buys a part with credits, only in the dock, and only if affordable", () => {
@@ -1000,7 +1018,7 @@ describe("the new ship", () => {
     const used = new Set<string>();
     for (let i = 0; i < Math.round(30 / TICK); i++) {
       sim.step();
-      for (const thruster of sim.ship.firing) used.add(thruster);
+      for (const thruster of sim.ship.firing.keys()) used.add(thruster);
     }
     expect(used.has("thrusterMain")).toBe(true);
     expect(used.has("thrusterReverse")).toBe(false);

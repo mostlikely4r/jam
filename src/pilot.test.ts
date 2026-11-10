@@ -65,7 +65,7 @@ describe("drone", () => {
     });
     const used = new Set<string>();
     run(sim, 60, () => {
-      for (const thruster of sim.drones[0].ship.firing) used.add(thruster);
+      for (const thruster of sim.drones[0].ship.firing.keys()) used.add(thruster);
     });
     expect([...used].sort()).toEqual(["thrusterMain", "thrusterRotateLeft", "thrusterRotateRight"]);
   }, 30000);
@@ -388,7 +388,7 @@ describe("drone", () => {
     ship.parts.add("strafe");
     const used = new Set<string>();
     run(sim, 120, () => {
-      for (const thruster of ship.firing) used.add(thruster);
+      for (const thruster of ship.firing.keys()) used.add(thruster);
     });
     expect(used.has("thrusterReverse")).toBe(true);
     expect(used.has("thrusterStrafeLeft") || used.has("thrusterStrafeRight")).toBe(true);
@@ -1380,43 +1380,57 @@ describe("pirate and defender", () => {
         expect(sim.ship.frameShare).toBe(1);
       });
 
-      function orderDone(sim: Sim): void {
-        run(sim, 30, () => !sim.clickPilot.active);
-        expect(sim.clickPilot.active).toBe(false);
+      const kits = [[], ["reverse"], ["strafe"], ["reverse", "strafe"]] as const;
+      /** How far the ship slides against the deposit in ten seconds after its order is done. */
+      function driftAfter(sim: Sim): number {
+        const deposit = sim.deposits[0];
+        const dx = sim.ship.x - deposit.x;
+        const dy = sim.ship.y - deposit.y;
+        run(sim, 10, () => false);
+        return Math.hypot(sim.ship.x - deposit.x - dx, sim.ship.y - deposit.y - dy);
       }
 
-      it("a stop inside it ends truly at rest, with no drift after", () => {
-        const sim = depositWorld(moving);
-        const deposit = sim.deposits[0];
-        const { ship } = sim;
-        ship.parts.add("clickMove");
-        moveTo(ship, deposit.x + 20, deposit.y);
-        ship.vx = 30;
-        expect(sim.orderStop()).toBe(true);
-        orderDone(sim);
-        expect(sim.depositAt()).toBe(deposit);
-        const dx = ship.x - deposit.x;
-        const dy = ship.y - deposit.y;
-        run(sim, 10, () => false);
-        expect(ship.x - deposit.x).toBeCloseTo(dx, 6);
-        expect(ship.y - deposit.y).toBeCloseTo(dy, 6);
+      it("a stop inside it trims away the last of the speed with real thrusters, at part throttle", () => {
+        for (const kit of kits) {
+          const sim = depositWorld(moving);
+          const deposit = sim.deposits[0];
+          const { ship } = sim;
+          ship.parts.add("clickMove");
+          for (const part of kit) ship.parts.add(part);
+          moveTo(ship, deposit.x + 20, deposit.y);
+          ship.vx = 30;
+          ship.px = ship.x - 30 * TICK;
+          expect(sim.orderStop()).toBe(true);
+          let trims = 0;
+          run(sim, 30, () => {
+            if (sim.clickPilot.task !== "settling") return false;
+            for (const level of ship.firing.values()) if (level > 0 && level < 1) trims++;
+            return false;
+          });
+          expect(sim.clickPilot.active, kit.join()).toBe(false);
+          expect(trims, kit.join()).toBeGreaterThan(0);
+          expect(sim.depositAt()).toBe(deposit);
+          expect(driftAfter(sim), kit.join()).toBeLessThan(0.05);
+        }
       });
 
-      it("a move and stop ends on its spot, at rest", () => {
-        const sim = depositWorld(moving);
-        const deposit = sim.deposits[0];
-        const { ship } = sim;
-        ship.parts.add("clickMove");
-        moveTo(ship, deposit.x - 80, deposit.y);
-        expect(sim.orderMove(deposit.x + 60, deposit.y + 30)).toBe(true);
-        const offset = () => ({ x: ship.x - deposit.x, y: ship.y - deposit.y });
-        orderDone(sim);
-        // The spot rides along with the deposit from the moment it's ordered.
-        expect(Math.hypot(offset().x - 60, offset().y - 30)).toBeLessThan(1.5);
-        const held = offset();
-        run(sim, 10, () => false);
-        expect(offset().x).toBeCloseTo(held.x, 6);
-        expect(offset().y).toBeCloseTo(held.y, 6);
+      it("a move and stop ends on its spot, at rest, with or without side thrusters", () => {
+        for (const kit of kits) {
+          const sim = depositWorld(moving);
+          const deposit = sim.deposits[0];
+          const { ship } = sim;
+          ship.parts.add("clickMove");
+          for (const part of kit) ship.parts.add(part);
+          moveTo(ship, deposit.x - 80, deposit.y);
+          expect(sim.orderMove(deposit.x + 60, deposit.y + 30)).toBe(true);
+          run(sim, 30, () => false);
+          expect(sim.clickPilot.active, kit.join()).toBe(false);
+          // The spot rides along with the deposit from the moment it's ordered. A ship that
+          // has to turn around to brake lands within a wider circle.
+          const circle = kit.some((part) => part === "strafe") ? 1 : 2.5;
+          expect(Math.hypot(ship.x - deposit.x - 60, ship.y - deposit.y - 30), kit.join()).toBeLessThan(circle);
+          expect(driftAfter(sim), kit.join()).toBeLessThan(0.05);
+        }
       });
 
       it("leaves a ship outside its ring to the POIs", () => {

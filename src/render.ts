@@ -1,4 +1,5 @@
 import type { FighterPilot, DronePilot } from "./pilot";
+import type { ThrusterId } from "./tuning";
 import {
   DEPOSIT_HALF,
   DOCK_OFFSET,
@@ -855,18 +856,20 @@ export class Renderer {
     const r = SHIP_RADIUS;
     const up = -Math.PI / 2;
     const down = Math.PI / 2;
-    if (ship.firing.has("thrusterMain")) this.drawFlame(-r * 0.8, 0, Math.PI, 2, 4);
-    if (ship.firing.has("thrusterReverse")) this.drawFlame(r * 0.9, 0, 0, 1, 3);
-    if (ship.firing.has("thrusterStrafeLeft")) this.drawFlame(0, r * 0.45, down, 1, 3);
-    if (ship.firing.has("thrusterStrafeRight")) this.drawFlame(0, -r * 0.45, up, 1, 3);
-    if (ship.firing.has("thrusterRotateRight")) {
-      this.drawFlame(r * 0.6, -r * 0.2, up, 0.7, 2);
-      this.drawFlame(-r * 0.7, r * 0.55, down, 0.7, 2);
-    }
-    if (ship.firing.has("thrusterRotateLeft")) {
-      this.drawFlame(r * 0.6, r * 0.2, down, 0.7, 2);
-      this.drawFlame(-r * 0.7, -r * 0.55, up, 0.7, 2);
-    }
+    // A flame's size shows its throttle. Even the faintest trim stays visible.
+    const flame = (thruster: ThrusterId, x: number, y: number, direction: number, length: number, width: number) => {
+      const level = ship.firing.get(thruster);
+      if (level === undefined) return;
+      this.drawFlame(x, y, direction, length * (0.2 + 0.8 * level), width * (0.5 + 0.5 * level));
+    };
+    flame("thrusterMain", -r * 0.8, 0, Math.PI, 2, 4);
+    flame("thrusterReverse", r * 0.9, 0, 0, 1, 3);
+    flame("thrusterStrafeLeft", 0, r * 0.45, down, 1, 3);
+    flame("thrusterStrafeRight", 0, -r * 0.45, up, 1, 3);
+    flame("thrusterRotateRight", r * 0.6, -r * 0.2, up, 0.7, 2);
+    flame("thrusterRotateRight", -r * 0.7, r * 0.55, down, 0.7, 2);
+    flame("thrusterRotateLeft", r * 0.6, r * 0.2, down, 0.7, 2);
+    flame("thrusterRotateLeft", -r * 0.7, -r * 0.55, up, 0.7, 2);
 
     const damage = 1 - ship.hull / 100;
     ctx.fillStyle = `rgb(${red + damage * 55}, ${green - damage * 120}, ${blue - damage * 150})`;

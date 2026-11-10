@@ -380,15 +380,37 @@ function frameText(): string {
   return `Moving partly relative to ${frame.name} (${Math.round(frameShare * 100)}%)`;
 }
 
-function readControls(): void {
-  const forward = keys.has("KeyW") || keys.has("ArrowUp");
-  const back = keys.has("KeyS") || keys.has("ArrowDown");
-  const turnLeft = keys.has("KeyQ") || keys.has("ArrowLeft");
-  const turnRight = keys.has("KeyE") || keys.has("ArrowRight");
+/** Each thruster key's throttle, 0 to 1, and the keys that drive it. */
+const throttle = { forward: 0, back: 0, left: 0, right: 0, turnLeft: 0, turnRight: 0 };
+const THROTTLE_KEYS: Record<keyof typeof throttle, string[]> = {
+  forward: ["KeyW", "ArrowUp"],
+  back: ["KeyS", "ArrowDown"],
+  left: ["KeyA"],
+  right: ["KeyD"],
+  turnLeft: ["KeyQ", "ArrowLeft"],
+  turnRight: ["KeyE", "ArrowRight"],
+};
+
+/**
+ * A key fires its thruster at full while held. With Shift held it ramps instead: up while
+ * the key is down, down once it's let go. Letting go of Shift snaps back to full or off.
+ */
+function updateThrottle(seconds: number): void {
+  const fine = keys.has("ShiftLeft") || keys.has("ShiftRight");
+  const step = seconds / Math.max(0.01, tuning.throttleRamp);
+  for (const name of Object.keys(throttle) as (keyof typeof throttle)[]) {
+    const held = THROTTLE_KEYS[name].some((code) => keys.has(code));
+    if (!fine) throttle[name] = held ? 1 : 0;
+    else throttle[name] = Math.min(1, Math.max(0, throttle[name] + (held ? step : -step)));
+  }
+}
+
+function readControls(seconds: number): void {
+  updateThrottle(seconds);
   sim.controls.fire = keys.has("Space");
-  const thrust = (forward ? 1 : 0) - (back ? 1 : 0);
-  const strafe = (keys.has("KeyD") ? 1 : 0) - (keys.has("KeyA") ? 1 : 0);
-  const turn = (turnRight ? 1 : 0) - (turnLeft ? 1 : 0);
+  const thrust = throttle.forward - throttle.back;
+  const strafe = throttle.right - throttle.left;
+  const turn = throttle.turnRight - throttle.turnLeft;
   // The keys fly while held. The order waits and takes back over once they're let go.
   if (thrust !== 0 || strafe !== 0 || turn !== 0) sim.clickPilot.handsOn();
   if (sim.clickPilot.flying) return;
@@ -540,7 +562,7 @@ function frame(now: number): void {
   lastTime = now;
   if (seconds > 0) fps += (1 / seconds - fps) * 0.05;
 
-  readControls();
+  readControls(paused ? 0 : seconds);
   sim.ship.aim = mouse ? renderer.screenToWorld(mouse.x, mouse.y) : null;
   if (!paused) {
     accumulator += seconds * timeScale;

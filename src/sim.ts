@@ -109,8 +109,8 @@ export interface Ship extends Body {
   prevTurretAngle: number;
   /** The world spot the turret turns toward, or null to face forward. */
   aim: { x: number; y: number } | null;
-  /** Thrusters that fired on the last tick. */
-  firing: Set<ThrusterId>;
+  /** Thrusters that fired on the last tick, and how hard: 0 to 1 of their full output. */
+  firing: Map<ThrusterId, number>;
 }
 
 export interface Rock extends Body {
@@ -1054,7 +1054,7 @@ export class Sim {
       turretAngle: 0,
       prevTurretAngle: 0,
       aim: null,
-      firing: new Set(),
+      firing: new Map(),
     };
   }
 
@@ -1997,7 +1997,8 @@ export class Sim {
   }
 
   /**
-   * The velocity change one pair of opposed thrusters makes this tick. With no
+   * The velocity change one pair of opposed thrusters makes this tick. The command's size
+   * is the throttle, so a part of full output gives a part of the change. With no
    * pilot input on this axis, `assist` fires whichever thruster opposes the motion.
    * It uses the real thrusters, so a missing one leaves that motion uncorrected.
    */
@@ -2012,7 +2013,8 @@ export class Sim {
     assist: boolean,
   ): number {
     let direction = Math.sign(command);
-    let limit = Infinity;
+    const full = direction > 0 ? positiveChange : negativeChange;
+    let limit = Math.min(1, Math.abs(command)) * full;
     if (direction === 0) {
       if (!assist || Math.abs(velocity) < 1e-6) return 0;
       direction = velocity < 0 ? 1 : -1;
@@ -2020,8 +2022,10 @@ export class Sim {
     }
     const thruster = direction > 0 ? positive : negative;
     if (!this.canFire(ship, thruster)) return 0;
-    ship.firing.add(thruster);
-    return direction * Math.min(direction > 0 ? positiveChange : negativeChange, limit);
+    const fullChange = direction > 0 ? positiveChange : negativeChange;
+    const change = Math.min(fullChange, limit);
+    ship.firing.set(thruster, fullChange > 0 ? change / fullChange : 0);
+    return direction * change;
   }
 
   /** A thruster needs its part. The panel's switches can also turn off the player's. */

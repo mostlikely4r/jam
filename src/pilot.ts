@@ -64,7 +64,19 @@ const STOPPED_SPEED = 6;
 const EASE_SPEED = 12;
 const EASE_ACCELERATION = 40;
 const EASE_RATE = 2;
+/** Without side thrusters braking means turning the nose around first: it eases this many flips' time out. */
+const EASE_FLIPS = 1;
+/** How close counts as on the spot for a ship that has to turn to brake. */
+const LANDING_TURNING = 2;
+/** A trim burns along the nose once it points this close to the need, and leaves the rest for the next. */
+const TRIM_ANGLE = 0.2;
+/** It never eases slower than this, so the last stretch doesn't drag on. */
+const EASE_FLOOR = 0.6;
 const SETTLED_DISTANCE = 0.5;
+/** Settling ends once the speed left to fix is below this: a fraction of a unit a minute. */
+const REST_SPEED = 0.002;
+/** Slow enough over the spot to count as there. */
+const LANDING_SPEED = 1;
 const FACING_ANGLE = 0.05;
 const FACING_SPIN = 0.1;
 /** Gives up on a click order that gets no closer for this long, such as a spot inside a rock. */
@@ -658,6 +670,8 @@ interface ClickOrder {
   /** The facing held whenever no burn needs the nose, or null to leave the nose be. */
   face: number | null;
   stage: "flying" | "stopping" | "settling" | "facing";
+  /** Reached its spot while settling, so from then on it only stops. */
+  landed?: boolean;
   closest: number;
   stuck: number;
 }
@@ -819,7 +833,8 @@ export class ClickPilot extends ShipPilot {
   update(sim: Sim): void {
     const { order, ship } = this;
     if (!order) return;
-    const needs = order.move || order.stage === "stopping" ? "clickMove" : "clickTurn";
+    const stopping = order.stage === "stopping" || order.stage === "settling";
+    const needs = order.move || stopping ? "clickMove" : "clickTurn";
     if (!ship.parts.has(needs)) {
       this.cancel();
       return;
@@ -845,7 +860,8 @@ export class ClickPilot extends ShipPilot {
     const { vx, vy } = this.relativeVelocity(target);
     const speed = Math.hypot(vx, vy);
 
-    if (order.move) {
+    // Settling makes no headway on purpose once it's on the spot, so that isn't being stuck.
+    if (order.move && order.stage !== "settling") {
       if (distance < order.closest - CLICK_PROGRESS) {
         order.closest = distance;
         order.stuck = 0;
@@ -867,7 +883,7 @@ export class ClickPilot extends ShipPilot {
       else if (order.drifts) this.steer(sim, -vx, -vy, STOPPED_SPEED, order.face);
       else this.brake(sim, -vx, -vy, STOPPED_SPEED, order.face);
     }
-    if (order.stage === "settling") this.settle(order, target, distance, vx, vy);
+    if (order.stage === "settling") this.settle(sim, order, target, distance, vx, vy);
     if (order.stage === "facing") {
       const { face } = order;
       if (face === null) {
@@ -881,24 +897,81 @@ export class ClickPilot extends ShipPilot {
   }
 
   /**
-   * Thrusters can't trim the last few units of speed, so this does without them: a move
-   * eases onto its spot, and either way the ship ends truly at rest against what carries it.
+   * The last few units of speed, trimmed away at part throttle: a move eases onto its spot,
+   * and either way the ship ends at rest against what carries it. Once on the spot it only
+   * stops, wherever that leaves it.
    */
-  private settle(order: ClickOrder, target: Body, distance: number, vx: number, vy: number): void {
-    const { ship } = this;
-    if (!order.move || distance < SETTLED_DISTANCE) {
-      ship.vx = 0;
-      ship.vy = 0;
+  private settle(sim: Sim, order: ClickOrder, target: Body, distance: number, vx: number, vy: number): void {
+    // Without side thrusters it eases in more gently and lands less exactly: slow enough
+    // that the drift while it turns around to brake stays inside the landing circle.
+    const direct = this.ship.parts.has("strafe");
+    const flip = this.flipSeconds(sim);
+    const landing = direct ? SETTLED_DISTANCE : LANDING_TURNING;
+    if (distance < landing && Math.hypot(vx, vy) < LANDING_SPEED) order.landed = true;
+    const easing = order.move && !order.landed;
+    let wantX = 0;
+    let wantY = 0;
+    if (easing) {
+      const rate = direct ? EASE_RATE : 1 / (EASE_FLIPS * flip);
+      const floor = direct ? EASE_FLOOR : landing / flip;
+      const speed = Math.min(EASE_SPEED, Math.max(floor, distance * rate));
+      wantX = ((target.x - this.ship.x) / distance) * speed;
+      wantY = ((target.y - this.ship.y) / distance) * speed;
+    }
+    const needX = wantX - vx;
+    const needY = wantY - vy;
+    if (!easing && Math.hypot(needX, needY) < REST_SPEED) {
       order.stage = "facing";
       return;
     }
-    const speed = Math.min(EASE_SPEED, distance * EASE_RATE);
-    const changeX = ((target.x - ship.x) / distance) * speed - vx;
-    const changeY = ((target.y - ship.y) / distance) * speed - vy;
-    const change = Math.hypot(changeX, changeY);
-    const share = change > 0 ? Math.min(1, (EASE_ACCELERATION * TICK) / change) : 0;
-    ship.vx += changeX * share;
-    ship.vy += changeY * share;
+    const most = EASE_ACCELERATION * TICK;
+    const need = Math.hypot(needX, needY);
+    const share = need > most ? most / need : 1;
+    this.trim(sim, needX * share, needY * share, order.face);
+  }
+
+  /** About how long it takes to turn the nose around, from its rotation thrust and top spin. */
+  private flipSeconds(sim: Sim): number {
+    const accel = ((sim.tuning.rotationThrust * Math.PI) / 180) * sim.shipResponse(this.ship);
+    const peak = Math.sqrt(accel * Math.PI);
+    if (peak <= SPIN_LIMIT) return (2 * peak) / accel;
+    return Math.PI / SPIN_LIMIT + SPIN_LIMIT / accel;
+  }
+
+  /**
+   * Makes a small velocity change this tick at part throttle, so it gets just what it asks
+   * for. Side and reverse thrusters do it without turning; otherwise the nose turns to it.
+   */
+  private trim(sim: Sim, needX: number, needY: number, hold: number | null): void {
+    const { ship } = this;
+    const { tuning } = sim;
+    const perTick = TICK * sim.shipResponse(ship);
+    const throttle = (change: number, full: number) => Math.max(-1, Math.min(1, change / full));
+    const cos = Math.cos(ship.angle);
+    const sin = Math.sin(ship.angle);
+    const forward = needX * cos + needY * sin;
+    const side = -needX * sin + needY * cos;
+    const { parts } = ship;
+    if (parts.has("strafe") && (forward >= 0 || parts.has("reverse"))) {
+      const full = forward >= 0 ? tuning.thrust : tuning.reverseThrust;
+      ship.controls.thrust = throttle(forward, full * perTick);
+      ship.controls.strafe = throttle(side, tuning.sideThrust * perTick);
+      this.turnTo(sim, hold ?? ship.angle);
+      return;
+    }
+    const needAngle = Math.atan2(needY, needX);
+    const backward = needAngle + Math.PI;
+    const useReverse =
+      parts.has("reverse") &&
+      Math.abs(wrapAngle(backward - ship.angle)) < Math.abs(wrapAngle(needAngle - ship.angle));
+    const burnAngle = useReverse ? backward : needAngle;
+    this.turnTo(sim, burnAngle);
+    const off = Math.abs(wrapAngle(burnAngle - ship.angle));
+    if (off >= TRIM_ANGLE) return;
+    // Only the part along the nose; what's left over waits for the next turn.
+    const along = Math.hypot(needX, needY) * Math.cos(off);
+    const full = (useReverse ? tuning.reverseThrust : tuning.thrust) * perTick;
+    ship.controls.thrust = (useReverse ? -1 : 1) * throttle(along, full);
   }
 
   protected override speedLimitHere(sim: Sim): number {

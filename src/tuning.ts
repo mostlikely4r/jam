@@ -4,6 +4,8 @@ export const DEFAULTS = {
   reverseThrust: 220,
   sideThrust: 200,
   rotationThrust: 400,
+  /** With Shift held, how many seconds a thruster key takes to ramp from off to full. */
+  throttleRamp: 1.5,
 
   retro: false,
   thrusterMain: true,
@@ -220,6 +222,7 @@ export const GROUPS: Group[] = [
       { key: "reverseThrust", label: "Reverse thrust", min: 0, max: 1000, step: 10 },
       { key: "sideThrust", label: "Side thrust", min: 0, max: 1000, step: 10 },
       { key: "rotationThrust", label: "Rotation thrust", min: 30, max: 1500, step: 10 },
+      { key: "throttleRamp", label: "Shift throttle: seconds from off to full", min: 0.2, max: 6, step: 0.1 },
     ],
   },
   {

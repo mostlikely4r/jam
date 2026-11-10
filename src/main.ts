@@ -656,11 +656,7 @@ window.addEventListener("keydown", (event) => {
   keys.add(event.code);
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));
-window.addEventListener("blur", () => {
-  keys.clear();
-  // Gone to another window: the game shouldn't carry on without you.
-  if (!paused) setPaused(true);
-});
+window.addEventListener("blur", () => keys.clear());
 /** Shorter drags than this, in screen pixels, count as a click. */
 const DRAG_PIXELS = 10;
 /** A second right click this soon after the first, in the same place, makes a double click. */

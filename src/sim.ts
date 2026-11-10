@@ -345,15 +345,13 @@ export interface Stats {
 }
 
 /** Small seeded generator, so a given seed always builds the same field. */
-function makeRandom(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+/** The next number from 0 to 1 for a generator's state, which it moves on. */
+function nextRandom(state: { a: number }): number {
+  state.a = (state.a + 0x6d2b79f5) >>> 0;
+  let t = state.a;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
 /**
@@ -496,7 +494,9 @@ export class Sim {
   station!: Poi;
   events: SimEvent[] = [];
   stats: Stats = { bestOre: 0, topSpeed: 0 };
-  private random: () => number = Math.random;
+  /** The world's own random numbers, from a state that can be saved. */
+  private randomState = { a: 1 };
+  private random = (): number => nextRandom(this.randomState);
   chatter = new Chatter(1);
   /** Counts down to the next rock drifting in, in units of the average wait. */
   private inflowTimer = 1;
@@ -506,8 +506,91 @@ export class Sim {
     this.reset(seed);
   }
 
+  /**
+   * Everything needed to carry on later, as plain data. Pilots keep only whom they fly and
+   * how they're set up: like anyone coming back to a job, they plan their next step afresh.
+   */
+  snapshot(): object {
+    const pilot = (each: DronePilot) => ({ ship: each.ship, buys: each.buys, flees: each.flees, wishlist: each.wishlist });
+    return {
+      tuning: this.tuning,
+      controls: this.controls,
+      ship: this.ship,
+      drones: this.drones.map(pilot),
+      traffic: this.traffic.map(pilot),
+      fighters: this.fighters.map((each) => each.ship),
+      pirateBase: this.pirateBase,
+      stationAccount: this.stationAccount,
+      stationOre: this.stationOre,
+      stationParts: this.stationParts,
+      hauler: this.hauler,
+      blueprints: this.blueprints,
+      blueprintPaid: this.blueprintPaid,
+      blueprintsOrdered: this.blueprintsOrdered,
+      deposits: this.deposits,
+      batteries: this.batteries,
+      haulerTimer: this.haulerTimer,
+      pirateOre: this.pirateOre,
+      pirateCredits: this.pirateCredits,
+      pirateCap: this.pirateCap,
+      blackMarket: this.blackMarket,
+      blackMarketTimer: this.blackMarketTimer,
+      lostTraffic: this.lostTraffic,
+      distress: this.distress,
+      clock: this.clock,
+      rocks: this.rocks,
+      shots: this.shots,
+      ores: this.ores,
+      field: this.field,
+      station: this.station,
+      stats: this.stats,
+      inflowTimer: this.inflowTimer,
+      randomState: this.randomState,
+    };
+  }
+
+  /** Picks up from a snapshot. Anything a newer ship has that the saved one lacks starts as new. */
+  restore(saved: unknown): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = saved as any;
+    for (const key of Object.keys(this.tuning) as (keyof Tuning)[]) {
+      if (key in data.tuning) Object.assign(this.tuning, { [key]: data.tuning[key] });
+    }
+    const template = this.makeShip(0, 0, this.controls);
+    const fill = (ship: Ship): Ship => {
+      for (const [key, value] of Object.entries(template)) {
+        if (!(key in ship)) Object.assign(ship, { [key]: value instanceof Set || value instanceof Map ? new (value.constructor as typeof Set)() : value });
+      }
+      return ship;
+    };
+    this.controls = data.controls;
+    this.ship = fill(data.ship);
+    const pilot = (each: { ship: Ship; buys: DronePilot["buys"]; flees: boolean; wishlist: PartId[] }) => {
+      const made = new DronePilot(fill(each.ship));
+      made.buys = each.buys;
+      made.flees = each.flees;
+      made.wishlist = each.wishlist;
+      return made;
+    };
+    this.drones = data.drones.map(pilot);
+    this.traffic = data.traffic.map(pilot);
+    this.fighters = data.fighters.map((ship: Ship) => new FighterPilot(fill(ship)));
+    for (const battery of data.batteries as Battery[]) for (const guard of battery.guns) fill(guard.gun);
+    const plain = [
+      "pirateBase", "stationAccount", "stationOre", "stationParts", "hauler", "blueprints", "blueprintPaid",
+      "blueprintsOrdered", "deposits", "batteries", "haulerTimer", "pirateOre", "pirateCredits", "pirateCap",
+      "blackMarket", "blackMarketTimer", "lostTraffic", "distress", "clock", "rocks", "shots", "ores", "field",
+      "station", "stats", "inflowTimer", "randomState",
+    ] as const;
+    for (const key of plain) if (key in data) Object.assign(this, { [key]: data[key] });
+    this.clickPilot = new ClickPilot(this.ship);
+    this.chatter = new Chatter(this.randomState.a);
+    this.grudges = new WeakMap();
+    this.events = [];
+  }
+
   reset(seed: number): void {
-    this.random = makeRandom(seed);
+    this.randomState = { a: seed >>> 0 };
     this.chatter = new Chatter(seed);
     this.rocks = [];
     this.shots = [];

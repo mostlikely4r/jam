@@ -1,4 +1,5 @@
 import { ShipDemo } from "./demo";
+import { loadGame, saveGame, saveInfo, type SaveSlot } from "./save";
 import { Audio } from "./audio";
 import { Radio } from "./radio";
 import { type Deposit, MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
@@ -67,8 +68,67 @@ const SHIPS: { model: "racer" | "floater"; name: string; pitch: string }[] = [
   { model: "floater", name: "Floater", pitch: "Slow and steady, flown with the mouse. Click where to go and let it drift there." },
 ];
 
-/** The start menu: pick a ship to begin. The game waits behind it. */
+/** Whether a game is going, rather than waiting on the start menu. Only then is it saved. */
+let inGame = false;
+/** Seconds until the next automatic save. */
+const AUTOSAVE_SECONDS = 30;
+let autosaveTimer = AUTOSAVE_SECONDS;
+
+function autosave(): void {
+  if (inGame) saveGame(sim, "auto");
+}
+
+/** "5 minutes ago", or the date for anything older than a day. */
+function ago(savedAt: number): string {
+  const minutes = Math.round((Date.now() - savedAt) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  return new Date(savedAt).toLocaleDateString();
+}
+
+/** Picks up a saved game and goes straight into it. */
+function resumeFrom(slot: SaveSlot): boolean {
+  if (!loadGame(sim, slot)) return false;
+  keys.clear();
+  buildPanel();
+  demos = [];
+  startOverlay.hidden = true;
+  pauseOverlay.hidden = true;
+  paused = false;
+  inGame = true;
+  autosaveTimer = AUTOSAVE_SECONDS;
+  return true;
+}
+
+/** Continue and Load lines for the start menu, for whatever saves there are. */
+function saveButtons(): HTMLElement[] {
+  const lines: HTMLElement[] = [];
+  const slots: [SaveSlot, string][] = [
+    ["auto", "Continue"],
+    ["manual", "Load your saved game"],
+  ];
+  for (const [slot, label] of slots) {
+    const info = saveInfo(slot);
+    if (!info) continue;
+    const button = document.createElement("button");
+    button.className = "resume";
+    if (info.fits) {
+      button.textContent = `${label} (saved ${ago(info.savedAt)})`;
+      button.addEventListener("click", () => resumeFrom(slot));
+    } else {
+      button.textContent = `${label}: saved by an older version of JAM, so it can't be loaded`;
+      button.disabled = true;
+    }
+    lines.push(button);
+  }
+  return lines;
+}
+
+/** The start menu: pick a ship to begin, or carry on a saved game. The game waits behind it. */
 function showStart(): void {
+  inGame = false;
   paused = true;
   pauseOverlay.hidden = true;
   startOverlay.hidden = false;
@@ -98,7 +158,7 @@ function showStart(): void {
   const hint = document.createElement("p");
   hint.className = "hint";
   hint.textContent = "Esc or P pauses, with the controls under Help.";
-  startBox.replaceChildren(title, sub, cards, hint);
+  startBox.replaceChildren(title, sub, ...saveButtons(), cards, hint);
 }
 
 function chooseShip(model: "racer" | "floater"): void {
@@ -108,6 +168,8 @@ function chooseShip(model: "racer" | "floater"): void {
   demos = [];
   startOverlay.hidden = true;
   paused = false;
+  inGame = true;
+  autosaveTimer = AUTOSAVE_SECONDS;
 }
 const pauseOverlay = document.getElementById("pause") as HTMLDivElement;
 
@@ -226,14 +288,33 @@ function showPage(page: "main" | "help" | "settings"): void {
         newGame.textContent = "New game - your ship and money are lost. Click again to start over";
         return;
       }
+      // Whatever's going now is kept as the one to continue.
+      autosave();
       showStart();
     }, "danger");
+    const save = menuButton("Save game", () => {
+      save.textContent = saveGame(sim, "manual") ? "Saved" : "Couldn't save: the browser's storage is full or switched off";
+    });
+    const manual = saveInfo("manual");
+    let confirmingLoad = false;
+    const load = menuButton(manual ? `Load saved game (saved ${ago(manual.savedAt)})` : "Load saved game: nothing saved yet", () => {
+      if (!manual?.fits) return;
+      if (!confirmingLoad) {
+        confirmingLoad = true;
+        load.textContent = "Load saved game - what you have now is lost. Click again to load";
+        return;
+      }
+      if (!resumeFrom("manual")) load.textContent = "Couldn't load that save";
+    });
+    load.disabled = !manual?.fits;
     pauseBox.replaceChildren(
       title,
       sub,
       menuButton("Resume", () => setPaused(false)),
       menuButton("Help", () => showPage("help")),
       menuButton("Settings", () => showPage("settings")),
+      save,
+      load,
       newGame,
     );
     return;
@@ -711,6 +792,11 @@ window.addEventListener("keydown", (event) => {
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));
 window.addEventListener("blur", () => keys.clear());
+// Closing or leaving the tab saves too, so walking away never loses anything.
+window.addEventListener("pagehide", autosave);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) autosave();
+});
 /** Shorter drags than this, in screen pixels, count as a click. */
 const DRAG_PIXELS = 10;
 /** A second right click this soon after the first, in the same place, makes a double click. */
@@ -828,6 +914,11 @@ function frame(now: number): void {
   if (seconds > 0) fps += (1 / seconds - fps) * 0.05;
 
   for (const demo of demos) demo.update(seconds);
+  autosaveTimer -= seconds;
+  if (autosaveTimer <= 0) {
+    autosaveTimer = AUTOSAVE_SECONDS;
+    autosave();
+  }
   readControls(paused ? 0 : seconds);
   sim.ship.aim = mouse ? renderer.screenToWorld(mouse.x, mouse.y) : null;
   if (!paused) {

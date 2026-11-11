@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { bodyAt, orbitsAt } from "../sim";
 import { DEFAULTS } from "../tuning";
 import { bodiesFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, writeGame } from "./link";
-import { makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk } from "./world";
+import { limitCarrying, makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk } from "./world";
 
 describe("the link between the designer and the game", () => {
   it("finds the planet, field, station and pirate base", () => {
@@ -23,13 +23,25 @@ describe("the link between the designer and the game", () => {
   it("writes each place's rocks and carrying, no outer edge meaning everywhere", () => {
     const world = seedWorld();
     const { field, station } = linkedNodes(world);
-    Object.assign(field!, { rocks: 300, rockDrift: 5, rockInflow: 2, carryFull: 2000, carryNone: 8000 });
+    Object.assign(field!, { rocks: 300, rockDrift: 5, rockInflow: 2, carryFull: 1000, carryNone: 9000 });
+    Object.assign(station!, { carryFull: 0, carryNone: 0 });
     const tuning = { ...DEFAULTS };
     writeGame(world, tuning);
     expect([tuning.rockCount, tuning.rockDrift, tuning.rockInflow]).toEqual([300, 5, 2]);
-    expect([tuning.fieldCarryFull, tuning.fieldCarryNone]).toEqual([2000, 8000]);
-    expect(station?.carryNone).toBe(0);
+    expect([tuning.fieldCarryFull, tuning.fieldCarryNone]).toEqual([1000, 9000]);
     expect([tuning.stationCarryFull, tuning.stationCarryNone]).toEqual([Infinity, Infinity]);
+  });
+
+  it("starts each place carrying only what's near it, and brings old drafts carrying everywhere into line", () => {
+    const world = seedWorld();
+    const { field, station, pirates: pirateBase } = linkedNodes(world);
+    expect([field!.carryFull, field!.carryNone]).toEqual([2000, 8000]);
+    expect([station!.carryFull, station!.carryNone]).toEqual([2000, 6000]);
+    Object.assign(field!, { carryFull: 0, carryNone: 0 });
+    Object.assign(pirateBase!, { carryFull: 0, carryNone: 0 });
+    Object.assign(station!, { carryFull: 500, carryNone: 3000 });
+    limitCarrying(world);
+    expect([field!.carryNone, pirateBase!.carryNone, station!.carryNone]).toEqual([8000, 6000, 3000]);
   });
 
   it("starts new games where the designer says, copies included, by ship", () => {

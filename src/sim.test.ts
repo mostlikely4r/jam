@@ -1791,8 +1791,16 @@ describe("POI carrying zones", () => {
     y: sim.field.y,
   });
 
-  it("by default the nearest POI carries everything, everywhere", () => {
+  it("by default carries only near each POI, so open space carries nothing", () => {
     const sim = zoned();
+    const near = out(sim, 1000);
+    expect(sim.carryShares(near.x, near.y)[0]).toBe(1);
+    const far = out(sim, 50000);
+    expect(Math.max(...sim.carryShares(far.x, far.y))).toBe(0);
+  });
+
+  it("with no outer range the nearest POI carries everything, everywhere", () => {
+    const sim = zoned({ ...carrying(Infinity, Infinity) });
     const spot = out(sim, 50000);
     expect(sim.carryShares(spot.x, spot.y)[0]).toBe(1);
   });

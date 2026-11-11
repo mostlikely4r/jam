@@ -79,7 +79,7 @@ describe("copies round the same orbit", () => {
     const at = positions(world, t);
     const there = orbitsAt(fields[1].orbits, t);
     expect(there.x).toBeCloseTo(at.get(second)!.x - at.get(planet!)!.x, 3);
-    expect(fields[1]).toMatchObject({ radius: 5200, rocks: 80, carryFull: Infinity, carryNone: Infinity });
+    expect(fields[1]).toMatchObject({ radius: 5200, rocks: 80, carryFull: 2000, carryNone: 8000 });
   });
 
   it("old saves without copies have just the one", () => {

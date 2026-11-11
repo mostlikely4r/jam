@@ -27,11 +27,6 @@ const WORLD = {
   fieldWanderChance: 0,
   fieldLuckSeconds: 0,
   fieldHabitSeconds: 0,
-  // Carried by a place only near it: a spinning station carrying a ship everywhere would sweep it about far out.
-  stationCarryFull: 2000,
-  stationCarryNone: 6000,
-  fieldCarryFull: 2000,
-  fieldCarryNone: 8000,
 };
 
 const PLANET: SolidBody = {

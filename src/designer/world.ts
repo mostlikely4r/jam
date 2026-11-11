@@ -142,10 +142,31 @@ export function bodyDefaults(
   return { surface: "none", pull: 0, pullFull: 0, pullAccel: 0, ...bare };
 }
 
-/** A place's own settings, as the game starts them. */
+/**
+ * A place's own settings, as the game starts them. Places carry only what's near them, so
+ * open space between them carries nothing: a spinning station carrying everything would
+ * sweep a ship far out sideways faster than it can fly.
+ */
 export function placeDefaults(kind: NodeKind): Pick<WorldNode, "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone"> {
-  if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, carryFull: 0, carryNone: 0 };
+  if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field };
+  if (kind === "station" || kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station };
   return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0 };
+}
+
+/** Default carrying, from each place's edge: full out to the first, fading to nothing by the second. */
+export const CARRY = {
+  field: { carryFull: 2000, carryNone: 8000 },
+  station: { carryFull: 2000, carryNone: 6000 },
+} as const;
+
+/** Places still carrying everywhere, as every place did before carrying had a range, get the defaults. */
+export function limitCarrying(world: World): void {
+  const visit = (node: WorldNode) => {
+    const isPlace = node.kind === "field" || node.kind === "station" || node.kind === "pirate base";
+    if (isPlace && node.carryFull === 0 && node.carryNone === 0) Object.assign(node, node.kind === "field" ? CARRY.field : CARRY.station);
+    node.children.forEach(visit);
+  };
+  visit(world.root);
 }
 
 /** A copy's own place: its orbit and where on it it is at time 0, in degrees. */

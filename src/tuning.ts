@@ -33,12 +33,12 @@ export const DEFAULTS = {
    * fully. Beyond it, its share falls off evenly to nothing at the second. Infinity is the
    * old way: the nearest POI carries everything, everywhere. Set by the system designer.
    */
-  fieldCarryFull: Infinity,
-  fieldCarryNone: Infinity,
-  stationCarryFull: Infinity,
-  stationCarryNone: Infinity,
-  pirateCarryFull: Infinity,
-  pirateCarryNone: Infinity,
+  fieldCarryFull: 2000,
+  fieldCarryNone: 8000,
+  stationCarryFull: 2000,
+  stationCarryNone: 6000,
+  pirateCarryFull: 2000,
+  pirateCarryNone: 6000,
   showPoiZones: false,
   /** Loose ore this far from every POI's edge and every ship is gone for good. */
   oreForgetDistance: 6000,

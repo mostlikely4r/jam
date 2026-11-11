@@ -12,6 +12,7 @@ import {
   positions,
   reachOf,
   seedWorld,
+  limitCarrying,
   spinAngle,
   stringifyWorld,
   SHIP_CHOICES,
@@ -30,6 +31,8 @@ import { DEFAULTS } from "../tuning";
 const DEFAULT_ZOOM = 0.8;
 const MAX_OUT_ZOOM = 0.35;
 const DRAFT_KEY = "jam-world-draft";
+/** Set once a draft from before carrying had a range has been given the default ranges. */
+const CARRY_LIMITED_KEY = "jam-designer-carry-limited";
 /** The settings groups the user has opened. All start closed. */
 const GROUPS_KEY = "jam-designer-open";
 const SPEEDS = [1, 10, 60, 600, 3600, 36000];
@@ -309,6 +312,10 @@ export class Designer {
       const text = localStorage.getItem(DRAFT_KEY);
       const world = text ? parseWorld(text) : null;
       if (world) this.moveOldField(world);
+      if (world && localStorage.getItem(CARRY_LIMITED_KEY) === null) {
+        limitCarrying(world);
+        localStorage.setItem(CARRY_LIMITED_KEY, "1");
+      }
       return world;
     } catch {
       return null;

@@ -13,14 +13,23 @@ export const BODY_KINDS = ["star", "planet", "moon", "asteroid"] as const;
 export const PLACE_KINDS = ["anchor", "field", "station", "pirate base"] as const;
 export type NodeKind = (typeof BODY_KINDS)[number] | (typeof PLACE_KINDS)[number];
 
+export const SURFACES = ["none", "damage", "death"] as const;
+export type Surface = (typeof SURFACES)[number];
+
 export interface WorldNode {
   id: string;
   name: string;
   kind: NodeKind;
   /** A body's surface, or a place's size. */
   radius: number;
-  /** Bodies only: how far out the pull reaches, measured from the centre. 0 for none. */
+  /** Bodies only: what touching the ground does. */
+  surface: Surface;
+  /** Bodies only: how far out the pull starts, measured from the centre. 0 for none. */
   pull: number;
+  /** Bodies only: from here down to the ground the pull is at full strength. It grows evenly from `pull` to here. */
+  pullFull: number;
+  /** Bodies only: the full pull, in units/s². */
+  pullAccel: number;
   /** Distance from the parent's centre. Ignored for the root. */
   orbitRadius: number;
   /** Seconds per orbit. 0 stands still; negative goes the other way round. */
@@ -92,6 +101,18 @@ export function parentOf(world: World, target: WorldNode): WorldNode | null {
   return walk(world).find((entry) => entry.node === target)?.parent ?? null;
 }
 
+/**
+ * A first guess at a body's ground and pull for its size. The Floater pushes 84 units/s² and
+ * the Racer 420, so a full pull between them traps one and not the other.
+ */
+export function bodyDefaults(kind: NodeKind, radius: number): Pick<WorldNode, "surface" | "pull" | "pullFull" | "pullAccel"> {
+  if (kind === "star") return { surface: "death", pull: radius * 4, pullFull: radius * 2, pullAccel: 300 };
+  if (kind === "planet") return { surface: "death", pull: radius * 2.5, pullFull: radius * 1.25, pullAccel: 150 };
+  if (kind === "moon") return { surface: "death", pull: radius * 2.5, pullFull: radius * 1.25, pullAccel: 100 };
+  if (kind === "asteroid") return { surface: "damage", pull: 0, pullFull: 0, pullAccel: 0 };
+  return { surface: "none", pull: 0, pullFull: 0, pullAccel: 0 };
+}
+
 let nextId = 1;
 
 export function newId(world: World): string {
@@ -115,7 +136,7 @@ export function makeChild(world: World, parent: WorldNode, kind: NodeKind): Worl
     name: kind[0].toUpperCase() + kind.slice(1),
     kind,
     radius,
-    pull: kind === "planet" || kind === "moon" ? radius * 2.5 : kind === "star" ? radius * 3 : 0,
+    ...bodyDefaults(kind, radius),
     orbitRadius,
     orbitPeriod,
     orbitPhase: 0,
@@ -136,7 +157,10 @@ export function seedWorld(): World {
     name,
     kind,
     radius: 0,
+    surface: "none",
     pull: 0,
+    pullFull: 0,
+    pullAccel: 0,
     orbitRadius: 0,
     orbitPeriod: 0,
     orbitPhase: 0,
@@ -162,13 +186,13 @@ export function seedWorld(): World {
     name: "Planet",
     kind: "planet",
     radius: 12000,
-    pull: 30000,
+    ...bodyDefaults("planet", 12000),
     orbitRadius: 3000000,
     orbitPeriod: 36 * 3600,
     spinPeriod: 6 * 3600,
     children: [field],
   });
-  return { version: WORLD_VERSION, root: node({ id: "star", name: "Star", kind: "star", radius: 150000, pull: 600000, children: [planet] }) };
+  return { version: WORLD_VERSION, root: node({ id: "star", name: "Star", kind: "star", radius: 150000, ...bodyDefaults("star", 150000), children: [planet] }) };
 }
 
 /** Reads a saved world, or null when it doesn't look like one. Missing numbers become 0. */
@@ -179,15 +203,22 @@ export function parseWorld(text: string): World | null {
     const kinds = [...BODY_KINDS, ...PLACE_KINDS] as string[];
     const read = (raw: Record<string, unknown>): WorldNode | null => {
       if (typeof raw.id !== "string" || typeof raw.kind !== "string" || !kinds.includes(raw.kind)) return null;
-      const num = (key: string) => (typeof raw[key] === "number" && Number.isFinite(raw[key]) ? (raw[key] as number) : 0);
+      const num = (key: string, missing = 0) =>
+        typeof raw[key] === "number" && Number.isFinite(raw[key]) ? (raw[key] as number) : key in raw ? 0 : missing;
       const children = Array.isArray(raw.children) ? raw.children.map((child) => read(child as Record<string, unknown>)) : [];
       if (children.some((child) => child === null)) return null;
+      const kind = raw.kind as NodeKind;
+      // Saved before bodies had ground and full pull: those come from the kind's defaults.
+      const defaults = bodyDefaults(kind, num("radius"));
       return {
         id: raw.id,
         name: typeof raw.name === "string" ? raw.name : raw.kind,
-        kind: raw.kind as NodeKind,
+        kind,
         radius: num("radius"),
-        pull: num("pull"),
+        surface: (SURFACES as readonly unknown[]).includes(raw.surface) ? (raw.surface as Surface) : defaults.surface,
+        pull: num("pull", defaults.pull),
+        pullFull: num("pullFull", defaults.pullFull),
+        pullAccel: num("pullAccel", defaults.pullAccel),
         orbitRadius: num("orbitRadius"),
         orbitPeriod: num("orbitPeriod"),
         orbitPhase: num("orbitPhase"),

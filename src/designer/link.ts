@@ -6,9 +6,9 @@
  * The tuning is the one channel between them. The designer writes into the same values the
  * sliders use, and reads them back when it opens, so whichever was changed last wins.
  */
-import type { Poi } from "../sim";
+import type { Orbit, Poi, SolidBody } from "../sim";
 import type { Tuning } from "../tuning";
-import { isBody, parentOf, walk, type NodeKind, type World, type WorldNode } from "./world";
+import { isBody, parentOf, pathTo, walk, type NodeKind, type World, type WorldNode } from "./world";
 
 /** Each POI's orbit angle at clock 0, in radians. */
 export type Phases = Partial<Record<Poi["name"], number>>;
@@ -18,7 +18,7 @@ export interface GameLink {
   tuning: Tuning;
   clock(): number;
   phases(): Phases;
-  apply(phases: Phases): void;
+  apply(phases: Phases, bodies: SolidBody[]): void;
 }
 
 export interface Linked {
@@ -36,10 +36,49 @@ export function linkedNodes(world: World): Linked {
   return { planet: parent && isBody(parent.kind) ? parent : null, field, station: under("station"), pirates: under("pirate base") };
 }
 
+/**
+ * Every body in the tree, placed as the game sees it: round whatever the field orbits, which
+ * the game keeps still at its centre. A body's place is the sum of its own chain of orbits,
+ * less the chain of that centre.
+ */
+export function bodiesFor(world: World): SolidBody[] {
+  const { field } = linkedNodes(world);
+  const centre = (field && parentOf(world, field)) ?? world.root;
+  const centreChain = pathTo(world, centre);
+  const orbit = (node: WorldNode, sign: 1 | -1): Orbit => ({
+    radius: node.orbitRadius,
+    period: node.orbitPeriod,
+    phase: (node.orbitPhase * Math.PI) / 180,
+    sign,
+  });
+  return walk(world)
+    .map((entry) => entry.node)
+    .filter((node) => isBody(node.kind))
+    .map((node) => {
+      const chain = pathTo(world, node);
+      let shared = 0;
+      while (shared < chain.length && shared < centreChain.length && chain[shared] === centreChain[shared]) shared++;
+      // The root sits at the middle of everything: its own orbit counts for nothing.
+      const own = (nodes: WorldNode[]) => nodes.filter((each) => each !== world.root);
+      return {
+        name: node.name,
+        kind: node.kind,
+        radius: node.radius,
+        surface: node.surface,
+        pullStart: node.pull,
+        pullFull: node.pullFull,
+        pullAccel: node.pullAccel,
+        spinPeriod: node.spinPeriod,
+        orbits: [
+          ...own(chain.slice(shared)).map((each) => orbit(each, 1)),
+          ...own(centreChain.slice(shared)).map((each) => orbit(each, -1)),
+        ],
+      };
+    });
+}
+
 export function writeGame(world: World, tuning: Tuning): void {
-  const { planet, field, station, pirates } = linkedNodes(world);
-  tuning.planetRadius = planet?.radius ?? 0;
-  tuning.planetSpinPeriod = planet?.spinPeriod ?? 0;
+  const { field, station, pirates } = linkedNodes(world);
   if (!field) return;
   tuning.fieldRadius = field.radius;
   tuning.fieldOrbitRadius = field.orbitRadius;
@@ -63,10 +102,7 @@ function degrees(radians: number): number {
   return Math.round((turned % 360) * 1000) / 1000;
 }
 
-/**
- * Brings the designer's numbers up to date with the game. The planet has no sliders, so
- * it stays as designed: a slider reset can't wipe it.
- */
+/** Brings the designer's numbers up to date with the game's sliders. Bodies have none. */
 export function readGame(world: World, tuning: Tuning, phases: Phases): void {
   const { field, station, pirates } = linkedNodes(world);
   if (!field) return;
@@ -101,14 +137,14 @@ export function phasesFromWorld(world: World): Phases {
 
 /** A few lines for the designer's side panel: what the game will use. */
 export function linkSummary(world: World): string {
-  const linked = linkedNodes(world);
-  const used = Object.values(linked).filter((node): node is WorldNode => node !== null);
-  const rest = walk(world)
-    .map((entry) => entry.node)
-    .filter((node) => !used.includes(node));
-  const lines = [`In the game: ${used.map((node) => node.name).join(", ") || "nothing"}`];
-  if (rest.length > 0) lines.push(`Map only: ${rest.map((node) => node.name).join(", ")}`);
-  if (linked.field && !linked.planet) lines.push(`${linked.field.name} doesn't directly orbit a body, so the game has no planet`);
-  lines.push("Pull isn't in the game yet. A new field radius needs a new game (R) to lay out its rocks. Start angles last until the next new game.");
+  const { field, station, pirates } = linkedNodes(world);
+  const linkedPlaces = [field, station, pirates];
+  const nodes = walk(world).map((entry) => entry.node);
+  // Every body is real. Of the places, only the ones the game has.
+  const real = nodes.filter((node) => isBody(node.kind) || linkedPlaces.includes(node));
+  const places = nodes.filter((node) => !real.includes(node));
+  const lines = [`In the game: ${real.map((node) => node.name).join(", ") || "nothing"}`];
+  if (places.length > 0) lines.push(`Map only: ${places.map((node) => node.name).join(", ")}`);
+  lines.push("A new field radius needs a new game (R) to lay out its rocks. Start angles last until the next new game.");
   return lines.join("\n");
 }

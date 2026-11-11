@@ -13,12 +13,14 @@ import {
   seedWorld,
   spinAngle,
   stringifyWorld,
+  SURFACES,
   walk,
   type NodeKind,
+  type Surface,
   type World,
   type WorldNode,
 } from "./world";
-import { linkSummary, linkedNodes, phasesFromWorld, readGame, writeGame, type GameLink } from "./link";
+import { bodiesFor, linkSummary, linkedNodes, phasesFromWorld, readGame, writeGame, type GameLink } from "./link";
 import { planRoute, type Flight, type Route } from "../route";
 import { DEFAULTS } from "../tuning";
 
@@ -26,6 +28,8 @@ import { DEFAULTS } from "../tuning";
 const DEFAULT_ZOOM = 0.8;
 const MAX_OUT_ZOOM = 0.35;
 const DRAFT_KEY = "jam-world-draft";
+/** Set once this browser's game has taken the designer's numbers, so the sliders win after that. */
+const LINKED_KEY = "jam-world-linked";
 const SPEEDS = [1, 10, 60, 600, 3600, 36000];
 const CLICK_PIXELS = 5;
 /** Ships to time a route with, from the game's own numbers. */
@@ -85,6 +89,16 @@ function readableTime(seconds: number): string {
   if (s < 7200) return `${sign}${(s / 60).toFixed(1)} min`;
   if (s < 3 * 86400) return `${sign}${(s / 3600).toFixed(1)} h`;
   return `${sign}${(s / 86400).toFixed(1)} days`;
+}
+
+/** Which ships can still climb out where a pull is at full strength, flat out with no parts. */
+function climbing(accel: number): string {
+  if (accel <= 0) return "no pull";
+  const floater = FLIGHTS.floater.flight.accel;
+  const racer = FLIGHTS.racer.flight.accel;
+  if (accel >= racer) return `nothing climbs out where it's full (Racer ${racer}, Floater ${floater})`;
+  if (accel >= floater) return `the Racer climbs out where it's full, the Floater (${floater}) can't`;
+  return `both ships climb out (Floater ${floater}, Racer ${racer})`;
 }
 
 function readableDistance(units: number): string {
@@ -231,7 +245,30 @@ export class Designer {
   /** Hands the game this layout. */
   linkToGame(): void {
     writeGame(this.world, this.game.tuning);
-    this.game.apply(phasesFromWorld(this.world));
+    this.game.apply(phasesFromWorld(this.world), bodiesFor(this.world));
+    try {
+      localStorage.setItem(LINKED_KEY, "1");
+      localStorage.setItem(DRAFT_KEY, stringifyWorld(this.world));
+    } catch {
+      // Storage off: the link still holds until the page is closed.
+    }
+  }
+
+  /**
+   * At startup: the game gets the bodies every time, as they aren't saved anywhere else. The
+   * numbers the sliders share go to the game only the first time; after that the game's win.
+   */
+  connect(): void {
+    let linked = false;
+    try {
+      linked = localStorage.getItem(LINKED_KEY) !== null;
+    } catch {
+      // Storage off: treat it as the first time.
+    }
+    if (linked) {
+      readGame(this.world, this.game.tuning, {});
+      this.game.apply({}, bodiesFor(this.world));
+    } else this.linkToGame();
   }
 
   // --- Small DOM helpers -------------------------------------------------------------
@@ -471,7 +508,19 @@ export class Designer {
     parts.push(this.labelled("Kind (bodies are solid and filled; the rest are places)", kind));
 
     parts.push(this.number(node, "radius", body ? "Radius (surface)" : "Radius (size)", (v) => `${this.screens(v * 2)} across`));
-    if (body) parts.push(this.number(node, "pull", "Pull reaches out to (from the centre, 0 for none)", (v) => (v > 0 ? `${readableDistance(v - node.radius)} beyond the surface` : "no pull")));
+    if (body) {
+      const surface = document.createElement("select");
+      const meanings: Record<Surface, string> = { none: "nothing: not solid", damage: "a knock, hurting by speed like a rock", death: "death" };
+      for (const value of SURFACES) surface.append(new Option(meanings[value], value, false, value === node.surface));
+      surface.addEventListener("change", () => {
+        node.surface = surface.value as Surface;
+        this.changed();
+      });
+      parts.push(this.labelled("Touching the ground means", surface));
+      parts.push(this.number(node, "pull", "Pull starts at (from the centre, 0 for none)", (v) => (v > 0 ? `${readableDistance(v - node.radius)} beyond the surface` : "no pull")));
+      parts.push(this.number(node, "pullFull", "Pull is full from here down (from the centre)", (v) => (v > node.radius ? `${readableDistance(v - node.radius)} above the surface` : "full only at the surface")));
+      parts.push(this.number(node, "pullAccel", "Full pull, units/s²", (v) => climbing(v)));
+    }
     if (!isRoot) {
       parts.push(this.number(node, "orbitRadius", "Orbit radius (from the parent's centre)", (v) => `${readableDistance(v)}; ${readableDistance(v - (parentOf(this.world, node)?.radius ?? 0))} from its surface`));
       parts.push(this.number(node, "orbitPeriod", "Orbit period, seconds (negative goes the other way)", (v) => `${readableTime(v)} per orbit, ${orbitSpeed({ ...node, orbitPeriod: v }).toFixed(1)} units/s`));
@@ -531,7 +580,7 @@ export class Designer {
 
   private number(
     node: WorldNode,
-    key: "radius" | "pull" | "orbitRadius" | "orbitPeriod" | "orbitPhase" | "spinPeriod",
+    key: "radius" | "pull" | "pullFull" | "pullAccel" | "orbitRadius" | "orbitPeriod" | "orbitPhase" | "spinPeriod",
     text: string,
     hint: (value: number) => string,
   ): HTMLLabelElement {
@@ -766,16 +815,23 @@ export class Designer {
       ctx.stroke();
     }
 
-    // Pull zones.
+    // Pull zones: where it starts, and where it's full.
     ctx.setLineDash([8, 6]);
     for (const { node } of entries) {
-      if (!isBody(node.kind) || node.pull <= node.radius) continue;
+      if (!isBody(node.kind) || node.pullAccel <= 0) continue;
       const p = at.get(node)!;
-      if (!ring(p.x, p.y, node.pull)) continue;
-      ctx.fillStyle = "rgba(255, 110, 80, 0.04)";
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255, 110, 80, 0.45)";
-      ctx.stroke();
+      if (node.pull > node.radius && ring(p.x, p.y, node.pull)) {
+        ctx.fillStyle = "rgba(255, 110, 80, 0.04)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255, 110, 80, 0.45)";
+        ctx.stroke();
+      }
+      if (node.pullFull > node.radius && node.pullFull < node.pull && ring(p.x, p.y, node.pullFull)) {
+        ctx.fillStyle = "rgba(255, 110, 80, 0.06)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255, 110, 80, 0.7)";
+        ctx.stroke();
+      }
     }
     ctx.setLineDash([]);
 

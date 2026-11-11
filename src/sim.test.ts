@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PARTS } from "./parts";
 import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
-import { DOCK_OFFSET, MAX_HULL, type Poi, SHIP_RADIUS, Sim, STATION_HALF, TICK } from "./sim";
+import { bodyAt, DOCK_OFFSET, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, type SolidBody, STATION_HALF, TICK } from "./sim";
 
 /** Every part, weighing nothing, so tests of the thrusters themselves see plain numbers. */
 /** The flight tests below are about the quick ship. The new ship has its own tests. */
@@ -241,13 +241,20 @@ describe("station", () => {
     expect(Math.min(moved, Math.PI * 2 - moved)).toBeCloseTo(Math.PI / 2, 2);
   });
 
-  describe("the planet", () => {
-    it("wrecks a ship that flies into it and rebuilds it away from there", () => {
-      const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, planetRadius: 12000, fieldOrbitRadius: 60000 });
-      sim.ship.x = 11990;
-      sim.ship.y = 0;
-      sim.ship.px = 11990;
-      sim.ship.py = 0;
+  describe("bodies from the designer", () => {
+    function planet(extra: Partial<SolidBody> = {}): SolidBody {
+      return { name: "Planet", kind: "planet", radius: 12000, surface: "death", pullStart: 0, pullFull: 0, pullAccel: 0, spinPeriod: 0, orbits: [], ...extra };
+    }
+    /** A still field far away, so nothing carries the ship near the body. */
+    function near(body: SolidBody, x: number, vx = 0): Sim {
+      const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, fieldOrbitRadius: 200000, fieldOrbitPeriod: 0, fieldRotationPeriod: 0, orbitPeriod: 0, stationRotationPeriod: 0 });
+      sim.bodies = [body];
+      Object.assign(sim.ship, { x, y: 0, px: x, py: 0, vx, vy: 0 });
+      return sim;
+    }
+
+    it("wrecks a ship that flies into deadly ground, and rebuilds it away from there", () => {
+      const sim = near(planet(), 11990);
       const wrecks = sim.ship.wrecks;
       run(sim, TICK);
       expect(sim.ship.wrecks).toBe(wrecks + 1);
@@ -255,23 +262,76 @@ describe("station", () => {
     });
 
     it("leaves a ship just above the ground alone", () => {
-      const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, planetRadius: 12000, fieldOrbitRadius: 60000 });
-      sim.ship.x = 12000 + SHIP_RADIUS + 100;
-      sim.ship.y = 0;
-      sim.ship.px = sim.ship.x;
-      sim.ship.py = 0;
+      const sim = near(planet(), 12000 + SHIP_RADIUS + 100);
       run(sim, TICK);
       expect(sim.ship.wrecks).toBe(0);
     });
 
-    it("isn't there unless the layout says so", () => {
-      const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0 });
-      sim.ship.x = 10;
-      sim.ship.y = 0;
-      sim.ship.px = 10;
-      sim.ship.py = 0;
+    it("isn't there unless the designer says so", () => {
+      const sim = near(planet(), 10);
+      sim.bodies = [];
       run(sim, TICK);
       expect(sim.ship.wrecks).toBe(0);
+    });
+
+    it("lets a ship straight through ground that isn't solid", () => {
+      const sim = near(planet({ surface: "none" }), 11000);
+      run(sim, 1);
+      expect(sim.ship.wrecks).toBe(0);
+      expect(sim.ship.hull).toBe(MAX_HULL);
+    });
+
+    it("knocks a ship back off hard ground, hurting it by speed like a rock", () => {
+      const slow = near(planet({ surface: "damage" }), 12000 + SHIP_RADIUS + 5, -60);
+      run(slow, 0.5);
+      expect(slow.ship.hull).toBe(MAX_HULL);
+      expect(slow.ship.vx).toBeGreaterThan(0);
+      const fast = near(planet({ surface: "damage" }), 12000 + SHIP_RADIUS + 5, -400);
+      run(fast, 0.5);
+      expect(fast.ship.hull).toBeLessThan(MAX_HULL);
+      expect(fast.ship.vx).toBeGreaterThan(0);
+      expect(Math.hypot(fast.ship.x, fast.ship.y)).toBeGreaterThanOrEqual(12000 + SHIP_RADIUS);
+    });
+
+    it("hurts a still ship that a moving body runs into", () => {
+      // A body on a big orbit, moving at about 600 units/s through the ship's spot.
+      const radius = 100000;
+      const period = (2 * Math.PI * radius) / 600;
+      const moon = planet({ radius: 1000, surface: "damage", orbits: [{ radius, period, phase: -0.0125, sign: 1 }] });
+      const sim = near(moon, radius);
+      sim.ship.y = 0;
+      run(sim, 2);
+      expect(sim.ship.hull).toBeLessThan(MAX_HULL);
+    });
+
+    it("pulls evenly harder from where it starts to where it's full, then holds", () => {
+      const body = planet({ pullStart: 30000, pullFull: 15000, pullAccel: 150 });
+      expect(pullAt(body, 31000)).toBe(0);
+      expect(pullAt(body, 22500)).toBeCloseTo(75, 9);
+      expect(pullAt(body, 15000)).toBeCloseTo(150, 9);
+      expect(pullAt(body, 13000)).toBe(150);
+      const sim = near(body, 22500);
+      run(sim, 1);
+      expect(sim.ship.vx).toBeLessThan(-70);
+      expect(sim.ship.vx).toBeGreaterThan(-90);
+    });
+
+    it("pulls loose ore too, and ore that lands is gone", () => {
+      const sim = near(planet({ pullStart: 30000, pullFull: 15000, pullAccel: 150 }), 50000);
+      sim.ores.push({ x: 13000, y: 0, px: 13000, py: 0, vx: 0, vy: 0, kind: 0, amount: 1 });
+      sim.tuning.oreForgetDistance = Infinity;
+      run(sim, 0.5);
+      expect(sim.ores[0].vx).toBeLessThan(-50);
+      run(sim, 20);
+      expect(sim.ores.length).toBe(0);
+    });
+
+    it("places a body by its chain of orbits", () => {
+      const body = planet({ orbits: [{ radius: 1000, period: 100, phase: 0, sign: 1 }, { radius: 400, period: 0, phase: Math.PI / 2, sign: -1 }] });
+      const at = bodyAt(body, 25);
+      expect(at.x).toBeCloseTo(0, 6);
+      expect(at.y).toBeCloseTo(1000 - 400, 6);
+      expect(at.vx).toBeCloseTo(-1000 * ((2 * Math.PI) / 100), 6);
     });
   });
 

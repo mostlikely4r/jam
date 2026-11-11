@@ -71,7 +71,8 @@ const designer = dev
         tuning,
         clock: () => sim.now,
         phases: () => sim.orbitPhases(),
-        apply(phases) {
+        apply(phases, bodies) {
+          sim.bodies = bodies;
           sim.applyLayout(phases);
           saveTuning();
           buildPanel();
@@ -1049,8 +1050,7 @@ function frame(now: number): void {
 }
 
 buildPanel();
-// No planet yet means the designer's layout has never reached this browser's game.
-if (tuning.planetRadius === 0) designer?.linkToGame();
+designer?.connect();
 showStart();
 requestAnimationFrame(frame);
 

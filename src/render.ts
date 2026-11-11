@@ -3,6 +3,7 @@ import type { ThrusterId } from "./tuning";
 import {
   BLACK_MARKET_LENGTH,
   BLACK_MARKET_WIDTH,
+  bodyAt,
   DEPOSIT_HALF,
   DOCK_OFFSET,
   HAULER_LENGTH,
@@ -80,6 +81,14 @@ interface Star {
 
 const PLANET_MARKS = 1500;
 
+/** How each kind of body looks, until they get looks of their own. */
+const BODY_LOOKS: Record<string, { ground: string; dark: string; light: string; haze: string; glow: number }> = {
+  star: { ground: "#f4c55a", dark: "rgba(200, 120, 30, 0.35)", light: "rgba(255, 240, 180, 0.35)", haze: "rgba(255, 200, 90, 0.5)", glow: 1.3 },
+  planet: { ground: "#20344f", dark: "rgba(12, 24, 42, 0.45)", light: "rgba(70, 105, 150, 0.22)", haze: "rgba(120, 170, 235, 0.4)", glow: 1.04 },
+  moon: { ground: "#3a3f48", dark: "rgba(20, 22, 28, 0.45)", light: "rgba(120, 128, 140, 0.25)", haze: "rgba(170, 178, 192, 0.2)", glow: 1.02 },
+  asteroid: { ground: "#4a4036", dark: "rgba(25, 20, 15, 0.45)", light: "rgba(130, 115, 95, 0.25)", haze: "rgba(0, 0, 0, 0)", glow: 1.01 },
+};
+
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
@@ -96,7 +105,7 @@ export class Renderer {
   /** Where the player last saw each pirate, in the axes of what it was near. */
   private ghosts = new WeakMap<Ship, { poi: Poi; x: number; y: number; seenAt: number }>();
   private stars: Star[] = [];
-  /** Where the marks on the planet's ground are, as shares of its radius. */
+  /** Where the marks on a body's ground are, as shares of its radius. */
   private planetMarks: { angle: number; distance: number; size: number; light: boolean }[] = [];
   private flash = 0;
   /** Shows what strangers shouldn't need: pointers to every ship. */
@@ -262,7 +271,7 @@ export class Renderer {
     const visible = (x: number, y: number, r: number) =>
       Math.abs(x - camX) < halfW + r && Math.abs(y - camY) < halfH + r;
 
-    this.drawPlanet(sim, visible);
+    this.drawBodies(sim, alpha, visible);
     this.drawStation(sim, alpha);
     this.drawDeposits(sim, alpha);
     this.drawGuards(sim, alpha);
@@ -324,41 +333,49 @@ export class Renderer {
     }
   }
 
-  /** The planet, at the centre of the field's orbit: a wall of dark ground under a thin glow. */
-  private drawPlanet(sim: Sim, visible: (x: number, y: number, r: number) => boolean): void {
-    const { planetRadius: radius, planetSpinPeriod: spin } = sim.tuning;
-    if (radius <= 0) return;
+  /**
+   * Stars, planets, moons and asteroids: placeholders for now, a disc of ground under a thin
+   * glow, with marks on it so that flying over it can be seen and felt.
+   */
+  private drawBodies(sim: Sim, alpha: number, visible: (x: number, y: number, r: number) => boolean): void {
     const { ctx } = this;
     const { camX, camY, scale, width, height } = this.view;
-    const glowRadius = radius * 1.04;
-    if (Math.hypot(camX, camY) - Math.hypot(width, height) / 2 / scale > glowRadius) return;
-    const glow = ctx.createRadialGradient(0, 0, radius, 0, 0, glowRadius);
-    glow.addColorStop(0, "rgba(120, 170, 235, 0.4)");
-    glow.addColorStop(1, "rgba(120, 170, 235, 0)");
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#20344f";
-    ctx.beginPath();
-    ctx.arc(0, 0, radius, 0, Math.PI * 2);
-    ctx.fill();
-    // Marks on the ground, so that flying over it can be seen and felt.
-    const turn = spin !== 0 ? (Math.PI * 2 * sim.now) / spin : 0;
-    for (const light of [false, true]) {
-      ctx.fillStyle = light ? "rgba(70, 105, 150, 0.22)" : "rgba(12, 24, 42, 0.45)";
+    const halfDiagonal = Math.hypot(width, height) / 2 / scale;
+    const time = sim.now - (1 - alpha) * TICK;
+    sim.bodies.forEach((body, index) => {
+      const look = BODY_LOOKS[body.kind] ?? BODY_LOOKS.planet;
+      const { radius } = body;
+      const { x: cx, y: cy } = bodyAt(body, time);
+      const glowRadius = radius * look.glow;
+      if (radius <= 0 || Math.hypot(cx - camX, cy - camY) - halfDiagonal > glowRadius) return;
+      const glow = ctx.createRadialGradient(cx, cy, radius, cx, cy, glowRadius);
+      glow.addColorStop(0, look.haze);
+      glow.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = glow;
       ctx.beginPath();
-      for (const mark of this.planetMarks) {
-        if (mark.light !== light) continue;
-        const x = Math.cos(mark.angle + turn) * mark.distance * radius;
-        const y = Math.sin(mark.angle + turn) * mark.distance * radius;
-        const size = mark.size * radius;
-        if (!visible(x, y, size)) continue;
-        ctx.moveTo(x + size, y);
-        ctx.arc(x, y, size, 0, Math.PI * 2);
-      }
+      ctx.arc(cx, cy, glowRadius, 0, Math.PI * 2);
       ctx.fill();
-    }
+      ctx.fillStyle = look.ground;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.fill();
+      // Each body turns its marks a different way round, so no two look the same.
+      const turn = index * 2.4 + (body.spinPeriod !== 0 ? (Math.PI * 2 * time) / body.spinPeriod : 0);
+      for (const light of [false, true]) {
+        ctx.fillStyle = light ? look.light : look.dark;
+        ctx.beginPath();
+        for (const mark of this.planetMarks) {
+          if (mark.light !== light) continue;
+          const x = cx + Math.cos(mark.angle + turn) * mark.distance * radius;
+          const y = cy + Math.sin(mark.angle + turn) * mark.distance * radius;
+          const size = mark.size * radius;
+          if (!visible(x, y, size)) continue;
+          ctx.moveTo(x + size, y);
+          ctx.arc(x, y, size, 0, Math.PI * 2);
+        }
+        ctx.fill();
+      }
+    });
   }
 
   private drawStation(sim: Sim, alpha: number): void {

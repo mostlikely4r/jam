@@ -302,6 +302,59 @@ export interface Poi {
   turn: number;
 }
 
+/** What touching a body's ground does: nothing, a bounce that hurts like a rock's, or the end. */
+export type Surface = "none" | "damage" | "death";
+
+/** One circle in a body's motion: a radius, seconds per turn, the angle at clock 0, and which way it counts. */
+export interface Orbit {
+  radius: number;
+  period: number;
+  phase: number;
+  sign: 1 | -1;
+}
+
+/**
+ * A star, planet, moon or asteroid from the system designer. Its place relative to the
+ * game's centre is the sum of its orbits. Not saved: the designer hands them over each time.
+ */
+export interface SolidBody {
+  name: string;
+  kind: string;
+  radius: number;
+  surface: Surface;
+  /** Pull starts at `pullStart` from the centre, grows evenly to `pullAccel` at `pullFull`, and holds from there down. */
+  pullStart: number;
+  pullFull: number;
+  pullAccel: number;
+  spinPeriod: number;
+  orbits: Orbit[];
+}
+
+/** A body's pull, in units/s², at a distance from its centre. */
+export function pullAt(body: SolidBody, distance: number): number {
+  const { pullStart, pullFull, pullAccel } = body;
+  if (pullAccel <= 0 || distance >= pullStart) return 0;
+  if (distance <= pullFull || pullStart <= pullFull) return pullAccel;
+  return (pullAccel * (pullStart - distance)) / (pullStart - pullFull);
+}
+
+/** Where a body is at a time on the clock, and how fast it's going. */
+export function bodyAt(body: SolidBody, time: number): { x: number; y: number; vx: number; vy: number } {
+  let x = 0;
+  let y = 0;
+  let vx = 0;
+  let vy = 0;
+  for (const { radius, period, phase, sign } of body.orbits) {
+    const rate = orbitRate(period);
+    const angle = phase + rate * time;
+    x += sign * Math.cos(angle) * radius;
+    y += sign * Math.sin(angle) * radius;
+    vx -= sign * Math.sin(angle) * radius * rate;
+    vy += sign * Math.cos(angle) * radius * rate;
+  }
+  return { x, y, vx, vy };
+}
+
 export interface PoiReading {
   /** Direction from the ship to the marker's target. */
   dx: number;
@@ -501,6 +554,10 @@ export class Sim {
   /** Flies the player's ship to a clicked spot, if it has the part. */
   clickPilot!: ClickPilot;
   rocks: Rock[] = [];
+  /** Stars, planets, moons and asteroids, from the system designer. None without it. */
+  bodies: SolidBody[] = [];
+  /** Where each body is this tick. */
+  private bodySpots: { body: SolidBody; x: number; y: number; vx: number; vy: number }[] = [];
   shots: Shot[] = [];
   ores: Ore[] = [];
   field!: Poi;
@@ -1772,11 +1829,14 @@ export class Sim {
     this.moveRocks(dt);
     this.pullOre(this.ship, dt);
     for (const pilot of pilots) this.pullOre(pilot.ship, dt);
+    this.bodySpots = this.bodies.map((body) => ({ body, ...bodyAt(body, this.clock) }));
+    this.pullTowardBodies(dt);
     this.moveOres(dt);
     this.moveShip(this.ship, dt);
     for (const pilot of pilots) this.moveShip(pilot.ship, dt);
-    this.crashIntoPlanet(this.ship);
-    for (const pilot of pilots) this.crashIntoPlanet(pilot.ship);
+    this.touchBodies(this.ship, dt);
+    for (const pilot of pilots) this.touchBodies(pilot.ship, dt);
+    this.burnOreOnBodies();
     this.moveShots(dt);
     this.fireShots(this.ship);
     this.collectOre(this.ship);
@@ -2399,13 +2459,59 @@ export class Sim {
     }
   }
 
-  /** The planet is at the centre of the field's orbit. Nobody survives flying into it. */
-  private crashIntoPlanet(ship: Ship): void {
-    const { planetRadius } = this.tuning;
-    if (planetRadius <= 0 || Math.hypot(ship.x, ship.y) >= planetRadius + SHIP_RADIUS) return;
-    ship.damageTaken += ship.hull;
-    ship.hull = 0;
-    this.wreckShip(ship);
+  /** Every body's pull, on ships out in the open and on loose ore. Rocks and places keep to their paths. */
+  private pullTowardBodies(dt: number): void {
+    if (this.bodySpots.length === 0) return;
+    const pull = (thing: { x: number; y: number; vx: number; vy: number }) => {
+      for (const { body, x, y } of this.bodySpots) {
+        const dx = x - thing.x;
+        const dy = y - thing.y;
+        const distance = Math.hypot(dx, dy);
+        const accel = distance > 0 ? pullAt(body, distance) : 0;
+        if (accel === 0) continue;
+        thing.vx += (dx / distance) * accel * dt;
+        thing.vy += (dy / distance) * accel * dt;
+      }
+    };
+    for (const ship of [this.ship, ...this.pilots.map((pilot) => pilot.ship)]) if (!this.isDocked(ship)) pull(ship);
+    for (const ore of this.ores) pull(ore);
+  }
+
+  /** A ship on a body's ground: through it, off it with a knock, or wrecked. */
+  private touchBodies(ship: Ship, dt: number): void {
+    for (const { body, x, y, vx, vy } of this.bodySpots) {
+      if (body.surface === "none") continue;
+      const reach = body.radius + SHIP_RADIUS;
+      const dx = ship.x - x;
+      const dy = ship.y - y;
+      const distance = Math.hypot(dx, dy);
+      if (distance >= reach) continue;
+      if (body.surface === "death") {
+        ship.damageTaken += ship.hull;
+        ship.hull = 0;
+        this.wreckShip(ship);
+        return;
+      }
+      const nx = distance > 0 ? dx / distance : 1;
+      const ny = distance > 0 ? dy / distance : 0;
+      // A ship's speed counts against what carries it, so the ground's must too. What this
+      // tick moved it, less its own speed, is how fast it was carried, turning and all.
+      const ground = {
+        vx: vx - ((ship.x - ship.px) / dt - ship.vx),
+        vy: vy - ((ship.y - ship.py) / dt - ship.vy),
+      };
+      ship.x = x + nx * (reach + 0.01);
+      ship.y = y + ny * (reach + 0.01);
+      this.bounceOff(ship, nx, ny, ground, 0);
+      if (ship.hull <= 0) return;
+    }
+  }
+
+  /** Loose ore that reaches solid ground is gone. */
+  private burnOreOnBodies(): void {
+    const solid = this.bodySpots.filter((spot) => spot.body.surface !== "none");
+    if (solid.length === 0) return;
+    this.ores = this.ores.filter((ore) => solid.every(({ body, x, y }) => Math.hypot(ore.x - x, ore.y - y) >= body.radius));
   }
 
   private wreckShip(ship: Ship): void {

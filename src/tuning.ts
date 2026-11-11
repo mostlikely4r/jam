@@ -51,9 +51,6 @@ export const DEFAULTS = {
   pirateOrbitPeriod: 900,
   pirateRotationPeriod: 0,
   stationRotationPeriod: 300,
-  /** A solid planet at the centre of the field's orbit. 0 is no planet. Set by the system designer. */
-  planetRadius: 0,
-  planetSpinPeriod: 0,
   dockDrag: 0.25,
   creditsPerOre: 10,
 

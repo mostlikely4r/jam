@@ -17,6 +17,7 @@
     "carryFull": 0,
     "carryNone": 0,
     "spawns": [],
+    "shipyard": false,
     "count": 1,
     "angleVariance": 0,
     "orbitVariance": 0,
@@ -42,13 +43,14 @@
         "carryFull": 0,
         "carryNone": 0,
         "spawns": [],
+        "shipyard": false,
+        "count": 1,
+        "angleVariance": 0,
+        "orbitVariance": 0,
         "orbitRadius": 1638000,
         "orbitPeriod": 648617,
         "orbitPhase": 0,
         "spinPeriod": 0,
-        "count": 1,
-        "angleVariance": 0,
-        "orbitVariance": 0,
         "children": [
           {
             "id": "n2",
@@ -67,13 +69,14 @@
             "carryFull": 0,
             "carryNone": 0,
             "spawns": [],
+            "shipyard": false,
+            "count": 1,
+            "angleVariance": 0,
+            "orbitVariance": 0,
             "orbitRadius": 181000,
             "orbitPeriod": 10567,
             "orbitPhase": 0,
             "spinPeriod": 0,
-            "count": 1,
-            "angleVariance": 0,
-            "orbitVariance": 0,
             "children": [
               {
                 "id": "n3",
@@ -92,13 +95,14 @@
                 "carryFull": 0,
                 "carryNone": 0,
                 "spawns": [],
+                "shipyard": false,
+                "count": 1,
+                "angleVariance": 0,
+                "orbitVariance": 0,
                 "orbitRadius": 40400,
                 "orbitPeriod": 5350,
                 "orbitPhase": 0,
                 "spinPeriod": 0,
-                "count": 1,
-                "angleVariance": 0,
-                "orbitVariance": 0,
                 "children": [
                   {
                     "id": "n4",
@@ -117,15 +121,15 @@
                     "carryFull": 2000,
                     "carryNone": 8000,
                     "spawns": [],
+                    "shipyard": false,
+                    "count": 1,
+                    "angleVariance": 0,
+                    "orbitVariance": 0,
                     "orbitRadius": 17900,
                     "orbitPeriod": -6000,
                     "orbitPhase": 0,
                     "spinPeriod": 0,
-                    "count": 1,
-                    "angleVariance": 0,
-                    "orbitVariance": 0,
-                    "children": [],
-                    "shipyard": false
+                    "children": []
                   },
                   {
                     "id": "n5",
@@ -144,15 +148,15 @@
                     "carryFull": 2000,
                     "carryNone": 8000,
                     "spawns": [],
+                    "shipyard": false,
+                    "count": 1,
+                    "angleVariance": 0,
+                    "orbitVariance": 0,
                     "orbitRadius": 17900,
                     "orbitPeriod": -6000,
                     "orbitPhase": 120,
                     "spinPeriod": 0,
-                    "count": 1,
-                    "angleVariance": 0,
-                    "orbitVariance": 0,
-                    "children": [],
-                    "shipyard": false
+                    "children": []
                   },
                   {
                     "id": "n6",
@@ -171,15 +175,15 @@
                     "carryFull": 2000,
                     "carryNone": 8000,
                     "spawns": [],
+                    "shipyard": false,
+                    "count": 1,
+                    "angleVariance": 0,
+                    "orbitVariance": 0,
                     "orbitRadius": 17900,
                     "orbitPeriod": -6000,
                     "orbitPhase": 260,
                     "spinPeriod": 0,
-                    "count": 1,
-                    "angleVariance": 0,
-                    "orbitVariance": 0,
-                    "children": [],
-                    "shipyard": false
+                    "children": []
                   },
                   {
                     "id": "n7",
@@ -198,15 +202,15 @@
                     "carryFull": 2000,
                     "carryNone": 6000,
                     "spawns": [],
+                    "shipyard": true,
+                    "count": 1,
+                    "angleVariance": 0,
+                    "orbitVariance": 0,
                     "orbitRadius": 10000,
                     "orbitPeriod": 16000,
                     "orbitPhase": 0,
                     "spinPeriod": 0,
-                    "count": 1,
-                    "angleVariance": 0,
-                    "orbitVariance": 0,
-                    "children": [],
-                    "shipyard": true
+                    "children": []
                   },
                   {
                     "id": "n8",
@@ -225,26 +229,22 @@
                     "carryFull": 2000,
                     "carryNone": 6000,
                     "spawns": [],
+                    "shipyard": false,
+                    "count": 1,
+                    "angleVariance": 0,
+                    "orbitVariance": 0,
                     "orbitRadius": 25000,
                     "orbitPeriod": 16000,
                     "orbitPhase": 0,
                     "spinPeriod": 0,
-                    "count": 1,
-                    "angleVariance": 0,
-                    "orbitVariance": 0,
-                    "children": [],
-                    "shipyard": false
+                    "children": []
                   }
-                ],
-                "shipyard": false
+                ]
               }
-            ],
-            "shipyard": false
+            ]
           }
-        ],
-        "shipyard": false
+        ]
       }
-    ],
-    "shipyard": false
+    ]
   }
 }

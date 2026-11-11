@@ -127,6 +127,8 @@ export interface Ship extends Body {
   pirateKilledAt: number | null;
   /** The field it was nearest when that happened: a `MiningField` id. */
   pirateKilledIn: string | null;
+  /** The base a defender belongs to, by id: it guards near there and is paid from there. Null: the first. */
+  home: string | null;
 }
 
 export interface Rock extends Body {
@@ -382,10 +384,12 @@ export interface Base {
   hauler: Hauler | null;
   /** Seconds until its next hauler sets out. */
   haulerTimer: number;
+  /** Its traffic gone for good, waiting for it to replace them. */
+  lostTraffic: ShipModel[];
 }
 
 /** What a base holds, as saved. */
-type BaseState = Pick<Base, "id" | "account" | "ore" | "parts" | "hauler" | "haulerTimer">;
+type BaseState = Pick<Base, "id" | "account" | "ore" | "parts" | "hauler" | "haulerTimer" | "lostTraffic">;
 
 interface ExtraField {
   spec: FieldSpec;
@@ -691,8 +695,13 @@ export class Sim {
   blackMarket: BlackMarket | null = null;
   /** Seconds until the black market next sets out. */
   blackMarketTimer = 0;
-  /** Traffic gone for good, waiting for the station to replace it. */
-  lostTraffic: ShipModel[] = [];
+  /** The first base's traffic gone for good, waiting to be replaced. */
+  get lostTraffic(): ShipModel[] {
+    return this.bases[0].lostTraffic;
+  }
+  set lostTraffic(lost: ShipModel[]) {
+    this.bases[0].lostTraffic = lost;
+  }
   /** The ship most recently hit by a shot, if that was recent. */
   distress: { ship: Ship; age: number } | null = null;
   /** Seconds since the world began, for things that fade. */
@@ -758,7 +767,7 @@ export class Sim {
       traffic: this.traffic.map(pilot),
       fighters: this.fighters.map((each) => each.ship),
       pirateBase: this.pirateBase,
-      bases: this.bases.map(({ id, account, ore, parts, hauler, haulerTimer }): BaseState => ({ id, account, ore, parts, hauler, haulerTimer })),
+      bases: this.bases.map(({ id, account, ore, parts, hauler, haulerTimer, lostTraffic }): BaseState => ({ id, account, ore, parts, hauler, haulerTimer, lostTraffic })),
       blueprints: this.blueprints,
       blueprintPaid: this.blueprintPaid,
       blueprintsOrdered: this.blueprintsOrdered,
@@ -769,7 +778,6 @@ export class Sim {
       pirateCap: this.pirateCap,
       blackMarket: this.blackMarket,
       blackMarketTimer: this.blackMarketTimer,
-      lostTraffic: this.lostTraffic,
       distress: this.distress,
       clock: this.clock,
       rocks: this.rocks,
@@ -815,13 +823,21 @@ export class Sim {
     for (const battery of data.batteries as Battery[]) for (const guard of battery.guns) fill(guard.gun);
     const plain = [
       "pirateBase", "blueprints", "blueprintPaid", "blueprintsOrdered", "deposits", "batteries", "pirateOre",
-      "pirateCredits", "pirateCap", "blackMarket", "blackMarketTimer", "lostTraffic", "distress", "clock", "rocks",
+      "pirateCredits", "pirateCap", "blackMarket", "blackMarketTimer", "distress", "clock", "rocks",
       "shots", "ores", "field", "station", "stats", "inflowTimer", "randomState",
     ] as const;
     for (const key of plain) if (key in data) Object.assign(this, { [key]: data[key] });
     // A save from before every base had its own: what it held was the first base's.
     const bases: BaseState[] = data.bases ?? [
-      { id: FIRST_BASE, account: data.stationAccount, ore: data.stationOre, parts: data.stationParts, hauler: data.hauler, haulerTimer: data.haulerTimer },
+      {
+        id: FIRST_BASE,
+        account: data.stationAccount,
+        ore: data.stationOre,
+        parts: data.stationParts,
+        hauler: data.hauler,
+        haulerTimer: data.haulerTimer,
+        lostTraffic: data.lostTraffic,
+      },
     ];
     this.bases[0].poi = this.station;
     this.savedBases = new Map(bases.map((state) => [state.id, state]));
@@ -874,16 +890,12 @@ export class Sim {
     this.pirateCap = this.tuning.pirateLimit;
     this.blackMarket = null;
     this.blackMarketTimer = this.tuning.blackMarketFirst;
-    this.lostTraffic = [];
     this.fighters = [];
     for (let i = 0; i < this.tuning.pirates; i++) {
       const start = this.homeOf(null, "pirate");
       this.addFighter(start.x, start.y, "pirate");
     }
-    for (let i = 0; i < this.tuning.defenders; i++) {
-      const dock = this.dockPoint();
-      this.addFighter(dock.x, dock.y, "defender");
-    }
+    for (const base of this.bases) this.addDefenders(base);
     this.traffic = [];
     const models: ShipModel[] = [
       ...Array<ShipModel>(this.tuning.trafficRacers).fill("racer"),
@@ -945,13 +957,14 @@ export class Sim {
       parts: tuning.stationStartParts,
       hauler: null,
       haulerTimer: tuning.haulerFirst,
+      lostTraffic: [],
     };
   }
 
-  /** Gives a base what a loaded save held for it, if the save has it. */
-  private takeSaved(base: Base): void {
+  /** Gives a base what a loaded save held for it, if the save has it. Returns whether it did. */
+  private takeSaved(base: Base): boolean {
     const saved = this.savedBases.get(base.id);
-    if (!saved) return;
+    if (!saved) return false;
     this.savedBases.delete(base.id);
     Object.assign(base, {
       account: saved.account ?? base.account,
@@ -959,7 +972,20 @@ export class Sim {
       parts: saved.parts ?? base.parts,
       hauler: saved.hauler ?? null,
       haulerTimer: saved.haulerTimer ?? base.haulerTimer,
+      lostTraffic: saved.lostTraffic ?? [],
     });
+    return true;
+  }
+
+  /** The base a ship belongs to: a defender's own, and the first for anyone else. */
+  homeBaseOf(ship: Ship): Base {
+    return (ship.home !== null && this.bases.find((base) => base.id === ship.home)) || this.bases[0];
+  }
+
+  /** A base's own defenders, docked at it. */
+  private addDefenders(base: Base): void {
+    const dock = this.dockPoint(false, base.poi);
+    for (let i = 0; i < this.tuning.defenders; i++) this.addFighter(dock.x, dock.y, "defender", base.id);
   }
 
   /** The base whose station this is. */
@@ -1165,13 +1191,14 @@ export class Sim {
   }
 
   /** Six thrusters and the first gun. */
-  private addFighter(x: number, y: number, faction: Faction): void {
+  private addFighter(x: number, y: number, faction: Faction, home: string | null = null): void {
     const ship = this.makeShip(
       x,
       y,
       { thrust: 0, strafe: 0, turn: 0, fire: false, retro: false, stabilize: false },
     );
     ship.faction = faction;
+    ship.home = home;
     ship.parts.add("reverse");
     ship.parts.add("strafe");
     this.fighters.push(new FighterPilot(ship));
@@ -1183,7 +1210,7 @@ export class Sim {
     if (faction === "pirate" && base) {
       return previous ? { x: base.px, y: base.py } : { x: base.x, y: base.y };
     }
-    return this.dockPoint(previous);
+    return this.dockPoint(previous, ship ? this.homeBaseOf(ship).poi : this.station);
   }
 
   /** Whether a ship is where it can sell and repair. */
@@ -1687,6 +1714,7 @@ export class Sim {
       wanted: false,
       pirateKilledAt: null,
       pirateKilledIn: null,
+      home: null,
     };
   }
 
@@ -2174,7 +2202,7 @@ export class Sim {
 
   /** Whose credits this ship earns and spends: its owner's, the station's, or its own. */
   accountOf(ship: Ship): { credits: number } {
-    if (ship.faction === "defender") return this.stationAccount;
+    if (ship.faction === "defender") return this.homeBaseOf(ship).account;
     return ship.owner ?? ship;
   }
 
@@ -2390,7 +2418,10 @@ export class Sim {
         let base = kept.get(spec.id);
         if (!base || base === this.bases[0]) {
           base = this.makeBase(spec.id, spec, this.makePoi("station", null, 0, 0, 0, STATION_REACH));
-          this.takeSaved(base);
+          base.spec = spec;
+          this.fitBase(base);
+          // A new base comes with its defenders. One from a save has them in the save already.
+          if (!this.takeSaved(base)) this.addDefenders(base);
         }
         base.spec = spec;
         this.fitBase(base);
@@ -3158,7 +3189,10 @@ export class Sim {
   }
 
   private removeShip(ship: Ship): void {
-    if (this.traffic.some((pilot) => pilot.ship === ship)) this.lostTraffic.push(ship.model);
+    // Lost traffic is the loss of the base that would have rebuilt it, which replaces it in time.
+    if (this.traffic.some((pilot) => pilot.ship === ship)) {
+      (this.baseOf(this.nearestDock(ship.x, ship.y, true)) ?? this.bases[0]).lostTraffic.push(ship.model);
+    }
     const others = (pilots: DronePilot[]) => pilots.filter((pilot) => pilot.ship !== ship);
     this.drones = others(this.drones);
     this.traffic = others(this.traffic);
@@ -3405,21 +3439,26 @@ export class Sim {
    * rather than spending on the ship.
    */
   private spendStationParts(): void {
+    for (const base of this.bases) this.spendBaseParts(base);
+  }
+
+  /** One base's spending: for its own lost traffic, out of its own parts and money. */
+  private spendBaseParts(base: Base): void {
     const { tuning } = this;
-    if (this.lostTraffic.length === 0) return;
-    const spare = this.stationParts - tuning.stationReserveParts;
-    const dock = this.dockPoint();
-    const hasDefender = this.fighters.some((pilot) => pilot.ship.faction === "defender");
+    if (base.lostTraffic.length === 0) return;
+    const spare = base.parts - tuning.stationReserveParts;
+    const dock = this.dockPoint(false, base.poi);
+    const hasDefender = this.fighters.some((pilot) => pilot.ship.faction === "defender" && this.homeBaseOf(pilot.ship) === base);
     if (!hasDefender && tuning.defenderPrice > 0) {
       if (spare < this.stockFor(tuning.defenderPrice)) return;
-      this.chargeForService(this.stationAccount, tuning.defenderPrice, this.bases[0]);
-      this.addFighter(dock.x, dock.y, "defender");
-      if (this.tuning.chatter) this.chatter.defenderLaunched(this);
+      this.chargeForService(base.account, tuning.defenderPrice, base);
+      this.addFighter(dock.x, dock.y, "defender", base.id);
+      if (this.tuning.chatter) this.chatter.defenderLaunched(this, base.poi);
     } else {
       if (spare < this.stockFor(tuning.rebuildCost)) return;
-      this.chargeForService(this.stationAccount, tuning.rebuildCost, this.bases[0]);
-      this.addTraffic(dock.x, dock.y, this.lostTraffic.shift()!);
-      if (this.tuning.chatter) this.chatter.trafficReplaced(this, this.traffic[this.traffic.length - 1].ship);
+      this.chargeForService(base.account, tuning.rebuildCost, base);
+      this.addTraffic(dock.x, dock.y, base.lostTraffic.shift()!);
+      if (this.tuning.chatter) this.chatter.trafficReplaced(this, this.traffic[this.traffic.length - 1].ship, base.poi);
     }
     this.events.push({ type: "sale", x: dock.x, y: dock.y });
   }

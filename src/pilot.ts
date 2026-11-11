@@ -1426,7 +1426,9 @@ export class FighterPilot extends ShipPilot {
       return;
     }
     const distress = sim.distress;
-    if (ship.faction === "defender" && distress && distress.ship !== ship) {
+    // A defender answers a call near its own base: the nearest base answers each call.
+    const ours = (other: Ship) => sim.nearestDock(other.x, other.y) === sim.homeBaseOf(ship).poi;
+    if (ship.faction === "defender" && distress && distress.ship !== ship && ours(distress.ship)) {
       this.task = "responding";
       this.flyTo(sim, distress.ship, FIGHT_DISTANCE, PATROL_PASS_SPEED, null);
       return;
@@ -1608,10 +1610,11 @@ export class FighterPilot extends ShipPilot {
     this.flyTo(sim, spot, 0, PATROL_PASS_SPEED, null);
   }
 
-  /** Flies from one random spot in the field to the next. */
+  /** Flies from one random spot in the field to the next: a defender's is the one by its base. */
   private fly(sim: Sim): void {
     const { ship } = this;
-    const { field, tuning } = sim;
+    const home = sim.homeBaseOf(ship).poi;
+    const { poi: field, radius } = ship.faction === "defender" ? sim.miningFieldAt(home.x, home.y) : sim.miningFields()[0];
     this.task = "patrolling";
     this.patrolAge += TICK;
     const reached =
@@ -1623,7 +1626,7 @@ export class FighterPilot extends ShipPilot {
     if (!this.patrol || reached || this.patrolAge > PATROL_GIVE_UP_SECONDS) {
       // A few tries at a spot clear of any turrets. A field that's all covered gets patrolled anyway.
       for (let tries = 0; tries < PATROL_TRIES; tries++) {
-        const distance = tuning.fieldRadius * Math.sqrt(sim.roll());
+        const distance = radius * Math.sqrt(sim.roll());
         const dir = sim.roll() * Math.PI * 2;
         const x = Math.cos(dir) * distance;
         const y = Math.sin(dir) * distance;

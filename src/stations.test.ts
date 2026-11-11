@@ -222,3 +222,47 @@ describe("a second base", () => {
     expect(sim.docks).toEqual([sim.station]);
   });
 });
+
+describe("a second base's own defence", () => {
+  it("has defenders of its own from the start, which guard the field by it", () => {
+    const { sim, outpost } = world({ defenders: 1 });
+    sim.reset(4);
+    const defenders = sim.fighters.filter((pilot) => pilot.ship.faction === "defender").map((pilot) => pilot.ship);
+    expect(defenders.map((ship) => ship.home).sort()).toEqual(["outpost:0", "station"]);
+    const theirs = defenders.find((ship) => ship.home === "outpost:0")!;
+    expect(sim.homeBaseOf(theirs)).toBe(sim.bases[1]);
+    expect(sim.accountOf(theirs)).toBe(sim.bases[1].account);
+    run(sim, 90);
+    const second = sim.extraFields[0].poi;
+    expect(Math.hypot(theirs.x - second.x, theirs.y - second.y)).toBeLessThan(9000);
+    expect(Math.hypot(theirs.x - outpost.x, theirs.y - outpost.y)).toBeLessThan(15000);
+  }, 60000);
+
+  it("replaces its own lost traffic from its own parts, and the first base doesn't", () => {
+    const { sim, outpost } = world({ trafficRacers: 1, defenders: 0, defenderPrice: 0, rebuildCost: 100 });
+    const [first, second] = sim.bases;
+    const { ship } = sim.traffic[0];
+    ship.x = outpost.x + 2000;
+    ship.y = outpost.y;
+    (sim as unknown as { removeShip(ship: Ship): void }).removeShip(ship);
+    expect(second.lostTraffic).toEqual(["racer"]);
+    expect(first.lostTraffic).toEqual([]);
+    const firstParts = first.parts;
+    const secondParts = second.parts;
+    sim.step();
+    expect(sim.traffic.length).toBe(1);
+    expect(second.parts).toBeLessThan(secondParts);
+    expect(first.parts).toBe(firstParts);
+    expect(sim.dockedAt(sim.traffic[0].ship)).toBe(outpost);
+  });
+
+  it("keeps its defenders' home and its lost traffic through a save", () => {
+    const { sim } = world({ defenders: 1 });
+    sim.reset(4);
+    sim.bases[1].lostTraffic.push("floater");
+    const { sim: into } = world();
+    roundTrip(sim, into);
+    expect(into.bases[1].lostTraffic).toEqual(["floater"]);
+    expect(into.fighters.filter((pilot) => pilot.ship.faction === "defender").map((pilot) => pilot.ship.home).sort()).toEqual(["outpost:0", "station"]);
+  });
+});

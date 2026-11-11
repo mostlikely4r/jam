@@ -307,12 +307,12 @@ export class Chatter {
     this.stationSays(sim, `New blueprint${names.length > 1 ? "s" : ""} in. The shop now stocks ${list}.`, true);
   }
 
-  defenderLaunched(sim: Sim): void {
-    this.stationSays(sim, "Defender launching. Stay safe out there.", true);
+  defenderLaunched(sim: Sim, from: Poi): void {
+    this.stationSays(sim, "Defender launching. Stay safe out there.", true, from);
   }
 
-  trafficReplaced(sim: Sim, ship: Ship): void {
-    this.stationSays(sim, `${this.nameOf(sim, ship)}, you're cleared for departure. Welcome back.`);
+  trafficReplaced(sim: Sim, ship: Ship, from: Poi): void {
+    this.stationSays(sim, `${this.nameOf(sim, ship)}, you're cleared for departure. Welcome back.`, false, from);
   }
 
   private fieldTalk(sim: Sim, ship: Ship): void {

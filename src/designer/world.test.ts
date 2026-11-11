@@ -39,11 +39,11 @@ describe("world layout", () => {
     expect(parseWorld(JSON.stringify({ version: 1, root: { id: "a", kind: "teapot" } }))).toBeNull();
   });
 
-  it("finds that today's station passes through the seeded planet's pull", () => {
+  it("finds how close the station comes to the seeded planet's pull", () => {
     const world = seedWorld();
     const pass = closestApproach(world, find(world, "planet"), find(world, "station"));
-    // Field at 20,000, station 10,200 out from it, both going round: closest centre distance 9,800.
-    expect(pass.gap).toBeCloseTo(9800 - 30000 - 300, -1);
+    // Field at 60,000, station 10,200 out from it, both going round: nearest is 49,800 from the centre.
+    expect(pass.gap).toBeCloseTo(49800 - 30000 - 300, -1);
   });
 
   it("finds a clear pass when the field is moved out", () => {

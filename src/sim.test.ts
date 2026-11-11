@@ -241,6 +241,113 @@ describe("station", () => {
     expect(Math.min(moved, Math.PI * 2 - moved)).toBeCloseTo(Math.PI / 2, 2);
   });
 
+  describe("the planet", () => {
+    it("wrecks a ship that flies into it and rebuilds it away from there", () => {
+      const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, planetRadius: 12000, fieldOrbitRadius: 60000 });
+      sim.ship.x = 11990;
+      sim.ship.y = 0;
+      sim.ship.px = 11990;
+      sim.ship.py = 0;
+      const wrecks = sim.ship.wrecks;
+      run(sim, TICK);
+      expect(sim.ship.wrecks).toBe(wrecks + 1);
+      expect(Math.hypot(sim.ship.x, sim.ship.y)).toBeGreaterThan(12000);
+    });
+
+    it("leaves a ship just above the ground alone", () => {
+      const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, planetRadius: 12000, fieldOrbitRadius: 60000 });
+      sim.ship.x = 12000 + SHIP_RADIUS + 100;
+      sim.ship.y = 0;
+      sim.ship.px = sim.ship.x;
+      sim.ship.py = 0;
+      run(sim, TICK);
+      expect(sim.ship.wrecks).toBe(0);
+    });
+
+    it("isn't there unless the layout says so", () => {
+      const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0 });
+      sim.ship.x = 10;
+      sim.ship.y = 0;
+      sim.ship.px = 10;
+      sim.ship.py = 0;
+      run(sim, TICK);
+      expect(sim.ship.wrecks).toBe(0);
+    });
+  });
+
+  describe("a layout changed from outside the game", () => {
+    function linkedSim(): Sim {
+      return new Sim(1, { ...DEFAULTS, rockCount: 30, testDrones: 0, pirates: 1, fieldOrbitPeriod: 600, orbitPeriod: 300 });
+    }
+
+    it("brings the whole scene along when the field moves out", () => {
+      const sim = linkedSim();
+      run(sim, 5);
+      const offset = { x: sim.ship.x - sim.field.x, y: sim.ship.y - sim.field.y };
+      const rock = sim.rocks[0];
+      const rockOffset = { x: rock.x - sim.field.x, y: rock.y - sim.field.y };
+      sim.tuning.fieldOrbitRadius = 60000;
+      sim.applyLayout();
+      expect(Math.hypot(sim.field.x, sim.field.y)).toBeCloseTo(60000, 6);
+      expect(sim.ship.x - sim.field.x).toBeCloseTo(offset.x, 6);
+      expect(sim.ship.y - sim.field.y).toBeCloseTo(offset.y, 6);
+      expect(rock.x - sim.field.x).toBeCloseTo(rockOffset.x, 6);
+      expect(rock.y - sim.field.y).toBeCloseTo(rockOffset.y, 6);
+    });
+
+    it("carries on smoothly the tick after, with nothing thrown by the jump", () => {
+      const sim = linkedSim();
+      run(sim, 5);
+      sim.tuning.fieldOrbitRadius = 60000;
+      sim.applyLayout();
+      const before = { x: sim.ship.x - sim.field.x, y: sim.ship.y - sim.field.y };
+      run(sim, TICK);
+      expect(Math.hypot(sim.ship.x - sim.field.x - before.x, sim.ship.y - sim.field.y - before.y)).toBeLessThan(5);
+    });
+
+    it("keeps a ship at the station with the station when only that moves", () => {
+      const sim = linkedSim();
+      run(sim, 1);
+      sim.ship.x = sim.station.x + 100;
+      sim.ship.y = sim.station.y;
+      sim.tuning.stationDistance += 3000;
+      sim.applyLayout();
+      expect(sim.ship.x - sim.station.x).toBeCloseTo(100, 6);
+      expect(sim.ship.y - sim.station.y).toBeCloseTo(0, 6);
+    });
+
+    it("goes exactly to a phase it's given, and stays on the formula", () => {
+      const sim = linkedSim();
+      run(sim, 20);
+      sim.tuning.fieldOrbitPeriod = 1200;
+      sim.applyLayout({ field: 1 });
+      const angle = 1 + ((Math.PI * 2) / 1200) * sim.now;
+      expect(sim.field.x).toBeCloseTo(Math.cos(angle) * sim.tuning.fieldOrbitRadius, 6);
+      run(sim, 10);
+      const at = sim.poiAt(sim.field, sim.now);
+      expect(at.x).toBeCloseTo(sim.field.x, 6);
+    });
+
+    it("stays where it is on the orbit when given no phase", () => {
+      const sim = linkedSim();
+      run(sim, 20);
+      const angle = sim.field.orbitAngle;
+      sim.tuning.fieldOrbitPeriod = 1200;
+      sim.applyLayout();
+      expect(sim.field.orbitAngle).toBeCloseTo(angle, 9);
+    });
+
+    it("orbits the other way for a negative period, and the pirate base at its own pace", () => {
+      const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, pirates: 1, fieldOrbitPeriod: -600, orbitPeriod: 300, pirateOrbitPeriod: 600 });
+      const field = sim.field.orbitAngle;
+      const station = sim.station.orbitAngle;
+      const base = sim.pirateBase!.orbitAngle;
+      run(sim, 10);
+      expect(sim.field.orbitAngle).toBeLessThan(field);
+      expect(sim.station.orbitAngle - station).toBeCloseTo(2 * (sim.pirateBase!.orbitAngle - base), 6);
+    });
+  });
+
   describe("orbits worked out from time", () => {
     /** The field circling the system's centre, the station and pirate base circling the field. */
     function orbiting(): Sim {

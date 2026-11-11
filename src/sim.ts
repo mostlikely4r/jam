@@ -231,8 +231,11 @@ const HAULER_WAIT_SECONDS = 15;
 const HAULER_ARRIVAL_LIMIT = 400;
 
 /** Radians per second for a period in seconds. Zero or less stands still, as it always has here. */
+/** How far beyond a station or base things count as being there, when the layout moves it. */
+const LAYOUT_NEIGHBOURHOOD = 500;
+
 function orbitRate(period: number): number {
-  return period > 0 ? (Math.PI * 2) / period : 0;
+  return period !== 0 ? (Math.PI * 2) / period : 0;
 }
 
 /** A point of interest: it orbits on a fixed path, spins, and carries nearby objects. */
@@ -689,7 +692,7 @@ export class Sim {
       tuning.orbitPeriod,
       STATION_REACH,
     );
-    // Orbits at the same pace as the station, so it stays on the far side of the field.
+    // By default it orbits at the same pace as the station, so it stays on the far side of the field.
     this.pirateBase =
       tuning.pirates > 0
         ? this.makePoi(
@@ -697,7 +700,7 @@ export class Sim {
             this.field,
             tuning.fieldRadius + tuning.pirateBaseDistance,
             0,
-            tuning.orbitPeriod,
+            tuning.pirateOrbitPeriod,
             PIRATE_BASE_RADIUS,
           )
         : null;
@@ -1772,6 +1775,8 @@ export class Sim {
     this.moveOres(dt);
     this.moveShip(this.ship, dt);
     for (const pilot of pilots) this.moveShip(pilot.ship, dt);
+    this.crashIntoPlanet(this.ship);
+    for (const pilot of pilots) this.crashIntoPlanet(pilot.ship);
     this.moveShots(dt);
     this.fireShots(this.ship);
     this.collectOre(this.ship);
@@ -1799,7 +1804,7 @@ export class Sim {
     const { tuning, field, station } = this;
     this.movePoi(field, tuning.fieldOrbitPeriod, tuning.fieldRotationPeriod, dt);
     this.movePoi(station, tuning.orbitPeriod, tuning.stationRotationPeriod, dt);
-    if (this.pirateBase) this.movePoi(this.pirateBase, tuning.orbitPeriod, 0, dt);
+    if (this.pirateBase) this.movePoi(this.pirateBase, tuning.pirateOrbitPeriod, tuning.pirateRotationPeriod, dt);
   }
 
   private movePoi(poi: Poi, orbitPeriod: number, rotationPeriod: number, dt: number): void {
@@ -1827,6 +1832,69 @@ export class Sim {
     const parent = poi.parent ? this.poiAt(poi.parent, time) : { x: 0, y: 0 };
     const angle = poi.orbitPhase + orbitRate(poi.orbitPeriod) * time;
     return { x: parent.x + Math.cos(angle) * poi.orbitRadius, y: parent.y + Math.sin(angle) * poi.orbitRadius };
+  }
+
+  /** Each POI's orbit angle at clock 0. */
+  orbitPhases(): Partial<Record<Poi["name"], number>> {
+    return Object.fromEntries(this.pois.map((poi) => [poi.name, poi.orbitPhase]));
+  }
+
+  /**
+   * Moves the POIs to where the tuning now says, for a layout changed from outside the game.
+   * Everything comes along: what's at the station or pirate base moves with that, and the
+   * rest of the scene with the field, so nobody is left behind in empty space. A POI given
+   * a phase goes exactly there. Without one it carries on from the angle it's at.
+   */
+  applyLayout(phases: Partial<Record<Poi["name"], number>> = {}): void {
+    const { field, station, pirateBase, tuning, clock } = this;
+    const stations = pirateBase ? [station, pirateBase] : [station];
+    const before = new Map(this.pois.map((poi) => [poi, { x: poi.x, y: poi.y }]));
+    const place = (poi: Poi, orbitRadius: number, orbitPeriod: number) => {
+      const rate = orbitRate(orbitPeriod);
+      poi.orbitRadius = orbitRadius;
+      poi.orbitPeriod = orbitPeriod;
+      poi.orbitPhase = phases[poi.name] ?? poi.orbitAngle - rate * clock;
+      poi.orbitAngle = poi.orbitPhase + rate * clock;
+      poi.x = poi.px = (poi.parent?.x ?? 0) + Math.cos(poi.orbitAngle) * orbitRadius;
+      poi.y = poi.py = (poi.parent?.y ?? 0) + Math.sin(poi.orbitAngle) * orbitRadius;
+    };
+    field.reach = tuning.fieldRadius;
+    place(field, tuning.fieldOrbitRadius, tuning.fieldOrbitPeriod);
+    place(station, tuning.fieldRadius + tuning.stationDistance, tuning.orbitPeriod);
+    if (pirateBase) place(pirateBase, tuning.fieldRadius + tuning.pirateBaseDistance, tuning.pirateOrbitPeriod);
+
+    const moved = (poi: Poi) => ({ x: poi.x - before.get(poi)!.x, y: poi.y - before.get(poi)!.y });
+    const shift = (thing: { x: number; y: number; px: number; py: number }, by: { x: number; y: number }) => {
+      thing.x += by.x;
+      thing.y += by.y;
+      thing.px += by.x;
+      thing.py += by.y;
+    };
+    const fieldMoved = moved(field);
+    const bodies = [
+      this.ship,
+      ...this.pilots.map((pilot) => pilot.ship),
+      ...this.rocks,
+      ...this.ores,
+      ...this.shots,
+      ...(this.clickPilot.spot ? [this.clickPilot.spot] : []),
+    ];
+    for (const body of bodies) {
+      const at = stations.find((poi) => {
+        const was = before.get(poi)!;
+        return Math.hypot(body.x - was.x, body.y - was.y) < poi.reach + LAYOUT_NEIGHBOURHOOD;
+      });
+      shift(body, at ? moved(at) : fieldMoved);
+    }
+    if (this.hauler) shift(this.hauler, moved(station));
+    if (this.blackMarket) shift(this.blackMarket, pirateBase ? moved(pirateBase) : fieldMoved);
+    // These follow their POIs, and a jump in one of them would carry whatever is inside it.
+    this.moveDeposits();
+    for (const deposit of this.deposits) {
+      deposit.px = deposit.x;
+      deposit.py = deposit.y;
+    }
+    this.moveGuards();
   }
 
   private get pois(): Poi[] {
@@ -2329,6 +2397,15 @@ export class Sim {
       this.events.push({ type: "impact", x: ship.x, y: ship.y, damage, player });
       if (ship.hull <= 0) this.wreckShip(ship);
     }
+  }
+
+  /** The planet is at the centre of the field's orbit. Nobody survives flying into it. */
+  private crashIntoPlanet(ship: Ship): void {
+    const { planetRadius } = this.tuning;
+    if (planetRadius <= 0 || Math.hypot(ship.x, ship.y) >= planetRadius + SHIP_RADIUS) return;
+    ship.damageTaken += ship.hull;
+    ship.hull = 0;
+    this.wreckShip(ship);
   }
 
   private wreckShip(ship: Ship): void {

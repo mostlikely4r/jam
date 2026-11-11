@@ -3,7 +3,7 @@
  * and spins at its own pace. Positions are worked out from time, not added up tick by
  * tick, so any moment can be looked at directly (see docs/open-world-plan.md, 3.2).
  *
- * The system designer edits this. The game doesn't read it yet.
+ * The system designer edits this. See link.ts for the parts the game flies in.
  */
 
 export const WORLD_VERSION = 1;
@@ -125,9 +125,10 @@ export function makeChild(world: World, parent: WorldNode, kind: NodeKind): Worl
 }
 
 /**
- * Today's game, with the planet the field already circles made real. The station and
- * pirate base use the game's defaults: field radius plus their distance from its edge.
- * The planet's size is the user's first guess of about ten screens across.
+ * Today's game, with the planet the field circles made real. The station and pirate base
+ * use the game's defaults: field radius plus their distance from its edge. The planet is
+ * about ten screens across, and the field far enough out to keep the station clear of its
+ * pull. The field's orbit time keeps it at the speed it has always moved at.
  */
 export function seedWorld(): World {
   const node = ({ id, name, kind, ...fields }: Partial<WorldNode> & Pick<WorldNode, "id" | "name" | "kind">): WorldNode => ({
@@ -148,8 +149,8 @@ export function seedWorld(): World {
     name: "Field",
     kind: "field",
     radius: 5200,
-    orbitRadius: 20000,
-    orbitPeriod: 3600,
+    orbitRadius: 60000,
+    orbitPeriod: 10800,
     spinPeriod: 1800,
     children: [
       node({ id: "station", name: "Station", kind: "station", radius: 300, orbitRadius: 10200, orbitPeriod: 900, orbitPhase: 180, spinPeriod: 300 }),

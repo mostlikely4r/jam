@@ -28,8 +28,8 @@
             "kind": "field",
             "radius": 5200,
             "pull": 0,
-            "orbitRadius": 20000,
-            "orbitPeriod": 3600,
+            "orbitRadius": 60000,
+            "orbitPeriod": 10800,
             "orbitPhase": 0,
             "spinPeriod": 1800,
             "children": [

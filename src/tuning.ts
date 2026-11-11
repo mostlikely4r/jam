@@ -48,7 +48,12 @@ export const DEFAULTS = {
   /** How far beyond the field's edge the pirate base sits, on the far side from the station. */
   pirateBaseDistance: 4000,
   orbitPeriod: 900,
+  pirateOrbitPeriod: 900,
+  pirateRotationPeriod: 0,
   stationRotationPeriod: 300,
+  /** A solid planet at the centre of the field's orbit. 0 is no planet. Set by the system designer. */
+  planetRadius: 0,
+  planetSpinPeriod: 0,
   dockDrag: 0.25,
   creditsPerOre: 10,
 
@@ -273,8 +278,8 @@ export const GROUPS: Group[] = [
       { key: "fieldRadius", label: "Radius (on restart)", min: 800, max: 8000, step: 100 },
       { key: "rockDrift", label: "Rock drift (on restart)", min: 0, max: 80, step: 1 },
       { key: "rockInflow", label: "Big rocks drifting in per minute", min: 0, max: 10, step: 0.25 },
-      { key: "fieldOrbitRadius", label: "Orbit size (on restart)", min: 0, max: 60000, step: 1000 },
-      { key: "fieldOrbitPeriod", label: "Orbit time (s, 0 = off)", min: 0, max: 7200, step: 60 },
+      { key: "fieldOrbitRadius", label: "Orbit size (on restart)", min: 0, max: 200000, step: 1000 },
+      { key: "fieldOrbitPeriod", label: "Orbit time (s, 0 = off)", min: 0, max: 43200, step: 60 },
       { key: "fieldRotationPeriod", label: "Rotation time (s, 0 = off)", min: 0, max: 3600, step: 30 },
     ],
   },
@@ -305,6 +310,7 @@ export const GROUPS: Group[] = [
       { key: "stationDistance", label: "Distance (on restart)", min: 1000, max: 15000, step: 100 },
       { key: "pirateBaseDistance", label: "Pirate base distance from the field (on restart)", min: 500, max: 15000, step: 100 },
       { key: "orbitPeriod", label: "Orbit time (s, 0 = off)", min: 0, max: 3600, step: 30 },
+      { key: "pirateOrbitPeriod", label: "Pirate base orbit time (s, 0 = off)", min: 0, max: 3600, step: 30 },
       { key: "stationRotationPeriod", label: "Rotation time (s, 0 = off)", min: 0, max: 3600, step: 30 },
       { key: "dockDrag", label: "Dock slowdown", min: 0, max: 3, step: 0.05 },
       { key: "creditsPerOre", label: "Credits per ore", min: 1, max: 100, step: 1 },

@@ -1,0 +1,114 @@
+/**
+ * What the game flies from the designer's layout. The game's own world is fixed in shape: a
+ * planet at the centre of a field's orbit, with a station and a pirate base round the field.
+ * The designer's tree is free, so this finds those four in it. Anything else is map only.
+ *
+ * The tuning is the one channel between them. The designer writes into the same values the
+ * sliders use, and reads them back when it opens, so whichever was changed last wins.
+ */
+import type { Poi } from "../sim";
+import type { Tuning } from "../tuning";
+import { isBody, parentOf, walk, type NodeKind, type World, type WorldNode } from "./world";
+
+/** Each POI's orbit angle at clock 0, in radians. */
+export type Phases = Partial<Record<Poi["name"], number>>;
+
+/** The designer's way into the running game. */
+export interface GameLink {
+  tuning: Tuning;
+  clock(): number;
+  phases(): Phases;
+  apply(phases: Phases): void;
+}
+
+export interface Linked {
+  planet: WorldNode | null;
+  field: WorldNode | null;
+  station: WorldNode | null;
+  pirates: WorldNode | null;
+}
+
+/** The first field in the tree, the body it directly orbits, and the base and station on it. */
+export function linkedNodes(world: World): Linked {
+  const field = walk(world).find((entry) => entry.node.kind === "field")?.node ?? null;
+  const parent = field && parentOf(world, field);
+  const under = (kind: NodeKind) => field?.children.find((child) => child.kind === kind) ?? null;
+  return { planet: parent && isBody(parent.kind) ? parent : null, field, station: under("station"), pirates: under("pirate base") };
+}
+
+export function writeGame(world: World, tuning: Tuning): void {
+  const { planet, field, station, pirates } = linkedNodes(world);
+  tuning.planetRadius = planet?.radius ?? 0;
+  tuning.planetSpinPeriod = planet?.spinPeriod ?? 0;
+  if (!field) return;
+  tuning.fieldRadius = field.radius;
+  tuning.fieldOrbitRadius = field.orbitRadius;
+  tuning.fieldOrbitPeriod = field.orbitPeriod;
+  tuning.fieldRotationPeriod = field.spinPeriod;
+  if (station) {
+    tuning.stationDistance = station.orbitRadius - field.radius;
+    tuning.orbitPeriod = station.orbitPeriod;
+    tuning.stationRotationPeriod = station.spinPeriod;
+  }
+  if (pirates) {
+    tuning.pirateBaseDistance = pirates.orbitRadius - field.radius;
+    tuning.pirateOrbitPeriod = pirates.orbitPeriod;
+    tuning.pirateRotationPeriod = pirates.spinPeriod;
+  }
+}
+
+/** Degrees, kept to a sensible length: at the field's distance, 0.001 is about a unit. */
+function degrees(radians: number): number {
+  const turned = (((radians * 180) / Math.PI) % 360) + 360;
+  return Math.round((turned % 360) * 1000) / 1000;
+}
+
+/**
+ * Brings the designer's numbers up to date with the game. The planet has no sliders, so
+ * it stays as designed: a slider reset can't wipe it.
+ */
+export function readGame(world: World, tuning: Tuning, phases: Phases): void {
+  const { field, station, pirates } = linkedNodes(world);
+  if (!field) return;
+  field.radius = tuning.fieldRadius;
+  field.orbitRadius = tuning.fieldOrbitRadius;
+  field.orbitPeriod = tuning.fieldOrbitPeriod;
+  field.spinPeriod = tuning.fieldRotationPeriod;
+  if (phases.field !== undefined) field.orbitPhase = degrees(phases.field);
+  if (station) {
+    station.orbitRadius = tuning.fieldRadius + tuning.stationDistance;
+    station.orbitPeriod = tuning.orbitPeriod;
+    station.spinPeriod = tuning.stationRotationPeriod;
+    if (phases.station !== undefined) station.orbitPhase = degrees(phases.station);
+  }
+  if (pirates) {
+    pirates.orbitRadius = tuning.fieldRadius + tuning.pirateBaseDistance;
+    pirates.orbitPeriod = tuning.pirateOrbitPeriod;
+    pirates.spinPeriod = tuning.pirateRotationPeriod;
+    if (phases["pirate base"] !== undefined) pirates.orbitPhase = degrees(phases["pirate base"]);
+  }
+}
+
+export function phasesFromWorld(world: World): Phases {
+  const { field, station, pirates } = linkedNodes(world);
+  const radians = (node: WorldNode) => (node.orbitPhase * Math.PI) / 180;
+  return {
+    ...(field && { field: radians(field) }),
+    ...(station && { station: radians(station) }),
+    ...(pirates && { "pirate base": radians(pirates) }),
+  };
+}
+
+/** A few lines for the designer's side panel: what the game will use. */
+export function linkSummary(world: World): string {
+  const linked = linkedNodes(world);
+  const used = Object.values(linked).filter((node): node is WorldNode => node !== null);
+  const rest = walk(world)
+    .map((entry) => entry.node)
+    .filter((node) => !used.includes(node));
+  const lines = [`In the game: ${used.map((node) => node.name).join(", ") || "nothing"}`];
+  if (rest.length > 0) lines.push(`Map only: ${rest.map((node) => node.name).join(", ")}`);
+  if (linked.field && !linked.planet) lines.push(`${linked.field.name} doesn't directly orbit a body, so the game has no planet`);
+  lines.push("Pull isn't in the game yet. A new field radius needs a new game (R) to lay out its rocks. Start angles last until the next new game.");
+  return lines.join("\n");
+}

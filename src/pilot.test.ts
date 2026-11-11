@@ -415,6 +415,7 @@ describe("pirate and defender", () => {
       fieldRotationPeriod: 0,
       stationRotationPeriod: 0,
       orbitPeriod: 0,
+      pirateOrbitPeriod: 0,
       ...extra,
     });
     return sim;

@@ -78,6 +78,8 @@ interface Star {
   depth: number;
 }
 
+const PLANET_MARKS = 1500;
+
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
@@ -94,6 +96,8 @@ export class Renderer {
   /** Where the player last saw each pirate, in the axes of what it was near. */
   private ghosts = new WeakMap<Ship, { poi: Poi; x: number; y: number; seenAt: number }>();
   private stars: Star[] = [];
+  /** Where the marks on the planet's ground are, as shares of its radius. */
+  private planetMarks: { angle: number; distance: number; size: number; light: boolean }[] = [];
   private flash = 0;
   /** Shows what strangers shouldn't need: pointers to every ship. */
   dev = false;
@@ -126,6 +130,15 @@ export class Renderer {
         x: Math.random() * 4000,
         y: Math.random() * 4000,
         depth: 0.08 + Math.random() * 0.35,
+      });
+    }
+    for (let i = 0; i < PLANET_MARKS; i++) {
+      const size = 0.004 + Math.random() * Math.random() * 0.05;
+      this.planetMarks.push({
+        angle: Math.random() * Math.PI * 2,
+        distance: Math.sqrt(Math.random()) * (1 - size),
+        size,
+        light: Math.random() < 0.4,
       });
     }
   }
@@ -249,6 +262,7 @@ export class Renderer {
     const visible = (x: number, y: number, r: number) =>
       Math.abs(x - camX) < halfW + r && Math.abs(y - camY) < halfH + r;
 
+    this.drawPlanet(sim, visible);
     this.drawStation(sim, alpha);
     this.drawDeposits(sim, alpha);
     this.drawGuards(sim, alpha);
@@ -307,6 +321,43 @@ export class Renderer {
       ctx.fillStyle = `rgb(${brightness}, ${brightness}, ${Math.min(255, brightness + 25)})`;
       const size = (star.depth > 0.3 ? 2 : 1) * dpr;
       ctx.fillRect(x, y, size, size);
+    }
+  }
+
+  /** The planet, at the centre of the field's orbit: a wall of dark ground under a thin glow. */
+  private drawPlanet(sim: Sim, visible: (x: number, y: number, r: number) => boolean): void {
+    const { planetRadius: radius, planetSpinPeriod: spin } = sim.tuning;
+    if (radius <= 0) return;
+    const { ctx } = this;
+    const { camX, camY, scale, width, height } = this.view;
+    const glowRadius = radius * 1.04;
+    if (Math.hypot(camX, camY) - Math.hypot(width, height) / 2 / scale > glowRadius) return;
+    const glow = ctx.createRadialGradient(0, 0, radius, 0, 0, glowRadius);
+    glow.addColorStop(0, "rgba(120, 170, 235, 0.4)");
+    glow.addColorStop(1, "rgba(120, 170, 235, 0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#20344f";
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.fill();
+    // Marks on the ground, so that flying over it can be seen and felt.
+    const turn = spin !== 0 ? (Math.PI * 2 * sim.now) / spin : 0;
+    for (const light of [false, true]) {
+      ctx.fillStyle = light ? "rgba(70, 105, 150, 0.22)" : "rgba(12, 24, 42, 0.45)";
+      ctx.beginPath();
+      for (const mark of this.planetMarks) {
+        if (mark.light !== light) continue;
+        const x = Math.cos(mark.angle + turn) * mark.distance * radius;
+        const y = Math.sin(mark.angle + turn) * mark.distance * radius;
+        const size = mark.size * radius;
+        if (!visible(x, y, size)) continue;
+        ctx.moveTo(x + size, y);
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+      }
+      ctx.fill();
     }
   }
 

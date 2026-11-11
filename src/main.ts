@@ -61,11 +61,23 @@ hud.hidden = !dev;
 const pauseBox = document.querySelector("#pause .box") as HTMLDivElement;
 /** Dev only: the system designer, a separate view for laying out stars, planets and places. */
 const designer = dev
-  ? new Designer(() => {
-      keys.clear();
-      // Opened from the pause menu: go back to it.
-      if (paused) setPaused(true);
-    })
+  ? new Designer(
+      () => {
+        keys.clear();
+        // Opened from the pause menu: go back to it.
+        if (paused) setPaused(true);
+      },
+      {
+        tuning,
+        clock: () => sim.now,
+        phases: () => sim.orbitPhases(),
+        apply(phases) {
+          sim.applyLayout(phases);
+          saveTuning();
+          buildPanel();
+        },
+      },
+    )
   : null;
 
 function openDesigner(): void {
@@ -107,6 +119,8 @@ function ago(savedAt: number): string {
 /** Picks up a saved game and goes straight into it. */
 function resumeFrom(slot: SaveSlot): boolean {
   if (!loadGame(sim, slot)) return false;
+  // A save keeps the layout it was made in, which the designer may have changed since.
+  if (designer) sim.applyLayout();
   keys.clear();
   buildPanel();
   demos = [];
@@ -1035,6 +1049,8 @@ function frame(now: number): void {
 }
 
 buildPanel();
+// No planet yet means the designer's layout has never reached this browser's game.
+if (tuning.planetRadius === 0) designer?.linkToGame();
 showStart();
 requestAnimationFrame(frame);
 

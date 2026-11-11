@@ -18,6 +18,7 @@ import {
   type World,
   type WorldNode,
 } from "./world";
+import { linkSummary, linkedNodes, phasesFromWorld, readGame, writeGame, type GameLink } from "./link";
 import { planRoute, type Flight, type Route } from "../route";
 import { DEFAULTS } from "../tuning";
 
@@ -103,7 +104,7 @@ function niceLength(target: number): number {
 /**
  * A dev-only view for laying out the star system: a tree of bodies and places, their
  * sizes, orbits and spins, played forward in time, next to boxes the size of the game's
- * screen. It edits a world file and leaves the running game alone.
+ * screen. Closing it hands the numbers the game knows about to the game (see link.ts).
  */
 export class Designer {
   readonly element: HTMLDivElement;
@@ -135,8 +136,12 @@ export class Designer {
   private routeTimer = 0;
   private readonly routeBox: HTMLDivElement;
   private readonly routeText: HTMLDivElement;
+  private readonly linkText: HTMLDivElement;
 
-  constructor(private readonly onClose: () => void) {
+  constructor(
+    private readonly onClose: () => void,
+    private readonly game: GameLink,
+  ) {
     const style = document.createElement("style");
     style.textContent = STYLE;
     document.head.append(style);
@@ -159,10 +164,13 @@ export class Designer {
     this.routeText.className = "route";
     this.status = document.createElement("div");
     this.status.className = "status";
+    this.linkText = document.createElement("div");
+    this.linkText.className = "route";
     side.append(
       this.title("System designer", "h1"),
-      this.text("Dev only. Edits the world file, not the running game. O or Esc goes back."),
+      this.text("Dev only. O or Esc goes back to the game, which picks up the changes."),
       this.button("Back to the game", () => this.close()),
+      this.linkText,
       this.title("Objects"),
       this.tree,
       this.editor,
@@ -176,7 +184,7 @@ export class Designer {
       this.title("World file"),
       this.button("Save to file", () => void this.saveFile()),
       this.button("Load from file", () => void this.loadFile()),
-      this.button("Start over from today's game", () => this.replace(seedWorld()), "danger"),
+      this.button("Start over from the default layout", () => this.replace(seedWorld()), "danger"),
       this.status,
     );
 
@@ -190,7 +198,7 @@ export class Designer {
     for (const value of SPEEDS) speed.append(new Option(`${value}x`, String(value), false, value === this.speed));
     speed.addEventListener("change", () => (this.speed = Number(speed.value)));
     this.clock = document.createElement("span");
-    time.append(this.playButton, speed, this.button("Time 0", () => (this.t = 0)), this.clock);
+    time.append(this.playButton, speed, this.button("Time 0", () => (this.t = 0)), this.button("Game time", () => (this.t = this.game.clock())), this.clock);
 
     this.element.append(side, this.canvas, time);
     document.body.append(this.element);
@@ -203,6 +211,10 @@ export class Designer {
   }
 
   open(): void {
+    // The sliders may have changed things since last time, and this shows the game as it is.
+    readGame(this.world, this.game.tuning, this.game.phases());
+    this.t = this.game.clock();
+    this.rebuild();
     this.element.hidden = false;
     this.lastFrame = performance.now();
     this.fitView();
@@ -212,7 +224,14 @@ export class Designer {
   close(): void {
     this.element.hidden = true;
     this.setPlaying(false);
+    this.linkToGame();
     this.onClose();
+  }
+
+  /** Hands the game this layout. */
+  linkToGame(): void {
+    writeGame(this.world, this.game.tuning);
+    this.game.apply(phasesFromWorld(this.world));
   }
 
   // --- Small DOM helpers -------------------------------------------------------------
@@ -242,10 +261,23 @@ export class Designer {
   private loadDraft(): World | null {
     try {
       const text = localStorage.getItem(DRAFT_KEY);
-      return text ? parseWorld(text) : null;
+      const world = text ? parseWorld(text) : null;
+      if (world) this.moveOldField(world);
+      return world;
     } catch {
       return null;
     }
+  }
+
+  /**
+   * The first default layout had the field at 20,000, which puts the station through the
+   * planet. A draft still holding those numbers gets the field moved out to the new default.
+   */
+  private moveOldField(world: World): void {
+    const { field, planet } = linkedNodes(world);
+    if (!field || field.orbitRadius !== 20000 || field.orbitPeriod !== 3600 || planet?.radius !== 12000) return;
+    field.orbitRadius = 60000;
+    field.orbitPeriod = 10800;
   }
 
   /** Every edit is kept in the browser at once, so a reload loses nothing. */
@@ -325,6 +357,7 @@ export class Designer {
     );
     this.buildEditor();
     this.buildRouteBox();
+    this.linkText.textContent = linkSummary(this.world);
     this.passTimer = 0;
   }
 

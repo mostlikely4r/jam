@@ -55,16 +55,20 @@ export class Chart {
     return this.pick;
   }
 
-  /** Fits the view to everything there is: bodies, places and the ship. */
+  /** Fits the view to what the chart knows of the world: found bodies, visited places, the ship. */
   private fit(): void {
     const { sim } = this;
     const far = (x: number, y: number, pad = 0): number => Math.hypot(x, y) + pad;
     let extent = far(sim.ship.x, sim.ship.y);
     for (const body of sim.bodies) {
+      if (!sim.chartSeenBody(body)) continue;
       const at = bodyAt(body, sim.now);
       extent = Math.max(extent, far(at.x, at.y, body.radius));
     }
-    for (const poi of sim.allPois()) extent = Math.max(extent, far(poi.x, poi.y, poi.reach));
+    for (const poi of sim.allPois()) {
+      if (!sim.chartSeenPoi(poi)) continue;
+      extent = Math.max(extent, far(poi.x, poi.y, poi.reach));
+    }
     const { width, height } = this.canvas!.getBoundingClientRect();
     this.fitScale = (Math.min(width, height) / 2 / extent) * 0.92;
     this.view = { cx: 0, cy: 0, scale: this.fitScale };
@@ -226,6 +230,8 @@ export class Chart {
     ctx.lineWidth = 1;
     const ARC = (20 * Math.PI) / 180;
     const ring = (worldCenter: { x: number; y: number }, radius: number, angle: number, found: boolean): void => {
+      // Nothing to see on a ring that's under a couple of screen pixels, or no ring at all.
+      if (radius <= 0 || radius * view.scale < 2) return;
       const { x, y } = to(worldCenter.x, worldCenter.y);
       ctx.beginPath();
       if (found) ctx.arc(x, y, radius * view.scale * dpr, 0, Math.PI * 2);
@@ -250,8 +256,9 @@ export class Chart {
       ring(parent, poi.orbitRadius, angle, this.ringFound(sim, parent));
     }
 
-    // The bodies.
+    // The bodies. Unfound ones stay dark: only their orbit arcs hint at them.
     for (const body of sim.bodies) {
+      if (!sim.chartSeenBody(body)) continue;
       const at = bodyAt(body, sim.now);
       const { x, y } = to(at.x, at.y);
       const pixels = Math.max(2.5, body.radius * view.scale * dpr);
@@ -271,6 +278,7 @@ export class Chart {
 
     // The places. Fields show their reach, so a look tells you where the rocks are.
     for (const poi of sim.allPois()) {
+      if (!sim.chartSeenPoi(poi)) continue;
       const { x, y } = to(poi.x, poi.y);
       if (poi.name === "field") {
         ctx.strokeStyle = "rgba(150, 200, 150, 0.3)";
@@ -288,7 +296,7 @@ export class Chart {
       ctx.fill();
       label(poi.x, poi.y, this.placeLabel(sim, poi));
     }
-    for (const deposit of sim.deposits) {
+    if (sim.discovered.has("deposit")) for (const deposit of sim.deposits) {
       const { x, y } = to(deposit.x, deposit.y);
       ctx.fillStyle = "#d8a860";
       ctx.beginPath();

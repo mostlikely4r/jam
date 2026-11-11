@@ -137,7 +137,7 @@ export const PARTS: Part[] = [
     short: "chart",
     price: 350,
     weight: 0.02,
-    description: "Press C for the whole system: bodies, orbits and every place",
+    description: "Map. Press C to open it",
     tier: 2,
   },
   {

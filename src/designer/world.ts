@@ -133,8 +133,6 @@ export interface Copy {
   orbitPhase: number;
 }
 
-const MAX_COPIES = 500;
-
 /** The same numbers from the same text every time, so copies scatter the same way on every load. */
 function seeded(text: string): () => number {
   let state = 2166136261;
@@ -149,7 +147,7 @@ function seeded(text: string): () => number {
 
 /** The copies of a node beyond itself: evenly spaced round its orbit, then scattered. */
 export function copiesOf(node: WorldNode): Copy[] {
-  const count = Math.min(MAX_COPIES, Math.max(1, Math.floor(node.count)));
+  const count = Math.max(1, Math.floor(node.count));
   const random = seeded(node.id);
   const spacing = 360 / count;
   const copies: Copy[] = [];

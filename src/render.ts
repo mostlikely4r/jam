@@ -581,12 +581,10 @@ export class Renderer {
    */
   private drawPoiZones(sim: Sim, alpha: number): void {
     const { ctx } = this;
-    const { tuning } = sim;
-    const full = tuning.poiFullRange;
-    const none = Math.max(full, tuning.poiNoneRange);
     const pois = [sim.field, sim.station, ...(sim.pirateBase ? [sim.pirateBase] : [])];
     ctx.lineWidth = 2;
     for (const poi of pois) {
+      const { full, none } = sim.carryRange(poi);
       const x = lerp(poi.px, poi.x, alpha);
       const y = lerp(poi.py, poi.y, alpha);
       ctx.strokeStyle = "rgba(200, 160, 255, 0.45)";

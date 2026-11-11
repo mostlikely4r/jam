@@ -14,6 +14,7 @@ import {
   seedWorld,
   spinAngle,
   stringifyWorld,
+  SHIP_CHOICES,
   SURFACES,
   walk,
   type NodeKind,
@@ -21,7 +22,7 @@ import {
   type World,
   type WorldNode,
 } from "./world";
-import { bodiesFor, linkSummary, linkedNodes, phasesFromWorld, readGame, writeGame, type GameLink } from "./link";
+import { bodiesFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, writeGame, type GameLink } from "./link";
 import { planRoute, type Flight, type Route } from "../route";
 import { DEFAULTS } from "../tuning";
 
@@ -31,8 +32,6 @@ const MAX_OUT_ZOOM = 0.35;
 const DRAFT_KEY = "jam-world-draft";
 /** The settings groups the user has opened. All start closed. */
 const GROUPS_KEY = "jam-designer-open";
-/** Set once this browser's game has taken the designer's numbers, so the sliders win after that. */
-const LINKED_KEY = "jam-world-linked";
 const SPEEDS = [1, 10, 60, 600, 3600, 36000];
 const CLICK_PIXELS = 5;
 /** Ships to time a route with, from the game's own numbers. */
@@ -246,8 +245,8 @@ export class Designer {
   }
 
   open(): void {
-    // The sliders may have changed things since last time, and this shows the game as it is.
-    readGame(this.world, this.game.tuning, this.game.phases());
+    // Time has moved the places on since, and this shows the game as it is.
+    readGame(this.world, this.game.phases());
     this.t = this.game.clock();
     const { ship, field } = this.game.where();
     this.shipFix = { x: ship.x - field.x, y: ship.y - field.y, clock: this.t };
@@ -268,30 +267,17 @@ export class Designer {
   /** Hands the game this layout. */
   linkToGame(): void {
     writeGame(this.world, this.game.tuning);
-    this.game.apply(phasesFromWorld(this.world), bodiesFor(this.world));
+    this.game.apply(phasesFromWorld(this.world), bodiesFor(this.world), spawnsFor(this.world));
     try {
-      localStorage.setItem(LINKED_KEY, "1");
       localStorage.setItem(DRAFT_KEY, stringifyWorld(this.world));
     } catch {
       // Storage off: the link still holds until the page is closed.
     }
   }
 
-  /**
-   * At startup: the game gets the bodies every time, as they aren't saved anywhere else. The
-   * numbers the sliders share go to the game only the first time; after that the game's win.
-   */
+  /** At startup: the designer is the home of the layout, so the game takes it from here. */
   connect(): void {
-    let linked = false;
-    try {
-      linked = localStorage.getItem(LINKED_KEY) !== null;
-    } catch {
-      // Storage off: treat it as the first time.
-    }
-    if (linked) {
-      readGame(this.world, this.game.tuning, {});
-      this.game.apply({}, bodiesFor(this.world));
-    } else this.linkToGame();
+    this.linkToGame();
   }
 
   // --- Small DOM helpers -------------------------------------------------------------
@@ -530,7 +516,12 @@ export class Designer {
     });
     parts.push(this.labelled("Kind (bodies are solid and filled; the rest are places)", kind));
 
-    const size: HTMLElement[] = [this.number(node, "radius", body ? "Radius (surface)" : "Radius (size)", (v) => `${this.screens(v * 2)} across`)];
+    const fixedSize = node.kind === "station" || node.kind === "pirate base";
+    const size: HTMLElement[] = [
+      fixedSize
+        ? this.text("Drawn at the game's own size. The circle on the map is only a guide.")
+        : this.number(node, "radius", body ? "Radius (surface)" : "Radius (size)", (v) => `${this.screens(v * 2)} across`),
+    ];
     if (body) {
       const surface = document.createElement("select");
       const meanings: Record<Surface, string> = { none: "nothing: not solid", damage: "a knock, hurting by speed like a rock", death: "death" };
@@ -565,6 +556,42 @@ export class Designer {
     }
     orbit.push(this.number(node, "spinPeriod", "Spin period, seconds (negative turns the other way)", (v) => `${readableTime(v)} per turn`));
     parts.push(...this.group(isRoot ? "Spin" : "Orbit and spin", orbit));
+    if (node.kind === "field") {
+      parts.push(
+        ...this.group("Rocks", [
+          this.number(node, "rocks", "How many rocks", (v) => `${Math.floor(v)} at the start of a new game`),
+          this.number(node, "rockDrift", "Rock drift at the start, units/s", (v) => (v > 0 ? `up to ${v} units/s each` : "they start still")),
+          this.number(node, "rockInflow", "Big rocks drifting in, per minute", (v) => (v > 0 ? `about one every ${readableTime(60 / v)}` : "none")),
+        ]),
+      );
+    }
+    if (node.kind === "field" || node.kind === "station" || node.kind === "pirate base") {
+      parts.push(
+        ...this.group("Carrying", [
+          this.text("What moves with this place. Nearest place first; past its full range its share fades and mixes with others."),
+          this.number(node, "carryFull", "Fully carried within (from its edge)", (v) => `${readableDistance(v)} from its edge`),
+          this.number(node, "carryNone", "Not carried beyond (0: everywhere)", (v) => (v > 0 ? `fades out by ${readableDistance(v)} from its edge` : "carries everything, everywhere")),
+        ]),
+      );
+    }
+    if (!isRoot && !body) {
+      const boxes = SHIP_CHOICES.map((ship) => {
+        const toggle = document.createElement("label");
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = node.spawns.includes(ship);
+        box.addEventListener("change", () => {
+          node.spawns = SHIP_CHOICES.filter((each) => (each === ship ? box.checked : node.spawns.includes(each)));
+          this.changed();
+          this.linkText.textContent = linkSummary(this.world);
+        });
+        toggle.append(box, ` the ${ship[0].toUpperCase()}${ship.slice(1)}`);
+        return toggle;
+      });
+      parts.push(
+        ...this.group("New game start", [this.text("A new game with this ship starts here. With several places for one ship, one is picked at random."), ...boxes]),
+      );
+    }
     if (!isRoot) {
       parts.push(
         ...this.group("Copies", [
@@ -684,7 +711,12 @@ export class Designer {
       | "spinPeriod"
       | "count"
       | "angleVariance"
-      | "orbitVariance",
+      | "orbitVariance"
+      | "rocks"
+      | "rockDrift"
+      | "rockInflow"
+      | "carryFull"
+      | "carryNone",
     text: string,
     hint: (value: number) => string,
   ): HTMLLabelElement {

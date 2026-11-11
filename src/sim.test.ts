@@ -3,6 +3,18 @@ import { PARTS } from "./parts";
 import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
 import { bodyAt, DOCK_OFFSET, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, type SolidBody, STATION_HALF, TICK } from "./sim";
 
+/** The same carrying ranges for every POI. */
+function carrying(full: number, none: number) {
+  return {
+    fieldCarryFull: full,
+    fieldCarryNone: none,
+    stationCarryFull: full,
+    stationCarryNone: none,
+    pirateCarryFull: full,
+    pirateCarryNone: none,
+  };
+}
+
 /** Every part, weighing nothing, so tests of the thrusters themselves see plain numbers. */
 /** The flight tests below are about the quick ship. The new ship has its own tests. */
 const DEFAULTS = {
@@ -239,6 +251,48 @@ describe("station", () => {
     expect(Math.hypot(sim.station.x, sim.station.y)).toBeCloseTo(radius, 5);
     const moved = Math.abs(Math.atan2(sim.station.y, sim.station.x) - start) % (Math.PI * 2);
     expect(Math.min(moved, Math.PI * 2 - moved)).toBeCloseTo(Math.PI / 2, 2);
+  });
+
+  describe("new games laid out by the designer", () => {
+    const base = { ...DEFAULTS, rockCount: 0, testDrones: 0, pirates: 1 };
+
+    it("start the ship at a spawn for its model, picked at random from several", () => {
+      const sim = new Sim(1, { ...base, floaterStart: true });
+      sim.spawns = [
+        { ship: "racer", orbits: [{ radius: 1000, period: 0, phase: 0, sign: 1 }] },
+        { ship: "floater", orbits: [{ radius: 40000, period: 0, phase: 0, sign: 1 }] },
+        { ship: "floater", orbits: [{ radius: 40000, period: 0, phase: Math.PI, sign: 1 }] },
+      ];
+      const seen = new Set<number>();
+      for (let seed = 2; seed < 30; seed++) {
+        sim.reset(seed);
+        expect(Math.hypot(sim.ship.x, sim.ship.y)).toBeCloseTo(40000, 6);
+        seen.add(Math.sign(sim.ship.x));
+      }
+      expect(seen.size).toBe(2);
+    });
+
+    it("start by the field when no spawn is for this ship", () => {
+      const sim = new Sim(1, { ...base, floaterStart: false });
+      sim.spawns = [{ ship: "floater", orbits: [{ radius: 40000, period: 0, phase: 0, sign: 1 }] }];
+      sim.reset(2);
+      expect(Math.hypot(sim.ship.x - sim.field.x, sim.ship.y - sim.field.y)).toBeLessThan(DEFAULTS.fieldRadius + 500);
+    });
+
+    it("put the places at the designer's angles for the clock now", () => {
+      const sim = new Sim(1, { ...base, fieldOrbitPeriod: 600 });
+      run(sim, 100);
+      sim.startPhases = { field: 1, station: 2 };
+      sim.reset(2);
+      expect(sim.field.orbitAngle).toBeCloseTo(1 + ((2 * Math.PI) / 600) * sim.now, 9);
+      expect(sim.station.orbitAngle).toBeCloseTo(2 + ((2 * Math.PI) / DEFAULTS.orbitPeriod) * sim.now, 9);
+    });
+
+    it("let each place carry to its own range", () => {
+      const sim = new Sim(1, { ...base, fieldCarryFull: Infinity, fieldCarryNone: Infinity, stationCarryFull: 0, stationCarryNone: 0 });
+      expect(sim.carryRange(sim.station)).toEqual({ full: 0, none: 0 });
+      expect(sim.carryRange(sim.field)).toEqual({ full: Infinity, none: Infinity });
+    });
   });
 
   describe("bodies from the designer", () => {
@@ -1661,7 +1715,7 @@ describe("POI carrying zones", () => {
   });
 
   it("carries fully within the full range, fades linearly, and lets go past the outer range", () => {
-    const sim = zoned({ poiFullRange: 1000, poiNoneRange: 3000 });
+    const sim = zoned({ ...carrying(1000, 3000) });
     const share = (distance: number) => {
       const spot = out(sim, distance);
       return sim.carryShares(spot.x, spot.y)[0];
@@ -1674,7 +1728,7 @@ describe("POI carrying zones", () => {
   const looseOre = (x: number, y: number) => ({ x, y, px: x, py: y, vx: 0, vy: 0, kind: 0, amount: 1 });
 
   it("ore outside every zone isn't turned by the field", () => {
-    const sim = zoned({ poiFullRange: 500, poiNoneRange: 1000 });
+    const sim = zoned({ ...carrying(500, 1000) });
     const spot = out(sim, 1500);
     const ore = looseOre(spot.x, spot.y);
     sim.ores.push(ore);
@@ -1683,7 +1737,7 @@ describe("POI carrying zones", () => {
   });
 
   it("ore in the full zone turns with the field", () => {
-    const sim = zoned({ poiFullRange: 500, poiNoneRange: 1000 });
+    const sim = zoned({ ...carrying(500, 1000) });
     const spot = out(sim, 200);
     const ore = looseOre(spot.x, spot.y);
     sim.ores.push(ore);
@@ -1693,7 +1747,7 @@ describe("POI carrying zones", () => {
   });
 
   it("the outer range is never inside the full range", () => {
-    const sim = zoned({ poiFullRange: 2000, poiNoneRange: 500 });
+    const sim = zoned({ ...carrying(2000, 500) });
     const spot = out(sim, 1500);
     expect(sim.carryShares(spot.x, spot.y)[0]).toBe(1);
   });
@@ -1786,8 +1840,7 @@ describe("loose ore far out", () => {
       haulers: false,
       fieldOrbitRadius: 0,
       fieldRotationPeriod: 0,
-      poiFullRange: 0,
-      poiNoneRange: 0,
+      ...carrying(0, 0),
       ...extra,
     });
   }

@@ -72,8 +72,10 @@ const designer = dev
         clock: () => sim.now,
         phases: () => sim.orbitPhases(),
         where: () => ({ ship: { x: sim.ship.x, y: sim.ship.y }, field: { x: sim.field.x, y: sim.field.y } }),
-        apply(phases, bodies) {
+        apply(phases, bodies, spawns) {
           sim.bodies = bodies;
+          sim.spawns = spawns;
+          sim.startPhases = phases;
           sim.applyLayout(phases);
           saveTuning();
           buildPanel();
@@ -735,6 +737,8 @@ function buildPanel(): void {
   reset.textContent = "Reset to defaults";
   reset.addEventListener("click", () => {
     Object.assign(tuning, DEFAULTS);
+    // The places' own numbers come from the designer, not the defaults.
+    designer?.linkToGame();
     saveTuning();
     opened.clear();
     saveOpened();

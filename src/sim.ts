@@ -348,11 +348,22 @@ export function pullAt(body: SolidBody, distance: number): number {
 
 /** Where a body is at a time on the clock, and how fast it's going. */
 export function bodyAt(body: SolidBody, time: number): { x: number; y: number; vx: number; vy: number } {
+  return orbitsAt(body.orbits, time);
+}
+
+/** A new game's start for one ship, from the system designer. */
+export interface Spawn {
+  ship: ShipModel;
+  orbits: Orbit[];
+}
+
+/** Where a chain of orbits puts something at a time on the clock, and how fast it's going. */
+export function orbitsAt(orbits: Orbit[], time: number): { x: number; y: number; vx: number; vy: number } {
   let x = 0;
   let y = 0;
   let vx = 0;
   let vy = 0;
-  for (const { radius, period, phase, sign } of body.orbits) {
+  for (const { radius, period, phase, sign } of orbits) {
     const rate = orbitRate(period);
     const angle = phase + rate * time;
     x += sign * Math.cos(angle) * radius;
@@ -564,6 +575,10 @@ export class Sim {
   rocks: Rock[] = [];
   /** Stars, planets, moons and asteroids, from the system designer. None without it. */
   bodies: SolidBody[] = [];
+  /** Where new games start, by ship. Several for one ship: one is picked at random. None: by the field. */
+  spawns: Spawn[] = [];
+  /** Each POI's angle at clock 0 for new games, from the designer. Missing: the game's own start. */
+  startPhases: Partial<Record<Poi["name"], number>> = {};
   /** Where each body is this tick. */
   private bodySpots: { body: SolidBody; x: number; y: number; vx: number; vy: number }[] = [];
   shots: Shot[] = [];
@@ -685,6 +700,11 @@ export class Sim {
     this.resetPlayerControls();
     const model = this.tuning.floaterStart ? "floater" : "racer";
     this.ship = this.makeShip(this.startX(), this.field.y, this.controls, model);
+    const spawns = this.spawns.filter((spawn) => spawn.ship === model);
+    if (spawns.length > 0) {
+      const at = orbitsAt(spawns[Math.floor(this.random() * spawns.length)].orbits, this.clock);
+      Object.assign(this.ship, { x: at.x, y: at.y, px: at.x, py: at.y });
+    }
     if (model === "floater") {
       this.ship.parts.add("gun2");
       this.ship.parts.add("clickMove");
@@ -747,13 +767,18 @@ export class Sim {
 
   private placePois(): void {
     const { tuning } = this;
-    this.field = this.makePoi("field", null, tuning.fieldOrbitRadius, 0, tuning.fieldOrbitPeriod, tuning.fieldRadius);
+    // The designer's angles, as they stand now. Without them, the game's own start.
+    const angle = (name: Poi["name"], own: number, period: number) => {
+      const phase = this.startPhases[name];
+      return phase === undefined ? own : phase + orbitRate(period) * this.clock;
+    };
+    this.field = this.makePoi("field", null, tuning.fieldOrbitRadius, angle("field", 0, tuning.fieldOrbitPeriod), tuning.fieldOrbitPeriod, tuning.fieldRadius);
     // Starts behind the ship's starting point, on the far side from the rocks.
     this.station = this.makePoi(
       "station",
       this.field,
       tuning.fieldRadius + tuning.stationDistance,
-      Math.PI,
+      angle("station", Math.PI, tuning.orbitPeriod),
       tuning.orbitPeriod,
       STATION_REACH,
     );
@@ -764,7 +789,7 @@ export class Sim {
             "pirate base",
             this.field,
             tuning.fieldRadius + tuning.pirateBaseDistance,
-            0,
+            angle("pirate base", 0, tuning.pirateOrbitPeriod),
             tuning.pirateOrbitPeriod,
             PIRATE_BASE_RADIUS,
           )
@@ -1305,7 +1330,7 @@ export class Sim {
     };
   }
 
-  /** The player restarts by the field. A drone restarts in the dock, where it would be rebuilt. */
+  /** A rebuilt ship starts in the station's dock, where it was rebuilt. A pirate starts at its base. */
   private respawn(ship: Ship): void {
     if (ship === this.ship) this.clickPilot.cancel();
     const home = this.homeOf(ship);
@@ -1997,17 +2022,29 @@ export class Sim {
    * Shares that add up to more than 1 are scaled down to 1 in total.
    */
   carryShares(x: number, y: number): number[] {
-    const { pois, tuning } = this;
-    const full = tuning.poiFullRange;
-    const none = Math.max(full, tuning.poiNoneRange);
+    const { pois } = this;
+    const ranges = pois.map((poi) => this.carryRange(poi));
     const distances = pois.map((poi) => this.edgeDistance(poi, x, y));
     const nearest = distances.indexOf(Math.min(...distances));
-    if (distances[nearest] <= full) return pois.map((_, i) => (i === nearest ? 1 : 0));
-    const shares = distances.map((distance) =>
-      none === Infinity ? 1 : Math.max(0, Math.min(1, (none - distance) / (none - full))),
-    );
+    if (distances[nearest] <= ranges[nearest].full) return pois.map((_, i) => (i === nearest ? 1 : 0));
+    const shares = distances.map((distance, i) => {
+      const { full, none } = ranges[i];
+      return none === Infinity ? 1 : Math.max(0, Math.min(1, (none - distance) / (none - full)));
+    });
     const total = shares.reduce((sum, share) => sum + share, 0);
     return total > 1 ? shares.map((share) => share / total) : shares;
+  }
+
+  /** How far from its edge a POI carries things fully, and where it stops carrying at all. */
+  carryRange(poi: Poi): { full: number; none: number } {
+    const { tuning } = this;
+    const [full, none] =
+      poi.name === "field"
+        ? [tuning.fieldCarryFull, tuning.fieldCarryNone]
+        : poi.name === "station"
+          ? [tuning.stationCarryFull, tuning.stationCarryNone]
+          : [tuning.pirateCarryFull, tuning.pirateCarryNone];
+    return { full, none: Math.max(full, none) };
   }
 
   /**

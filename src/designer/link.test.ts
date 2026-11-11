@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { bodyAt } from "../sim";
+import { bodyAt, orbitsAt } from "../sim";
 import { DEFAULTS } from "../tuning";
-import { bodiesFor, linkSummary, linkedNodes, phasesFromWorld, readGame, writeGame } from "./link";
+import { bodiesFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, writeGame } from "./link";
 import { makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk } from "./world";
 
 describe("the link between the designer and the game", () => {
@@ -20,18 +20,42 @@ describe("the link between the designer and the game", () => {
     expect(tuning.fieldRadius + tuning.pirateBaseDistance).toBe(9200);
   });
 
-  it("reads a slider's change back", () => {
+  it("writes each place's rocks and carrying, no outer edge meaning everywhere", () => {
     const world = seedWorld();
+    const { field, station } = linkedNodes(world);
+    Object.assign(field!, { rocks: 300, rockDrift: 5, rockInflow: 2, carryFull: 2000, carryNone: 8000 });
     const tuning = { ...DEFAULTS };
     writeGame(world, tuning);
-    tuning.fieldOrbitPeriod = 7200;
-    readGame(world, tuning, {});
-    expect(linkedNodes(world).field?.orbitPeriod).toBe(7200);
+    expect([tuning.rockCount, tuning.rockDrift, tuning.rockInflow]).toEqual([300, 5, 2]);
+    expect([tuning.fieldCarryFull, tuning.fieldCarryNone]).toEqual([2000, 8000]);
+    expect(station?.carryNone).toBe(0);
+    expect([tuning.stationCarryFull, tuning.stationCarryNone]).toEqual([Infinity, Infinity]);
+  });
+
+  it("starts new games where the designer says, copies included, by ship", () => {
+    const world = seedWorld();
+    const { planet } = linkedNodes(world);
+    const anchor = makeChild(world, planet!, "anchor");
+    Object.assign(anchor, { name: "Start", orbitRadius: 40000, count: 3, spawns: ["floater"] });
+    planet!.children.push(anchor);
+    const spawns = spawnsFor(world);
+    expect(spawns.length).toBe(3);
+    expect(spawns.every((spawn) => spawn.ship === "floater")).toBe(true);
+    const at = positions(world, 300);
+    const there = orbitsAt(spawns[0].orbits, 300);
+    expect(there.x).toBeCloseTo(at.get(anchor)!.x - at.get(planet!)!.x, 3);
+    expect(linkSummary(world)).toContain("racer: by the field, floater: Start");
+  });
+
+  it("only takes the places' angles from the game, keeping its own numbers", () => {
+    const world = seedWorld();
+    readGame(world, { field: 1 });
+    expect(linkedNodes(world).field?.orbitRadius).toBe(60000);
   });
 
   it("shows the game's real place on the orbit, as a tidy angle", () => {
     const world = seedWorld();
-    readGame(world, { ...DEFAULTS }, { field: -Math.PI / 2, station: 3 * Math.PI });
+    readGame(world, { field: -Math.PI / 2, station: 3 * Math.PI });
     const { field, station } = linkedNodes(world);
     expect(field?.orbitPhase).toBe(270);
     expect(station?.orbitPhase).toBe(180);

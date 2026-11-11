@@ -14,6 +14,9 @@ export const PLACE_KINDS = ["anchor", "field", "station", "pirate base"] as cons
 export type NodeKind = (typeof BODY_KINDS)[number] | (typeof PLACE_KINDS)[number];
 
 export const SURFACES = ["none", "damage", "death"] as const;
+/** The ships a new game starts with. */
+export const SHIP_CHOICES = ["racer", "floater"] as const;
+export type ShipChoice = (typeof SHIP_CHOICES)[number];
 export type Surface = (typeof SURFACES)[number];
 
 export interface WorldNode {
@@ -42,6 +45,18 @@ export interface WorldNode {
   orbitPhase: number;
   /** Seconds per turn about its own centre. 0 doesn't spin; negative turns the other way. */
   spinPeriod: number;
+  /** Fields only: how many rocks, how fast they drift at the start, and big ones drifting in per minute. */
+  rocks: number;
+  rockDrift: number;
+  rockInflow: number;
+  /**
+   * Fields, stations and pirate bases: within `carryFull` of its edge it carries things
+   * fully, fading to nothing at `carryNone`. A `carryNone` of 0 carries everything, everywhere.
+   */
+  carryFull: number;
+  carryNone: number;
+  /** Places only: the ships a new game can start at. */
+  spawns: ShipChoice[];
   /** How many go round in this orbit, itself included. Copies are the same thing without children. */
   count: number;
   /** How far each copy may wander from even spacing, as a % of half the gap between them. */
@@ -127,6 +142,12 @@ export function bodyDefaults(
   return { surface: "none", pull: 0, pullFull: 0, pullAccel: 0, ...bare };
 }
 
+/** A place's own settings, as the game starts them. */
+export function placeDefaults(kind: NodeKind): Pick<WorldNode, "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone"> {
+  if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, carryFull: 0, carryNone: 0 };
+  return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0 };
+}
+
 /** A copy's own place: its orbit and where on it it is at time 0, in degrees. */
 export interface Copy {
   orbitRadius: number;
@@ -207,6 +228,8 @@ export function makeChild(world: World, parent: WorldNode, kind: NodeKind): Worl
     kind,
     radius,
     ...bodyDefaults(kind, radius),
+    ...placeDefaults(kind),
+    spawns: [],
     orbitRadius,
     orbitPeriod,
     orbitPhase: 0,
@@ -236,6 +259,8 @@ export function seedWorld(): World {
     pullAccel: 0,
     atmosphere: 0,
     burnSpeed: 0,
+    ...placeDefaults(kind),
+    spawns: [],
     orbitRadius: 0,
     orbitPeriod: 0,
     orbitPhase: 0,
@@ -288,6 +313,7 @@ export function parseWorld(text: string): World | null {
       const kind = raw.kind as NodeKind;
       // Saved before bodies had ground and full pull: those come from the kind's defaults.
       const defaults = bodyDefaults(kind, num("radius"));
+      const places = placeDefaults(kind);
       return {
         id: raw.id,
         name: typeof raw.name === "string" ? raw.name : raw.kind,
@@ -299,6 +325,12 @@ export function parseWorld(text: string): World | null {
         pullAccel: num("pullAccel", defaults.pullAccel),
         atmosphere: num("atmosphere", defaults.atmosphere),
         burnSpeed: num("burnSpeed", defaults.burnSpeed),
+        rocks: num("rocks", places.rocks),
+        rockDrift: num("rockDrift", places.rockDrift),
+        rockInflow: num("rockInflow", places.rockInflow),
+        carryFull: num("carryFull"),
+        carryNone: num("carryNone"),
+        spawns: Array.isArray(raw.spawns) ? SHIP_CHOICES.filter((ship) => (raw.spawns as unknown[]).includes(ship)) : [],
         count: Math.max(1, Math.floor(num("count", 1))),
         angleVariance: num("angleVariance"),
         orbitVariance: num("orbitVariance"),

@@ -29,12 +29,16 @@ export const DEFAULTS = {
   rockCount: 520,
   fieldRadius: 5200,
   /**
-   * Within this distance of a POI's edge, the nearest POI carries things fully. Beyond
-   * it, its pull falls off linearly to nothing at the second distance. Infinity is the
-   * old way: the nearest POI carries everything, everywhere.
+   * For each POI: within the first distance of its edge, the nearest POI carries things
+   * fully. Beyond it, its share falls off evenly to nothing at the second. Infinity is the
+   * old way: the nearest POI carries everything, everywhere. Set by the system designer.
    */
-  poiFullRange: Infinity,
-  poiNoneRange: Infinity,
+  fieldCarryFull: Infinity,
+  fieldCarryNone: Infinity,
+  stationCarryFull: Infinity,
+  stationCarryNone: Infinity,
+  pirateCarryFull: Infinity,
+  pirateCarryNone: Infinity,
   showPoiZones: false,
   /** Loose ore this far from every POI's edge and every ship is gone for good. */
   oreForgetDistance: 6000,
@@ -270,25 +274,11 @@ export const GROUPS: Group[] = [
       { key: "flingOreAmount", label: "Gun 1: ore a flung piece is worth", min: 1, max: 10, step: 1 },
     ],
   },
-  {
-    title: "Field",
-    sliders: [
-      { key: "rockCount", label: "Rocks (on restart)", min: 20, max: 1500, step: 10 },
-      { key: "fieldRadius", label: "Radius (on restart)", min: 800, max: 8000, step: 100 },
-      { key: "rockDrift", label: "Rock drift (on restart)", min: 0, max: 80, step: 1 },
-      { key: "rockInflow", label: "Big rocks drifting in per minute", min: 0, max: 10, step: 0.25 },
-      { key: "fieldOrbitRadius", label: "Orbit size (on restart)", min: 0, max: 200000, step: 1000 },
-      { key: "fieldOrbitPeriod", label: "Orbit time (s, 0 = off)", min: 0, max: 43200, step: 60 },
-      { key: "fieldRotationPeriod", label: "Rotation time (s, 0 = off)", min: 0, max: 3600, step: 30 },
-    ],
-  },
+  // The field's, station's and pirate base's own numbers live in the system designer (O).
   {
     title: "POI carrying",
-    sliders: [
-      { key: "poiFullRange", label: "Fully carried within (from a POI's edge)", min: 0, max: 10000, step: 100, infinite: true },
-      { key: "poiNoneRange", label: "Not carried beyond", min: 0, max: 20000, step: 100, infinite: true },
-    ],
-    switches: [{ key: "showPoiZones", label: "Show POI zones" }],
+    sliders: [],
+    switches: [{ key: "showPoiZones", label: "Show POI zones (each place's carrying is set in the designer)" }],
   },
   {
     title: "Loose ore",
@@ -306,11 +296,6 @@ export const GROUPS: Group[] = [
   {
     title: "Station",
     sliders: [
-      { key: "stationDistance", label: "Distance (on restart)", min: 1000, max: 15000, step: 100 },
-      { key: "pirateBaseDistance", label: "Pirate base distance from the field (on restart)", min: 500, max: 15000, step: 100 },
-      { key: "orbitPeriod", label: "Orbit time (s, 0 = off)", min: 0, max: 3600, step: 30 },
-      { key: "pirateOrbitPeriod", label: "Pirate base orbit time (s, 0 = off)", min: 0, max: 3600, step: 30 },
-      { key: "stationRotationPeriod", label: "Rotation time (s, 0 = off)", min: 0, max: 3600, step: 30 },
       { key: "dockDrag", label: "Dock slowdown", min: 0, max: 3, step: 0.05 },
       { key: "creditsPerOre", label: "Credits per ore", min: 1, max: 100, step: 1 },
     ],

@@ -272,7 +272,7 @@ export class Renderer {
       Math.abs(x - camX) < halfW + r && Math.abs(y - camY) < halfH + r;
 
     this.drawBodies(sim, alpha, visible);
-    this.drawStation(sim, alpha);
+    for (const station of sim.docks) this.drawStation(sim, station, alpha);
     this.drawDeposits(sim, alpha);
     this.drawGuards(sim, alpha);
     this.drawHauler(sim, alpha);
@@ -379,9 +379,9 @@ export class Renderer {
     });
   }
 
-  private drawStation(sim: Sim, alpha: number): void {
+  /** A station and its dock. Only the station itself shows the ore and parts it holds. */
+  private drawStation(sim: Sim, station: Poi, alpha: number): void {
     const { ctx } = this;
-    const { station } = sim;
     const x = lerp(station.px, station.x, alpha);
     const y = lerp(station.py, station.y, alpha);
     const size = STATION_HALF * 2;
@@ -392,7 +392,7 @@ export class Renderer {
 
     const dockX = DOCK_OFFSET - STATION_HALF;
     const dockY = -STATION_HALF;
-    ctx.fillStyle = sim.isDocked() ? "rgba(143, 227, 161, 0.2)" : "rgba(143, 227, 161, 0.07)";
+    ctx.fillStyle = sim.dockedAt() === station ? "rgba(143, 227, 161, 0.2)" : "rgba(143, 227, 161, 0.07)";
     ctx.fillRect(dockX, dockY, size, size);
     ctx.strokeStyle = "#8fe3a1";
     ctx.lineWidth = 2;
@@ -405,8 +405,10 @@ export class Renderer {
     ctx.strokeStyle = "#aab1bd";
     ctx.lineWidth = 3;
     ctx.strokeRect(-STATION_HALF, -STATION_HALF, size, size);
-    this.drawOrePile(sim.stationOre, STATION_HALF);
-    this.drawCrates(sim.stationParts, STATION_HALF);
+    if (station === sim.station) {
+      this.drawOrePile(sim.stationOre, STATION_HALF);
+      this.drawCrates(sim.stationParts, STATION_HALF);
+    }
     ctx.restore();
   }
 
@@ -581,7 +583,7 @@ export class Renderer {
    */
   private drawPoiZones(sim: Sim, alpha: number): void {
     const { ctx } = this;
-    const pois = [sim.field, sim.station, ...(sim.pirateBase ? [sim.pirateBase] : []), ...sim.extraFields.map((extra) => extra.poi)];
+    const pois = [sim.field, ...sim.docks, ...(sim.pirateBase ? [sim.pirateBase] : []), ...sim.extraFields.map((extra) => extra.poi)];
     ctx.lineWidth = 2;
     for (const poi of pois) {
       const { full, none } = sim.carryRange(poi);
@@ -1186,11 +1188,12 @@ export class Renderer {
     const meters = sim.ship.parts.has("meters");
     // Only the big places anyone knows about, and only once they're close.
     const near = viewHalfWidth * 2 * POINTER_SCREENS;
-    const field = sim.readPoi(sim.field, viewHalfWidth, viewHalfHeight);
+    // The nearest field and station, so there's always somewhere to mine and to sell.
+    const field = sim.readPoi(sim.miningFieldAt(sim.ship.x, sim.ship.y).poi, viewHalfWidth, viewHalfHeight);
     if (field.distance > 0 && (field.distance < near || this.dev)) {
       this.drawPointer(field, "#8fb4ff", "field", 0.34, meters, width, height, dpr);
     }
-    const station = sim.readPoi(sim.station, viewHalfWidth, viewHalfHeight);
+    const station = sim.readPoi(sim.nearestDock(sim.ship.x, sim.ship.y), viewHalfWidth, viewHalfHeight);
     if (station.distance > 0 && (station.distance < near || this.dev)) {
       // It flashes once the hold is full: time to go and sell.
       const full = sim.ship.ore >= sim.cargoSpace(sim.ship);

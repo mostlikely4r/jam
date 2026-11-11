@@ -336,7 +336,6 @@ class ShipPilot {
   /** Direction to fly: straight at the target, or past the first thing in the way. */
   protected routeAround(sim: Sim, target: Mover, exclude: object | null): { x: number; y: number } {
     const { ship } = this;
-    const { station } = sim;
     const toX = target.x - ship.x;
     const toY = target.y - ship.y;
     const distance = Math.hypot(toX, toY) || 1;
@@ -363,7 +362,7 @@ class ShipPilot {
     // The station is big enough to plan around from further away.
     // Clears its corners, while the dock's center stays outside this radius.
     const stationRadius = Math.hypot(STATION_HALF, STATION_HALF) + SHIP_RADIUS + 30;
-    consider(station.x, station.y, stationRadius, Math.min(distance, AVOID_LOOK_AHEAD * 3));
+    for (const station of sim.docks) consider(station.x, station.y, stationRadius, Math.min(distance, AVOID_LOOK_AHEAD * 3));
     for (const rock of sim.rocks) {
       if (rock === exclude) continue;
       consider(rock.x, rock.y, rock.radius + SHIP_RADIUS + AVOID_MARGIN, along);
@@ -546,10 +545,11 @@ export class DronePilot extends ShipPilot {
     // Repairs come before shopping, so it never spends its repair money on parts.
     if (ship.ore === 0 && sim.canRepair(ship)) {
       this.task = "repairing";
-      this.hold(sim, sim.dockPoint(), sim.dockPoint(true));
+      const dock = sim.dockedAt(ship) ?? sim.station;
+      this.hold(sim, sim.dockPoint(false, dock), sim.dockPoint(true, dock));
       return;
     }
-    if (ship.ore === 0 && sim.isDocked(ship)) this.shop(sim);
+    if (ship.ore === 0 && sim.atShop(ship)) this.shop(sim);
 
     if (!this.hauling && ship.ore === 0) {
       this.chooseField(sim);
@@ -569,7 +569,7 @@ export class DronePilot extends ShipPilot {
    */
   private chooseTrade(sim: Sim): void {
     const { ship } = this;
-    const docked = sim.isDocked(ship);
+    const docked = sim.atShop(ship);
     if (!docked) this.decidedTrade = false;
     if (!docked || this.decidedTrade || this.trading || ship.owner || this.buys !== "upgrades") return;
     this.decidedTrade = true;
@@ -604,10 +604,12 @@ export class DronePilot extends ShipPilot {
     }
     const lately = ship.pirateKilledAt !== null && sim.now - ship.pirateKilledAt < tuning.fieldFearSeconds;
     const feared = lately && sim.roll() < tuning.fieldFearChance ? ship.pirateKilledIn : null;
+    const here = sim.dockedAt(ship) ?? sim.station;
     let best = fields[0];
     let bestCost = Infinity;
     for (const field of fields) {
-      let cost = 2 * this.tripSeconds(sim, field) - sim.roll() * tuning.fieldLuckSeconds;
+      const back = sim.nearestDock(field.poi.x, field.poi.y);
+      let cost = this.tripSeconds(sim, here, field.poi) + this.tripSeconds(sim, field.poi, back) - sim.roll() * tuning.fieldLuckSeconds;
       if (!open.includes(field)) cost += LAST_RESORT;
       if (field.id === feared) cost += LAST_RESORT;
       if (field.id === this.habit) cost -= tuning.fieldHabitSeconds;
@@ -619,12 +621,12 @@ export class DronePilot extends ShipPilot {
     this.working = best.id;
   }
 
-  /** Seconds from the station to a field, by the route planner, round any body in the way. */
-  tripSeconds(sim: Sim, field: MiningField): number {
+  /** Seconds from one place to another, by the route planner, round any body in the way. */
+  tripSeconds(sim: Sim, start: Poi, end: Poi): number {
     const { ship } = this;
     const flight = { accel: sim.tuning.thrust * sim.shipResponse(ship), cruise: this.cruiseSpeed(sim) };
-    const from = sim.poiAt(sim.station, sim.now);
-    const to = sim.poiAt(field.poi, sim.now);
+    const from = sim.poiAt(start, sim.now);
+    const to = sim.poiAt(end, sim.now);
     // Round the body nearest the station of those across the way, in that body's frame.
     let centre = { x: 0, y: 0 };
     let radius = 0;
@@ -639,8 +641,8 @@ export class DronePilot extends ShipPilot {
       }
     }
     const route = planRoute(
-      (t) => minus(sim.poiAt(sim.station, t), centre),
-      (t) => minus(sim.poiAt(field.poi, t), centre),
+      (t) => minus(sim.poiAt(start, t), centre),
+      (t) => minus(sim.poiAt(end, t), centre),
       sim.now,
       radius,
       flight,
@@ -720,8 +722,9 @@ export class DronePilot extends ShipPilot {
   private flee(sim: Sim): void {
     // A load banked on the way can't be lost.
     if (this.dropLoad(sim)) return;
-    const dock = sim.dockPoint();
-    const before = sim.dockPoint(true);
+    const station = sim.dockedAt(this.ship) ?? sim.nearestDock(this.ship.x, this.ship.y);
+    const dock = sim.dockPoint(false, station);
+    const before = sim.dockPoint(true, station);
     if (!sim.isDocked(this.ship)) {
       this.task = "fleeing";
       this.travel(sim, { x: dock.x, y: dock.y, px: before.x, py: before.y }, DOCK_ARRIVAL_SLACK, 0, null);
@@ -779,14 +782,17 @@ export class DronePilot extends ShipPilot {
     const { ship } = this;
     // A damaged ship is going to the station for repairs anyway, so it sells its load there too.
     if (this.dropsThisLoad && ship.hull >= LOW_HULL && this.dropLoad(sim)) return;
-    if (sim.isDocked(ship)) {
+    const docked = sim.dockedAt(ship);
+    if (docked) {
       this.task = "unloading";
-      this.hold(sim, sim.dockPoint(), sim.dockPoint(true));
+      this.hold(sim, sim.dockPoint(false, docked), sim.dockPoint(true, docked));
       return;
     }
+    // Sells at whichever station is nearest.
     this.task = "to station";
-    const dock = sim.dockPoint();
-    const before = sim.dockPoint(true);
+    const station = sim.nearestDock(ship.x, ship.y);
+    const dock = sim.dockPoint(false, station);
+    const before = sim.dockPoint(true, station);
     this.travel(sim, { x: dock.x, y: dock.y, px: before.x, py: before.y }, DOCK_ARRIVAL_SLACK, 0, null);
   }
 

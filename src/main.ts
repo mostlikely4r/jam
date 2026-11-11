@@ -72,11 +72,11 @@ const designer = dev
         clock: () => sim.now,
         phases: () => sim.orbitPhases(),
         where: () => ({ ship: { x: sim.ship.x, y: sim.ship.y }, field: { x: sim.field.x, y: sim.field.y } }),
-        apply(phases, bodies, spawns, fields) {
+        apply(phases, bodies, spawns, fields, stations) {
           sim.bodies = bodies;
           sim.spawns = spawns;
           sim.startPhases = phases;
-          sim.applyLayout(phases, fields);
+          sim.applyLayout(phases, fields, stations);
           saveTuning();
           buildPanel();
         },
@@ -536,8 +536,9 @@ function updatePirateShop(): void {
 
 function updateShop(): void {
   const { ship } = sim;
-  const docked = sim.isDocked();
-  const deposit = docked ? null : sim.depositAt();
+  // Only the station itself has a shop. Its outposts just buy ore and repair.
+  const docked = sim.atShop();
+  const deposit = sim.isDocked() ? null : sim.depositAt();
   if (deposit) {
     updateDepositShop(deposit);
     return;
@@ -837,7 +838,7 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "KeyR" && dev) restart();
   if (event.code === "KeyX") setRetro(!tuning.retro);
   const digit = /^Digit([0-9])$/.exec(event.code);
-  if (digit && sim.isDocked()) {
+  if (digit && sim.atShop()) {
     const part = PARTS[digit[1] === "0" ? 9 : Number(digit[1]) - 1];
     if (part) tradePart(part);
   }
@@ -845,8 +846,8 @@ window.addEventListener("keydown", (event) => {
   if (deposit && event.code === "Digit1") sim.sellToDeposit(sim.ship, deposit);
   if (deposit && event.code === "Digit2") sim.buyFromDeposit(sim.ship, deposit);
   if (!deposit && !sim.isDocked() && sim.atPirateBase() && event.code === "Digit1") sim.buyFromPirateBase(sim.ship);
-  if (event.code === "Equal" && sim.isDocked() && PARTS[10]) tradePart(PARTS[10]);
-  if (event.code === "Minus" && sim.isDocked()) tradeDrone();
+  if (event.code === "Equal" && sim.atShop() && PARTS[10]) tradePart(PARTS[10]);
+  if (event.code === "Minus" && sim.atShop()) tradeDrone();
   keys.add(event.code);
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));

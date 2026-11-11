@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bodyAt, orbitsAt } from "../sim";
 import { DEFAULTS } from "../tuning";
-import { bodiesFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, writeGame } from "./link";
+import { bodiesFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, stationsFor, writeGame } from "./link";
 import { limitCarrying, makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk } from "./world";
 
 describe("the link between the designer and the game", () => {
@@ -111,17 +111,41 @@ describe("the link between the designer and the game", () => {
     expect(linkSummary(world)).toContain("Map only: Anchor");
   });
 
-  it("links the first field, makes other fields real, and leaves their stations on the map", () => {
+  it("links the first field, and makes other fields and their stations real, but not other pirate bases", () => {
     const world = seedWorld();
     const { planet, field } = linkedNodes(world);
     const extra = makeChild(world, planet!, "field");
     const outpost = makeChild(world, extra, "station");
     outpost.name = "Outpost";
-    extra.children.push(outpost);
+    const hideout = makeChild(world, extra, "pirate base");
+    hideout.name = "Hideout";
+    extra.children.push(outpost, hideout);
     planet!.children.push(extra);
     expect(linkedNodes(world).field).toBe(field);
-    expect(linkSummary(world)).toContain(`In the game: Star, Planet, Field, Station, Pirate base, ${extra.name}`);
-    expect(linkSummary(world)).toContain("Map only: Outpost");
+    expect(linkSummary(world)).toContain(`In the game: Star, Planet, Field, Station, Pirate base, ${extra.name}, Outpost`);
+    expect(linkSummary(world)).toContain("Map only: Hideout");
+  });
+
+  it("hands every station but the first over as a dock, with its shipyard, copies included", () => {
+    const world = seedWorld();
+    const { planet, station } = linkedNodes(world);
+    const extra = makeChild(world, planet!, "field");
+    const outpost = makeChild(world, extra, "station");
+    Object.assign(outpost, { name: "Outpost", shipyard: false, count: 2 });
+    extra.children.push(outpost);
+    planet!.children.push(extra);
+    const stations = stationsFor(world);
+    expect(stations.map((each) => [each.name, each.shipyard])).toEqual([["Outpost", false], ["Outpost 2", false]]);
+    const t = 300;
+    const at = positions(world, t);
+    const there = orbitsAt(stations[0].orbits, t);
+    expect(there.x).toBeCloseTo(at.get(outpost)!.x - at.get(planet!)!.x, 3);
+    expect(there.y).toBeCloseTo(at.get(outpost)!.y - at.get(planet!)!.y, 3);
+    // The first station is the game's own: its shipyard goes through the tuning.
+    station!.shipyard = false;
+    const tuning = { ...DEFAULTS };
+    writeGame(world, tuning);
+    expect(tuning.stationShipyard).toBe(false);
   });
 
   it("gives a world saved before ground and full pull its kind's defaults", () => {

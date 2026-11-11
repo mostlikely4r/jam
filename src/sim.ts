@@ -342,6 +342,26 @@ export interface MiningField {
   full: number;
 }
 
+/**
+ * A station from the designer beyond the first: a dock that buys ore and repairs, and
+ * rebuilds wrecks if it has a shipyard. No shop. It's a branch of the station: the same
+ * money and the same store of ore and parts. Not saved: the designer hands them over.
+ */
+export interface StationSpec {
+  id: string;
+  name: string;
+  rotationPeriod: number;
+  orbits: Orbit[];
+  carryFull: number;
+  carryNone: number;
+  shipyard: boolean;
+}
+
+interface Outpost {
+  spec: StationSpec;
+  poi: Poi;
+}
+
 interface ExtraField {
   spec: FieldSpec;
   poi: Poi;
@@ -639,6 +659,8 @@ export class Sim {
   startPhases: Partial<Record<Poi["name"], number>> = {};
   /** Fields beyond the first, from the designer. Rocks only: no station, deposit or traffic of their own. */
   extraFields: ExtraField[] = [];
+  /** The designer's other stations. */
+  outposts: Outpost[] = [];
   private miningCache: { clock: number; extras: ExtraField[]; radius: number; fields: MiningField[] } | null = null;
   /** Where each body is this tick. */
   private bodySpots: { body: SolidBody; x: number; y: number; vx: number; vy: number }[] = [];
@@ -851,6 +873,15 @@ export class Sim {
     const at = orbitsAt(spec.orbits, this.clock);
     poi.orbits = spec.orbits;
     poi.reach = spec.radius;
+    poi.carry = { full: spec.carryFull, none: Math.max(spec.carryFull, spec.carryNone) };
+    poi.x = poi.px = at.x;
+    poi.y = poi.py = at.y;
+  }
+
+  private fitOutpost(outpost: Outpost): void {
+    const { spec, poi } = outpost;
+    const at = orbitsAt(spec.orbits, this.clock);
+    poi.orbits = spec.orbits;
     poi.carry = { full: spec.carryFull, none: Math.max(spec.carryFull, spec.carryNone) };
     poi.x = poi.px = at.x;
     poi.y = poi.py = at.y;
@@ -1518,10 +1549,13 @@ export class Sim {
     };
   }
 
-  /** A rebuilt ship starts in the station's dock, where it was rebuilt. A pirate starts at its base. */
+  /**
+   * A rebuilt ship starts in the dock it was rebuilt in: the nearest with a shipyard to
+   * where it was wrecked. A pirate starts at its base.
+   */
   private respawn(ship: Ship): void {
     if (ship === this.ship) this.clickPilot.cancel();
-    const home = this.homeOf(ship);
+    const home = ship.faction === "pirate" ? this.homeOf(ship) : this.dockPoint(false, this.nearestDock(ship.x, ship.y, true));
     ship.x = home.x;
     ship.y = home.y;
     ship.px = ship.x;
@@ -1611,7 +1645,7 @@ export class Sim {
 
   /** Puts the ship owner's credits toward a blueprint, as far as they go. Returns whether any went in. */
   fundBlueprint(ship: Ship, id: BlueprintId): boolean {
-    if (!this.canOrder(id) || !this.isDocked(ship)) return false;
+    if (!this.canOrder(id) || !this.atShop(ship)) return false;
     const account = this.accountOf(ship);
     const amount = Math.min(account.credits, this.blueprintLeft(id));
     if (amount <= 0) return false;
@@ -1936,7 +1970,7 @@ export class Sim {
     const part = PARTS.find((candidate) => candidate.id === id)!;
     if (!partFits(part, ship.model) || !this.unlocked(id)) return false;
     const account = this.accountOf(ship);
-    if (!this.isDocked(ship) || ship.parts.has(id) || account.credits < price) return false;
+    if (!this.atShop(ship) || ship.parts.has(id) || account.credits < price) return false;
     if (!this.hasPartsFor(price)) return false;
     this.chargeForService(account, price);
     ship.parts.add(id);
@@ -1948,7 +1982,7 @@ export class Sim {
 
   /** Sells a part back at full price, so a ship can go back to being light. */
   sellPart(ship: Ship, id: PartId): boolean {
-    if (!this.isDocked(ship) || !ship.parts.has(id)) return false;
+    if (!this.atShop(ship) || !ship.parts.has(id)) return false;
     this.chargeForService(ship, -this.partPrice(id));
     ship.parts.delete(id);
     if ((id === "clickMove" || id === "clickTurn") && ship === this.ship) this.clickPilot.cancel();
@@ -1959,7 +1993,7 @@ export class Sim {
   /** Any ship in the dock can pay for a new drone, which starts there and earns for itself. */
   buyDrone(buyer: Ship): DronePilot | null {
     const { tuning } = this;
-    if (!this.isDocked(buyer) || buyer.credits < tuning.dronePrice) return null;
+    if (!this.atShop(buyer) || buyer.credits < tuning.dronePrice) return null;
     if (this.drones.length >= tuning.droneLimit || !this.hasPartsFor(tuning.dronePrice)) return null;
     if (!this.unlocked("drone")) return null;
     this.chargeForService(buyer, tuning.dronePrice);
@@ -1997,9 +2031,34 @@ export class Sim {
     return ship.owner ?? ship;
   }
 
-  /** Center of the dock, now or as of the previous tick. */
-  dockPoint(previous = false): { x: number; y: number } {
-    const { station } = this;
+  /** Every station with a dock: the station itself first, then the outposts. */
+  get docks(): Poi[] {
+    return [this.station, ...this.outposts.map((outpost) => outpost.poi)];
+  }
+
+  /** Whether a dock rebuilds wrecks. */
+  hasShipyard(dock: Poi): boolean {
+    if (dock === this.station) return this.tuning.stationShipyard;
+    return this.outposts.find((outpost) => outpost.poi === dock)?.spec.shipyard ?? false;
+  }
+
+  /** The nearest dock to a spot, or the nearest with a shipyard. With no shipyard anywhere, the station. */
+  nearestDock(x: number, y: number, shipyard = false): Poi {
+    let best = this.station;
+    let bestDistance = Infinity;
+    for (const dock of this.docks) {
+      if (shipyard && !this.hasShipyard(dock)) continue;
+      const distance = Math.hypot(dock.x - x, dock.y - y);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = dock;
+      }
+    }
+    return best;
+  }
+
+  /** Center of a station's dock, now or as of the previous tick. */
+  dockPoint(previous = false, station: Poi = this.station): { x: number; y: number } {
     const rotation = previous ? station.prevRotation : station.rotation;
     return {
       x: (previous ? station.px : station.x) + Math.cos(rotation) * DOCK_OFFSET,
@@ -2097,6 +2156,16 @@ export class Sim {
       poi.turn = orbitRate(spec.rotationPeriod) * dt;
       poi.rotation += poi.turn;
     }
+    for (const { spec, poi } of this.outposts) {
+      poi.px = poi.x;
+      poi.py = poi.y;
+      poi.prevRotation = poi.rotation;
+      const at = orbitsAt(spec.orbits, this.clock);
+      poi.x = at.x;
+      poi.y = at.y;
+      poi.turn = orbitRate(spec.rotationPeriod) * dt;
+      poi.rotation += poi.turn;
+    }
   }
 
   private movePoi(poi: Poi, orbitPeriod: number, rotationPeriod: number, dt: number): void {
@@ -2142,9 +2211,10 @@ export class Sim {
    * rest of the scene with the field, so nobody is left behind in empty space. A POI given
    * a phase goes exactly there. Without one it carries on from the angle it's at.
    */
-  applyLayout(phases: Partial<Record<Poi["name"], number>> = {}, fields?: FieldSpec[]): void {
+  applyLayout(phases: Partial<Record<Poi["name"], number>> = {}, fields?: FieldSpec[], stationSpecs?: StationSpec[]): void {
     const { field, station, pirateBase, tuning, clock } = this;
-    const stations = pirateBase ? [station, pirateBase] : [station];
+    // What's at a station goes where that station goes, outposts as they were included.
+    const stations = [...(pirateBase ? [station, pirateBase] : [station]), ...this.outposts.map((outpost) => outpost.poi)];
     const before = new Map(this.pois.map((poi) => [poi, { x: poi.x, y: poi.y }]));
     // Each body goes with the field it was in, by the fields as they were.
     const fieldsBefore = this.rockFields();
@@ -2166,6 +2236,15 @@ export class Sim {
       }
       this.extraFields = next;
     }
+    if (stationSpecs) {
+      const kept = new Map(this.outposts.map((outpost) => [outpost.spec.id, outpost]));
+      this.outposts = stationSpecs.map((spec) => {
+        const outpost = kept.get(spec.id) ?? { spec, poi: this.makePoi("station", null, 0, 0, 0, STATION_REACH) };
+        outpost.spec = spec;
+        this.fitOutpost(outpost);
+        return outpost;
+      });
+    }
     const place = (poi: Poi, orbitRadius: number, orbitPeriod: number) => {
       const rate = orbitRate(orbitPeriod);
       poi.orbitRadius = orbitRadius;
@@ -2183,7 +2262,10 @@ export class Sim {
     const moved = (poi: Poi) => {
       const was = before.get(poi);
       // Gone, or new: nothing to follow.
-      const removed = poi.orbits !== undefined && !this.extraFields.some((extra) => extra.poi === poi);
+      const removed =
+        poi.orbits !== undefined &&
+        !this.extraFields.some((extra) => extra.poi === poi) &&
+        !this.outposts.some((outpost) => outpost.poi === poi);
       if (!was || removed) return { x: 0, y: 0 };
       return { x: poi.x - was.x, y: poi.y - was.y };
     };
@@ -2239,7 +2321,7 @@ export class Sim {
   private get pois(): Poi[] {
     const { field, station, pirateBase } = this;
     const own = pirateBase ? [field, station, pirateBase] : [field, station];
-    return [...own, ...this.extraFields.map((extra) => extra.poi)];
+    return [...own, ...this.extraFields.map((extra) => extra.poi), ...this.outposts.map((outpost) => outpost.poi)];
   }
 
   /** Distance from a POI's edge, as of the last tick. Negative inside it. */
@@ -2380,17 +2462,17 @@ export class Sim {
    * Closing speed comes from real positions, so it includes all carrying by POIs.
    */
   readPoi(poi: Poi, viewHalfWidth: number, viewHalfHeight: number): PoiReading {
-    const { ship, station, tuning } = this;
+    const { ship, tuning } = this;
+    const isStation = this.docks.includes(poi);
     const gapToView = (shipX: number, shipY: number, x: number, y: number, rotation: number) => {
       const cos = Math.cos(rotation);
       const sin = Math.sin(rotation);
-      // The field is a circle. The station and its dock are a box, measured by its current extents.
-      const isStation = poi === station;
+      // A field is a circle. A station and its dock are a box, measured by its current extents.
       const centerX = isStation ? x + cos * STATION_SHAPE_CENTER : x;
       const centerY = isStation ? y + sin * STATION_SHAPE_CENTER : y;
       const extentX = isStation ? Math.abs(cos) * STATION_SHAPE_HALF + Math.abs(sin) * STATION_HALF : 0;
       const extentY = isStation ? Math.abs(sin) * STATION_SHAPE_HALF + Math.abs(cos) * STATION_HALF : 0;
-      const radius = isStation ? 0 : tuning.fieldRadius;
+      const radius = isStation ? 0 : poi === this.field ? tuning.fieldRadius : poi.reach;
       const viewX = shipX + ship.vx * tuning.lookahead;
       const viewY = shipY + ship.vy * tuning.lookahead;
       const outX = Math.max(0, Math.abs(centerX - viewX) - viewHalfWidth - extentX);
@@ -2399,8 +2481,8 @@ export class Sim {
     };
     const gap = gapToView(ship.x, ship.y, poi.x, poi.y, poi.rotation);
     const previousGap = gapToView(ship.px, ship.py, poi.px, poi.py, poi.prevRotation);
-    const leadX = poi === station ? Math.cos(poi.rotation) * DOCK_OFFSET : 0;
-    const leadY = poi === station ? Math.sin(poi.rotation) * DOCK_OFFSET : 0;
+    const leadX = isStation ? Math.cos(poi.rotation) * DOCK_OFFSET : 0;
+    const leadY = isStation ? Math.sin(poi.rotation) * DOCK_OFFSET : 0;
     return {
       dx: poi.x + leadX - ship.x,
       dy: poi.y + leadY - ship.y,
@@ -2427,22 +2509,35 @@ export class Sim {
   }
 
   /** Converts a world position's offset from the station into the station's own axes. */
-  private toStationAxes(dx: number, dy: number): { x: number; y: number } {
-    const cos = Math.cos(this.station.rotation);
-    const sin = Math.sin(this.station.rotation);
+  private toStationAxes(dx: number, dy: number, station: Poi = this.station): { x: number; y: number } {
+    const cos = Math.cos(station.rotation);
+    const sin = Math.sin(station.rotation);
     return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
   }
 
-  private fromStationAxes(x: number, y: number): { x: number; y: number } {
-    const cos = Math.cos(this.station.rotation);
-    const sin = Math.sin(this.station.rotation);
+  private fromStationAxes(x: number, y: number, station: Poi = this.station): { x: number; y: number } {
+    const cos = Math.cos(station.rotation);
+    const sin = Math.sin(station.rotation);
     return { x: x * cos - y * sin, y: x * sin + y * cos };
   }
 
+  /** The station whose dock a ship is in, or null. */
+  dockedAt(ship: Ship = this.ship): Poi | null {
+    for (const station of this.docks) {
+      const local = this.toStationAxes(ship.x - station.x, ship.y - station.y, station);
+      if (Math.abs(local.x - DOCK_OFFSET) < STATION_HALF && Math.abs(local.y) < STATION_HALF) return station;
+    }
+    return null;
+  }
+
+  /** In any station's dock: it sells ore, repairs, and is safe. */
   isDocked(ship: Ship = this.ship): boolean {
-    const { station } = this;
-    const local = this.toStationAxes(ship.x - station.x, ship.y - station.y);
-    return Math.abs(local.x - DOCK_OFFSET) < STATION_HALF && Math.abs(local.y) < STATION_HALF;
+    return this.dockedAt(ship) !== null;
+  }
+
+  /** In the station's own dock, where the shop is. */
+  atShop(ship: Ship = this.ship): boolean {
+    return this.dockedAt(ship) === this.station;
   }
 
   /**
@@ -2691,11 +2786,22 @@ export class Sim {
       }
     }
 
-    const { station } = this;
     const stationReach = STATION_HALF + SHIP_RADIUS;
-    const from = this.toStationAxes(ship.x - station.x, ship.y - station.y);
-    const move = this.toStationAxes(ship.vx * dt, ship.vy * dt);
-    const stationHit = sweepBox(from.x, from.y, move.x, move.y, stationReach, stationReach);
+    let station = this.station;
+    let from = { x: 0, y: 0 };
+    let move = { x: 0, y: 0 };
+    let stationHit: ReturnType<typeof sweepBox> = null;
+    for (const dock of this.docks) {
+      const dockFrom = this.toStationAxes(ship.x - dock.x, ship.y - dock.y, dock);
+      const dockMove = this.toStationAxes(ship.vx * dt, ship.vy * dt, dock);
+      const dockHit = sweepBox(dockFrom.x, dockFrom.y, dockMove.x, dockMove.y, stationReach, stationReach);
+      if (dockHit && (!stationHit || dockHit.t < stationHit.t)) {
+        station = dock;
+        from = dockFrom;
+        move = dockMove;
+        stationHit = dockHit;
+      }
+    }
     if (stationHit && stationHit.t < hitT) {
       // Rest on the surface, so a ship never stays stuck inside the station.
       const restX = stationHit.nx !== 0
@@ -2704,10 +2810,10 @@ export class Sim {
       const restY = stationHit.ny !== 0
         ? stationHit.ny * (stationReach + 0.01)
         : from.y + move.y * stationHit.t;
-      const rest = this.fromStationAxes(restX, restY);
+      const rest = this.fromStationAxes(restX, restY, station);
       ship.x = station.x + rest.x;
       ship.y = station.y + rest.y;
-      const normal = this.fromStationAxes(stationHit.nx, stationHit.ny);
+      const normal = this.fromStationAxes(stationHit.nx, stationHit.ny, station);
       this.bounceOff(ship, normal.x, normal.y, STILL, 0);
       return;
     }
@@ -3133,9 +3239,13 @@ export class Sim {
       shot.life -= dt;
       if (shot.life <= 0) continue;
 
-      const from = this.toStationAxes(shot.x - this.station.x, shot.y - this.station.y);
-      const move = this.toStationAxes(shot.vx * dt, shot.vy * dt);
-      const stationHit = sweepBox(from.x, from.y, move.x, move.y, STATION_HALF, STATION_HALF);
+      let stationHit: ReturnType<typeof sweepBox> = null;
+      for (const dock of this.docks) {
+        const from = this.toStationAxes(shot.x - dock.x, shot.y - dock.y, dock);
+        const move = this.toStationAxes(shot.vx * dt, shot.vy * dt, dock);
+        const dockHit = sweepBox(from.x, from.y, move.x, move.y, STATION_HALF, STATION_HALF);
+        if (dockHit && (!stationHit || dockHit.t < stationHit.t)) stationHit = dockHit;
+      }
 
       let hit: Rock | null = null;
       let hitT = Infinity;

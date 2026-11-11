@@ -57,6 +57,8 @@ export interface WorldNode {
   carryNone: number;
   /** Places only: the ships a new game can start at. */
   spawns: ShipChoice[];
+  /** Stations only: wrecked ships are rebuilt at the nearest station with a shipyard. */
+  shipyard: boolean;
   /** How many go round in this orbit, itself included. Copies are the same thing without children. */
   count: number;
   /** How far each copy may wander from even spacing, as a % of half the gap between them. */
@@ -147,10 +149,11 @@ export function bodyDefaults(
  * open space between them carries nothing: a spinning station carrying everything would
  * sweep a ship far out sideways faster than it can fly.
  */
-export function placeDefaults(kind: NodeKind): Pick<WorldNode, "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone"> {
-  if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field };
-  if (kind === "station" || kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station };
-  return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0 };
+export function placeDefaults(kind: NodeKind): Pick<WorldNode, "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard"> {
+  if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, shipyard: false };
+  if (kind === "station") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true };
+  if (kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: false };
+  return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, shipyard: false };
 }
 
 /** Default carrying, from each place's edge: full out to the first, fading to nothing by the second. */
@@ -352,6 +355,7 @@ export function parseWorld(text: string): World | null {
         carryFull: num("carryFull"),
         carryNone: num("carryNone"),
         spawns: Array.isArray(raw.spawns) ? SHIP_CHOICES.filter((ship) => (raw.spawns as unknown[]).includes(ship)) : [],
+        shipyard: typeof raw.shipyard === "boolean" ? raw.shipyard : places.shipyard,
         count: Math.max(1, Math.floor(num("count", 1))),
         angleVariance: num("angleVariance"),
         orbitVariance: num("orbitVariance"),

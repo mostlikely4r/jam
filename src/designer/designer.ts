@@ -23,7 +23,7 @@ import {
   type World,
   type WorldNode,
 } from "./world";
-import { bodiesFor, fieldsFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, writeGame, type GameLink } from "./link";
+import { bodiesFor, fieldsFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, stationsFor, writeGame, type GameLink } from "./link";
 import { planRoute, type Flight, type Route } from "../route";
 import { DEFAULTS } from "../tuning";
 
@@ -270,7 +270,7 @@ export class Designer {
   /** Hands the game this layout. */
   linkToGame(): void {
     writeGame(this.world, this.game.tuning);
-    this.game.apply(phasesFromWorld(this.world), bodiesFor(this.world), spawnsFor(this.world), fieldsFor(this.world));
+    this.game.apply(phasesFromWorld(this.world), bodiesFor(this.world), spawnsFor(this.world), fieldsFor(this.world), stationsFor(this.world));
     try {
       localStorage.setItem(DRAFT_KEY, stringifyWorld(this.world));
     } catch {
@@ -578,6 +578,23 @@ export class Designer {
           this.text("What moves with this place. Nearest place first; past its full range its share fades and mixes with others."),
           this.number(node, "carryFull", "Fully carried within (from its edge)", (v) => `${readableDistance(v)} from its edge`),
           this.number(node, "carryNone", "Not carried beyond (0: everywhere)", (v) => (v > 0 ? `fades out by ${readableDistance(v)} from its edge` : "carries everything, everywhere")),
+        ]),
+      );
+    }
+    if (node.kind === "station") {
+      const toggle = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = node.shipyard;
+      box.addEventListener("change", () => {
+        node.shipyard = box.checked;
+        this.changed();
+      });
+      toggle.append(box, " Shipyard");
+      parts.push(
+        ...this.group("Station", [
+          this.text("Every station buys ore and repairs. Only the main station, at the first field, has the shop. Wrecked ships are rebuilt at the nearest station with a shipyard."),
+          toggle,
         ]),
       );
     }

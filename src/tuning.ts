@@ -55,6 +55,8 @@ export const DEFAULTS = {
   pirateOrbitPeriod: 900,
   pirateRotationPeriod: 0,
   stationRotationPeriod: 300,
+  /** Whether the station rebuilds wrecked ships. A wreck goes to the nearest station that does. */
+  stationShipyard: true,
   dockDrag: 0.25,
   creditsPerOre: 10,
 

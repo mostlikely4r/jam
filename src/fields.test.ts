@@ -89,8 +89,8 @@ describe("traffic between fields", () => {
     const far = world(Math.PI);
     const [nearField] = near.sim.miningFields().slice(1);
     const [farField] = far.sim.miningFields().slice(1);
-    const nearTrip = near.pilot.tripSeconds(near.sim, nearField);
-    const farTrip = far.pilot.tripSeconds(far.sim, farField);
+    const nearTrip = near.pilot.tripSeconds(near.sim, near.sim.station, nearField.poi);
+    const farTrip = far.pilot.tripSeconds(far.sim, far.sim.station, farField.poi);
     expect(farTrip).toBeGreaterThan(nearTrip * 3);
     // Straight through the planet would be 120,000 across; round its pull is further.
     expect(farTrip).toBeGreaterThan(120000 / DEFAULTS.droneCruiseSpeed);

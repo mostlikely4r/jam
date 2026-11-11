@@ -52,7 +52,10 @@ describe("save and load", () => {
     roundTrip(sim, into);
     expect(into.discovered.has("dock")).toBe(true);
     into.reset(3);
-    expect(into.discovered.size).toBe(0);
+    // A new game forgets what was found, but knows the one field it starts beside: that
+    // seed is the chart's, and it's the only entry.
+    expect(into.discovered.size).toBe(1);
+    expect(into.discovered.has("dock")).toBe(false);
   });
 
   it("a ship saved before a field existed gets it as new", () => {

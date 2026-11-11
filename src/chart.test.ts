@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { MAX_HULL, Sim, TICK } from "./sim";
+import { bodyAt, MAX_HULL, type SolidBody, Sim, TICK } from "./sim";
 import { DEFAULTS } from "./tuning";
 
 /**
@@ -32,6 +32,53 @@ function run(sim: Sim, seconds: number, each?: () => void): void {
 }
 
 describe("chart", () => {
+  it("starts knowing only the field it works", () => {
+    const sim = new Sim(1, { ...ALONE });
+    run(sim, 1);
+    expect(sim.chartSeenPoi(sim.field)).toBe(true);
+    expect(sim.chartSeenPoi(sim.station)).toBe(false);
+    expect(sim.pirateBase === null || !sim.chartSeenPoi(sim.pirateBase)).toBe(true);
+  });
+
+  it("a place visited later joins the chart", () => {
+    const sim = new Sim(1, { ...ALONE });
+    run(sim, 1);
+    const dock = sim.dockPoint();
+    sim.ship.x = dock.x;
+    sim.ship.y = dock.y;
+    sim.ship.px = dock.x;
+    sim.ship.py = dock.y;
+    run(sim, 1);
+    expect(sim.chartSeenPoi(sim.station)).toBe(true);
+  });
+
+  it("a body joins the chart once the ship has been near it", () => {
+    const sim = new Sim(1, { ...ALONE });
+    const body: SolidBody = {
+      name: "Test planet",
+      kind: "planet",
+      radius: 5000,
+      surface: "none",
+      pullStart: 0,
+      pullFull: 0,
+      pullAccel: 0,
+      atmosphere: 0,
+      burnSpeed: 0,
+      spinPeriod: 0,
+      orbits: [{ radius: 100000, period: 1000000, phase: 0, sign: 1 }],
+    };
+    sim.bodies.push(body);
+    run(sim, 1);
+    expect(sim.chartSeenBody(body)).toBe(false);
+    const at = bodyAt(body, sim.now);
+    sim.ship.x = at.x;
+    sim.ship.y = at.y;
+    sim.ship.px = at.x;
+    sim.ship.py = at.y;
+    run(sim, 1);
+    expect(sim.chartSeenBody(body)).toBe(true);
+  });
+
   it("lists every place: the game's own three, the designer's outposts and fields", () => {
     const sim = new Sim(1, { ...ALONE });
     const pois = sim.allPois();

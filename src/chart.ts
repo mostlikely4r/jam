@@ -126,20 +126,49 @@ export class Chart {
     };
   }
 
-  /** Every pickable thing: the places, the deposits, and the bodies themselves. */
+  /** Every pickable thing: the places, the deposits, and the bodies themselves.
+   * The chart shows what the player has been to, so an unvisited place is not here at all. */
   private targets(sim: Sim): ChartPick[] {
     const picks: ChartPick[] = [];
-    const name = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
     for (const poi of sim.allPois()) {
-      picks.push({ poi, kind: poi.name, label: name(poi.name), place: true, radius: poi.reach });
+      if (!sim.chartSeenPoi(poi)) continue;
+      picks.push({ poi, kind: poi.name, label: this.placeLabel(sim, poi), place: true, radius: poi.reach });
     }
-    for (const deposit of sim.deposits) {
-      picks.push({ deposit, kind: "field deposit", label: "Deposit", place: true, radius: 150 });
+    if (sim.discovered.has("deposit")) {
+      for (const deposit of sim.deposits) {
+        picks.push({ deposit, kind: "field deposit", label: "Deposit", place: true, radius: 150 });
+      }
     }
     for (const body of sim.bodies) {
+      if (!sim.chartSeenBody(body)) continue;
       picks.push({ body, kind: body.kind, label: body.name, place: false, radius: body.radius });
     }
     return picks;
+  }
+
+  /** What a place is called: the designer's name for its own stations and fields. */
+  private placeLabel(sim: Sim, poi: Poi): string {
+    if (poi === sim.station) return "Station";
+    if (poi === sim.field) return "Field";
+    if (poi === sim.pirateBase) return "Pirate base";
+    const outpost = sim.outposts.find(({ poi: at }) => at === poi);
+    if (outpost) return outpost.spec.name || "Outpost";
+    const extra = sim.extraFields.find(({ poi: at }) => at === poi);
+    if (extra) return extra.spec.name || "Field";
+    return poi.name;
+  }
+
+  /** Whether what a ring's centre belongs to has been found: a body there, or a place. */
+  private ringFound(sim: Sim, center: { x: number; y: number }): boolean {
+    for (const body of sim.bodies) {
+      const at = bodyAt(body, sim.now);
+      if (Math.hypot(at.x - center.x, at.y - center.y) < 1) return sim.chartSeenBody(body);
+    }
+    for (const poi of sim.allPois()) {
+      if (Math.hypot(poi.x - center.x, poi.y - center.y) < 1) return sim.chartSeenPoi(poi);
+    }
+    // Empty space, or a system with nothing at the centre: nothing left to find out.
+    return true;
   }
 
   private positionOf(pick: ChartPick): { x: number; y: number } {
@@ -191,27 +220,34 @@ export class Chart {
       labels.push({ x: spot.x, y: spot.y, text });
     };
 
-    // The orbits: each body's chain, drawn as rings round the body it orbits.
+    // The orbits: each body's chain, drawn as rings round the body it orbits. Until that
+    // body has been found, only a short arc round the orbiting thing shows: a hint of
+    // something there, and which way it moves.
     ctx.lineWidth = 1;
+    const ARC = (20 * Math.PI) / 180;
+    const ring = (worldCenter: { x: number; y: number }, radius: number, angle: number, found: boolean): void => {
+      const { x, y } = to(worldCenter.x, worldCenter.y);
+      ctx.beginPath();
+      if (found) ctx.arc(x, y, radius * view.scale * dpr, 0, Math.PI * 2);
+      else ctx.arc(x, y, radius * view.scale * dpr, angle - ARC, angle + ARC);
+      ctx.stroke();
+    };
     for (const body of sim.bodies) {
       for (let i = 0; i < body.orbits.length; i++) {
         const center = bodyAt({ ...body, orbits: body.orbits.slice(0, i) }, sim.now);
-        const { x, y } = to(center.x, center.y);
+        const at = bodyAt(body, sim.now);
+        const angle = Math.atan2(at.y - center.y, at.x - center.x);
         ctx.strokeStyle = "rgba(120, 140, 180, 0.16)";
-        ctx.beginPath();
-        ctx.arc(x, y, body.orbits[i].radius * view.scale * dpr, 0, Math.PI * 2);
-        ctx.stroke();
+        ring(center, body.orbits[i].radius, angle, this.ringFound(sim, center));
       }
     }
     // Places' own orbits round whatever carries them.
     for (const poi of sim.allPois()) {
-      if (poi.orbitRadius <= 0) continue;
+      if (!sim.chartSeenPoi(poi) || poi.orbitRadius <= 0) continue;
       const parent = poi.parent ? { x: poi.parent.x, y: poi.parent.y } : { x: 0, y: 0 };
-      const { x, y } = to(parent.x, parent.y);
+      const angle = Math.atan2(poi.y - parent.y, poi.x - parent.x);
       ctx.strokeStyle = "rgba(160, 140, 120, 0.14)";
-      ctx.beginPath();
-      ctx.arc(x, y, poi.orbitRadius * view.scale * dpr, 0, Math.PI * 2);
-      ctx.stroke();
+      ring(parent, poi.orbitRadius, angle, this.ringFound(sim, parent));
     }
 
     // The bodies.
@@ -250,7 +286,7 @@ export class Chart {
       ctx.beginPath();
       ctx.arc(x, y, Math.max(3, Math.min(8, poi.reach * view.scale * dpr)), 0, Math.PI * 2);
       ctx.fill();
-      label(poi.x, poi.y, poi.name === "station" && poi !== sim.station ? "Outpost" : poi.name);
+      label(poi.x, poi.y, this.placeLabel(sim, poi));
     }
     for (const deposit of sim.deposits) {
       const { x, y } = to(deposit.x, deposit.y);

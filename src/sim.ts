@@ -789,6 +789,8 @@ export class Sim {
     this.discovered = new Set();
     this.inflowTimer = 1;
     this.placePois();
+    // The field the ship starts beside is where it works: the chart knows it from the start.
+    this.discovered.add(`chart:${this.chartKey(this.field)}`);
     this.resetPlayerControls();
     const model = this.tuning.floaterStart ? "floater" : "racer";
     this.ship = this.makeShip(this.startX(), this.field.y, this.controls, model);
@@ -3217,6 +3219,37 @@ export class Sim {
     if (this.isDocked(ship)) discovered.add("dock");
     if (this.depositAt(ship)) discovered.add("deposit");
     if (this.atPirateBase(ship)) discovered.add("seller");
+    // The chart draws only what the player has been to: a place from inside its reach,
+    // a body from a few of its own radii out, or its air. Kept with discovered, so it saves.
+    for (const poi of this.pois) {
+      if (Math.hypot(ship.x - poi.x, ship.y - poi.y) < poi.reach) discovered.add(`chart:${this.chartKey(poi)}`);
+    }
+    for (const { body, x, y } of this.bodySpots) {
+      const sight = Math.max(body.radius * this.tuning.bodySight, body.atmosphere);
+      if (Math.hypot(ship.x - x, ship.y - y) < sight) discovered.add(`chart:body:${body.name}`);
+    }
+  }
+
+  /** The chart's own key for a place: what the discovered set holds for it. */
+  chartKey(poi: Poi): string {
+    if (poi === this.field) return "field";
+    if (poi === this.station) return "station";
+    if (poi === this.pirateBase) return "pirate base";
+    const extra = this.extraFields.find(({ poi: at }) => at === poi);
+    if (extra) return `extra:${extra.spec.id}`;
+    const outpost = this.outposts.find(({ poi: at }) => at === poi);
+    if (outpost) return `outpost:${outpost.spec.id}`;
+    return "place";
+  }
+
+  /** Whether the chart draws a place: only what the player has visited. */
+  chartSeenPoi(poi: Poi): boolean {
+    return this.discovered.has(`chart:${this.chartKey(poi)}`);
+  }
+
+  /** Whether the chart draws a body: only what the player has been near. */
+  chartSeenBody(body: SolidBody): boolean {
+    return this.discovered.has(`chart:body:${body.name}`);
   }
 
   /** Whether a ship is close enough to the pirate base to trade there. */

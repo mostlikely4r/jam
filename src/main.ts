@@ -296,7 +296,7 @@ const HELP: [string, HelpLine[]][] = [
   [
     "Chart",
     [
-      ["C", "The system chart", has("starmap")],
+      ["C", "The chart: what you've found so far", has("starmap")],
       ["C: wheel / drag", "Zoom / pan the chart", has("starmap")],
       ["C: pick a place, Enter", "Autopilot flies the course", has("autopilot")],
       ["Flight keys", "Take over from the autopilot; it resumes when you let go", has("autopilot")],

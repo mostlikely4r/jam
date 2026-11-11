@@ -101,6 +101,9 @@ export const DEFAULTS = {
   haulers: true,
   /** The shop only sells what the station has bought a blueprint for. */
   stationUnlocks: false,
+  /** A body shows on the chart once the ship has been this many of its radii from it,
+   * or inside its air, whichever reaches further. */
+  bodySight: 4,
   /** A blueprint's price, as a share of what the part sells for. */
   blueprintScale: 0.75,
   /** Credits the station holds back before spending on blueprints. */
@@ -366,6 +369,7 @@ export const GROUPS: Group[] = [
       { key: "trafficRacers", label: "First ships (on restart)", min: 0, max: 10, step: 1 },
       { key: "trafficFloaters", label: "New ships (on restart)", min: 0, max: 10, step: 1 },
       { key: "chatterRange", label: "Radio range", min: 300, max: 5000, step: 100 },
+      { key: "bodySight", label: "Bodies show on the chart from this many radii", min: 1, max: 20, step: 0.5 },
     ],
     switches: [
       { key: "showTraffic", label: "Show traffic readouts and arrows" },

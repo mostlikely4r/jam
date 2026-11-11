@@ -79,6 +79,19 @@ interface Star {
   depth: number;
 }
 
+/** A speck of dust: still in whatever carries the ship, so it shows the ship's own motion. */
+interface Mote {
+  x: number;
+  y: number;
+  /** Below 1 it moves slower than the world, which reads as further off. */
+  depth: number;
+  bright: number;
+}
+
+const MOTES = 140;
+/** How much of a second's motion each speck smears into a streak. */
+const DUST_STREAK = 1 / 30;
+
 const PLANET_MARKS = 1500;
 
 /** How each kind of body looks, until they get looks of their own. */
@@ -105,6 +118,7 @@ export class Renderer {
   /** Where the player last saw each pirate, in the axes of what it was near. */
   private ghosts = new WeakMap<Ship, { poi: Poi; x: number; y: number; seenAt: number }>();
   private stars: Star[] = [];
+  private motes: Mote[] = [];
   /** Where the marks on a body's ground are, as shares of its radius. */
   private planetMarks: { angle: number; distance: number; size: number; light: boolean }[] = [];
   private flash = 0;
@@ -140,6 +154,9 @@ export class Renderer {
         y: Math.random() * 4000,
         depth: 0.08 + Math.random() * 0.35,
       });
+    }
+    for (let i = 0; i < MOTES; i++) {
+      this.motes.push({ x: Math.random(), y: Math.random(), depth: 0.45 + Math.random() * 0.55, bright: 0.25 + Math.random() * 0.5 });
     }
     for (let i = 0; i < PLANET_MARKS; i++) {
       const size = 0.004 + Math.random() * Math.random() * 0.05;
@@ -263,7 +280,8 @@ export class Renderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = "#05070d";
     ctx.fillRect(0, 0, width, height);
-    this.drawStars(camX, camY, width, height, dpr);
+    this.drawStars(width, height, dpr);
+    this.drawDust(ship, camX, camY, scale, width, height, dpr, alpha, onWreck);
 
     ctx.setTransform(scale, 0, 0, scale, width / 2 - camX * scale, height / 2 - camY * scale);
     const halfW = width / 2 / scale + 80;
@@ -321,15 +339,46 @@ export class Renderer {
     }
   }
 
-  private drawStars(camX: number, camY: number, width: number, height: number, dpr: number): void {
+  /** The far stars: so far off that nothing in the system moves them. */
+  private drawStars(width: number, height: number, dpr: number): void {
     const { ctx } = this;
     for (const star of this.stars) {
-      const x = mod(star.x - camX * star.depth, 4000) * (width / 4000);
-      const y = mod(star.y - camY * star.depth, 4000) * (height / 4000);
+      const x = star.x * (width / 4000);
+      const y = star.y * (height / 4000);
       const brightness = Math.round(70 + star.depth * 300);
       ctx.fillStyle = `rgb(${brightness}, ${brightness}, ${Math.min(255, brightness + 25)})`;
       const size = (star.depth > 0.3 ? 2 : 1) * dpr;
       ctx.fillRect(x, y, size, size);
+    }
+  }
+
+  /**
+   * The near dust: still in whatever carries the ship, so parked in a field it hangs still,
+   * and on the move it streams past at the ship's own speed. Wraps round the screen, so
+   * there's always the same amount whatever the zoom.
+   */
+  private drawDust(ship: Ship, camX: number, camY: number, scale: number, width: number, height: number, dpr: number, alpha: number, onWreck: boolean): void {
+    const { ctx } = this;
+    // Where the camera is in the carried frame: the world position less all the carrying.
+    const offX = camX - lerp(ship.prevCarriedX, ship.carriedX, alpha);
+    const offY = camY - lerp(ship.prevCarriedY, ship.carriedY, alpha);
+    // Watching the wreck the camera holds still, and so does the dust.
+    const vx = onWreck ? 0 : ship.vx;
+    const vy = onWreck ? 0 : ship.vy;
+    ctx.lineCap = "round";
+    for (const mote of this.motes) {
+      const x = mod(mote.x * width - offX * scale * mote.depth, width);
+      const y = mod(mote.y * height - offY * scale * mote.depth, height);
+      const dx = vx * scale * mote.depth * DUST_STREAK;
+      const dy = vy * scale * mote.depth * DUST_STREAK;
+      const shade = Math.round(90 + mote.bright * 110 * mote.depth);
+      ctx.strokeStyle = `rgba(${shade}, ${shade}, ${shade + 15}, ${mote.bright})`;
+      ctx.lineWidth = (mote.depth > 0.8 ? 1.5 : 1) * dpr;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      // A streak trails back the way it's going past, and is a dot at rest.
+      ctx.lineTo(x + dx + (Math.abs(dx) + Math.abs(dy) < 0.5 ? 0.5 : 0), y + dy);
+      ctx.stroke();
     }
   }
 

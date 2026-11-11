@@ -759,6 +759,19 @@ describe("motion relative to the nearest POI", () => {
     expect(sim.ship.angle).toBeCloseTo(sim.field.rotation, 5);
   });
 
+  it("counts how far it carried a resting ship, for the dust to drift with", () => {
+    const sim = movingSim();
+    sim.ship.x = sim.field.x + 500;
+    sim.ship.y = sim.field.y + 200;
+    const x = sim.ship.x;
+    const y = sim.ship.y;
+    run(sim, 30);
+    // All the ship moved was carrying, so the dust, which moves with the carrying, held still around it.
+    expect(Math.hypot(sim.ship.x - x, sim.ship.y - y)).toBeGreaterThan(100);
+    expect(sim.ship.carriedX).toBeCloseTo(sim.ship.x - x, 5);
+    expect(sim.ship.carriedY).toBeCloseTo(sim.ship.y - y, 5);
+  });
+
   it("carries a resting ship with the station's orbit and rotation", () => {
     const sim = movingSim();
     sim.ship.x = sim.station.x + DOCK_OFFSET;

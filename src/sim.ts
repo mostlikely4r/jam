@@ -98,6 +98,11 @@ export interface Ship extends Body {
   frameShare: number;
   /** How far the POIs turned the ship on the last tick. */
   carriedTurn: number;
+  /** How far the POIs have carried the ship in all, and as of the tick before: the dust drifts with it. */
+  carriedX: number;
+  carriedY: number;
+  prevCarriedX: number;
+  prevCarriedY: number;
   /** How hard it's burning in a body's air this tick, 0 to 1, for drawing. */
   burning: number;
   ore: number;
@@ -1562,6 +1567,10 @@ export class Sim {
       frame: this.field,
       frameShare: 1,
       carriedTurn: 0,
+      carriedX: 0,
+      carriedY: 0,
+      prevCarriedX: 0,
+      prevCarriedY: 0,
       burning: 0,
       ore: 0,
       unloadTimer: 0,
@@ -2433,6 +2442,11 @@ export class Sim {
 
   private carryShip(ship: Ship): void {
     const { poi, share, turn } = this.carry(ship);
+    // The carry is all the ship moved so far this tick: its own speed comes after.
+    ship.prevCarriedX = ship.carriedX;
+    ship.prevCarriedY = ship.carriedY;
+    ship.carriedX += ship.x - ship.px;
+    ship.carriedY += ship.y - ship.py;
     ship.frame = poi;
     ship.frameShare = share;
     ship.carriedTurn = turn;

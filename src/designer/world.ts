@@ -30,6 +30,10 @@ export interface WorldNode {
   pullFull: number;
   /** Bodies only: the full pull, in units/s². */
   pullAccel: number;
+  /** Bodies only: how far out the air reaches, from the centre. 0 for none. */
+  atmosphere: number;
+  /** Bodies only: in the air, faster than this against the ground burns. */
+  burnSpeed: number;
   /** Distance from the parent's centre. Ignored for the root. */
   orbitRadius: number;
   /** Seconds per orbit. 0 stands still; negative goes the other way round. */
@@ -38,6 +42,12 @@ export interface WorldNode {
   orbitPhase: number;
   /** Seconds per turn about its own centre. 0 doesn't spin; negative turns the other way. */
   spinPeriod: number;
+  /** How many go round in this orbit, itself included. Copies are the same thing without children. */
+  count: number;
+  /** How far each copy may wander from even spacing, as a % of half the gap between them. */
+  angleVariance: number;
+  /** How far each copy's orbit may be from this one's, as a % of it, in or out. */
+  orbitVariance: number;
   children: WorldNode[];
 }
 
@@ -105,12 +115,74 @@ export function parentOf(world: World, target: WorldNode): WorldNode | null {
  * A first guess at a body's ground and pull for its size. The Floater pushes 84 units/s² and
  * the Racer 420, so a full pull between them traps one and not the other.
  */
-export function bodyDefaults(kind: NodeKind, radius: number): Pick<WorldNode, "surface" | "pull" | "pullFull" | "pullAccel"> {
-  if (kind === "star") return { surface: "death", pull: radius * 4, pullFull: radius * 2, pullAccel: 300 };
-  if (kind === "planet") return { surface: "death", pull: radius * 2.5, pullFull: radius * 1.25, pullAccel: 150 };
-  if (kind === "moon") return { surface: "death", pull: radius * 2.5, pullFull: radius * 1.25, pullAccel: 100 };
-  if (kind === "asteroid") return { surface: "damage", pull: 0, pullFull: 0, pullAccel: 0 };
-  return { surface: "none", pull: 0, pullFull: 0, pullAccel: 0 };
+export function bodyDefaults(
+  kind: NodeKind,
+  radius: number,
+): Pick<WorldNode, "surface" | "pull" | "pullFull" | "pullAccel" | "atmosphere" | "burnSpeed"> {
+  const bare = { atmosphere: 0, burnSpeed: 0 };
+  if (kind === "star") return { surface: "death", pull: radius * 4, pullFull: radius * 2, pullAccel: 300, atmosphere: radius * 1.5, burnSpeed: 0 };
+  if (kind === "planet") return { surface: "death", pull: radius * 2.5, pullFull: radius * 1.25, pullAccel: 150, atmosphere: radius * 1.15, burnSpeed: 300 };
+  if (kind === "moon") return { surface: "death", pull: radius * 2.5, pullFull: radius * 1.25, pullAccel: 100, ...bare };
+  if (kind === "asteroid") return { surface: "damage", pull: 0, pullFull: 0, pullAccel: 0, ...bare };
+  return { surface: "none", pull: 0, pullFull: 0, pullAccel: 0, ...bare };
+}
+
+/** A copy's own place: its orbit and where on it it is at time 0, in degrees. */
+export interface Copy {
+  orbitRadius: number;
+  orbitPhase: number;
+}
+
+const MAX_COPIES = 500;
+
+/** The same numbers from the same text every time, so copies scatter the same way on every load. */
+function seeded(text: string): () => number {
+  let state = 2166136261;
+  for (let i = 0; i < text.length; i++) state = Math.imul(state ^ text.charCodeAt(i), 16777619);
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** The copies of a node beyond itself: evenly spaced round its orbit, then scattered. */
+export function copiesOf(node: WorldNode): Copy[] {
+  const count = Math.min(MAX_COPIES, Math.max(1, Math.floor(node.count)));
+  const random = seeded(node.id);
+  const spacing = 360 / count;
+  const copies: Copy[] = [];
+  for (let i = 1; i < count; i++) {
+    const angle = random() * 2 - 1;
+    const radius = random() * 2 - 1;
+    copies.push({
+      orbitPhase: node.orbitPhase + i * spacing + (angle * node.angleVariance * spacing) / 200,
+      orbitRadius: node.orbitRadius * (1 + (radius * node.orbitVariance) / 100),
+    });
+  }
+  return copies;
+}
+
+/** Where every copy is at time `t`, by the node it copies. */
+export function copyPositions(
+  world: World,
+  t: number,
+  at: Map<WorldNode, { x: number; y: number }> = positions(world, t),
+): Map<WorldNode, { x: number; y: number }[]> {
+  const out = new Map<WorldNode, { x: number; y: number }[]>();
+  for (const { node, parent } of walk(world)) {
+    if (!parent || node.count <= 1) continue;
+    const centre = at.get(parent)!;
+    out.set(
+      node,
+      copiesOf(node).map((copy) => {
+        const angle = (copy.orbitPhase * Math.PI) / 180 + rate(node.orbitPeriod) * t;
+        return { x: centre.x + Math.cos(angle) * copy.orbitRadius, y: centre.y + Math.sin(angle) * copy.orbitRadius };
+      }),
+    );
+  }
+  return out;
 }
 
 let nextId = 1;
@@ -141,6 +213,9 @@ export function makeChild(world: World, parent: WorldNode, kind: NodeKind): Worl
     orbitPeriod,
     orbitPhase: 0,
     spinPeriod: 0,
+    count: 1,
+    angleVariance: 0,
+    orbitVariance: 0,
     children: [],
   };
 }
@@ -161,10 +236,15 @@ export function seedWorld(): World {
     pull: 0,
     pullFull: 0,
     pullAccel: 0,
+    atmosphere: 0,
+    burnSpeed: 0,
     orbitRadius: 0,
     orbitPeriod: 0,
     orbitPhase: 0,
     spinPeriod: 0,
+    count: 1,
+    angleVariance: 0,
+    orbitVariance: 0,
     children: [],
     ...fields,
   });
@@ -219,6 +299,11 @@ export function parseWorld(text: string): World | null {
         pull: num("pull", defaults.pull),
         pullFull: num("pullFull", defaults.pullFull),
         pullAccel: num("pullAccel", defaults.pullAccel),
+        atmosphere: num("atmosphere", defaults.atmosphere),
+        burnSpeed: num("burnSpeed", defaults.burnSpeed),
+        count: Math.max(1, Math.floor(num("count", 1))),
+        angleVariance: num("angleVariance"),
+        orbitVariance: num("orbitVariance"),
         orbitRadius: num("orbitRadius"),
         orbitPeriod: num("orbitPeriod"),
         orbitPhase: num("orbitPhase"),

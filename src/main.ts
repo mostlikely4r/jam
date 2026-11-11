@@ -71,6 +71,7 @@ const designer = dev
         tuning,
         clock: () => sim.now,
         phases: () => sim.orbitPhases(),
+        where: () => ({ ship: { x: sim.ship.x, y: sim.ship.y }, field: { x: sim.field.x, y: sim.field.y } }),
         apply(phases, bodies) {
           sim.bodies = bodies;
           sim.applyLayout(phases);

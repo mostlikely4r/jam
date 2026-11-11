@@ -346,7 +346,8 @@ export class Renderer {
       const look = BODY_LOOKS[body.kind] ?? BODY_LOOKS.planet;
       const { radius } = body;
       const { x: cx, y: cy } = bodyAt(body, time);
-      const glowRadius = radius * look.glow;
+      // The air thins from the ground out to its edge. Without any, a thin glow.
+      const glowRadius = body.atmosphere > radius ? body.atmosphere : radius * look.glow;
       if (radius <= 0 || Math.hypot(cx - camX, cy - camY) - halfDiagonal > glowRadius) return;
       const glow = ctx.createRadialGradient(cx, cy, radius, cx, cy, glowRadius);
       glow.addColorStop(0, look.haze);
@@ -1032,6 +1033,17 @@ export class Renderer {
   ): void {
     const { ctx } = this;
     const angle = lerp(ship.prevAngle, ship.angle, alpha);
+
+    if (ship.burning > 0) {
+      const reach = 26 + ship.burning * 34;
+      const heat = ctx.createRadialGradient(x, y, 4, x, y, reach);
+      heat.addColorStop(0, `rgba(255, 170, 70, ${0.85 * ship.burning})`);
+      heat.addColorStop(1, "rgba(255, 90, 30, 0)");
+      ctx.fillStyle = heat;
+      ctx.beginPath();
+      ctx.arc(x, y, reach, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // Direction of travel, since with inertia it often differs from the nose.
     const speed = Math.hypot(ship.vx, ship.vy);

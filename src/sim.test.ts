@@ -243,7 +243,7 @@ describe("station", () => {
 
   describe("bodies from the designer", () => {
     function planet(extra: Partial<SolidBody> = {}): SolidBody {
-      return { name: "Planet", kind: "planet", radius: 12000, surface: "death", pullStart: 0, pullFull: 0, pullAccel: 0, spinPeriod: 0, orbits: [], ...extra };
+      return { name: "Planet", kind: "planet", radius: 12000, surface: "death", pullStart: 0, pullFull: 0, pullAccel: 0, atmosphere: 0, burnSpeed: 0, spinPeriod: 0, orbits: [], ...extra };
     }
     /** A still field far away, so nothing carries the ship near the body. */
     function near(body: SolidBody, x: number, vx = 0): Sim {
@@ -324,6 +324,24 @@ describe("station", () => {
       expect(sim.ores[0].vx).toBeLessThan(-50);
       run(sim, 20);
       expect(sim.ores.length).toBe(0);
+    });
+
+    it("burns a ship going too fast in the air, and only there", () => {
+      const air = { surface: "none" as const, atmosphere: 14000, burnSpeed: 300 };
+      const fast = near(planet(air), 13000, 0);
+      fast.ship.vy = 700;
+      run(fast, 1);
+      expect(fast.ship.hull).toBeLessThan(MAX_HULL - 5);
+      expect(fast.ship.burning).toBeGreaterThan(0.9);
+      const slow = near(planet(air), 13000, 0);
+      slow.ship.vy = 200;
+      run(slow, 1);
+      expect(slow.ship.hull).toBe(MAX_HULL);
+      expect(slow.ship.burning).toBe(0);
+      const above = near(planet(air), 15000, 0);
+      above.ship.vy = 700;
+      run(above, 1);
+      expect(above.ship.hull).toBe(MAX_HULL);
     });
 
     it("places a body by its chain of orbits", () => {

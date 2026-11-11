@@ -8,7 +8,7 @@
  */
 import type { Orbit, Poi, SolidBody } from "../sim";
 import type { Tuning } from "../tuning";
-import { isBody, parentOf, pathTo, walk, type NodeKind, type World, type WorldNode } from "./world";
+import { copiesOf, isBody, parentOf, pathTo, walk, type Copy, type NodeKind, type World, type WorldNode } from "./world";
 
 /** Each POI's orbit angle at clock 0, in radians. */
 export type Phases = Partial<Record<Poi["name"], number>>;
@@ -19,6 +19,8 @@ export interface GameLink {
   clock(): number;
   phases(): Phases;
   apply(phases: Phases, bodies: SolidBody[]): void;
+  /** Where the player's ship and the field are now, in the game's own frame. */
+  where(): { ship: { x: number; y: number }; field: { x: number; y: number } };
 }
 
 export interface Linked {
@@ -37,43 +39,51 @@ export function linkedNodes(world: World): Linked {
 }
 
 /**
- * Every body in the tree, placed as the game sees it: round whatever the field orbits, which
- * the game keeps still at its centre. A body's place is the sum of its own chain of orbits,
- * less the chain of that centre.
+ * Every body in the tree and its copies, placed as the game sees it: round whatever the field
+ * orbits, which the game keeps still at its centre. A body's place is the sum of its own chain
+ * of orbits, less the chain of that centre.
  */
 export function bodiesFor(world: World): SolidBody[] {
   const { field } = linkedNodes(world);
   const centre = (field && parentOf(world, field)) ?? world.root;
   const centreChain = pathTo(world, centre);
-  const orbit = (node: WorldNode, sign: 1 | -1): Orbit => ({
-    radius: node.orbitRadius,
+  const orbit = (node: WorldNode, sign: 1 | -1, copy: Copy | null): Orbit => ({
+    radius: copy?.orbitRadius ?? node.orbitRadius,
     period: node.orbitPeriod,
-    phase: (node.orbitPhase * Math.PI) / 180,
+    phase: ((copy?.orbitPhase ?? node.orbitPhase) * Math.PI) / 180,
     sign,
   });
+  // The root sits at the middle of everything: its own orbit counts for nothing.
+  const own = (nodes: WorldNode[]) => nodes.filter((each) => each !== world.root);
+  const place = (node: WorldNode, copy: Copy | null): Orbit[] => {
+    const chain = pathTo(world, node);
+    // A copy isn't the node itself, so it shares the centre's chain only as far as its parent.
+    const compare = copy ? chain.slice(0, -1) : chain;
+    let shared = 0;
+    while (shared < compare.length && shared < centreChain.length && compare[shared] === centreChain[shared]) shared++;
+    return [
+      ...own(chain.slice(shared)).map((each) => orbit(each, 1, each === node ? copy : null)),
+      ...own(centreChain.slice(shared)).map((each) => orbit(each, -1, null)),
+    ];
+  };
   return walk(world)
     .map((entry) => entry.node)
     .filter((node) => isBody(node.kind))
-    .map((node) => {
-      const chain = pathTo(world, node);
-      let shared = 0;
-      while (shared < chain.length && shared < centreChain.length && chain[shared] === centreChain[shared]) shared++;
-      // The root sits at the middle of everything: its own orbit counts for nothing.
-      const own = (nodes: WorldNode[]) => nodes.filter((each) => each !== world.root);
-      return {
-        name: node.name,
+    .flatMap((node) => {
+      const copies = node === world.root ? [] : copiesOf(node);
+      return [null, ...copies].map((copy, index) => ({
+        name: index === 0 ? node.name : `${node.name} ${index + 1}`,
         kind: node.kind,
         radius: node.radius,
         surface: node.surface,
         pullStart: node.pull,
         pullFull: node.pullFull,
         pullAccel: node.pullAccel,
+        atmosphere: node.atmosphere,
+        burnSpeed: node.burnSpeed,
         spinPeriod: node.spinPeriod,
-        orbits: [
-          ...own(chain.slice(shared)).map((each) => orbit(each, 1)),
-          ...own(centreChain.slice(shared)).map((each) => orbit(each, -1)),
-        ],
-      };
+        orbits: place(node, copy),
+      }));
     });
 }
 

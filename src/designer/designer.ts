@@ -2,6 +2,7 @@ import {
   BODY_KINDS,
   PLACE_KINDS,
   closestApproach,
+  copyPositions,
   isBody,
   makeChild,
   orbitSpeed,
@@ -28,6 +29,8 @@ import { DEFAULTS } from "../tuning";
 const DEFAULT_ZOOM = 0.8;
 const MAX_OUT_ZOOM = 0.35;
 const DRAFT_KEY = "jam-world-draft";
+/** The settings groups the user has opened. All start closed. */
+const GROUPS_KEY = "jam-designer-open";
 /** Set once this browser's game has taken the designer's numbers, so the sliders win after that. */
 const LINKED_KEY = "jam-world-linked";
 const SPEEDS = [1, 10, 60, 600, 3600, 36000];
@@ -58,6 +61,10 @@ const STYLE = `
 #designer .side { width: 340px; box-sizing: border-box; padding: 12px 14px; overflow-y: auto; background: #0b0f18; border-right: 1px solid #222a3a; }
 #designer h1 { font-size: 15px; margin: 0 0 2px; color: #8fb4ff; letter-spacing: 2px; }
 #designer h2 { font-size: 12px; margin: 16px 0 6px; color: #8fe3a1; text-transform: uppercase; letter-spacing: 1px; }
+#designer h3.group { font-size: 12px; margin: 10px 0 2px; color: #8fb4ff; cursor: pointer; user-select: none; }
+#designer h3.group::before { content: "▾  "; }
+#designer h3.group.closed::before { content: "▸  "; }
+#designer h3.group:hover { color: #b9cfff; }
 #designer p { margin: 0 0 6px; color: #7f8ba0; }
 #designer button, #designer select, #designer input { background: #1a2233; color: #cfd8e6; border: 1px solid #33405a; font: inherit; padding: 4px 7px; }
 #designer button { cursor: pointer; margin: 0 4px 4px 0; }
@@ -99,6 +106,15 @@ function climbing(accel: number): string {
   if (accel >= racer) return `nothing climbs out where it's full (Racer ${racer}, Floater ${floater})`;
   if (accel >= floater) return `the Racer climbs out where it's full, the Floater (${floater}) can't`;
   return `both ships climb out (Floater ${floater}, Racer ${racer})`;
+}
+
+function loadOpenGroups(): string[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(GROUPS_KEY) ?? "[]");
+    return Array.isArray(saved) ? saved.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function readableDistance(units: number): string {
@@ -151,6 +167,10 @@ export class Designer {
   private readonly routeBox: HTMLDivElement;
   private readonly routeText: HTMLDivElement;
   private readonly linkText: HTMLDivElement;
+  private readonly openGroups = new Set<string>(loadOpenGroups());
+  /** The player's ship as of opening: its offset from the field, and the game's clock then. */
+  private shipFix: { x: number; y: number; clock: number } | null = null;
+  private followShip = false;
 
   constructor(
     private readonly onClose: () => void,
@@ -184,6 +204,7 @@ export class Designer {
       this.title("System designer", "h1"),
       this.text("Dev only. O or Esc goes back to the game, which picks up the changes."),
       this.button("Back to the game", () => this.close()),
+      this.button("Find my ship", () => this.findShip()),
       this.linkText,
       this.title("Objects"),
       this.tree,
@@ -228,6 +249,8 @@ export class Designer {
     // The sliders may have changed things since last time, and this shows the game as it is.
     readGame(this.world, this.game.tuning, this.game.phases());
     this.t = this.game.clock();
+    const { ship, field } = this.game.where();
+    this.shipFix = { x: ship.x - field.x, y: ship.y - field.y, clock: this.t };
     this.rebuild();
     this.element.hidden = false;
     this.lastFrame = performance.now();
@@ -507,7 +530,7 @@ export class Designer {
     });
     parts.push(this.labelled("Kind (bodies are solid and filled; the rest are places)", kind));
 
-    parts.push(this.number(node, "radius", body ? "Radius (surface)" : "Radius (size)", (v) => `${this.screens(v * 2)} across`));
+    const size: HTMLElement[] = [this.number(node, "radius", body ? "Radius (surface)" : "Radius (size)", (v) => `${this.screens(v * 2)} across`)];
     if (body) {
       const surface = document.createElement("select");
       const meanings: Record<Surface, string> = { none: "nothing: not solid", damage: "a knock, hurting by speed like a rock", death: "death" };
@@ -516,17 +539,41 @@ export class Designer {
         node.surface = surface.value as Surface;
         this.changed();
       });
-      parts.push(this.labelled("Touching the ground means", surface));
-      parts.push(this.number(node, "pull", "Pull starts at (from the centre, 0 for none)", (v) => (v > 0 ? `${readableDistance(v - node.radius)} beyond the surface` : "no pull")));
-      parts.push(this.number(node, "pullFull", "Pull is full from here down (from the centre)", (v) => (v > node.radius ? `${readableDistance(v - node.radius)} above the surface` : "full only at the surface")));
-      parts.push(this.number(node, "pullAccel", "Full pull, units/s²", (v) => climbing(v)));
+      size.push(
+        this.labelled("Touching the ground means", surface),
+        this.number(node, "atmosphere", "Air reaches out to (from the centre, 0 for none)", (v) => (v > node.radius ? `${readableDistance(v - node.radius)} deep` : "no air")),
+        this.number(node, "burnSpeed", "Burns in the air above this speed, units/s", (v) => (v > 0 ? `faster than ${v} against the ground glows and hurts` : "any speed burns")),
+      );
     }
+    parts.push(...this.group(body ? "Size, ground and air" : "Size", size));
+    if (body) {
+      parts.push(
+        ...this.group("Pull", [
+          this.number(node, "pull", "Pull starts at (from the centre, 0 for none)", (v) => (v > 0 ? `${readableDistance(v - node.radius)} beyond the surface` : "no pull")),
+          this.number(node, "pullFull", "Pull is full from here down (from the centre)", (v) => (v > node.radius ? `${readableDistance(v - node.radius)} above the surface` : "full only at the surface")),
+          this.number(node, "pullAccel", "Full pull, units/s²", (v) => climbing(v)),
+        ]),
+      );
+    }
+    const orbit: HTMLElement[] = [];
     if (!isRoot) {
-      parts.push(this.number(node, "orbitRadius", "Orbit radius (from the parent's centre)", (v) => `${readableDistance(v)}; ${readableDistance(v - (parentOf(this.world, node)?.radius ?? 0))} from its surface`));
-      parts.push(this.number(node, "orbitPeriod", "Orbit period, seconds (negative goes the other way)", (v) => `${readableTime(v)} per orbit, ${orbitSpeed({ ...node, orbitPeriod: v }).toFixed(1)} units/s`));
-      parts.push(this.number(node, "orbitPhase", "Start angle on the orbit, degrees", () => ""));
+      orbit.push(
+        this.number(node, "orbitRadius", "Orbit radius (from the parent's centre)", (v) => `${readableDistance(v)}; ${readableDistance(v - (parentOf(this.world, node)?.radius ?? 0))} from its surface`),
+        this.number(node, "orbitPeriod", "Orbit period, seconds (negative goes the other way)", (v) => `${readableTime(v)} per orbit, ${orbitSpeed({ ...node, orbitPeriod: v }).toFixed(1)} units/s`),
+        this.number(node, "orbitPhase", "Start angle on the orbit, degrees", () => ""),
+      );
     }
-    parts.push(this.number(node, "spinPeriod", "Spin period, seconds (negative turns the other way)", (v) => `${readableTime(v)} per turn`));
+    orbit.push(this.number(node, "spinPeriod", "Spin period, seconds (negative turns the other way)", (v) => `${readableTime(v)} per turn`));
+    parts.push(...this.group(isRoot ? "Spin" : "Orbit and spin", orbit));
+    if (!isRoot) {
+      parts.push(
+        ...this.group("Copies", [
+          this.number(node, "count", "How many in this orbit, itself included", (v) => (v > 1 ? `${Math.floor(v) - 1} copies, without children${node.kind === "field" ? ", on the map only" : ""}` : "just this one")),
+          this.number(node, "angleVariance", "Scatter round the orbit, % of half the gap", (v) => (v > 0 ? "each copy wanders from even spacing" : "evenly spaced")),
+          this.number(node, "orbitVariance", "Scatter in and out, % of the orbit", (v) => (v > 0 ? `orbits from ${readableDistance(node.orbitRadius * (1 - v / 100))} to ${readableDistance(node.orbitRadius * (1 + v / 100))}` : "all on this orbit")),
+        ]),
+      );
+    }
 
     const addKind = document.createElement("select");
     for (const value of [...BODY_KINDS, ...PLACE_KINDS]) addKind.append(new Option(value, value));
@@ -549,6 +596,7 @@ export class Designer {
     actions.append(
       this.button("Follow", () => {
         this.follow = node;
+        this.followShip = false;
         this.fitView();
       }),
     );
@@ -572,6 +620,49 @@ export class Designer {
     this.editor.replaceChildren(...parts);
   }
 
+  /** A heading that opens and closes its settings, like the game's own panel. Remembered. */
+  private group(title: string, fields: HTMLElement[]): HTMLElement[] {
+    const heading = document.createElement("h3");
+    const body = document.createElement("div");
+    body.append(...fields);
+    const show = () => {
+      const open = this.openGroups.has(title);
+      heading.className = open ? "group" : "group closed";
+      body.hidden = !open;
+    };
+    heading.textContent = title;
+    heading.addEventListener("click", () => {
+      if (this.openGroups.has(title)) this.openGroups.delete(title);
+      else this.openGroups.add(title);
+      try {
+        localStorage.setItem(GROUPS_KEY, JSON.stringify([...this.openGroups]));
+      } catch {
+        // Storage off: it's remembered until the page closes.
+      }
+      show();
+    });
+    show();
+    return [heading, body];
+  }
+
+  /** Centres the view on the player's ship, close enough to see the game's screen around it. */
+  private findShip(): void {
+    this.follow = null;
+    this.followShip = true;
+    const { width, height } = this.canvas.getBoundingClientRect();
+    if (width > 0) this.scale = Math.min(width / (window.innerWidth / MAX_OUT_ZOOM), height / (window.innerHeight / MAX_OUT_ZOOM)) * 0.5;
+  }
+
+  /** Where the ship is at the time shown, carried by the field as it is in the game. */
+  private shipSpot(at: Map<WorldNode, { x: number; y: number }>): { x: number; y: number } | null {
+    const { field } = linkedNodes(this.world);
+    const centre = field && at.get(field);
+    if (!this.shipFix || !field || !centre) return null;
+    const turn = spinAngle(field, this.t) - spinAngle(field, this.shipFix.clock);
+    const { x, y } = this.shipFix;
+    return { x: centre.x + x * Math.cos(turn) - y * Math.sin(turn), y: centre.y + x * Math.sin(turn) + y * Math.cos(turn) };
+  }
+
   private labelled(text: string, input: HTMLElement): HTMLLabelElement {
     const label = document.createElement("label");
     label.append(text, input);
@@ -580,7 +671,20 @@ export class Designer {
 
   private number(
     node: WorldNode,
-    key: "radius" | "pull" | "pullFull" | "pullAccel" | "orbitRadius" | "orbitPeriod" | "orbitPhase" | "spinPeriod",
+    key:
+      | "radius"
+      | "pull"
+      | "pullFull"
+      | "pullAccel"
+      | "atmosphere"
+      | "burnSpeed"
+      | "orbitRadius"
+      | "orbitPeriod"
+      | "orbitPhase"
+      | "spinPeriod"
+      | "count"
+      | "angleVariance"
+      | "orbitVariance",
     text: string,
     hint: (value: number) => string,
   ): HTMLLabelElement {
@@ -669,6 +773,7 @@ export class Designer {
         // Grabbing the view lets go of whatever it followed, from where it is now.
         this.drag.moved = true;
         this.canvas.classList.add("dragging");
+        this.followShip = false;
         if (this.follow) {
           const at = positions(this.world, this.t).get(this.follow)!;
           this.cx = at.x;
@@ -695,6 +800,7 @@ export class Designer {
       const hit = this.hit(event.offsetX, event.offsetY);
       if (hit) {
         this.follow = hit;
+        this.followShip = false;
         this.select(hit);
       }
     });
@@ -704,7 +810,7 @@ export class Designer {
         event.preventDefault();
         const factor = event.deltaY > 0 ? 1 / 1.15 : 1.15;
         const next = Math.min(20, Math.max(1e-7, this.scale * factor));
-        if (!this.follow) {
+        if (!this.follow && !this.followShip) {
           // Keep the point under the mouse where it is.
           const { width, height } = this.canvas.getBoundingClientRect();
           const wx = this.cx + (event.offsetX - width / 2) / this.scale;
@@ -792,6 +898,11 @@ export class Designer {
         this.follow = null;
       }
     }
+    const ship = this.shipSpot(at);
+    if (this.followShip && ship) {
+      this.cx = ship.x;
+      this.cy = ship.y;
+    }
     const entries = walk(this.world);
     const diagonal = Math.hypot(this.width, this.height);
     const ring = (x: number, y: number, r: number) => {
@@ -813,6 +924,15 @@ export class Designer {
       if (!ring(p.x, p.y, node.orbitRadius)) continue;
       ctx.strokeStyle = node === this.selected ? "rgba(143, 180, 255, 0.6)" : "rgba(143, 180, 255, 0.16)";
       ctx.stroke();
+    }
+
+    // Air.
+    for (const { node } of entries) {
+      if (!isBody(node.kind) || node.atmosphere <= node.radius) continue;
+      const p = at.get(node)!;
+      if (!ring(p.x, p.y, node.atmosphere)) continue;
+      ctx.fillStyle = "rgba(120, 170, 235, 0.08)";
+      ctx.fill();
     }
 
     // Pull zones: where it starts, and where it's full.
@@ -897,6 +1017,34 @@ export class Designer {
       const pr = Math.max(4, Math.min(node.radius * this.scale, 40));
       ctx.fillStyle = node === this.selected ? "#ffffff" : COLORS[node.kind];
       ctx.fillText(node.name, p.x + pr * 0.7 + 4, p.y - pr * 0.7 - 4);
+    }
+
+    // Copies: the same thing again round the same parent, fainter.
+    for (const [node, spots] of copyPositions(this.world, this.t, at)) {
+      ctx.fillStyle = COLORS[node.kind];
+      ctx.strokeStyle = COLORS[node.kind];
+      ctx.globalAlpha = 0.6;
+      for (const spot of spots) {
+        const p = this.toScreen(spot.x, spot.y);
+        const pr = node.radius * this.scale;
+        if (p.x < -pr - 50 || p.y < -pr - 50 || p.x > this.width + pr + 50 || p.y > this.height + pr + 50) continue;
+        if (pr < 3) ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+        else if (!ring(spot.x, spot.y, node.radius)) continue;
+        else if (isBody(node.kind)) ctx.fill();
+        else ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    if (ship) {
+      const p = this.toScreen(ship.x, ship.y);
+      ctx.strokeStyle = "#ffffff";
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 9, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+      ctx.fillText("You", p.x + 12, p.y - 10);
     }
 
     this.drawRoute(at);

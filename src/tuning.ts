@@ -59,6 +59,8 @@ export const DEFAULTS = {
   rebuildCost: 300,
 
   safeImpactSpeed: 90,
+  /** Hull lost each second for every unit/s a ship goes past a body's burn speed in its air. */
+  burnDamage: 0.03,
   damagePerSpeed: 0.12,
   bounce: 0.45,
 

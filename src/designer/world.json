@@ -9,10 +9,15 @@
     "pull": 600000,
     "pullFull": 300000,
     "pullAccel": 300,
+    "atmosphere": 225000,
+    "burnSpeed": 0,
     "orbitRadius": 0,
     "orbitPeriod": 0,
     "orbitPhase": 0,
     "spinPeriod": 0,
+    "count": 1,
+    "angleVariance": 0,
+    "orbitVariance": 0,
     "children": [
       {
         "id": "planet",
@@ -23,10 +28,15 @@
         "pull": 30000,
         "pullFull": 15000,
         "pullAccel": 150,
+        "atmosphere": 13800,
+        "burnSpeed": 300,
         "orbitRadius": 3000000,
         "orbitPeriod": 129600,
         "orbitPhase": 0,
         "spinPeriod": 21600,
+        "count": 1,
+        "angleVariance": 0,
+        "orbitVariance": 0,
         "children": [
           {
             "id": "field",
@@ -37,10 +47,15 @@
             "pull": 0,
             "pullFull": 0,
             "pullAccel": 0,
+            "atmosphere": 0,
+            "burnSpeed": 0,
             "orbitRadius": 40000,
             "orbitPeriod": 3600,
             "orbitPhase": 0,
             "spinPeriod": 1800,
+            "count": 1,
+            "angleVariance": 0,
+            "orbitVariance": 0,
             "children": [
               {
                 "id": "station",
@@ -51,10 +66,15 @@
                 "pull": 0,
                 "pullFull": 0,
                 "pullAccel": 0,
+                "atmosphere": 0,
+                "burnSpeed": 0,
                 "orbitRadius": 7600,
                 "orbitPeriod": 900,
                 "orbitPhase": 180,
                 "spinPeriod": 300,
+                "count": 1,
+                "angleVariance": 0,
+                "orbitVariance": 0,
                 "children": []
               },
               {
@@ -66,10 +86,15 @@
                 "pull": 0,
                 "pullFull": 0,
                 "pullAccel": 0,
+                "atmosphere": 0,
+                "burnSpeed": 0,
                 "orbitRadius": 6600,
                 "orbitPeriod": 900,
                 "orbitPhase": 0,
                 "spinPeriod": 0,
+                "count": 1,
+                "angleVariance": 0,
+                "orbitVariance": 0,
                 "children": []
               }
             ]
@@ -83,10 +108,15 @@
             "pull": 7500,
             "pullFull": 0,
             "pullAccel": 0,
+            "atmosphere": 0,
+            "burnSpeed": 0,
             "orbitRadius": 50000,
             "orbitPeriod": 10567,
             "orbitPhase": 0,
             "spinPeriod": 0,
+            "count": 1,
+            "angleVariance": 0,
+            "orbitVariance": 0,
             "children": []
           },
           {
@@ -98,10 +128,15 @@
             "pull": 0,
             "pullFull": 0,
             "pullAccel": 0,
+            "atmosphere": 0,
+            "burnSpeed": 0,
             "orbitRadius": 47800,
             "orbitPeriod": 13301,
             "orbitPhase": 180,
             "spinPeriod": 0,
+            "count": 1,
+            "angleVariance": 0,
+            "orbitVariance": 0,
             "children": []
           }
         ]

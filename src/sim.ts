@@ -96,6 +96,8 @@ export interface Ship extends Body {
   frameShare: number;
   /** How far the POIs turned the ship on the last tick. */
   carriedTurn: number;
+  /** How hard it's burning in a body's air this tick, 0 to 1, for drawing. */
+  burning: number;
   ore: number;
   unloadTimer: number;
   angle: number;
@@ -231,6 +233,9 @@ const HAULER_WAIT_SECONDS = 15;
 const HAULER_ARRIVAL_LIMIT = 400;
 
 /** Radians per second for a period in seconds. Zero or less stands still, as it always has here. */
+/** Burning this much faster than a body's burn speed glows as bright as it gets. */
+const BURN_GLOW_SPEED = 300;
+
 /** How far beyond a station or base things count as being there, when the layout moves it. */
 const LAYOUT_NEIGHBOURHOOD = 500;
 
@@ -326,6 +331,9 @@ export interface SolidBody {
   pullStart: number;
   pullFull: number;
   pullAccel: number;
+  /** In the air, out to `atmosphere` from the centre, faster than `burnSpeed` against the ground burns. */
+  atmosphere: number;
+  burnSpeed: number;
   spinPeriod: number;
   orbits: Orbit[];
 }
@@ -1279,6 +1287,7 @@ export class Sim {
       frame: this.field,
       frameShare: 1,
       carriedTurn: 0,
+      burning: 0,
       ore: 0,
       unloadTimer: 0,
       angle: 0,
@@ -2477,15 +2486,35 @@ export class Sim {
     for (const ore of this.ores) pull(ore);
   }
 
-  /** A ship on a body's ground: through it, off it with a knock, or wrecked. */
+  /** A ship in a body's air or on its ground: burning, through it, off it with a knock, or wrecked. */
   private touchBodies(ship: Ship, dt: number): void {
+    ship.burning = 0;
+    if (this.bodySpots.length === 0) return;
+    // A ship's speed counts against what carries it, so the ground's must too. What this
+    // tick moved it, less its own speed, is how fast it was carried, turning and all.
+    const carriedX = (ship.x - ship.px) / dt - ship.vx;
+    const carriedY = (ship.y - ship.py) / dt - ship.vy;
+    const docked = this.isDocked(ship);
     for (const { body, x, y, vx, vy } of this.bodySpots) {
-      if (body.surface === "none") continue;
-      const reach = body.radius + SHIP_RADIUS;
       const dx = ship.x - x;
       const dy = ship.y - y;
       const distance = Math.hypot(dx, dy);
-      if (distance >= reach) continue;
+      const ground = { vx: vx - carriedX, vy: vy - carriedY };
+      if (!docked && distance < body.atmosphere) {
+        const over = Math.hypot(ship.vx - ground.vx, ship.vy - ground.vy) - body.burnSpeed;
+        if (over > 0) {
+          ship.burning = Math.max(ship.burning, Math.min(1, over / BURN_GLOW_SPEED));
+          const damage = over * this.tuning.burnDamage * dt;
+          ship.hull -= damage;
+          ship.damageTaken += damage;
+          if (ship.hull <= 0) {
+            this.wreckShip(ship);
+            return;
+          }
+        }
+      }
+      const reach = body.radius + SHIP_RADIUS;
+      if (body.surface === "none" || distance >= reach) continue;
       if (body.surface === "death") {
         ship.damageTaken += ship.hull;
         ship.hull = 0;
@@ -2494,12 +2523,6 @@ export class Sim {
       }
       const nx = distance > 0 ? dx / distance : 1;
       const ny = distance > 0 ? dy / distance : 0;
-      // A ship's speed counts against what carries it, so the ground's must too. What this
-      // tick moved it, less its own speed, is how fast it was carried, turning and all.
-      const ground = {
-        vx: vx - ((ship.x - ship.px) / dt - ship.vx),
-        vy: vy - ((ship.y - ship.py) / dt - ship.vy),
-      };
       ship.x = x + nx * (reach + 0.01);
       ship.y = y + ny * (reach + 0.01);
       this.bounceOff(ship, nx, ny, ground, 0);

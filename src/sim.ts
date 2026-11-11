@@ -1,6 +1,8 @@
 import { Chatter } from "./chatter";
 import { type BlueprintId, isProject, PARTS, partFits, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
-import { ClickPilot, DronePilot, FighterPilot } from "./pilot";
+import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD } from "./pilot";
+export { FIRST_FIELD };
+import { pathAround } from "./route";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
 export const TICK = 1 / 120;
@@ -118,6 +120,8 @@ export interface Ship extends Body {
   wanted: boolean;
   /** When a pirate last wrecked it, or null. It won't trade with pirates for a while after. */
   pirateKilledAt: number | null;
+  /** The field it was nearest when that happened: a `MiningField` id. */
+  pirateKilledIn: string | null;
 }
 
 export interface Rock extends Body {
@@ -329,6 +333,15 @@ export interface FieldSpec {
   orbits: Orbit[];
 }
 
+/** A field anyone can mine, as a pilot sees it. */
+export interface MiningField {
+  id: string;
+  poi: Poi;
+  radius: number;
+  /** How many rocks it holds when full. */
+  full: number;
+}
+
 interface ExtraField {
   spec: FieldSpec;
   poi: Poi;
@@ -365,6 +378,22 @@ export interface SolidBody {
   burnSpeed: number;
   spinPeriod: number;
   orbits: Orbit[];
+}
+
+/** Routes keep this far from a body's centre: clear of its pull and air, or just its ground. */
+export function keepOutRadius(body: SolidBody): number {
+  const reach = Math.max(body.radius, body.atmosphere, body.pullAccel > 0 ? body.pullStart : 0);
+  // A margin, as a ship at full speed cuts each corner a little.
+  return reach * 1.05 + 200;
+}
+
+/** How close the straight line from `a` to `b` comes to the origin. */
+function closestApproach(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSq = dx * dx + dy * dy;
+  const t = lengthSq === 0 ? 0 : Math.max(0, Math.min(1, -(a.x * dx + a.y * dy) / lengthSq));
+  return Math.hypot(a.x + dx * t, a.y + dy * t);
 }
 
 /** A body's pull, in units/s², at a distance from its centre. */
@@ -610,6 +639,7 @@ export class Sim {
   startPhases: Partial<Record<Poi["name"], number>> = {};
   /** Fields beyond the first, from the designer. Rocks only: no station, deposit or traffic of their own. */
   extraFields: ExtraField[] = [];
+  private miningCache: { clock: number; extras: ExtraField[]; radius: number; fields: MiningField[] } | null = null;
   /** Where each body is this tick. */
   private bodySpots: { body: SolidBody; x: number; y: number; vx: number; vy: number }[] = [];
   shots: Shot[] = [];
@@ -637,7 +667,14 @@ export class Sim {
    * how they're set up: like anyone coming back to a job, they plan their next step afresh.
    */
   snapshot(): object {
-    const pilot = (each: DronePilot) => ({ ship: each.ship, buys: each.buys, flees: each.flees, wishlist: each.wishlist });
+    const pilot = (each: DronePilot) => ({
+      ship: each.ship,
+      buys: each.buys,
+      flees: each.flees,
+      wishlist: each.wishlist,
+      working: each.working,
+      habit: each.habit,
+    });
     return {
       tuning: this.tuning,
       controls: this.controls,
@@ -692,11 +729,13 @@ export class Sim {
     };
     this.controls = data.controls;
     this.ship = fill(data.ship);
-    const pilot = (each: { ship: Ship; buys: DronePilot["buys"]; flees: boolean; wishlist: PartId[] }) => {
+    const pilot = (each: { ship: Ship; buys: DronePilot["buys"]; flees: boolean; wishlist: PartId[]; working?: string; habit?: string | null }) => {
       const made = new DronePilot(fill(each.ship));
       made.buys = each.buys;
       made.flees = each.flees;
       made.wishlist = each.wishlist;
+      made.working = each.working ?? FIRST_FIELD;
+      made.habit = each.habit ?? null;
       return made;
     };
     this.drones = data.drones.map(pilot);
@@ -820,6 +859,82 @@ export class Sim {
   /** Every field with its size: the first, from the tuning, then the designer's others. */
   private rockFields(): { poi: Poi; radius: number }[] {
     return [{ poi: this.field, radius: this.tuning.fieldRadius }, ...this.extraFields.map(({ poi, spec }) => ({ poi, radius: spec.radius }))];
+  }
+
+  /** Every field there is to mine, the first one first. */
+  miningFields(): MiningField[] {
+    // Asked for per rock and per ship, so worked out once a tick.
+    const cache = this.miningCache;
+    if (cache && cache.clock === this.clock && cache.extras === this.extraFields && cache.radius === this.tuning.fieldRadius) {
+      return cache.fields;
+    }
+    const fields = [
+      { id: FIRST_FIELD, poi: this.field, radius: this.tuning.fieldRadius, full: this.tuning.rockCount },
+      ...this.extraFields.map(({ poi, spec }) => ({ id: spec.id, poi, radius: spec.radius, full: spec.rocks })),
+    ];
+    this.miningCache = { clock: this.clock, extras: this.extraFields, radius: this.tuning.fieldRadius, fields };
+    return fields;
+  }
+
+  /** The field whose edge is nearest a spot. */
+  miningFieldAt(x: number, y: number): MiningField {
+    const fields = this.miningFields();
+    return fields[this.fieldAt(fields, x, y)];
+  }
+
+  /** Whether a rock belongs to a field: it's nearer that field's edge than any other's. */
+  rockIn(field: MiningField, rock: Rock): boolean {
+    if (this.extraFields.length === 0) return true;
+    return this.miningFieldAt(rock.x, rock.y).id === field.id;
+  }
+
+  /** Whether a field has been mined down below the share that's worth the trip. */
+  fieldEmpty(field: MiningField): boolean {
+    let count = 0;
+    for (const rock of this.rocks) if (!rock.arriving && this.rockIn(field, rock)) count++;
+    return count < field.full * this.tuning.fieldEmptyShare;
+  }
+
+  /**
+   * Where to steer for on the way from one spot to another so as to stay out of every
+   * body's pull, or null if the straight line is clear. It's the next corner of a path
+   * round the first body in the way, from where the bodies are now.
+   */
+  cornerToward(fromX: number, fromY: number, toX: number, toY: number): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bestAhead = Infinity;
+    for (const body of this.bodies) {
+      const at = bodyAt(body, this.clock);
+      const keepOut = keepOutRadius(body);
+      const from = { x: fromX - at.x, y: fromY - at.y };
+      const to = { x: toX - at.x, y: toY - at.y };
+      const ahead = Math.hypot(from.x, from.y);
+      // The body met first along the way is the one to get round first.
+      if (ahead >= bestAhead) continue;
+      let corner: { x: number; y: number } | null = null;
+      if (ahead < keepOut && Math.hypot(to.x, to.y) >= keepOut) {
+        // Already inside: plan from straight out at the edge, and climb out first if the
+        // way to the plan's next corner would take it any deeper.
+        const out = { x: (from.x / ahead) * keepOut * 1.01, y: (from.y / ahead) * keepOut * 1.01 };
+        const path = pathAround(out, to, keepOut);
+        const next = path.bends ? path.points[1] : to;
+        corner = closestApproach(from, next) < ahead * 0.99 ? out : next;
+        if (corner === to) corner = null;
+      } else {
+        const path = pathAround(from, to, keepOut);
+        if (path.bends) corner = path.points[1];
+      }
+      if (!corner) continue;
+      bestAhead = ahead;
+      best = { x: corner.x + at.x, y: corner.y + at.y };
+    }
+    return best;
+  }
+
+  /** The circle round a body that a route keeps out of, as it stands now. */
+  keepOutAt(body: SolidBody): { x: number; y: number; radius: number } {
+    const at = bodyAt(body, this.clock);
+    return { x: at.x, y: at.y, radius: keepOutRadius(body) };
   }
 
   /** The field a spot belongs to: the one whose edge is nearest. */
@@ -1399,6 +1514,7 @@ export class Sim {
       marked: false,
       wanted: false,
       pirateKilledAt: null,
+      pirateKilledIn: null,
     };
   }
 
@@ -3100,7 +3216,10 @@ export class Sim {
     this.judgeHit(ship, shot.from);
     const player = ship === this.ship;
     this.events.push({ type: "impact", x: ship.x, y: ship.y, damage, player });
-    if (ship.hull <= 0 && shot.from.faction === "pirate") ship.pirateKilledAt = this.clock;
+    if (ship.hull <= 0 && shot.from.faction === "pirate") {
+      ship.pirateKilledAt = this.clock;
+      ship.pirateKilledIn = this.miningFieldAt(ship.x, ship.y).id;
+    }
     if (ship.hull <= 0) this.wreckShip(ship);
   }
 

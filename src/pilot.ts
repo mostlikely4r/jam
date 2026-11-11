@@ -1,7 +1,10 @@
 import { DRONE_BUY_ORDER, type PartId } from "./parts";
+import { planRoute } from "./route";
 import {
   type Body,
   type Deposit,
+
+  type MiningField,
   type Ore,
   type Poi,
   type Rock,
@@ -26,6 +29,26 @@ const DIRECT_LIMIT = 80;
 const REVERSE_BRAKE_SECONDS = 0.3;
 const ORE_SIGHT = 800;
 const PASS_THROUGH_ORE_SPEED = 45;
+/** The first field's id among the mining fields. The others go by their designer id. */
+export const FIRST_FIELD = "first";
+
+/** Added to a field's cost when it's empty or feared, so it's only picked when every field is. */
+const LAST_RESORT = 1e6;
+/** Flying to a field, it stops this share of the field's radius in from the middle: well inside. */
+const FIELD_ARRIVAL_SHARE = 0.7;
+
+function minus(a: { x: number; y: number }, b: { x: number; y: number }): { x: number; y: number } {
+  return { x: a.x - b.x, y: a.y - b.y };
+}
+
+/** How close the straight line from `a` to `b` comes to a point. */
+function passesWithin(a: { x: number; y: number }, b: { x: number; y: number }, point: { x: number; y: number }): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSq = dx * dx + dy * dy;
+  const t = lengthSq === 0 ? 0 : Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq));
+  return Math.hypot(a.x + dx * t - point.x, a.y + dy * t - point.y);
+}
 const FIRING_DISTANCE = 300;
 const TOO_CLOSE_DISTANCE = 70;
 const BACK_OFF_SPEED = 50;
@@ -254,6 +277,26 @@ class ShipPilot {
     );
   }
 
+  /**
+   * Like `flyTo`, but the long way round any body whose pull lies across the straight line:
+   * it steers for the next corner of a path round it without slowing, then goes on as usual.
+   */
+  protected travel(sim: Sim, target: Mover, slack: number, arrivalSpeed: number, exclude: object | null): void {
+    const { ship } = this;
+    const corner = sim.cornerToward(ship.x, ship.y, target.x, target.y);
+    if (!corner) {
+      this.flyTo(sim, target, slack, arrivalSpeed, exclude);
+      return;
+    }
+    const still = { x: corner.x, y: corner.y, px: corner.x, py: corner.y };
+    this.flyTo(sim, still, 0, this.speedLimitHere(sim), null);
+  }
+
+  /** The speed it flies at between places. */
+  protected cruiseSpeed(sim: Sim): number {
+    return this.ship.model === "floater" ? sim.tuning.clickSpeed : sim.tuning.droneCruiseSpeed;
+  }
+
   /** Where the nose stays throughout a flight, or null if it's free to turn for burns. */
   protected flightNose(_heading: { x: number; y: number }): number | null {
     return null;
@@ -267,9 +310,10 @@ class ShipPilot {
   /** Slower inside the field and when coming up on it, so an impact is only a dent. */
   protected speedLimitHere(sim: Sim): number {
     const { ship } = this;
-    const { field, tuning } = sim;
+    const { tuning } = sim;
     if (ship.model === "floater") return tuning.clickSpeed;
-    const outside = Math.hypot(ship.x - field.x, ship.y - field.y) - tuning.fieldRadius;
+    const field = sim.extraFields.length > 0 ? sim.miningFieldAt(ship.x, ship.y) : sim.miningFields()[0];
+    const outside = Math.hypot(ship.x - field.poi.x, ship.y - field.poi.y) - field.radius;
     const nearField = tuning.droneFieldSpeed + this.stoppingSpeed(sim, Math.max(0, outside));
     return Math.min(tuning.droneCruiseSpeed, nearField);
   }
@@ -457,6 +501,12 @@ export class DronePilot extends ShipPilot {
   trading: Deposit | "pirate base" | null = null;
   /** Whether it has decided on this stay at the dock whether to make a buying run. */
   private decidedTrade = false;
+  /** The field it mines this trip, by id. Traffic picks one each time it leaves the dock. */
+  working = FIRST_FIELD;
+  /** The field it last mined, which it's a little drawn back to. */
+  habit: string | null = null;
+  /** Whether it has picked a field on this stay at the dock. */
+  private decidedField = false;
   private rock: Rock | null = null;
   private ore: Ore | null = null;
   private retarget = 0;
@@ -502,6 +552,7 @@ export class DronePilot extends ShipPilot {
     if (ship.ore === 0 && sim.isDocked(ship)) this.shop(sim);
 
     if (!this.hauling && ship.ore === 0) {
+      this.chooseField(sim);
       this.chooseTrade(sim);
       if (this.trading) {
         this.trade(sim);
@@ -526,6 +577,83 @@ export class DronePilot extends ShipPilot {
     if (source && sim.roll() < sim.tuning.tradeChance) this.trading = source;
   }
 
+  /**
+   * Leaving the dock with an empty hold, traffic picks a field to mine. Each field costs
+   * the round trip from the route planner. An empty field, or one where pirates killed it
+   * lately (some trips), costs so much it's the last resort. Going back to its last field
+   * is a little cheaper, and luck takes a little off each. The cheapest wins. Now and then
+   * it heads for any other field just to see.
+   */
+  private chooseField(sim: Sim): void {
+    const { ship } = this;
+    const docked = sim.isDocked(ship);
+    if (!docked) this.decidedField = false;
+    if (!docked || this.decidedField || ship.owner || this.buys !== "upgrades") return;
+    this.decidedField = true;
+    const fields = sim.miningFields();
+    if (fields.length === 1) {
+      this.working = FIRST_FIELD;
+      return;
+    }
+    const { tuning } = sim;
+    const open = fields.filter((field) => !sim.fieldEmpty(field));
+    const elsewhere = open.filter((field) => field.id !== this.working);
+    if (elsewhere.length > 0 && sim.roll() < tuning.fieldWanderChance) {
+      this.working = elsewhere[Math.floor(sim.roll() * elsewhere.length)].id;
+      return;
+    }
+    const lately = ship.pirateKilledAt !== null && sim.now - ship.pirateKilledAt < tuning.fieldFearSeconds;
+    const feared = lately && sim.roll() < tuning.fieldFearChance ? ship.pirateKilledIn : null;
+    let best = fields[0];
+    let bestCost = Infinity;
+    for (const field of fields) {
+      let cost = 2 * this.tripSeconds(sim, field) - sim.roll() * tuning.fieldLuckSeconds;
+      if (!open.includes(field)) cost += LAST_RESORT;
+      if (field.id === feared) cost += LAST_RESORT;
+      if (field.id === this.habit) cost -= tuning.fieldHabitSeconds;
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = field;
+      }
+    }
+    this.working = best.id;
+  }
+
+  /** Seconds from the station to a field, by the route planner, round any body in the way. */
+  tripSeconds(sim: Sim, field: MiningField): number {
+    const { ship } = this;
+    const flight = { accel: sim.tuning.thrust * sim.shipResponse(ship), cruise: this.cruiseSpeed(sim) };
+    const from = sim.poiAt(sim.station, sim.now);
+    const to = sim.poiAt(field.poi, sim.now);
+    // Round the body nearest the station of those across the way, in that body's frame.
+    let centre = { x: 0, y: 0 };
+    let radius = 0;
+    let nearest = Infinity;
+    for (const body of sim.bodies) {
+      const circle = sim.keepOutAt(body);
+      const distance = Math.hypot(circle.x - from.x, circle.y - from.y);
+      if (distance < nearest && passesWithin(from, to, circle) < circle.radius) {
+        nearest = distance;
+        centre = circle;
+        radius = circle.radius;
+      }
+    }
+    const route = planRoute(
+      (t) => minus(sim.poiAt(sim.station, t), centre),
+      (t) => minus(sim.poiAt(field.poi, t), centre),
+      sim.now,
+      radius,
+      flight,
+    );
+    return route.arrive - route.depart;
+  }
+
+  /** The field it's working this trip, or the first if that one's gone. */
+  private workingField(sim: Sim): MiningField {
+    const fields = sim.miningFields();
+    return fields.find((field) => field.id === this.working) ?? fields[0];
+  }
+
   /** Flies to where it's buying, buys a full hold, and from there it's an ordinary haul home. */
   private trade(sim: Sim): void {
     const { ship } = this;
@@ -538,7 +666,7 @@ export class DronePilot extends ShipPilot {
         return;
       }
       if (sim.atPirateBase(ship)) this.bought(sim.buyFromPirateBase(ship));
-      else this.flyTo(sim, base, sim.tuning.pirateBaseReach / 2, 0, null);
+      else this.travel(sim, base, sim.tuning.pirateBaseReach / 2, 0, null);
       return;
     }
     if (!sim.deposits.includes(source) || source.ore < sim.cargoSpace(ship)) {
@@ -546,7 +674,7 @@ export class DronePilot extends ShipPilot {
       return;
     }
     if (sim.depositAt(ship) === source) this.bought(sim.buyFromDeposit(ship, source));
-    else this.flyTo(sim, source, DEPOSIT_ARRIVAL, 0, null);
+    else this.travel(sim, source, DEPOSIT_ARRIVAL, 0, null);
   }
 
   private bought(amount: number): void {
@@ -596,7 +724,7 @@ export class DronePilot extends ShipPilot {
     const before = sim.dockPoint(true);
     if (!sim.isDocked(this.ship)) {
       this.task = "fleeing";
-      this.flyTo(sim, { x: dock.x, y: dock.y, px: before.x, py: before.y }, DOCK_ARRIVAL_SLACK, 0, null);
+      this.travel(sim, { x: dock.x, y: dock.y, px: before.x, py: before.y }, DOCK_ARRIVAL_SLACK, 0, null);
       return;
     }
     this.task = "sheltering";
@@ -643,7 +771,7 @@ export class DronePilot extends ShipPilot {
     if (!deposit) return false;
     this.task = "to deposit";
     if (sim.depositAt(ship) === deposit) sim.sellToDeposit(ship, deposit);
-    else this.flyTo(sim, deposit, DEPOSIT_ARRIVAL, 0, null);
+    else this.travel(sim, deposit, DEPOSIT_ARRIVAL, 0, null);
     return true;
   }
 
@@ -659,12 +787,23 @@ export class DronePilot extends ShipPilot {
     this.task = "to station";
     const dock = sim.dockPoint();
     const before = sim.dockPoint(true);
-    this.flyTo(sim, { x: dock.x, y: dock.y, px: before.x, py: before.y }, DOCK_ARRIVAL_SLACK, 0, null);
+    this.travel(sim, { x: dock.x, y: dock.y, px: before.x, py: before.y }, DOCK_ARRIVAL_SLACK, 0, null);
   }
 
   private mine(sim: Sim): void {
     const { ship } = this;
-    this.chooseTargets(sim);
+    const field = this.workingField(sim);
+    // Nearer another field than its own, or with a body still in the way, it's a trip there first.
+    const away =
+      sim.extraFields.length > 0 &&
+      (sim.miningFieldAt(ship.x, ship.y).id !== field.id || sim.cornerToward(ship.x, ship.y, field.poi.x, field.poi.y) !== null);
+    if (away && ship.ore === 0) {
+      this.task = field.id === FIRST_FIELD ? "to field" : "to far field";
+      this.travel(sim, field.poi, field.radius * FIELD_ARRIVAL_SHARE, 0, null);
+      return;
+    }
+    this.habit = field.id;
+    this.chooseTargets(sim, field);
 
     if (this.ore) {
       this.task = "gathering";
@@ -677,6 +816,11 @@ export class DronePilot extends ShipPilot {
     }
     if (ship.ore > 0) {
       this.hauling = true;
+      return;
+    }
+    // Mined out: back to the first field, which is by the station.
+    if (field.id !== FIRST_FIELD) {
+      this.working = FIRST_FIELD;
       return;
     }
     this.task = "idle";
@@ -693,7 +837,7 @@ export class DronePilot extends ShipPilot {
     return Math.hypot(ore.x - sim.ship.x, ore.y - sim.ship.y) < sim.tuning.trafficOreGap;
   }
 
-  private chooseTargets(sim: Sim): void {
+  private chooseTargets(sim: Sim, field: MiningField): void {
     const { ship } = this;
     this.targetAge += TICK;
     this.retarget -= TICK;
@@ -709,7 +853,8 @@ export class DronePilot extends ShipPilot {
       this.ore = null;
       this.retarget = 0;
     }
-    if (this.rock && !sim.rocks.includes(this.rock)) {
+    const elsewhere = (rock: Rock) => sim.extraFields.length > 0 && !sim.rockIn(field, rock);
+    if (this.rock && (!sim.rocks.includes(this.rock) || elsewhere(this.rock))) {
       this.rock = null;
       this.retarget = 0;
     }
@@ -729,11 +874,12 @@ export class DronePilot extends ShipPilot {
       }
     }
 
-    // Stays with its rock until the rock breaks, instead of wandering between them.
+    // Stays with its rock until the rock breaks, instead of wandering between them. Only
+    // its own field's: another field's rocks are a trip, not a target.
     if (!this.rock) {
       best = Infinity;
       for (const rock of sim.rocks) {
-        if (this.ignored.has(rock)) continue;
+        if (this.ignored.has(rock) || elsewhere(rock)) continue;
         const distance = Math.hypot(rock.x - ship.x, rock.y - ship.y) - rock.radius;
         if (distance < best) {
           best = distance;

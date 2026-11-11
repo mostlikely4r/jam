@@ -109,6 +109,17 @@ export const DEFAULTS = {
   pirateGrudgeSeconds: 900,
   /** Hits from one ship before traffic runs home to report it, and how many seconds each hit takes to be forgotten. */
   trafficPatience: 3,
+  /** The chance that traffic leaving the station heads for another field at random, however far. */
+  fieldWanderChance: 0.02,
+  /** Up to this many seconds of trip each field is let off by luck, so a field nearly as near gets picked too. */
+  fieldLuckSeconds: 60,
+  /** Seconds of trip a ship will take on to go back to the field it worked last. */
+  fieldHabitSeconds: 60,
+  /** A field holding less than this share of its rocks counts as empty. */
+  fieldEmptyShare: 0.3,
+  /** After pirates kill a ship, the chance on each trip that it keeps away from that field, and for how many seconds. */
+  fieldFearChance: 0.5,
+  fieldFearSeconds: 1800,
   grudgeFadeSeconds: 60,
   /** A victim this close to a defender reports to it there and then, instead of flying home. */
   witnessRange: 800,
@@ -444,6 +455,12 @@ export const GROUPS: Group[] = [
       { key: "tradeChance", label: "Chance traffic leaves the station to buy a load", min: 0, max: 1, step: 0.05 },
       { key: "pirateGrudgeSeconds", label: "Seconds traffic won't buy from pirates after they kill it", min: 0, max: 3600, step: 60 },
       { key: "trafficPatience", label: "Hits from one ship before traffic reports it", min: 1, max: 10, step: 1 },
+      { key: "fieldWanderChance", label: "Chance traffic heads for any other field", min: 0, max: 1, step: 0.01 },
+      { key: "fieldLuckSeconds", label: "Seconds of trip traffic shrugs off by luck", min: 0, max: 1200, step: 10 },
+      { key: "fieldHabitSeconds", label: "Seconds of trip traffic takes on to go back to its last field", min: 0, max: 1200, step: 10 },
+      { key: "fieldEmptyShare", label: "Field counts as empty below this share of its rocks", min: 0, max: 1, step: 0.05 },
+      { key: "fieldFearChance", label: "Chance traffic avoids the field pirates killed it in", min: 0, max: 1, step: 0.05 },
+      { key: "fieldFearSeconds", label: "Seconds traffic remembers where pirates killed it", min: 0, max: 7200, step: 60 },
       { key: "grudgeFadeSeconds", label: "Seconds for each hit to be forgotten", min: 5, max: 600, step: 5 },
       { key: "witnessRange", label: "Distance at which a victim reports to a defender in person", min: 0, max: 3000, step: 50 },
       { key: "trafficOreGap", label: "Traffic leaves others' ore this close to you alone", min: 0, max: 1000, step: 25 },

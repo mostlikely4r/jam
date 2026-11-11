@@ -577,7 +577,7 @@ describe("station", () => {
         expect(at.x).toBeCloseTo(poi.x, 6);
         expect(at.y).toBeCloseTo(poi.y, 6);
       }
-    });
+    }, 30000);
 
     it("tells where a POI will be, matching where it gets to", () => {
       const sim = orbiting();

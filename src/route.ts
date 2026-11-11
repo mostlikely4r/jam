@@ -3,7 +3,7 @@
  * works in the body's own frame (body at the origin, standing still) and hands in where
  * the start and the target are at any time.
  *
- * Used by the system designer to preview trips. Not yet used by any pilot.
+ * Used by the system designer to preview trips, and by traffic to weigh up the trip to each field.
  */
 
 export interface Vec {

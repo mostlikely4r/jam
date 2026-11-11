@@ -76,6 +76,9 @@ export const DEFAULTS = {
   floaterStart: true,
   floaterEngine: 0.2,
   clickSpeed: 80,
+  /** A course's top speed. The burn out and the brake in keep the trip time right; this only
+   * keeps a very long course sane, so stars sit near this and moons well under it. */
+  autopilotSpeed: 20000,
   /** A drag order's line is how far the destination drifts in this many seconds. */
   dragSeconds: 4,
   /** A drawn drift is measured against what carries things at the spot, not the ship's motion. */
@@ -341,6 +344,7 @@ export const GROUPS: Group[] = [
     sliders: [
       { key: "floaterEngine", label: "Engine power, all thrusters", min: 0.05, max: 1, step: 0.05 },
       { key: "clickSpeed", label: "Click to move speed", min: 20, max: 400, step: 10 },
+      { key: "autopilotSpeed", label: "Autopilot top speed", min: 1000, max: 60000, step: 500 },
       { key: "dragSeconds", label: "Drag order: seconds of drift the line shows", min: 1, max: 15, step: 0.5 },
       { key: "nudgeShare", label: "Nudge from the destination: share of a full drag", min: 0.05, max: 1, step: 0.05 },
       { key: "gun2ShotsPerSecond", label: "Gun 2 shots per second", min: 0.5, max: 7, step: 0.5 },

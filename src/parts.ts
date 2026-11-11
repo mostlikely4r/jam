@@ -11,7 +11,9 @@ export type PartId =
   | "clickTurn"
   | "turret"
   | "bay"
-  | "largeBay";
+  | "largeBay"
+  | "starmap"
+  | "autopilot";
 
 /** The racer is the quick ship with an arrow shape. The floater is slow and square. */
 export type ShipModel = "racer" | "floater";
@@ -127,6 +129,24 @@ export const PARTS: Part[] = [
     price: 150,
     weight: 0.02,
     description: "Drag from your ship to set a facing to hold",
+    tier: 2,
+  },
+  {
+    id: "starmap",
+    label: "System chart",
+    short: "chart",
+    price: 350,
+    weight: 0.02,
+    description: "Press C for the whole system: bodies, orbits and every place",
+    tier: 2,
+  },
+  {
+    id: "autopilot",
+    label: "Autopilot",
+    short: "auto",
+    price: 800,
+    weight: 0.05,
+    description: "From the chart, sets a course and flies it: out, coast, brake, round bodies",
     tier: 2,
   },
   {

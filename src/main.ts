@@ -1,4 +1,5 @@
 import { ShipDemo } from "./demo";
+import { Chart } from "./chart";
 import { Designer } from "./designer/designer";
 import { loadGame, saveGame, saveInfo, type SaveSlot } from "./save";
 import { Audio } from "./audio";
@@ -90,6 +91,8 @@ function openDesigner(): void {
   pauseOverlay.hidden = true;
   designer.open();
 }
+/** The system chart, for whoever has the starmap part. It lives over the game, which keeps running. */
+const chart = new Chart(sim);
 const startOverlay = document.getElementById("start") as HTMLDivElement;
 const startBox = document.querySelector("#start .box") as HTMLDivElement;
 /** The live demos behind the start menu's ship cards, while it's open. */
@@ -288,6 +291,15 @@ const HELP: [string, HelpLine[]][] = [
       ["In the dock: -", "Buy a drone", () => sim.discovered.has("dock") && sim.unlocked("drone")],
       ["At a deposit: 1 / 2", "Drop your ore / load ore to haul", found("deposit")],
       ["Where someone's selling ore: 1", "Buy a load", found("seller")],
+    ],
+  ],
+  [
+    "Chart",
+    [
+      ["C", "The system chart", has("starmap")],
+      ["C: wheel / drag", "Zoom / pan the chart", has("starmap")],
+      ["C: pick a place, Enter", "Autopilot flies the course", has("autopilot")],
+      ["Flight keys", "Take over from the autopilot; it resumes when you let go", has("autopilot")],
     ],
   ],
   [
@@ -817,6 +829,25 @@ window.addEventListener("keydown", (event) => {
     openDesigner();
     return;
   }
+  // The chart is up: the world runs on behind it, and the keys wait.
+  if (chart.isOpen) {
+    if (event.repeat) return;
+    if (event.code === "KeyC" || event.code === "Escape") {
+      chart.close();
+      keys.clear();
+      return;
+    }
+    if (event.code === "Enter") {
+      const pick = chart.selection;
+      if (pick?.place) {
+        const flew = pick.poi
+          ? sim.orderTravel(pick.poi)
+          : sim.orderTravelDeposit(pick.deposit!);
+        if (flew) chart.close();
+      }
+    }
+    return;
+  }
   if (event.code === "Escape" || event.code === "KeyP") {
     if (!event.repeat) setPaused(!paused);
     return;
@@ -828,6 +859,12 @@ window.addEventListener("keydown", (event) => {
   }
   // The menu is up: the game waits.
   if (paused) return;
+  // The chart needs its part. Without it the key does nothing: JAM is meant to be discovered.
+  if (event.code === "KeyC" && !event.repeat && sim.ship.parts.has("starmap")) {
+    keys.clear();
+    chart.open();
+    return;
+  }
   if (event.code === "Tab") {
     event.preventDefault();
     if (dev) panel.hidden = !panel.hidden;
@@ -1011,6 +1048,7 @@ function frame(now: number): void {
     dragged: Math.hypot(drag.toX - drag.fromX, drag.toY - drag.fromY) >= DRAG_PIXELS,
   };
   renderer.draw(sim, paused ? 1 : accumulator / TICK, paused ? 0 : seconds);
+  chart.draw(sim);
 
   hudTimer -= seconds;
   if (dev && hudTimer <= 0) {
@@ -1023,7 +1061,7 @@ function frame(now: number): void {
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
       `Ore   ${sim.ship.ore}/${cargoText(sim.ship)}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
       `Parts ${partList(sim.ship)}  Weight ${sim.shipWeight(sim.ship).toFixed(2)}`,
-      `${frameText()}${sim.isDocked() ? "  DOCKED" : ""}${sim.ship.marked ? "  MARKED by pirates" : ""}${sim.ship.wanted ? "  WANTED by the station" : ""}${sim.clickPilot.active ? `  Click order: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < MAX_HULL && !sim.hasPartsFor(tuning.repairCost) ? "  No repairs: the station is out of parts" : ""}`,
+      `${frameText()}${sim.isDocked() ? "  DOCKED" : ""}${sim.ship.marked ? "  MARKED by pirates" : ""}${sim.ship.wanted ? "  WANTED by the station" : ""}${sim.clickPilot.active ? `  ${sim.clickPilot.isCourse ? "Course" : "Click order"}: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < MAX_HULL && !sim.hasPartsFor(tuning.repairCost) ? "  No repairs: the station is out of parts" : ""}`,
       `Rocks ${sim.rocks.length}  Wrecks ${sim.ship.wrecks}`,
       ...sim.drones.flatMap((drone, index) => {
         const { ship } = drone;

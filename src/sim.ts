@@ -1476,6 +1476,36 @@ export class Sim {
     return this.clickPilot.nudge(vx, vy);
   }
 
+  /**
+   * Sets a course for a place, if the ship has the autopilot: for the dock, at its berth;
+   * for a field, just inside its edge; for the pirate base, inside its ring. The course
+   * chases the place as it moves. Returns whether it did.
+   */
+  orderTravel(poi: Poi): boolean {
+    if (!this.ship.parts.has("autopilot")) return false;
+    if (poi.name === "station") {
+      this.clickPilot.travelTo(poi, DOCK_OFFSET, 0);
+    } else if (poi.name === "pirate base") {
+      this.clickPilot.travelTo(poi, 0, 0, poi.reach / 2);
+    } else {
+      // A field, of either kind: stop near its edge, where the rocks start.
+      this.clickPilot.travelTo(poi, 0, 0, poi.reach * 0.85);
+    }
+    return true;
+  }
+
+  /** Sets a course for a deposit, if the ship has the autopilot. */
+  orderTravelDeposit(deposit: Deposit): boolean {
+    if (!this.ship.parts.has("autopilot")) return false;
+    this.clickPilot.travelTo(deposit, 0, 0, 60);
+    return true;
+  }
+
+  /** Every place, for the chart: the game's own three, plus the designer's outposts and fields. */
+  allPois(): Poi[] {
+    return this.pois;
+  }
+
   /** Holds a facing, during a move's coasts and after it, or turns there if there's no move. */
   orderFace(angle: number): boolean {
     if (!this.ship.parts.has("clickTurn")) return false;

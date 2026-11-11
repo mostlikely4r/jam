@@ -900,12 +900,37 @@ export class DronePilot extends ShipPilot {
 
 }
 
+/**
+ * A place a course follows. The order holds it by reference and reads where it is now, so
+ * the destination stays at a fixed spot in the place's own axes while it moves and turns.
+ * A Poi or a Deposit, by shape: where it is now and last tick, and how it's turned, if it turns.
+ */
+export interface CourseTarget {
+  x: number;
+  y: number;
+  px: number;
+  py: number;
+  rotation?: number;
+  prevRotation?: number;
+}
+
+/** Where in the place's own axes the course ends, and how short of the centre it stops. */
+interface CourseFollow {
+  poi: CourseTarget;
+  ox: number;
+  oy: number;
+  slack: number;
+}
+
 interface ClickOrder {
   /**
    * The destination. The sim moves and carries it like any loose body, so a spot at rest
    * stays put against whatever carries things there, and a drawn velocity drifts it on.
+   * A course instead reads its place live, through `follow`.
    */
   spot: Body;
+  /** The place this course flies to and keeps, in place of a carried spot. */
+  follow?: CourseFollow;
   /** The spot was given a velocity of its own. */
   drifts: boolean;
   /** Flies to the destination. Without it the order only stops or turns, where the ship is. */
@@ -933,6 +958,11 @@ export class ClickPilot extends ShipPilot {
     return this.order !== null;
   }
 
+  /** Whether the order is a course for a place, rather than a click order in the world. */
+  get isCourse(): boolean {
+    return !!this.order?.follow;
+  }
+
   /** Has an order and is flying it, not waiting out the player's hands on the keys. */
   get flying(): boolean {
     return this.order !== null && this.handsOff <= 0;
@@ -940,14 +970,18 @@ export class ClickPilot extends ShipPilot {
 
   /** What the order is doing, in words for the display. */
   get task(): string {
-    if (!this.order) return "";
-    return this.handsOff > 0 ? "waiting for the keys" : this.order.stage;
+    const { order } = this;
+    if (!order) return "";
+    if (this.handsOff > 0) return "waiting for the keys";
+    if (order.follow) return order.stage === "flying" ? "on course" : "coming in";
+    return order.stage;
   }
 
   /** Where a flight leads right now, or null without one. */
   target(): Mover | null {
-    if (!this.order?.move) return null;
-    return this.order.spot;
+    const { order } = this;
+    if (!order?.move) return null;
+    return order.follow ? this.courseSpot(order.follow) : order.spot;
   }
 
   /** The destination for the sim to move and carry, or null without an order. */
@@ -988,12 +1022,38 @@ export class ClickPilot extends ShipPilot {
   }
 
   /**
+   * Sets a course for a place, ending `slack` short of its centre (or at the spot `ox, oy`
+   * in its own axes, for a dock). The course chases the place as it moves and turns.
+   */
+  travelTo(poi: CourseTarget, ox = 0, oy = 0, slack = 0): void {
+    this.order = {
+      spot: { x: poi.x, y: poi.y, px: poi.px, py: poi.py, vx: 0, vy: 0 },
+      follow: { poi, ox, oy, slack },
+      drifts: false,
+      move: true,
+      face: this.order?.face ?? null,
+      stage: "flying",
+      closest: Infinity,
+      stuck: 0,
+    };
+    this.handsOff = 0;
+  }
+
+  /** Where the course's place is now, and was a tick ago, at the order's spot in its axes. */
+  private courseSpot(follow: CourseFollow): Mover {
+    const { poi } = follow;
+    if (follow.ox === 0 && follow.oy === 0) return poi;
+    return poiSpot(poi as Poi, follow.ox, follow.oy);
+  }
+
+  /**
    * Corrects the destination's drift by a small velocity, without starting over. Says the
    * same thing whatever the ship is doing, since it's measured against the destination.
    */
   nudge(vx: number, vy: number): boolean {
     const { order } = this;
-    if (!order?.move) return false;
+    // A course's destination is its place, not a spot a drift can be drawn onto.
+    if (!order?.move || order.follow) return false;
     order.spot.vx += vx;
     order.spot.vy += vy;
     order.drifts = true;
@@ -1077,7 +1137,7 @@ export class ClickPilot extends ShipPilot {
     const { order, ship } = this;
     if (!order) return;
     const stopping = order.stage === "stopping" || order.stage === "settling";
-    const needs = order.move || stopping ? "clickMove" : "clickTurn";
+    const needs = order.follow ? "autopilot" : order.move || stopping ? "clickMove" : "clickTurn";
     if (!ship.parts.has(needs)) {
       this.cancel();
       return;
@@ -1098,7 +1158,7 @@ export class ClickPilot extends ShipPilot {
 
     this.clearControls();
     this.correctingDirectly = false;
-    const target = order.spot;
+    const target = order.follow ? this.courseSpot(order.follow) : order.spot;
     const distance = Math.hypot(target.x - ship.x, target.y - ship.y);
     const { vx, vy } = this.relativeVelocity(target);
     const speed = Math.hypot(vx, vy);
@@ -1117,8 +1177,13 @@ export class ClickPilot extends ShipPilot {
     }
 
     if (order.stage === "flying") {
-      if (distance < ARRIVE_DISTANCE && speed < ARRIVE_SPEED) order.stage = "stopping";
-      else this.flyTo(sim, target, 0, 0, null);
+      if (order.follow) {
+        const at = distance - order.follow.slack;
+        if (at < ARRIVE_DISTANCE && speed < ARRIVE_SPEED) order.stage = "stopping";
+        else this.travel(sim, target, order.follow.slack, 0, null);
+      } else if (distance < ARRIVE_DISTANCE && speed < ARRIVE_SPEED) {
+        order.stage = "stopping";
+      } else this.flyTo(sim, target, 0, 0, null);
     }
     if (order.stage === "stopping") {
       // Either way it trims what speed is left: to rest, or to exactly the drawn drift.
@@ -1145,13 +1210,16 @@ export class ClickPilot extends ShipPilot {
    * and either way the ship ends at rest against what carries it. Once on the spot it only
    * stops, wherever that leaves it.
    */
-  private settle(sim: Sim, order: ClickOrder, target: Body, distance: number, vx: number, vy: number): void {
+  private settle(sim: Sim, order: ClickOrder, target: Mover, distance: number, vx: number, vy: number): void {
+    // A course stops `slack` short of its place, so the distance left is less the slack.
+    const slack = order.follow?.slack ?? 0;
+    const off = Math.max(0, distance - slack);
     // Without side thrusters it eases in more gently and lands less exactly: slow enough
     // that the drift while it turns around to brake stays inside the landing circle.
     const direct = this.ship.parts.has("strafe");
     const flip = this.flipSeconds(sim);
     const landing = direct ? SETTLED_DISTANCE : LANDING_TURNING;
-    if (distance < landing && Math.hypot(vx, vy) < LANDING_SPEED) order.landed = true;
+    if (off < landing && Math.hypot(vx, vy) < LANDING_SPEED) order.landed = true;
     // A drifting destination isn't eased onto, just matched: it carries on moving.
     const easing = order.move && !order.drifts && !order.landed;
     let wantX = 0;
@@ -1159,7 +1227,7 @@ export class ClickPilot extends ShipPilot {
     if (easing) {
       const rate = direct ? EASE_RATE : 1 / (EASE_FLIPS * flip);
       const floor = direct ? EASE_FLOOR : landing / flip;
-      const speed = Math.min(EASE_SPEED, Math.max(floor, distance * rate));
+      const speed = Math.min(EASE_SPEED, Math.max(floor, off * rate));
       wantX = ((target.x - this.ship.x) / distance) * speed;
       wantY = ((target.y - this.ship.y) / distance) * speed;
     }
@@ -1220,17 +1288,20 @@ export class ClickPilot extends ShipPilot {
   }
 
   protected override speedLimitHere(sim: Sim): number {
+    // A course is in it for the distance: the burn out and brake in set the pace, and the
+    // cap only keeps a crossing between stars sane.
+    if (this.order?.follow) return sim.tuning.autopilotSpeed;
     return sim.tuning.clickSpeed;
   }
 
-  /** Straight at the spot, whatever is in the way, unless it has the route planner. */
+  /** Straight at the spot, whatever is in the way, unless it has the route planner or a course. */
   protected override routeAround(
     sim: Sim,
     target: { x: number; y: number; px: number; py: number },
     exclude: object | null,
   ): { x: number; y: number } {
     const { ship } = this;
-    if (ship.parts.has("clickRoute")) return super.routeAround(sim, target, exclude);
+    if (ship.parts.has("clickRoute") || this.order?.follow) return super.routeAround(sim, target, exclude);
     const dx = target.x - ship.x;
     const dy = target.y - ship.y;
     const distance = Math.hypot(dx, dy) || 1;

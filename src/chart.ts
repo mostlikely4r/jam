@@ -155,8 +155,8 @@ export class Chart {
     if (poi === sim.station) return "Station";
     if (poi === sim.field) return "Field";
     if (poi === sim.pirateBase) return "Pirate base";
-    const outpost = sim.outposts.find(({ poi: at }) => at === poi);
-    if (outpost) return outpost.spec.name || "Outpost";
+    const base = sim.baseOf(poi);
+    if (base?.spec) return base.spec.name || "Station";
     const extra = sim.extraFields.find(({ poi: at }) => at === poi);
     if (extra) return extra.spec.name || "Field";
     return poi.name;

@@ -1,4 +1,4 @@
-import type { Ore, Ship, Sim } from "./sim";
+import type { Base, Ore, Poi, Ship, Sim } from "./sim";
 
 /** One line on the radio. A null speaker is the station. */
 export interface ChatterLine {
@@ -112,7 +112,8 @@ export class Chatter {
   private cooldowns = new WeakMap<Ship, Map<string, number>>();
   private stationCooldowns = new Map<string, number>();
   private nextFieldTalk = new WeakMap<Ship, number>();
-  private replies: { at: number; text: string }[] = [];
+  /** Station lines still to come, and which station says each: the first base's if none. */
+  private replies: { at: number; text: string; from?: Poi }[] = [];
   /** Ships that asked for the dock on this trip home. */
   private approached = new WeakSet<Ship>();
   private playerFar = true;
@@ -142,7 +143,7 @@ export class Chatter {
     this.time += dt;
     const due = this.replies.filter((reply) => reply.at <= this.time);
     this.replies = this.replies.filter((reply) => reply.at > this.time);
-    for (const reply of due) this.stationSays(sim, reply.text);
+    for (const reply of due) this.stationSays(sim, reply.text, false, reply.from);
 
     for (const pilot of [...sim.traffic, ...sim.drones]) {
       const { ship, task } = pilot;
@@ -194,12 +195,14 @@ export class Chatter {
       }
     }
 
-    const dock = sim.dockPoint();
+    // Whichever base the player comes in to greets them.
+    const near = sim.nearestDock(sim.ship.x, sim.ship.y);
+    const dock = sim.dockPoint(false, near);
     const distance = Math.hypot(sim.ship.x - dock.x, sim.ship.y - dock.y);
     if (distance > GREETING_FAR) this.playerFar = true;
     if (distance < GREETING_NEAR && this.playerFar) {
       this.playerFar = false;
-      if (this.stationReady("greeting", GREETING_COOLDOWN)) this.stationSays(sim, this.pick(GREETING));
+      if (this.stationReady("greeting", GREETING_COOLDOWN)) this.stationSays(sim, this.pick(GREETING), false, near);
     }
   }
 
@@ -237,15 +240,15 @@ export class Chatter {
     this.lineFrom(sim, BLACK_MARKET_NAME, "One hull, as ordered. Fly it well.", spot.x, spot.y);
   }
 
-  haulerBerthed(sim: Sim): void {
-    const spot = sim.haulerSpot();
+  haulerBerthed(sim: Sim, base: Base): void {
+    const spot = sim.haulerSpot(false, base);
     if (!spot) return;
     this.lineFrom(sim, HAULER_NAME, "At your berth and ready to load.", spot.x, spot.y);
-    this.reply(`Roger, ${HAULER_NAME}. Loading now.`);
+    this.reply(`Roger, ${HAULER_NAME}. Loading now.`, STATION_REPLY_DELAY, base.poi);
   }
 
-  haulerLeaving(sim: Sim, cargo: number): void {
-    const spot = sim.haulerSpot();
+  haulerLeaving(sim: Sim, base: Base, cargo: number): void {
+    const spot = sim.haulerSpot(false, base);
     if (!spot) return;
     const text = cargo > 0 ? `${cargo} ore aboard. See you next run.` : "Nothing for us today. We'll try again later.";
     this.lineFrom(sim, HAULER_NAME, text, spot.x, spot.y);
@@ -343,20 +346,20 @@ export class Chatter {
     sim.events.push({ type: "chatter", speaker: null, name, text, x, y, mayday: false, broadcast: false });
   }
 
-  private stationSays(sim: Sim, text: string, broadcast = false): void {
-    const dock = sim.dockPoint();
+  private stationSays(sim: Sim, text: string, broadcast = false, from?: Poi): void {
+    const dock = sim.dockPoint(false, from);
     sim.events.push({ type: "chatter", speaker: null, name: "Station", text, x: dock.x, y: dock.y, mayday: false, broadcast });
   }
 
-  private reply(text: string, delay = STATION_REPLY_DELAY): void {
-    this.replies.push({ at: this.time + delay, text });
+  private reply(text: string, delay = STATION_REPLY_DELAY, from?: Poi): void {
+    this.replies.push({ at: this.time + delay, text, from });
   }
 
   /** The player's ship was wrecked and rebuilt in the dock. Said once the wreck has been watched. */
-  playerRebuilt(cost: number, cleared: boolean): void {
+  playerRebuilt(cost: number, cleared: boolean, at: Poi): void {
     const price = cost > 0 ? ` That's ${cost} credits.` : "";
     const record = cleared ? " Fresh hull, clean record." : "";
-    this.reply(`We've rebuilt your ship.${price}${record}`, PLAYER_REBUILT_DELAY);
+    this.reply(`We've rebuilt your ship.${price}${record}`, PLAYER_REBUILT_DELAY, at);
   }
 
   private ready(ship: Ship, kind: string, cooldown: number): boolean {

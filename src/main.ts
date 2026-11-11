@@ -6,7 +6,7 @@ import { shippedWorld } from "./designer/shipped";
 import { loadGame, saveGame, saveInfo, type SaveSlot } from "./save";
 import { Audio } from "./audio";
 import { Radio } from "./radio";
-import { type Deposit, MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
+import { type Base, type Deposit, MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isProject, PARTS, partFits, type Part } from "./parts";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
@@ -489,8 +489,8 @@ function shopButton(key: string, line: ShopLine, onClick: () => void): HTMLButto
 }
 
 /** The hauler's arrival, in words for the shop's heading. */
-function haulerText(): string {
-  const eta = sim.haulerEta();
+function haulerText(base: Base): string {
+  const eta = sim.haulerEta(base);
   if (eta === null) return "no hauler coming";
   if (eta === 0) return "hauler docked";
   const seconds = Math.ceil(eta);
@@ -558,8 +558,9 @@ function updatePirateShop(): void {
 
 function updateShop(): void {
   const { ship } = sim;
-  // Only the station itself has a shop. Its outposts just buy ore and repair.
-  const docked = sim.atShop();
+  // Every base has a shop, selling from its own stock.
+  const base = sim.baseAt();
+  const docked = base !== null;
   const deposit = sim.isDocked() ? null : sim.depositAt();
   if (deposit) {
     updateDepositShop(deposit);
@@ -569,11 +570,11 @@ function updateShop(): void {
     updatePirateShop();
     return;
   }
-  if (docked) {
-    const title = `Dock shop - station ${Math.floor(sim.stationAccount.credits)} credits - ${haulerText()}`;
+  if (base) {
+    const title = `Dock shop - station ${Math.floor(base.account.credits)} credits - ${haulerText(base)}`;
     if (shopHeading.textContent !== title) shopHeading.textContent = title;
   }
-  const state = `${docked} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.blueprints].join()} ${[...sim.blueprintPaid].join()} ${[...sim.blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks}`;
+  const state = `${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.blueprints].join()} ${[...sim.blueprintPaid].join()} ${[...sim.blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked;

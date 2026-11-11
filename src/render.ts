@@ -13,6 +13,7 @@ import {
   SHIP_RADIUS,
   STATION_HALF,
   TICK,
+  type Base,
   type Poi,
   type PoiReading,
   type Ship,
@@ -290,10 +291,10 @@ export class Renderer {
       Math.abs(x - camX) < halfW + r && Math.abs(y - camY) < halfH + r;
 
     this.drawBodies(sim, alpha, visible);
-    for (const station of sim.docks) this.drawStation(sim, station, alpha);
+    for (const base of sim.bases) this.drawStation(sim, base, alpha);
     this.drawDeposits(sim, alpha);
     this.drawGuards(sim, alpha);
-    this.drawHauler(sim, alpha);
+    for (const base of sim.bases) this.drawHauler(sim, base, alpha);
     this.drawBlackMarket(sim, alpha);
     this.drawPirateBase(sim, alpha);
     if (tuning.showPoiZones) this.drawPoiZones(sim, alpha);
@@ -428,9 +429,10 @@ export class Renderer {
     });
   }
 
-  /** A station and its dock. Only the station itself shows the ore and parts it holds. */
-  private drawStation(sim: Sim, station: Poi, alpha: number): void {
+  /** A station and its dock, with the ore and parts its base holds. */
+  private drawStation(sim: Sim, base: Base, alpha: number): void {
     const { ctx } = this;
+    const station = base.poi;
     const x = lerp(station.px, station.x, alpha);
     const y = lerp(station.py, station.y, alpha);
     const size = STATION_HALF * 2;
@@ -454,10 +456,8 @@ export class Renderer {
     ctx.strokeStyle = "#aab1bd";
     ctx.lineWidth = 3;
     ctx.strokeRect(-STATION_HALF, -STATION_HALF, size, size);
-    if (station === sim.station) {
-      this.drawOrePile(sim.stationOre, STATION_HALF);
-      this.drawCrates(sim.stationParts, STATION_HALF);
-    }
+    this.drawOrePile(base.ore, STATION_HALF);
+    this.drawCrates(base.parts, STATION_HALF);
     ctx.restore();
   }
 
@@ -969,10 +969,10 @@ export class Renderer {
   }
 
   /** A long freighter, its cargo shown as lumps that fill it as it loads. */
-  private drawHauler(sim: Sim, alpha: number): void {
-    const now = sim.haulerSpot();
-    const before = sim.haulerSpot(true);
-    const hauler = sim.hauler;
+  private drawHauler(sim: Sim, base: Base, alpha: number): void {
+    const now = sim.haulerSpot(false, base);
+    const before = sim.haulerSpot(true, base);
+    const { hauler } = base;
     if (!now || !before || !hauler) return;
     const { ctx } = this;
     const x = lerp(before.x, now.x, alpha);

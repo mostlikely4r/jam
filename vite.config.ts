@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from "vite";
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-/** Where the system designer keeps its layout. Nothing imports it yet, so saving it doesn't reload the game. */
+/** Where the system designer keeps its layout, which the built game ships with. */
 const WORLD_FILE = fileURLToPath(new URL("./src/designer/world.json", import.meta.url));
 
 /** Lets the system designer read and write its world file while developing. Not in the built game. */
@@ -41,4 +41,7 @@ export default defineConfig({
   // Relative paths, so the built game works from any folder, such as a GitHub Pages project page.
   base: "./",
   plugins: [worldFile()],
+  // Saving the layout from the designer shouldn't reload the game under it: the designer's
+  // draft is already in play, and the next start or build picks the file up.
+  server: { watch: { ignored: ["**/src/designer/world.json"] } },
 });

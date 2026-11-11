@@ -18,7 +18,8 @@ export interface GameLink {
   tuning: Tuning;
   clock(): number;
   phases(): Phases;
-  apply(phases: Phases, bodies: SolidBody[], spawns: Spawn[], fields: FieldSpec[], stations: StationSpec[]): void;
+  /** `keep`: the places carry on from where they are, as after loading a save, rather than jump to `phases`. */
+  apply(phases: Phases, bodies: SolidBody[], spawns: Spawn[], fields: FieldSpec[], stations: StationSpec[], keep?: boolean): void;
   /** Where the player's ship and the field are now, in the game's own frame. */
   where(): { ship: { x: number; y: number }; field: { x: number; y: number } };
 }
@@ -160,6 +161,12 @@ function placer(world: World): (node: WorldNode, copy: Copy | null) => Orbit[] {
       ...own(centreChain.slice(shared)).map((each) => orbit(each, -1, null)),
     ];
   };
+}
+
+/** Hands the game a whole layout: the tuning it flies by, and every body, place and start. */
+export function useLayout(world: World, game: GameLink, keep = false): void {
+  writeGame(world, game.tuning);
+  game.apply(phasesFromWorld(world), bodiesFor(world), spawnsFor(world), fieldsFor(world), stationsFor(world), keep);
 }
 
 export function writeGame(world: World, tuning: Tuning): void {

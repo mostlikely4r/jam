@@ -1,6 +1,8 @@
 import { ShipDemo } from "./demo";
 import { Chart } from "./chart";
 import { Designer } from "./designer/designer";
+import { useLayout, type GameLink } from "./designer/link";
+import { shippedWorld } from "./designer/shipped";
 import { loadGame, saveGame, saveInfo, type SaveSlot } from "./save";
 import { Audio } from "./audio";
 import { Radio } from "./radio";
@@ -60,30 +62,38 @@ const dev = new URLSearchParams(location.search).has("dev");
 renderer.dev = dev;
 hud.hidden = !dev;
 const pauseBox = document.querySelector("#pause .box") as HTMLDivElement;
+/** The game's side of the layout: the designer writes through this, and so does the shipped world. */
+const gameLink: GameLink = {
+  tuning,
+  clock: () => sim.now,
+  phases: () => sim.orbitPhases(),
+  where: () => ({ ship: { x: sim.ship.x, y: sim.ship.y }, field: { x: sim.field.x, y: sim.field.y } }),
+  apply(phases, bodies, spawns, fields, stations, keep = false) {
+    sim.bodies = bodies;
+    sim.spawns = spawns;
+    sim.startPhases = phases;
+    sim.applyLayout(keep ? {} : phases, fields, stations);
+    saveTuning();
+    buildPanel();
+  },
+};
 /** Dev only: the system designer, a separate view for laying out stars, planets and places. */
 const designer = dev
-  ? new Designer(
-      () => {
-        keys.clear();
-        // Opened from the pause menu: go back to it.
-        if (paused) setPaused(true);
-      },
-      {
-        tuning,
-        clock: () => sim.now,
-        phases: () => sim.orbitPhases(),
-        where: () => ({ ship: { x: sim.ship.x, y: sim.ship.y }, field: { x: sim.field.x, y: sim.field.y } }),
-        apply(phases, bodies, spawns, fields, stations) {
-          sim.bodies = bodies;
-          sim.spawns = spawns;
-          sim.startPhases = phases;
-          sim.applyLayout(phases, fields, stations);
-          saveTuning();
-          buildPanel();
-        },
-      },
-    )
+  ? new Designer(() => {
+      keys.clear();
+      // Opened from the pause menu: go back to it.
+      if (paused) setPaused(true);
+    }, gameLink)
   : null;
+
+/**
+ * Puts the layout into the game: the designer's in dev, the shipped one otherwise.
+ * `keep`: the places carry on from where they are, as after loading a save.
+ */
+function layOut(keep = false): void {
+  if (designer) designer.linkToGame(keep);
+  else useLayout(shippedWorld(), gameLink, keep);
+}
 
 function openDesigner(): void {
   if (!designer) return;
@@ -126,8 +136,8 @@ function ago(savedAt: number): string {
 /** Picks up a saved game and goes straight into it. */
 function resumeFrom(slot: SaveSlot): boolean {
   if (!loadGame(sim, slot)) return false;
-  // A save keeps the layout it was made in, which the designer may have changed since.
-  if (designer) sim.applyLayout();
+  // A save keeps its own tuning, but the places are laid out as the world is now.
+  layOut(true);
   keys.clear();
   buildPanel();
   demos = [];
@@ -750,8 +760,8 @@ function buildPanel(): void {
   reset.textContent = "Reset to defaults";
   reset.addEventListener("click", () => {
     Object.assign(tuning, DEFAULTS);
-    // The places' own numbers come from the designer, not the defaults.
-    designer?.linkToGame();
+    // The places' own numbers come from the layout, not the defaults.
+    layOut();
     saveTuning();
     opened.clear();
     saveOpened();
@@ -1094,7 +1104,7 @@ function frame(now: number): void {
 }
 
 buildPanel();
-designer?.connect();
+layOut();
 showStart();
 requestAnimationFrame(frame);
 

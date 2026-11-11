@@ -11,7 +11,6 @@ import {
   pathTo,
   positions,
   reachOf,
-  seedWorld,
   limitCarrying,
   spinAngle,
   stringifyWorld,
@@ -23,7 +22,8 @@ import {
   type World,
   type WorldNode,
 } from "./world";
-import { bodiesFor, fieldsFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, stationsFor, writeGame, type GameLink } from "./link";
+import { linkSummary, linkedNodes, readGame, useLayout, type GameLink } from "./link";
+import { shippedWorld } from "./shipped";
 import { planRoute, type Flight, type Route } from "../route";
 import { DEFAULTS } from "../tuning";
 
@@ -182,7 +182,7 @@ export class Designer {
     style.textContent = STYLE;
     document.head.append(style);
 
-    this.world = this.loadDraft() ?? seedWorld();
+    this.world = this.loadDraft() ?? shippedWorld();
     this.selected = walk(this.world).find((entry) => isBody(entry.node.kind) && entry.node !== this.world.root)?.node ?? this.world.root;
     this.follow = this.selected;
 
@@ -221,7 +221,7 @@ export class Designer {
       this.title("World file"),
       this.button("Save to file", () => void this.saveFile()),
       this.button("Load from file", () => void this.loadFile()),
-      this.button("Start over from the default layout", () => this.replace(seedWorld()), "danger"),
+      this.button("Start over from the default layout", () => this.replace(shippedWorld()), "danger"),
       this.status,
     );
 
@@ -267,20 +267,14 @@ export class Designer {
     this.onClose();
   }
 
-  /** Hands the game this layout. */
-  linkToGame(): void {
-    writeGame(this.world, this.game.tuning);
-    this.game.apply(phasesFromWorld(this.world), bodiesFor(this.world), spawnsFor(this.world), fieldsFor(this.world), stationsFor(this.world));
+  /** Hands the game this layout. `keep`: the places stay where they are on their orbits. */
+  linkToGame(keep = false): void {
+    useLayout(this.world, this.game, keep);
     try {
       localStorage.setItem(DRAFT_KEY, stringifyWorld(this.world));
     } catch {
       // Storage off: the link still holds until the page is closed.
     }
-  }
-
-  /** At startup: the designer is the home of the layout, so the game takes it from here. */
-  connect(): void {
-    this.linkToGame();
   }
 
   // --- Small DOM helpers -------------------------------------------------------------

@@ -72,11 +72,11 @@ const designer = dev
         clock: () => sim.now,
         phases: () => sim.orbitPhases(),
         where: () => ({ ship: { x: sim.ship.x, y: sim.ship.y }, field: { x: sim.field.x, y: sim.field.y } }),
-        apply(phases, bodies, spawns) {
+        apply(phases, bodies, spawns, fields) {
           sim.bodies = bodies;
           sim.spawns = spawns;
           sim.startPhases = phases;
-          sim.applyLayout(phases);
+          sim.applyLayout(phases, fields);
           saveTuning();
           buildPanel();
         },

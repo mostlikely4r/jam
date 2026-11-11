@@ -305,6 +305,35 @@ export interface Poi {
   reach: number;
   /** Rotation made on the current tick. */
   turn: number;
+  /** A field from the designer beyond the first: placed by its chain of orbits instead. */
+  orbits?: Orbit[];
+  /** Its own carrying ranges, instead of the tuning's. */
+  carry?: { full: number; none: number };
+}
+
+/**
+ * A field from the designer beyond the first: rocks and nothing else. Not saved: the
+ * designer hands them over each time, and the rocks in them are saved like any other.
+ */
+export interface FieldSpec {
+  id: string;
+  name: string;
+  radius: number;
+  rocks: number;
+  rockDrift: number;
+  rockInflow: number;
+  /** Carries fully within `carryFull` of its edge, fading out by `carryNone`. Infinity: everywhere. */
+  carryFull: number;
+  carryNone: number;
+  rotationPeriod: number;
+  orbits: Orbit[];
+}
+
+interface ExtraField {
+  spec: FieldSpec;
+  poi: Poi;
+  /** Counts down to the next big rock drifting in. */
+  inflowTimer: number;
 }
 
 /** What touching a body's ground does: nothing, a bounce that hurts like a rock's, or the end. */
@@ -579,6 +608,8 @@ export class Sim {
   spawns: Spawn[] = [];
   /** Each POI's angle at clock 0 for new games, from the designer. Missing: the game's own start. */
   startPhases: Partial<Record<Poi["name"], number>> = {};
+  /** Fields beyond the first, from the designer. Rocks only: no station, deposit or traffic of their own. */
+  extraFields: ExtraField[] = [];
   /** Where each body is this tick. */
   private bodySpots: { body: SolidBody; x: number; y: number; vx: number; vy: number }[] = [];
   shots: Shot[] = [];
@@ -748,21 +779,62 @@ export class Sim {
       if (i < this.tuning.testDrones) this.addDrone(this.startX(), y);
       else this.addTraffic(this.trafficStartX(), y, models[i - this.tuning.testDrones]);
     }
+    this.layRocks(this.field, this.tuning.fieldRadius, this.tuning.rockCount, this.tuning.rockDrift);
+    for (const extra of this.extraFields) {
+      this.fitExtraField(extra);
+      extra.inflowTimer = 1;
+      this.layRocks(extra.poi, extra.spec.radius, extra.spec.rocks, extra.spec.rockDrift);
+    }
+  }
+
+  /** Scatters a field's rocks, clear of the player's ship. */
+  private layRocks(field: Poi, radius: number, count: number, rockDrift: number): void {
     const clear = 260;
-    for (let i = 0; i < this.tuning.rockCount; i++) {
-      const dist = this.tuning.fieldRadius * Math.sqrt(this.random());
+    for (let i = 0; i < count; i++) {
+      const dist = radius * Math.sqrt(this.random());
       const dir = this.random() * Math.PI * 2;
-      const x = this.field.x + Math.cos(dir) * dist;
-      const y = this.field.y + Math.sin(dir) * dist;
+      const x = field.x + Math.cos(dir) * dist;
+      const y = field.y + Math.sin(dir) * dist;
       if (Math.hypot(x - this.ship.x, y - this.ship.y) < clear) continue;
       const roll = this.random();
       const tier = roll < 0.3 ? 2 : roll < 0.7 ? 1 : 0;
-      const drift = this.tuning.rockDrift * this.random();
+      const drift = rockDrift * this.random();
       const driftDir = this.random() * Math.PI * 2;
       this.rocks.push(
         this.makeRock(tier, x, y, Math.cos(driftDir) * drift, Math.sin(driftDir) * drift),
       );
     }
+  }
+
+  /** Puts an extra field where its orbits say now, with its spec's size and carrying. */
+  private fitExtraField(extra: ExtraField): void {
+    const { spec, poi } = extra;
+    const at = orbitsAt(spec.orbits, this.clock);
+    poi.orbits = spec.orbits;
+    poi.reach = spec.radius;
+    poi.carry = { full: spec.carryFull, none: Math.max(spec.carryFull, spec.carryNone) };
+    poi.x = poi.px = at.x;
+    poi.y = poi.py = at.y;
+  }
+
+  /** Every field with its size: the first, from the tuning, then the designer's others. */
+  private rockFields(): { poi: Poi; radius: number }[] {
+    return [{ poi: this.field, radius: this.tuning.fieldRadius }, ...this.extraFields.map(({ poi, spec }) => ({ poi, radius: spec.radius }))];
+  }
+
+  /** The field a spot belongs to: the one whose edge is nearest. */
+  private fieldAt(fields: { poi: Poi; radius: number }[], x: number, y: number): number {
+    if (fields.length === 1) return 0;
+    let best = 0;
+    let bestDistance = Infinity;
+    fields.forEach(({ poi, radius }, i) => {
+      const distance = Math.hypot(x - poi.x, y - poi.y) - radius;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = i;
+      }
+    });
+    return best;
   }
 
   private placePois(): void {
@@ -1899,6 +1971,16 @@ export class Sim {
     this.movePoi(field, tuning.fieldOrbitPeriod, tuning.fieldRotationPeriod, dt);
     this.movePoi(station, tuning.orbitPeriod, tuning.stationRotationPeriod, dt);
     if (this.pirateBase) this.movePoi(this.pirateBase, tuning.pirateOrbitPeriod, tuning.pirateRotationPeriod, dt);
+    for (const { spec, poi } of this.extraFields) {
+      poi.px = poi.x;
+      poi.py = poi.y;
+      poi.prevRotation = poi.rotation;
+      const at = orbitsAt(spec.orbits, this.clock);
+      poi.x = at.x;
+      poi.y = at.y;
+      poi.turn = orbitRate(spec.rotationPeriod) * dt;
+      poi.rotation += poi.turn;
+    }
   }
 
   private movePoi(poi: Poi, orbitPeriod: number, rotationPeriod: number, dt: number): void {
@@ -1923,6 +2005,10 @@ export class Sim {
    * changes before then. Lets a pilot aim at where a place will be on arrival.
    */
   poiAt(poi: Poi, time: number): { x: number; y: number } {
+    if (poi.orbits) {
+      const { x, y } = orbitsAt(poi.orbits, time);
+      return { x, y };
+    }
     const parent = poi.parent ? this.poiAt(poi.parent, time) : { x: 0, y: 0 };
     const angle = poi.orbitPhase + orbitRate(poi.orbitPeriod) * time;
     return { x: parent.x + Math.cos(angle) * poi.orbitRadius, y: parent.y + Math.sin(angle) * poi.orbitRadius };
@@ -1930,7 +2016,8 @@ export class Sim {
 
   /** Each POI's orbit angle at clock 0. */
   orbitPhases(): Partial<Record<Poi["name"], number>> {
-    return Object.fromEntries(this.pois.map((poi) => [poi.name, poi.orbitPhase]));
+    const { field, station, pirateBase } = this;
+    return Object.fromEntries((pirateBase ? [field, station, pirateBase] : [field, station]).map((poi) => [poi.name, poi.orbitPhase]));
   }
 
   /**
@@ -1939,10 +2026,30 @@ export class Sim {
    * rest of the scene with the field, so nobody is left behind in empty space. A POI given
    * a phase goes exactly there. Without one it carries on from the angle it's at.
    */
-  applyLayout(phases: Partial<Record<Poi["name"], number>> = {}): void {
+  applyLayout(phases: Partial<Record<Poi["name"], number>> = {}, fields?: FieldSpec[]): void {
     const { field, station, pirateBase, tuning, clock } = this;
     const stations = pirateBase ? [station, pirateBase] : [station];
     const before = new Map(this.pois.map((poi) => [poi, { x: poi.x, y: poi.y }]));
+    // Each body goes with the field it was in, by the fields as they were.
+    const fieldsBefore = this.rockFields();
+    const added: ExtraField[] = [];
+    if (fields) {
+      const kept = new Map(this.extraFields.map((extra) => [extra.spec.id, extra]));
+      const next = fields.map((spec) => {
+        const old = kept.get(spec.id);
+        const extra = old ?? { spec, poi: this.makePoi("field", null, 0, 0, 0, spec.radius), inflowTimer: 1 };
+        extra.spec = spec;
+        this.fitExtraField(extra);
+        if (!old) added.push(extra);
+        return extra;
+      });
+      // A field that's gone takes its rocks with it.
+      const gone = this.extraFields.filter((extra) => !next.includes(extra));
+      if (gone.length > 0) {
+        this.rocks = this.rocks.filter((rock) => !gone.some(({ poi, spec }) => Math.hypot(rock.x - poi.x, rock.y - poi.y) < spec.radius * 1.5));
+      }
+      this.extraFields = next;
+    }
     const place = (poi: Poi, orbitRadius: number, orbitPeriod: number) => {
       const rate = orbitRate(orbitPeriod);
       poi.orbitRadius = orbitRadius;
@@ -1957,14 +2064,19 @@ export class Sim {
     place(station, tuning.fieldRadius + tuning.stationDistance, tuning.orbitPeriod);
     if (pirateBase) place(pirateBase, tuning.fieldRadius + tuning.pirateBaseDistance, tuning.pirateOrbitPeriod);
 
-    const moved = (poi: Poi) => ({ x: poi.x - before.get(poi)!.x, y: poi.y - before.get(poi)!.y });
+    const moved = (poi: Poi) => {
+      const was = before.get(poi);
+      // Gone, or new: nothing to follow.
+      const removed = poi.orbits !== undefined && !this.extraFields.some((extra) => extra.poi === poi);
+      if (!was || removed) return { x: 0, y: 0 };
+      return { x: poi.x - was.x, y: poi.y - was.y };
+    };
     const shift = (thing: { x: number; y: number; px: number; py: number }, by: { x: number; y: number }) => {
       thing.x += by.x;
       thing.y += by.y;
       thing.px += by.x;
       thing.py += by.y;
     };
-    const fieldMoved = moved(field);
     const bodies = [
       this.ship,
       ...this.pilots.map((pilot) => pilot.ship),
@@ -1978,10 +2090,10 @@ export class Sim {
         const was = before.get(poi)!;
         return Math.hypot(body.x - was.x, body.y - was.y) < poi.reach + LAYOUT_NEIGHBOURHOOD;
       });
-      shift(body, at ? moved(at) : fieldMoved);
+      shift(body, at ? moved(at) : moved(fieldsBefore[this.fieldAtBefore(fieldsBefore, before, body)].poi));
     }
     if (this.hauler) shift(this.hauler, moved(station));
-    if (this.blackMarket) shift(this.blackMarket, pirateBase ? moved(pirateBase) : fieldMoved);
+    if (this.blackMarket) shift(this.blackMarket, moved(pirateBase ?? field));
     // These follow their POIs, and a jump in one of them would carry whatever is inside it.
     this.moveDeposits();
     for (const deposit of this.deposits) {
@@ -1989,11 +2101,29 @@ export class Sim {
       deposit.py = deposit.y;
     }
     this.moveGuards();
+    for (const extra of added) this.layRocks(extra.poi, extra.spec.radius, extra.spec.rocks, extra.spec.rockDrift);
+  }
+
+  /** Which field a body was in, by where the fields were before a layout moved them. */
+  private fieldAtBefore(fields: { poi: Poi; radius: number }[], before: Map<Poi, { x: number; y: number }>, body: { x: number; y: number }): number {
+    if (fields.length === 1) return 0;
+    let best = 0;
+    let bestDistance = Infinity;
+    fields.forEach(({ poi, radius }, i) => {
+      const was = before.get(poi) ?? poi;
+      const distance = Math.hypot(body.x - was.x, body.y - was.y) - radius;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = i;
+      }
+    });
+    return best;
   }
 
   private get pois(): Poi[] {
     const { field, station, pirateBase } = this;
-    return pirateBase ? [field, station, pirateBase] : [field, station];
+    const own = pirateBase ? [field, station, pirateBase] : [field, station];
+    return [...own, ...this.extraFields.map((extra) => extra.poi)];
   }
 
   /** Distance from a POI's edge, as of the last tick. Negative inside it. */
@@ -2037,6 +2167,7 @@ export class Sim {
 
   /** How far from its edge a POI carries things fully, and where it stops carrying at all. */
   carryRange(poi: Poi): { full: number; none: number } {
+    if (poi.carry) return poi.carry;
     const { tuning } = this;
     const [full, none] =
       poi.name === "field"
@@ -2202,17 +2333,31 @@ export class Sim {
    * Stands in for a distant belt that the field slowly gathers rocks from. Rocks
    * start out of sight and drift in, and stop coming once the field is full.
    */
+  /** Big rocks drift into each field that's short of its rocks. */
   private driftInRocks(dt: number): void {
-    const { tuning, field, ship } = this;
-    if (tuning.rockInflow <= 0 || this.rocks.length >= tuning.rockCount) return;
-    this.inflowTimer -= (dt * tuning.rockInflow) / 60;
-    if (this.inflowTimer > 0) return;
+    const fields = this.rockFields();
+    const counts = fields.map(() => 0);
+    if (fields.length === 1) counts[0] = this.rocks.length;
+    else for (const rock of this.rocks) counts[this.fieldAt(fields, rock.x, rock.y)]++;
+    const { tuning } = this;
+    this.inflowTimer = this.driftInto(fields[0], tuning.rockInflow, tuning.rockCount, counts[0], this.inflowTimer, dt);
+    this.extraFields.forEach((extra, i) => {
+      extra.inflowTimer = this.driftInto(fields[i + 1], extra.spec.rockInflow, extra.spec.rocks, counts[i + 1], extra.inflowTimer, dt);
+    });
+  }
 
-    const distance = tuning.fieldRadius + INFLOW_START_DISTANCE;
+  /** One field's inflow. Returns the timer as it stands after. */
+  private driftInto(field: { poi: Poi; radius: number }, perMinute: number, most: number, count: number, timer: number, dt: number): number {
+    const { ship } = this;
+    if (perMinute <= 0 || count >= most) return timer;
+    timer -= (dt * perMinute) / 60;
+    if (timer > 0) return timer;
+
+    const distance = field.radius + INFLOW_START_DISTANCE;
     for (let attempt = 0; attempt < 8; attempt++) {
       const dir = this.random() * Math.PI * 2;
-      const x = field.x + Math.cos(dir) * distance;
-      const y = field.y + Math.sin(dir) * distance;
+      const x = field.poi.x + Math.cos(dir) * distance;
+      const y = field.poi.y + Math.sin(dir) * distance;
       if (Math.hypot(x - ship.x, y - ship.y) < INFLOW_CLEAR_OF_PLAYER) continue;
       const rock = this.makeRock(
         INFLOW_TIER,
@@ -2223,19 +2368,20 @@ export class Sim {
       );
       rock.arriving = true;
       this.rocks.push(rock);
-      this.inflowTimer += 0.75 + this.random() * 0.5;
-      return;
+      return timer + 0.75 + this.random() * 0.5;
     }
+    return timer;
   }
 
   private moveRocks(dt: number): void {
-    const edge = this.tuning.fieldRadius;
+    const fields = this.rockFields();
     for (const rock of this.rocks) {
+      const { poi, radius } = fields[this.fieldAt(fields, rock.x, rock.y)];
       if (rock.arriving) {
         // The field's pull would speed it up all the way in.
-        rock.arriving = Math.hypot(rock.x - this.field.x, rock.y - this.field.y) > edge;
+        rock.arriving = Math.hypot(rock.x - poi.x, rock.y - poi.y) > radius;
       } else {
-        this.containInField(rock, edge, dt);
+        this.containInField(rock, poi, radius, dt);
       }
       rock.x += rock.vx * dt;
       rock.y += rock.vy * dt;
@@ -2282,9 +2428,9 @@ export class Sim {
   }
 
   /** Gentle pull so drifting rocks stay in the field during long sessions. */
-  private containInField(body: Body, edge: number, dt: number): void {
-    const dx = body.x - this.field.x;
-    const dy = body.y - this.field.y;
+  private containInField(body: Body, field: Poi, edge: number, dt: number): void {
+    const dx = body.x - field.x;
+    const dy = body.y - field.y;
     const dist = Math.hypot(dx, dy);
     if (dist <= edge) return;
     const pull = 6 * dt;

@@ -6,7 +6,7 @@
  * The tuning is the one channel between them. The designer writes into the same values the
  * sliders use, and reads them back when it opens, so whichever was changed last wins.
  */
-import type { Orbit, Poi, SolidBody, Spawn } from "../sim";
+import type { FieldSpec, Orbit, Poi, SolidBody, Spawn } from "../sim";
 import type { Tuning } from "../tuning";
 import { SHIP_CHOICES, copiesOf, isBody, parentOf, pathTo, walk, type Copy, type NodeKind, type World, type WorldNode } from "./world";
 
@@ -18,7 +18,7 @@ export interface GameLink {
   tuning: Tuning;
   clock(): number;
   phases(): Phases;
-  apply(phases: Phases, bodies: SolidBody[], spawns: Spawn[]): void;
+  apply(phases: Phases, bodies: SolidBody[], spawns: Spawn[], fields: FieldSpec[]): void;
   /** Where the player's ship and the field are now, in the game's own frame. */
   where(): { ship: { x: number; y: number }; field: { x: number; y: number } };
 }
@@ -64,6 +64,38 @@ export function bodiesFor(world: World): SolidBody[] {
         orbits: place(node, copy),
       }));
     });
+}
+
+/**
+ * Every field beyond the first, and every copy of any field, as rocks the game can fly
+ * through. Their stations and other children stay on the map.
+ */
+export function fieldsFor(world: World): FieldSpec[] {
+  const { field: first } = linkedNodes(world);
+  const place = placer(world);
+  return walk(world)
+    .map((entry) => entry.node)
+    .filter((node) => node.kind === "field" && node !== world.root)
+    .flatMap((node) =>
+      [null, ...copiesOf(node)]
+        .map((copy, index) => ({ copy, index }))
+        .filter(({ copy }) => node !== first || copy !== null)
+        .map(({ copy, index }) => {
+          const [carryFull, carryNone] = carrying(node);
+          return {
+            id: `${node.id}:${index}`,
+            name: index === 0 ? node.name : `${node.name} ${index + 1}`,
+            radius: node.radius,
+            rocks: node.rocks,
+            rockDrift: node.rockDrift,
+            rockInflow: node.rockInflow,
+            carryFull,
+            carryNone,
+            rotationPeriod: node.spinPeriod,
+            orbits: place(node, copy),
+          };
+        }),
+    );
 }
 
 /** Every place a new game can start, copies included, by ship. */
@@ -163,8 +195,8 @@ export function linkSummary(world: World): string {
   const { field, station, pirates } = linkedNodes(world);
   const linkedPlaces = [field, station, pirates];
   const nodes = walk(world).map((entry) => entry.node);
-  // Every body is real. Of the places, only the ones the game has.
-  const real = nodes.filter((node) => isBody(node.kind) || linkedPlaces.includes(node));
+  // Every body and field is real. Of the other places, only the ones the game has.
+  const real = nodes.filter((node) => isBody(node.kind) || node.kind === "field" || linkedPlaces.includes(node));
   const places = nodes.filter((node) => !real.includes(node));
   const lines = [`In the game: ${real.map((node) => node.name).join(", ") || "nothing"}`];
   if (places.length > 0) lines.push(`Map only: ${places.map((node) => node.name).join(", ")}`);

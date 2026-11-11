@@ -22,7 +22,7 @@ import {
   type World,
   type WorldNode,
 } from "./world";
-import { bodiesFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, writeGame, type GameLink } from "./link";
+import { bodiesFor, fieldsFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, writeGame, type GameLink } from "./link";
 import { planRoute, type Flight, type Route } from "../route";
 import { DEFAULTS } from "../tuning";
 
@@ -267,7 +267,7 @@ export class Designer {
   /** Hands the game this layout. */
   linkToGame(): void {
     writeGame(this.world, this.game.tuning);
-    this.game.apply(phasesFromWorld(this.world), bodiesFor(this.world), spawnsFor(this.world));
+    this.game.apply(phasesFromWorld(this.world), bodiesFor(this.world), spawnsFor(this.world), fieldsFor(this.world));
     try {
       localStorage.setItem(DRAFT_KEY, stringifyWorld(this.world));
     } catch {
@@ -595,7 +595,7 @@ export class Designer {
     if (!isRoot) {
       parts.push(
         ...this.group("Copies", [
-          this.number(node, "count", "How many in this orbit, itself included", (v) => (v > 1 ? `${Math.floor(v) - 1} copies, without children${node.kind === "field" ? ", on the map only" : ""}` : "just this one")),
+          this.number(node, "count", "How many in this orbit, itself included", (v) => (v > 1 ? `${Math.floor(v) - 1} copies, without children` : "just this one")),
           this.number(node, "angleVariance", "Scatter round the orbit, % of half the gap", (v) => (v > 0 ? "each copy wanders from even spacing" : "evenly spaced")),
           this.number(node, "orbitVariance", "Scatter in and out, % of the orbit", (v) => (v > 0 ? `orbits from ${readableDistance(node.orbitRadius * (1 - v / 100))} to ${readableDistance(node.orbitRadius * (1 + v / 100))}` : "all on this orbit")),
         ]),

@@ -99,14 +99,17 @@ describe("the link between the designer and the game", () => {
     expect(linkSummary(world)).toContain("Map only: Anchor");
   });
 
-  it("uses the first field and leaves the others on the map", () => {
+  it("links the first field, makes other fields real, and leaves their stations on the map", () => {
     const world = seedWorld();
     const { planet, field } = linkedNodes(world);
     const extra = makeChild(world, planet!, "field");
+    const outpost = makeChild(world, extra, "station");
+    outpost.name = "Outpost";
+    extra.children.push(outpost);
     planet!.children.push(extra);
     expect(linkedNodes(world).field).toBe(field);
-    expect(linkSummary(world)).toContain(`Map only: ${extra.name}`);
-    expect(linkSummary(world)).toContain("In the game: Star, Planet");
+    expect(linkSummary(world)).toContain(`In the game: Star, Planet, Field, Station, Pirate base, ${extra.name}`);
+    expect(linkSummary(world)).toContain("Map only: Outpost");
   });
 
   it("gives a world saved before ground and full pull its kind's defaults", () => {

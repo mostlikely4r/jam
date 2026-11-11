@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PARTS } from "./parts";
 import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
-import { bodyAt, DOCK_OFFSET, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, type SolidBody, STATION_HALF, TICK } from "./sim";
+import { bodyAt, DOCK_OFFSET, type FieldSpec, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, type SolidBody, STATION_HALF, TICK } from "./sim";
 
 /** The same carrying ranges for every POI. */
 function carrying(full: number, none: number) {
@@ -292,6 +292,89 @@ describe("station", () => {
       const sim = new Sim(1, { ...base, fieldCarryFull: Infinity, fieldCarryNone: Infinity, stationCarryFull: 0, stationCarryNone: 0 });
       expect(sim.carryRange(sim.station)).toEqual({ full: 0, none: 0 });
       expect(sim.carryRange(sim.field)).toEqual({ full: Infinity, none: Infinity });
+    });
+  });
+
+  describe("a second field from the designer", () => {
+    const second = (extra: Partial<FieldSpec> = {}): FieldSpec => ({
+      id: "second:0",
+      name: "Second",
+      radius: 3000,
+      rocks: 100,
+      rockDrift: 0,
+      rockInflow: 0,
+      carryFull: Infinity,
+      carryNone: Infinity,
+      rotationPeriod: 0,
+      orbits: [{ radius: 90000, period: 7200, phase: Math.PI, sign: 1 }],
+      ...extra,
+    });
+    const inSecond = (sim: Sim) => {
+      const { poi } = sim.extraFields[0];
+      return sim.rocks.filter((rock) => Math.hypot(rock.x - poi.x, rock.y - poi.y) < 3000 + 500);
+    };
+    function withSecond(extra: Partial<FieldSpec> = {}): Sim {
+      const sim = new Sim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800 });
+      sim.applyLayout({}, [second(extra)]);
+      return sim;
+    }
+
+    it("gets its own rocks when it appears, and leaves the first field's alone", () => {
+      const sim = withSecond();
+      expect(inSecond(sim).length).toBe(100);
+      expect(sim.rocks.length).toBe(150);
+    });
+
+    it("goes round its own orbit, and its rocks stay with it", () => {
+      const sim = withSecond();
+      run(sim, 120);
+      const { poi } = sim.extraFields[0];
+      const angle = Math.PI + ((2 * Math.PI) / 7200) * sim.now;
+      expect(poi.x).toBeCloseTo(Math.cos(angle) * 90000, 3);
+      expect(inSecond(sim).length).toBe(100);
+    });
+
+    it("is part of a new game too", () => {
+      const sim = withSecond();
+      sim.reset(5);
+      expect(inSecond(sim).length).toBe(100);
+    });
+
+    it("refills from its own inflow, not the first field's", () => {
+      const sim = withSecond({ rocks: 100, rockInflow: 60 });
+      const { poi } = sim.extraFields[0];
+      sim.rocks = sim.rocks.filter((rock) => Math.hypot(rock.x - poi.x, rock.y - poi.y) > 10000);
+      run(sim, 30);
+      // Drifting in from outside it: count everything round it, well clear of the first field.
+      expect(sim.rocks.filter((rock) => Math.hypot(rock.x - poi.x, rock.y - poi.y) < 20000).length).toBeGreaterThan(5);
+      const first = sim.rocks.filter((rock) => Math.hypot(rock.x - sim.field.x, rock.y - sim.field.y) < 20000);
+      expect(first.length).toBe(50);
+    });
+
+    it("takes its rocks with it when it's taken away", () => {
+      const sim = withSecond();
+      sim.applyLayout({}, []);
+      expect(sim.extraFields.length).toBe(0);
+      expect(sim.rocks.length).toBe(50);
+    });
+
+    it("carries to its own range", () => {
+      const sim = withSecond({ carryFull: 0, carryNone: 1000 });
+      expect(sim.carryRange(sim.extraFields[0].poi)).toEqual({ full: 0, none: 1000 });
+    });
+
+    it("moves its rocks along when its orbit changes, without touching the first field's", () => {
+      const sim = withSecond();
+      const firstRock = sim.rocks[0];
+      const firstAt = { x: firstRock.x, y: firstRock.y };
+      const rock = inSecond(sim)[0];
+      const offset = { x: rock.x - sim.extraFields[0].poi.x, y: rock.y - sim.extraFields[0].poi.y };
+      sim.applyLayout({}, [second({ orbits: [{ radius: 120000, period: 7200, phase: 2, sign: 1 }] })]);
+      const { poi } = sim.extraFields[0];
+      expect(rock.x - poi.x).toBeCloseTo(offset.x, 6);
+      expect(rock.y - poi.y).toBeCloseTo(offset.y, 6);
+      expect(firstRock.x).toBeCloseTo(firstAt.x, 6);
+      expect(inSecond(sim).length).toBe(100);
     });
   });
 

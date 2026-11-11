@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { bodyAt } from "../sim";
-import { bodiesFor, linkedNodes } from "./link";
+import { bodyAt, orbitsAt } from "../sim";
+import { bodiesFor, fieldsFor, linkedNodes } from "./link";
 import { copiesOf, copyPositions, makeChild, parseWorld, positions, seedWorld, stringifyWorld } from "./world";
 
 function satellites(count: number, angleVariance = 0, orbitVariance = 0) {
@@ -63,6 +63,23 @@ describe("copies round the same orbit", () => {
     const drawn = copyPositions(world, t, at).get(planet)![0];
     expect(bodyAt(copy, t).x).toBeCloseTo(drawn.x - at.get(planet)!.x, 2);
     expect(bodyAt(copy, t).y).toBeCloseTo(drawn.y - at.get(planet)!.y, 2);
+  });
+
+  it("make every field but the first real rocks in the game, copies of the first too", () => {
+    const world = seedWorld();
+    const { planet, field } = linkedNodes(world);
+    const second = makeChild(world, planet!, "field");
+    Object.assign(second, { name: "Second", orbitRadius: 90000, rocks: 80, count: 2 });
+    planet!.children.push(second);
+    field!.count = 2;
+    const fields = fieldsFor(world);
+    expect(fields.map((each) => each.name)).toEqual(["Field 2", "Second", "Second 2"]);
+    expect(new Set(fields.map((each) => each.id)).size).toBe(3);
+    const t = 400;
+    const at = positions(world, t);
+    const there = orbitsAt(fields[1].orbits, t);
+    expect(there.x).toBeCloseTo(at.get(second)!.x - at.get(planet!)!.x, 3);
+    expect(fields[1]).toMatchObject({ radius: 5200, rocks: 80, carryFull: Infinity, carryNone: Infinity });
   });
 
   it("old saves without copies have just the one", () => {

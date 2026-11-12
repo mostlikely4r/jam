@@ -28,8 +28,19 @@ function worldWith(fields: number): World {
   return world;
 }
 
-/** Lays the shipped world, with `fields` copies of the first field, into a sim and restarts it. */
-export function useShippedWorld(sim: Sim, fields = 1, seed = 2): void {
+/**
+ * Lays the shipped world, with `fields` copies of the first field, into a sim and restarts
+ * it. With `away`, the player's ship starts far out in empty space, so the camera has never
+ * been near any field but the first.
+ */
+export function useShippedWorld(sim: Sim, fields = 1, seed = 2, away = false): void {
   useLayout(worldWith(fields), linkTo(sim));
+  if (away) {
+    const far = [{ radius: 100000, period: 0, phase: 0, sign: 1 as const }];
+    sim.spawns = [
+      { ship: "racer", orbits: far },
+      { ship: "floater", orbits: far },
+    ];
+  }
   sim.reset(seed);
 }

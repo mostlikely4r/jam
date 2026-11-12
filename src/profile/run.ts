@@ -26,12 +26,15 @@ const SCENARIOS: Scenario[] = [
   { name: "10 fields, 100 traffic", fields: 10, traffic: 50 },
   { name: "100 traffic, camera away", fields: 1, traffic: 50, away: true },
   { name: "10 fields, 100 traffic, camera away", fields: 10, traffic: 50, away: true },
+  { name: "1000 fields, camera away", fields: 1000, traffic: 1, away: true },
 ];
 
 function run(scenario: Scenario, minutes: number) {
   const tuning = { ...DEFAULTS, trafficRacers: scenario.traffic, trafficFloaters: scenario.traffic };
   const sim = new Sim(1, tuning);
-  useShippedWorld(sim, scenario.fields);
+  const building = performance.now();
+  useShippedWorld(sim, scenario.fields, 2, scenario.away);
+  const build = performance.now() - building;
   const park = () => {
     if (!scenario.away) return;
     // 40,000 further out from the centre than the field: clear of every field and body.
@@ -55,7 +58,7 @@ function run(scenario: Scenario, minutes: number) {
   }
   const wall = (performance.now() - started) / ticks;
   sim.profile = null;
-  return { sim, report: profile.report(), wall };
+  return { sim, report: profile.report(), wall, build };
 }
 
 const minutes = Number(process.argv[2]) || 1;
@@ -67,12 +70,16 @@ const BUDGET = 1000 * TICK;
 
 console.log(`Each run: ${minutes} game minute(s) after 10 s to settle. Budget per step: ${BUDGET.toFixed(1)} ms, rendering included.\n`);
 for (const scenario of SCENARIOS.filter((each) => !only || each.name.includes(only))) {
-  const { sim, report, wall } = run(scenario, minutes);
+  const { sim, report, wall, build } = run(scenario, minutes);
+  const saved = (JSON.stringify(sim.snapshot()).length / 1e6).toFixed(1);
+  const asleep = [...sim.sleeping.values()];
+  const fresh = asleep.filter((field) => field.fresh !== undefined).length;
   const share = (wall / BUDGET) * 100;
   console.log(`${scenario.name}`);
   console.log(
     `  ${ms(wall)} ms a step (${share.toFixed(0)}% of budget)   rocks ${sim.rocks.length}  ore ${sim.ores.length}  shots ${sim.shots.length}  fields ${1 + sim.extraFields.length}  bodies ${sim.bodies.length}`,
   );
+  console.log(`  built in ${build.toFixed(0)} ms, save ${saved} MB, fields asleep ${asleep.length} (never seen ${fresh})`);
   for (const part of report.parts.filter((part) => part.ms >= report.total * 0.02)) {
     console.log(`  ${ms(part.ms)}  ${((part.ms / report.total) * 100).toFixed(0).padStart(3)}%  ${part.name}`);
   }

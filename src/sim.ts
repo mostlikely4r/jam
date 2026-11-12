@@ -417,6 +417,12 @@ export interface SleepingField {
   since: number;
   /** Positions, velocities and angles relative to the field's centre and turn. */
   rocks: Rock[];
+  /**
+   * Set while nobody has ever been near it: there are no rocks yet, only this seed to lay
+   * them from, full, the first time anything needs them (see `freshen`). A world of a
+   * thousand fields holds a thousand numbers, not a hundred thousand rocks.
+   */
+  fresh?: number;
 }
 
 /**
@@ -803,6 +809,8 @@ export class Sim {
   discovered = new Set<string>();
   /** The world's own random numbers, from a state that can be saved. */
   private randomState = { a: 1 };
+  /** The seed the world was made from: each never-seen field lays its rocks from it. */
+  private seed = 1;
   private random = (): number => nextRandom(this.randomState);
   chatter = new Chatter(1);
   /** Counts down to the next rock drifting in, in units of the average wait. */
@@ -859,6 +867,7 @@ export class Sim {
       inflowTimer: this.inflowTimer,
       sleeping: [...this.sleeping.values()],
       randomState: this.randomState,
+      seed: this.seed,
     };
   }
 
@@ -897,7 +906,7 @@ export class Sim {
     const plain = [
       "pirateBase", "blueprints", "blueprintPaid", "blueprintsOrdered", "deposits", "batteries", "pirateOre",
       "pirateCredits", "pirateCap", "blackMarket", "blackMarketTimer", "distress", "clock", "rocks",
-      "shots", "ores", "field", "station", "stats", "inflowTimer", "randomState",
+      "shots", "ores", "field", "station", "stats", "inflowTimer", "randomState", "seed",
     ] as const;
     for (const key of plain) if (key in data) Object.assign(this, { [key]: data[key] });
     // A save from before every base had its own: what it held was the first base's.
@@ -925,6 +934,7 @@ export class Sim {
   }
 
   reset(seed: number): void {
+    this.seed = seed >>> 0;
     this.randomState = { a: seed >>> 0 };
     this.chatter = new Chatter(seed);
     this.rocks = [];
@@ -987,7 +997,7 @@ export class Sim {
     for (const extra of this.extraFields) {
       this.fitExtraField(extra);
       extra.inflowTimer = 1;
-      this.layRocks(extra.poi, extra.spec.radius, extra.spec.rocks, extra.spec.rockDrift);
+      this.layExtraField(extra);
     }
   }
 
@@ -1008,6 +1018,60 @@ export class Sim {
         this.makeRock(tier, x, y, Math.cos(driftDir) * drift, Math.sin(driftDir) * drift),
       );
     }
+  }
+
+  /**
+   * A new field's rocks: scattered now if the camera or a ship is near, or else left
+   * fresh, just a seed, until someone comes.
+   */
+  private layExtraField(extra: ExtraField): void {
+    const { poi, spec } = extra;
+    const reach = spec.radius + FIELD_WAKE_DISTANCE;
+    const near = [this.viewer(), ...this.pilots.map((pilot) => pilot.ship)].some((at) => Math.hypot(at.x - poi.x, at.y - poi.y) < reach);
+    if (near) {
+      this.layRocks(poi, spec.radius, spec.rocks, spec.rockDrift);
+      return;
+    }
+    this.sleeping.set(spec.id, { id: spec.id, since: this.clock, rocks: [], fresh: this.fieldSeed(spec.id) });
+  }
+
+  /** A field's own seed, from the world's and its id: the same field always lays the same rocks. */
+  private fieldSeed(id: string): number {
+    let hash = (this.seed ^ 0x9e3779b9) >>> 0;
+    for (let i = 0; i < id.length; i++) hash = Math.imul(hash ^ id.charCodeAt(i), 16777619) >>> 0;
+    return hash;
+  }
+
+  /** How many rocks a field starts with, how far it spreads them, and how fast they drift. */
+  private fieldMake(id: string): { count: number; radius: number; drift: number } {
+    const extra = this.extraFields.find((each) => each.spec.id === id);
+    if (extra) return { count: extra.spec.rocks, radius: extra.spec.radius, drift: extra.spec.rockDrift };
+    return { count: this.tuning.rockCount, radius: this.tuning.fieldRadius, drift: this.tuning.rockDrift };
+  }
+
+  /**
+   * Lays a fresh field's rocks from its seed, in its own frame, as it would have started:
+   * the first time anything needs them, waking or mining. Nothing else touches the world's
+   * dice, so it doesn't matter when that happens.
+   */
+  private freshen(sleeping: SleepingField): void {
+    if (sleeping.fresh === undefined) return;
+    const state = { a: sleeping.fresh };
+    const roll = () => nextRandom(state);
+    const { count, radius, drift } = this.fieldMake(sleeping.id);
+    const rocks: Rock[] = [];
+    for (let i = 0; i < count; i++) {
+      const dist = radius * Math.sqrt(roll());
+      const dir = roll() * Math.PI * 2;
+      const pick = roll();
+      const tier = pick < 0.3 ? 2 : pick < 0.7 ? 1 : 0;
+      const speed = drift * roll();
+      const heading = roll() * Math.PI * 2;
+      rocks.push(this.makeRock(tier, Math.cos(dir) * dist, Math.sin(dir) * dist, Math.cos(heading) * speed, Math.sin(heading) * speed, roll));
+    }
+    sleeping.rocks = rocks;
+    sleeping.since = this.clock;
+    delete sleeping.fresh;
   }
 
   /** Puts an extra field where its orbits say now, with its spec's size and carrying. */
@@ -1095,6 +1159,18 @@ export class Sim {
     return [{ poi: this.field, radius: this.tuning.fieldRadius }, ...this.extraFields.map(({ poi, spec }) => ({ poi, radius: spec.radius }))];
   }
 
+  /**
+   * The fields whose rocks are out in the world, with where each is in `rockFields`. A
+   * sleeping field's rocks are kept with it, so no loose rock is ever in one: each rock
+   * only looks among these for its field, however many fields there are.
+   */
+  private awakeRockFields(): { poi: Poi; radius: number; index: number }[] {
+    const ids = [FIRST_FIELD, ...this.extraFields.map((extra) => extra.spec.id)];
+    return this.rockFields()
+      .map((field, index) => ({ ...field, index }))
+      .filter((field) => !this.sleeping.has(ids[field.index]));
+  }
+
   /** Every field there is to mine, the first one first. */
   miningFields(): MiningField[] {
     // Asked for per rock and per ship, so worked out once a tick.
@@ -1126,7 +1202,9 @@ export class Sim {
   fieldEmpty(field: MiningField): boolean {
     let count = 0;
     const sleeping = this.sleeping.get(field.id);
-    if (sleeping) {
+    if (sleeping?.fresh !== undefined) {
+      count = this.fieldMake(field.id).count;
+    } else if (sleeping) {
       for (const rock of sleeping.rocks) if (!rock.arriving) count++;
     } else {
       for (const rock of this.rocks) if (!rock.arriving && this.rockIn(field, rock)) count++;
@@ -2323,12 +2401,13 @@ export class Sim {
     };
   }
 
-  makeRock(tier: number, x: number, y: number, vx: number, vy: number): Rock {
-    const points = 8 + Math.floor(this.random() * 4);
+  /** A rock, shaped by the world's dice, or by `roll` when given (a fresh field's own). */
+  makeRock(tier: number, x: number, y: number, vx: number, vy: number, roll: () => number = this.random): Rock {
+    const points = 8 + Math.floor(roll() * 4);
     const shape: number[] = [];
-    for (let i = 0; i < points; i++) shape.push(0.84 + this.random() * 0.26);
+    for (let i = 0; i < points; i++) shape.push(0.84 + roll() * 0.26);
     const radius = TIER_RADIUS[tier];
-    const angle = this.random() * Math.PI * 2;
+    const angle = roll() * Math.PI * 2;
     return {
       x,
       y,
@@ -2342,7 +2421,7 @@ export class Sim {
       hp: Math.ceil((this.tuning.rockToughness * radius) / 60),
       angle,
       prevAngle: angle,
-      spin: (this.random() - 0.5) * (60 / radius),
+      spin: (roll() - 0.5) * (60 / radius),
       shape,
     };
   }
@@ -2591,7 +2670,7 @@ export class Sim {
       deposit.py = deposit.y;
     }
     this.moveGuards();
-    for (const extra of added) this.layRocks(extra.poi, extra.spec.radius, extra.spec.rocks, extra.spec.rockDrift);
+    for (const extra of added) this.layExtraField(extra);
   }
 
   /** Which field a body was in, by where the fields were before a layout moved them. */
@@ -2708,7 +2787,10 @@ export class Sim {
 
   /** Every POI's carry this tick, worked out once for all the bodies `carry` moves. */
   private carriersNow(): Carriers {
-    const pois = this.pois;
+    // A sleeping field carries nothing: its rocks are kept with it, and nobody is near it.
+    const asleep = new Set(this.extraFields.filter((extra) => this.sleeping.has(extra.spec.id)).map((extra) => extra.poi));
+    if (this.sleeping.has(FIRST_FIELD)) asleep.add(this.field);
+    const pois = this.pois.filter((poi) => !asleep.has(poi));
     const count = pois.length;
     const carriers: Carriers = {
       pois,
@@ -3321,6 +3403,7 @@ export class Sim {
    */
   private takeOre(fieldId: string, want: number): number {
     const sleeping = this.sleeping.get(fieldId);
+    if (sleeping) this.freshen(sleeping);
     const rocks = sleeping ? sleeping.rocks : this.rocks;
     const mine = (rock: Rock) => !rock.arriving && (sleeping !== undefined || this.miningFieldAt(rock.x, rock.y).id === fieldId);
     let given = 0;
@@ -3439,7 +3522,8 @@ export class Sim {
         falling.push(field);
       }
     }
-    if (falling.length > 0) this.sleepFields(fields, falling);
+    // Only awake fields have rocks out in the world to sort.
+    if (falling.length > 0) this.sleepFields(fields.filter((field) => !this.sleeping.has(field.id)), falling);
   }
 
   private sleepFields(fields: MiningField[], falling: MiningField[]): void {
@@ -3475,6 +3559,7 @@ export class Sim {
    * settled in the field, out where nobody is looking.
    */
   private wakeField(field: MiningField, sleeping: SleepingField): void {
+    this.freshen(sleeping);
     this.sleeping.delete(field.id);
     const { poi } = field;
     const cos = Math.cos(poi.rotation);
@@ -3512,9 +3597,10 @@ export class Sim {
 
   private driftInRocks(dt: number): void {
     const fields = this.rockFields();
+    const awake = this.awakeRockFields();
     const counts = fields.map(() => 0);
-    if (fields.length === 1) counts[0] = this.rocks.length;
-    else for (const rock of this.rocks) counts[this.fieldAt(fields, rock.x, rock.y)]++;
+    if (awake.length === 1) counts[awake[0].index] = this.rocks.length;
+    else if (awake.length > 1) for (const rock of this.rocks) counts[awake[this.fieldAt(awake, rock.x, rock.y)].index]++;
     const { tuning } = this;
     if (!this.sleeping.has(FIRST_FIELD)) {
       this.inflowTimer = this.driftInto(fields[0], tuning.rockInflow, tuning.rockCount, counts[0], this.inflowTimer, dt);
@@ -3553,7 +3639,7 @@ export class Sim {
   }
 
   private moveRocks(dt: number): void {
-    const fields = this.rockFields();
+    const fields = this.awakeRockFields();
     for (const rock of this.rocks) {
       const { poi, radius } = fields[this.fieldAt(fields, rock.x, rock.y)];
       if (rock.arriving) {

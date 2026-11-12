@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PARTS } from "./parts";
+import { FIRST_FIELD } from "./pilot";
 import { roundTrip } from "./save";
 import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
 import { bodyAt, DOCK_OFFSET, type FieldSpec, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, type SolidBody, STATION_HALF, TICK } from "./sim";
@@ -321,16 +322,61 @@ describe("station", () => {
       sim.ship.y = sim.ship.py = poi.y;
       sim.step();
     }
+    /** Takes the player's ship back to the first field, far from the second. */
+    function leaveSecond(sim: Sim): void {
+      sim.ship.x = sim.ship.px = sim.field.x;
+      sim.ship.y = sim.ship.py = sim.field.y;
+    }
     function withSecond(extra: Partial<FieldSpec> = {}, tuning: Partial<typeof DEFAULTS> = {}): Sim {
       const sim = new Sim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800, ...tuning });
       sim.applyLayout({}, [second(extra)]);
       return sim;
     }
 
-    it("gets its own rocks when it appears, and leaves the first field's alone", () => {
+    it("is only a seed until someone comes, then gets its own rocks and leaves the first field's alone", () => {
       const sim = withSecond();
+      expect(sim.rocks.length).toBe(50);
+      expect(sim.sleeping.get("second:0")?.fresh).toBeDefined();
+      expect(sim.sleeping.get("second:0")?.rocks.length).toBe(0);
+      visitSecond(sim);
       expect(inSecond(sim).length).toBe(100);
-      expect(sim.rocks.length).toBe(150);
+      // The first field, far behind the ship now, has gone to sleep with all of its own.
+      expect(sim.sleeping.get(FIRST_FIELD)?.rocks.length).toBe(50);
+    });
+
+    it("lays the same rocks whenever it's first visited, and doesn't change the world's dice", () => {
+      const early = withSecond();
+      const late = withSecond();
+      run(late, 30);
+      visitSecond(early);
+      visitSecond(late);
+      // Where each rock is from the field's centre, in its own turning frame.
+      const shape = (sim: Sim) => {
+        const { poi } = sim.extraFields[0];
+        const turn = -poi.rotation;
+        return inSecond(sim).flatMap((rock) => {
+          const dx = rock.x - poi.x;
+          const dy = rock.y - poi.y;
+          return [dx * Math.cos(turn) - dy * Math.sin(turn), dx * Math.sin(turn) + dy * Math.cos(turn), rock.tier, rock.radius];
+        });
+      };
+      const a = shape(early);
+      const b = shape(late);
+      expect(b.length).toBe(a.length);
+      // Within a unit: in the step it wakes, a rock near the edge is carried a touch differently.
+      expect(Math.max(...a.map((n, i) => Math.abs(n - b[i])))).toBeLessThan(1);
+      // The world's own dice go on the same as with no second field at all.
+      const plain = new Sim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800 });
+      expect(plain.roll()).toBe(withSecond().roll());
+    });
+
+    it("is laid at once when it appears where the camera is", () => {
+      const sim = new Sim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800 });
+      sim.ship.x = sim.ship.px = Math.cos(Math.PI) * 90000;
+      sim.ship.y = sim.ship.py = 0;
+      sim.applyLayout({}, [second({ orbits: [{ radius: 90000, period: 0, phase: Math.PI, sign: 1 }] })]);
+      expect(sim.sleeping.has("second:0")).toBe(false);
+      expect(inSecond(sim).length).toBeGreaterThan(90);
     });
 
     it("goes round its own orbit, and its rocks stay with it", () => {
@@ -339,8 +385,8 @@ describe("station", () => {
       const { poi } = sim.extraFields[0];
       const angle = Math.PI + ((2 * Math.PI) / 7200) * sim.now;
       expect(poi.x).toBeCloseTo(Math.cos(angle) * 90000, 3);
-      // Nobody's there, so it slept the whole way round, its rocks kept in its own frame.
-      expect(sim.sleeping.get("second:0")?.rocks.length).toBe(100);
+      // Nobody's been there, so it's still only a seed.
+      expect(sim.sleeping.get("second:0")?.fresh).toBeDefined();
       visitSecond(sim);
       expect(sim.sleeping.has("second:0")).toBe(false);
       expect(inSecond(sim).length).toBe(100);
@@ -349,13 +395,16 @@ describe("station", () => {
     it("is part of a new game too", () => {
       const sim = withSecond();
       sim.reset(5);
+      visitSecond(sim);
       expect(inSecond(sim).length).toBe(100);
     });
 
     it("refills from its own inflow, not the first field's", () => {
       const sim = withSecond({ rocks: 100, rockInflow: 60 });
       const { poi } = sim.extraFields[0];
+      visitSecond(sim);
       sim.rocks = sim.rocks.filter((rock) => Math.hypot(rock.x - poi.x, rock.y - poi.y) > 10000);
+      leaveSecond(sim);
       run(sim, 30);
       const first = sim.rocks.filter((rock) => Math.hypot(rock.x - sim.field.x, rock.y - sim.field.y) < 20000);
       expect(first.length).toBe(50);
@@ -376,9 +425,11 @@ describe("station", () => {
     it("sleeps while nobody is near, and wakes with any gap shot in it still there", () => {
       const sim = withSecond();
       const { poi } = sim.extraFields[0];
+      visitSecond(sim);
       // Shoot a hole in one side of it.
       sim.rocks = sim.rocks.filter((rock) => !(Math.hypot(rock.x - poi.x, rock.y - poi.y) < 3500 && rock.x > poi.x));
       const left = inSecond(sim).length;
+      leaveSecond(sim);
       run(sim, 60);
       expect(sim.rocks.length).toBe(50);
       visitSecond(sim);
@@ -390,6 +441,8 @@ describe("station", () => {
 
     it("keeps a sleeping field through a save", () => {
       const sim = withSecond();
+      visitSecond(sim);
+      leaveSecond(sim);
       run(sim, 5);
       expect(sim.sleeping.has("second:0")).toBe(true);
       const loaded = new Sim(1, { ...sim.tuning });
@@ -398,6 +451,17 @@ describe("station", () => {
       expect(loaded.sleeping.get("second:0")?.rocks.length).toBe(100);
       visitSecond(loaded);
       expect(inSecond(loaded).length).toBe(100);
+    });
+
+    it("keeps a never-seen field a seed through a save, and lays the same rocks after", () => {
+      const sim = withSecond();
+      const loaded = new Sim(1, { ...sim.tuning });
+      loaded.applyLayout({}, [second()]);
+      roundTrip(sim, loaded);
+      expect(loaded.sleeping.get("second:0")?.fresh).toBe(sim.sleeping.get("second:0")?.fresh);
+      visitSecond(sim);
+      visitSecond(loaded);
+      expect(inSecond(loaded).map((rock) => rock.radius)).toEqual(inSecond(sim).map((rock) => rock.radius));
     });
 
     it("stays awake while any ship is near it", () => {
@@ -424,7 +488,9 @@ describe("station", () => {
 
     it("moves its rocks along when its orbit changes, without touching the first field's", () => {
       const sim = withSecond();
-      const firstRock = sim.rocks[0];
+      visitSecond(sim);
+      // The first field is asleep now, its rocks kept in its own frame.
+      const firstRock = sim.sleeping.get(FIRST_FIELD)!.rocks[0];
       const firstAt = { x: firstRock.x, y: firstRock.y };
       const rock = inSecond(sim)[0];
       const offset = { x: rock.x - sim.extraFields[0].poi.x, y: rock.y - sim.extraFields[0].poi.y };

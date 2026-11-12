@@ -33,8 +33,14 @@ export const STEP_PARTS: Record<string, FarSide> = {
   movePois: { out: "everywhere", note: "Orbits: by the clock anyway." },
   moveDeposits: { out: "everywhere", note: "A few deposits." },
   moveGuards: { out: "everywhere", note: "Turrets ride their station or deposit." },
-  sleepAndWake: { out: "records", note: "Fields far from the camera and every flown ship sleep, and wake with regrowth." },
-  carryBodies: { out: "in view only", far: "Sleeping fields keep their rocks in the field's own frame, so they turn with it on waking." },
+  sleepAndWake: {
+    out: "records",
+    note: "Fields far from the camera and every flown ship sleep, and wake with regrowth. One nobody has been near is only a seed, laid the first time it wakes or is mined.",
+  },
+  carryBodies: {
+    out: "in view only",
+    far: "Sleeping fields keep their rocks in the field's own frame, so they turn with it on waking. A sleeping field carries nothing else: loose ore left in one stays where it was in space.",
+  },
   driftInRocks: { out: "in view only", far: "A sleeping field gets the rocks that would have drifted in all at once on waking (`wakeField`)." },
   moveRocks: { out: "in view only", far: "Sleeping rocks don't move; a shot gap stays where it was." },
   pullOre: { out: "in view only", far: "Records mine by the clock: `recordOre*` rates, measured from flown ships." },

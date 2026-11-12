@@ -71,7 +71,19 @@ in two.
 
 So the home tractor gets weaker for everyone. That fits on its own: the range needed halving
 anyway, as it was nearly overpowered. Traffic floaters buy the tractor first, so their mining
-changes too.
+changes too. The cone beam is built (b92d424). The user flew it: still strong for their
+stop-and-shoot style, but no longer a magic hover. Good for now, tune later.
+
+**Who it's for (user, 2026-11-12): the racer.** The all-round beam is the rare item a racer
+wants early. Today the tractor fits only the floater, so the all-round one must fit the racer.
+It's half of a set, **spray and swoop**: a spray gun breaks rocks into a cloud, and the racer
+sweeps through with the all-round beam. One piece of the set is close and found by luck; the
+other is the big trip that completes it.
+
+For the test, only the far piece is built: the all-round beam for the racer at the far base.
+The spray gun is a new weapon with its own design, and "found by luck" needs a way for luck to
+put an item somewhere nearby (loot, or stock that came by hauler). Both come after the trip has
+been tried.
 
 ### 2. A second base, far away
 

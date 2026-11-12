@@ -622,6 +622,20 @@ export function sweepBox(
   return { t: enter, nx, ny };
 }
 
+/** What every POI carries this tick, laid out so carrying a body makes nothing new. */
+interface Carriers {
+  pois: Poi[];
+  /** Whether any deposit is open, so a body may be inside one. */
+  deposits: boolean;
+  full: Float64Array;
+  none: Float64Array;
+  cos: Float64Array;
+  sin: Float64Array;
+  /** Scratch space for one body at a time. */
+  distances: Float64Array;
+  shares: Float64Array;
+}
+
 export class Sim {
   tuning: Tuning;
   controls: Controls = {
@@ -716,6 +730,8 @@ export class Sim {
   /** Flies the player's ship to a clicked spot, if it has the part. */
   clickPilot!: ClickPilot;
   rocks: Rock[] = [];
+  /** Each POI's carry this tick, set at the start of `carryBodies`. */
+  private carriers: Carriers | null = null;
   /** Times each part of `step` while set. Dev only: nothing in the game turns it on. */
   profile: StepProfile | null = null;
   /** Stars, planets, moons and asteroids, from the system designer. None without it. */
@@ -2587,6 +2603,7 @@ export class Sim {
    * what carries them, so crossing from one POI's zone to another keeps relative speed.
    */
   private carryBodies(dt: number): void {
+    this.carriers = this.carriersNow();
     this.carryShip(this.ship);
     for (const pilot of this.pilots) this.carryShip(pilot.ship);
     for (const rock of this.rocks) {
@@ -2619,10 +2636,38 @@ export class Sim {
     ship.angle += turn;
   }
 
-  /** Carries a body and says what carried it most, by how much, and how far it turned. */
+  /** Every POI's carry this tick, worked out once for all the bodies `carry` moves. */
+  private carriersNow(): Carriers {
+    const pois = this.pois;
+    const count = pois.length;
+    const carriers: Carriers = {
+      pois,
+      deposits: this.deposits.some((deposit) => deposit.partsLeft <= 0),
+      full: new Float64Array(count),
+      none: new Float64Array(count),
+      cos: new Float64Array(count),
+      sin: new Float64Array(count),
+      distances: new Float64Array(count),
+      shares: new Float64Array(count),
+    };
+    for (let i = 0; i < count; i++) {
+      const range = this.carryRange(pois[i]);
+      carriers.full[i] = range.full;
+      carriers.none[i] = range.none;
+      carriers.cos[i] = Math.cos(pois[i].turn);
+      carriers.sin[i] = Math.sin(pois[i].turn);
+    }
+    return carriers;
+  }
+
+  /**
+   * Carries a body and says what carried it most, by how much, and how far it turned.
+   * The same sums as `carryShares` and `nearestPoi`, in one pass with nothing made per body.
+   */
   private carry(body: Body): { poi: Poi | Deposit; share: number; turn: number } {
+    const carriers = this.carriers ?? (this.carriers = this.carriersNow());
     // Inside an open deposit's ring, it carries everything by itself. It doesn't turn.
-    const deposit = this.depositAt(body);
+    const deposit = carriers.deposits ? this.depositAt(body) : null;
     if (deposit) {
       body.px = body.x;
       body.py = body.y;
@@ -2630,23 +2675,37 @@ export class Sim {
       body.y += deposit.y - deposit.py;
       return { poi: deposit, share: 1, turn: 0 };
     }
-    const { pois } = this;
-    const shares = this.carryShares(body.x, body.y);
+    const { pois, full, none, cos, sin, distances, shares } = carriers;
+    const count = pois.length;
+    let nearest = 0;
+    for (let i = 0; i < count; i++) {
+      distances[i] = this.edgeDistance(pois[i], body.x, body.y);
+      if (distances[i] < distances[nearest]) nearest = i;
+    }
+    if (distances[nearest] <= full[nearest]) {
+      shares.fill(0);
+      shares[nearest] = 1;
+    } else {
+      let total = 0;
+      for (let i = 0; i < count; i++) {
+        shares[i] = none[i] === Infinity ? 1 : Math.max(0, Math.min(1, (none[i] - distances[i]) / (none[i] - full[i])));
+        total += shares[i];
+      }
+      if (total > 1) for (let i = 0; i < count; i++) shares[i] /= total;
+    }
     let moveX = 0;
     let moveY = 0;
     let turn = 0;
-    let poi = this.nearestPoi(body.x, body.y);
+    let poi = pois[nearest];
     let share = 0;
-    for (let i = 0; i < pois.length; i++) {
+    for (let i = 0; i < count; i++) {
       const weight = shares[i];
       if (weight === 0) continue;
       const carrier = pois[i];
-      const cos = Math.cos(carrier.turn);
-      const sin = Math.sin(carrier.turn);
       const dx = body.x - carrier.px;
       const dy = body.y - carrier.py;
-      moveX += weight * (carrier.x + dx * cos - dy * sin - body.x);
-      moveY += weight * (carrier.y + dx * sin + dy * cos - body.y);
+      moveX += weight * (carrier.x + dx * cos[i] - dy * sin[i] - body.x);
+      moveY += weight * (carrier.y + dx * sin[i] + dy * cos[i] - body.y);
       turn += weight * carrier.turn;
       if (weight > share) {
         share = weight;
@@ -2658,11 +2717,11 @@ export class Sim {
     body.x += moveX;
     body.y += moveY;
     if (turn !== 0) {
-      const cos = Math.cos(turn);
-      const sin = Math.sin(turn);
+      const c = Math.cos(turn);
+      const s = Math.sin(turn);
       const { vx, vy } = body;
-      body.vx = vx * cos - vy * sin;
-      body.vy = vx * sin + vy * cos;
+      body.vx = vx * c - vy * s;
+      body.vy = vx * s + vy * c;
     }
     return { poi, share, turn };
   }

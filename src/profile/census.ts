@@ -1,7 +1,8 @@
 /**
  * Counts what happens between pirates, defenders and traffic over a stretch of game time
  * with the camera far away: the numbers out-of-view dice have to match.
- * Run with: npm run census -- [game minutes] [seed] [flown|records] [spot chances ×]
+ * Run with: npm run census -- [game minutes] [seed] [flown|records] [spot chances ×] [--json]
+ * With --json it prints one line of totals instead, for `npm run parity`.
  */
 import { Sim, TICK } from "../sim";
 import { DEFAULTS } from "../tuning";
@@ -11,6 +12,7 @@ const minutes = Number(process.argv[2]) || 30;
 const seed = Number(process.argv[3]) || 1;
 const records = process.argv[4] === "records";
 const spotScale = Number(process.argv[5]) || 1;
+const json = process.argv.includes("--json");
 const sim = new Sim(seed, { ...DEFAULTS, trafficRecords: records, fighterRecords: records, recordSpotPirate: DEFAULTS.recordSpotPirate * spotScale, recordSpotDefender: DEFAULTS.recordSpotDefender * spotScale, chatter: false });
 useShippedWorld(sim, 1, seed);
 const park = () => {
@@ -70,9 +72,25 @@ for (let i = 0; i < Math.round((minutes * 60) / TICK); i++) {
   }
 }
 const lost = (sim as unknown as { bases: { lostTraffic: unknown[] }[] }).bases.reduce((sum, base) => sum + base.lostTraffic.length, 0);
-console.log(`${minutes} min, seed ${seed}, ${records ? `records, spot ×${spotScale}` : "flown"}, ${((performance.now() - started) / 1000).toFixed(0)} s`);
-console.log(`  traffic ${sim.traffic.length} (lost waiting ${lost}), pirates ${sim.fighters.filter((p) => p.ship.faction === "pirate").length}, defenders ${sim.fighters.filter((p) => p.ship.faction === "defender").length}`);
 const sold = sim.traffic.reduce((sum, p) => sum + p.ship.earned, 0) / sim.tuning.creditsPerOre;
+const left = (faction: string | null) => sim.fighters.filter((p) => p.ship.faction === faction).length;
+if (json) {
+  const totals: Record<string, number> = Object.fromEntries(count);
+  Object.assign(totals, {
+    "traffic left": sim.traffic.length,
+    "pirates left": left("pirate"),
+    "defenders left": left("defender"),
+    "traffic sold": Math.round(sold),
+    "pirate credits": Math.round(sim.pirateCredits),
+    "pirate ore": Math.round(sim.pirateOre),
+    "base ore": Math.round(sim.bases.reduce((sum, base) => sum + base.ore, 0)),
+    "seconds": Math.round((performance.now() - started) / 1000),
+  });
+  console.log(JSON.stringify(totals));
+  process.exit(0);
+}
+console.log(`${minutes} min, seed ${seed}, ${records ? `records, spot ×${spotScale}` : "flown"}, ${((performance.now() - started) / 1000).toFixed(0)} s`);
+console.log(`  traffic ${sim.traffic.length} (lost waiting ${lost}), pirates ${left("pirate")}, defenders ${left("defender")}`);
 console.log(`  traffic sold ${sold.toFixed(0)} ore, pirate credits ${sim.pirateCredits.toFixed(0)}`);
 console.log(`  fields ${sim.miningFields().map((f) => f.id).join(", ")}; bases ${sim.bases.map((b) => b.id).join(", ")}`);
 for (const [key, value] of [...count].sort()) console.log(`  ${key}: ${value}`);

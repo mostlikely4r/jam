@@ -560,6 +560,8 @@ export interface Ore extends Body {
   amount: number;
   /** Whose shot broke it loose, if anyone's. */
   from?: Ship | null;
+  /** The ship whose tractor beam has caught it, if any. Only that ship pulls it in. */
+  caughtBy?: Ship | null;
 }
 
 export type SimEvent =
@@ -2461,6 +2463,7 @@ export class Sim {
     this.driftInRocks(dt);
     this.moveRocks(dt);
     lap?.("rocks");
+    this.letGoOfOre();
     this.pullOre(this.ship, dt);
     for (const pilot of pilots) this.pullOre(pilot.ship, dt);
     this.bodySpots = this.bodies.map((body) => ({ body, ...bodyAt(body, this.clock) }));
@@ -3654,16 +3657,43 @@ export class Sim {
     }
   }
 
-  /** Steers loose ore in range toward the ship, so it arrives instead of circling it. */
-  private pullOre(ship: Ship, dt: number): void {
-    if (!ship.parts.has("tractor") || ship.ore >= this.cargoSpace(ship)) return;
-    const { tractorRange, tractorPull, tractorSpeed } = this.tuning;
-    const most = tractorPull * dt;
+  /** Whether a ship's tractor beam is working: fitted, and room in the bay for what it pulls. */
+  tractorOn(ship: Ship): boolean {
+    return ship.parts.has("tractor") && ship.ore < this.cargoSpace(ship);
+  }
+
+  /** Lets go of caught ore whose ship can't hold it any more: out of range, full, or no beam. */
+  private letGoOfOre(): void {
+    const range = this.tuning.tractorRange;
     for (const ore of this.ores) {
+      const ship = ore.caughtBy;
+      if (!ship) continue;
+      if (!this.tractorOn(ship) || Math.hypot(ship.x - ore.x, ship.y - ore.y) > range) ore.caughtBy = null;
+    }
+  }
+
+  /**
+   * Catches loose ore in range inside the beam's cone ahead of the ship, then steers what it
+   * has caught toward the ship, so it arrives instead of circling it. Caught ore stays caught
+   * wherever it drifts within range; ore another ship has caught is left to that ship.
+   */
+  private pullOre(ship: Ship, dt: number): void {
+    if (!this.tractorOn(ship)) return;
+    const { tractorRange, tractorPull, tractorSpeed, tractorCone } = this.tuning;
+    const most = tractorPull * dt;
+    const edge = Math.cos(((Math.min(tractorCone, 360) / 2) * Math.PI) / 180);
+    const noseX = Math.cos(ship.angle);
+    const noseY = Math.sin(ship.angle);
+    for (const ore of this.ores) {
+      if (ore.caughtBy && ore.caughtBy !== ship) continue;
       const dx = ship.x - ore.x;
       const dy = ship.y - ore.y;
       const distance = Math.hypot(dx, dy);
       if (distance > tractorRange || distance === 0) continue;
+      if (ore.caughtBy !== ship) {
+        if (-(dx * noseX + dy * noseY) / distance < edge) continue;
+        ore.caughtBy = ship;
+      }
       const changeX = ship.vx + (dx / distance) * tractorSpeed - ore.vx;
       const changeY = ship.vy + (dy / distance) * tractorSpeed - ore.vy;
       const change = Math.hypot(changeX, changeY);

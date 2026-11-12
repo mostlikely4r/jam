@@ -574,7 +574,7 @@ export class Renderer {
     }
   }
 
-  /** A line to each piece of ore being pulled, and for the player a faint ring at full range. */
+  /** A line to each piece of ore the beam has caught, and for the player a faint cone at full range. */
   private drawTractor(
     sim: Sim,
     ship: Ship,
@@ -583,20 +583,28 @@ export class Renderer {
     alpha: number,
     showRange: boolean,
   ): void {
-    if (!ship.parts.has("tractor") || ship.ore >= sim.cargoSpace(ship)) return;
+    if (!sim.tractorOn(ship)) return;
     const { ctx } = this;
-    const range = sim.tuning.tractorRange;
+    const { tractorRange: range, tractorCone } = sim.tuning;
     ctx.lineWidth = 1;
     if (showRange) {
       ctx.strokeStyle = "rgba(111, 224, 200, 0.12)";
       ctx.beginPath();
-      ctx.arc(x, y, range, 0, Math.PI * 2);
+      if (tractorCone >= 360) {
+        ctx.arc(x, y, range, 0, Math.PI * 2);
+      } else {
+        const angle = lerp(ship.prevAngle, ship.angle, alpha);
+        const half = (tractorCone / 2) * (Math.PI / 180);
+        ctx.moveTo(x, y);
+        ctx.arc(x, y, range, angle - half, angle + half);
+        ctx.closePath();
+      }
       ctx.stroke();
     }
     ctx.strokeStyle = "rgba(111, 224, 200, 0.45)";
     ctx.beginPath();
     for (const ore of sim.ores) {
-      if (Math.hypot(ore.x - ship.x, ore.y - ship.y) > range) continue;
+      if (ore.caughtBy !== ship) continue;
       ctx.moveTo(x, y);
       ctx.lineTo(lerp(ore.px, ore.x, alpha), lerp(ore.py, ore.y, alpha));
     }

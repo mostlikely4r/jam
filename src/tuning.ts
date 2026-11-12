@@ -89,7 +89,9 @@ export const DEFAULTS = {
   preciseChance: 0.25,
   turretTurnSpeed: 150,
   turretRange: 0.3333,
-  tractorRange: 350,
+  tractorRange: 175,
+  /** How wide the tractor beam's catching cone is ahead of the nose, in degrees. 360 catches all round. */
+  tractorCone: 30,
   tractorPull: 120,
   tractorSpeed: 100,
 
@@ -372,6 +374,7 @@ export const GROUPS: Group[] = [
       { key: "turretTurnSpeed", label: "Turret turn speed (degrees per second)", min: 30, max: 720, step: 10 },
       { key: "turretRange", label: "Turret share of the gun's range", min: 0.1, max: 1, step: 0.05 },
       { key: "tractorRange", label: "Tractor range", min: 50, max: 1500, step: 25 },
+      { key: "tractorCone", label: "Tractor cone (degrees)", min: 5, max: 360, step: 5 },
       { key: "tractorPull", label: "Tractor pull strength", min: 10, max: 600, step: 10 },
       { key: "tractorSpeed", label: "Tractor ore speed", min: 10, max: 400, step: 10 },
     ],

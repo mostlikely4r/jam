@@ -1636,35 +1636,31 @@ describe("the new ship", () => {
   }, 30000);
 
   describe("tractor beam", () => {
-    function withOre(distance: number, vy = 0): Sim {
+    /** Loose ore `distance` from the ship, `off` radians off its nose. */
+    function withOre(distance: number, vy = 0, off = 0): Sim {
       const sim = floater();
       sim.ship.parts.add("tractor");
-      sim.ores.push({
-        x: sim.ship.x + distance,
-        y: sim.ship.y,
-        px: sim.ship.x + distance,
-        py: sim.ship.y,
-        vx: 0,
-        vy,
-        kind: 0,
-        amount: 1,
-      });
+      const angle = sim.ship.angle + off;
+      const x = sim.ship.x + Math.cos(angle) * distance;
+      const y = sim.ship.y + Math.sin(angle) * distance;
+      sim.ores.push({ x, y, px: x, py: y, vx: 0, vy, kind: 0, amount: 1 });
       return sim;
     }
+    const near = GAME_DEFAULTS.tractorRange - 25;
 
     it("isn't fitted from the start", () => {
       expect(floater().ship.parts.has("tractor")).toBe(false);
     });
 
     it("pulls in ore within range until it's picked up", () => {
-      const sim = withOre(300);
+      const sim = withOre(near);
       run(sim, 10);
       expect(sim.ores.length).toBe(0);
       expect(sim.ship.ore).toBe(1);
     });
 
     it("catches ore that's flying off", () => {
-      const sim = withOre(300, 60);
+      const sim = withOre(near, 60);
       run(sim, 15);
       expect(sim.ship.ore).toBe(1);
     });
@@ -1675,8 +1671,43 @@ describe("the new ship", () => {
       expect(sim.ores[0].vx).toBe(0);
     });
 
+    it("leaves ore outside the cone alone", () => {
+      const sim = withOre(near, 0, Math.PI / 2);
+      run(sim, 2);
+      expect(sim.ores[0].vx).toBe(0);
+      expect(sim.ores[0].vy).toBe(0);
+    });
+
+    it("catches all round with a full cone", () => {
+      const sim = withOre(near, 0, Math.PI);
+      sim.tuning.tractorCone = 360;
+      run(sim, 10);
+      expect(sim.ship.ore).toBe(1);
+    });
+
+    it("keeps hold of caught ore when the ship turns away", () => {
+      const sim = withOre(near);
+      sim.step();
+      expect(sim.ores[0].caughtBy).toBe(sim.ship);
+      sim.ship.angle += Math.PI;
+      sim.ship.prevAngle = sim.ship.angle;
+      run(sim, 10);
+      expect(sim.ship.ore).toBe(1);
+    });
+
+    it("lets go of ore that gets out of range", () => {
+      const sim = withOre(near);
+      sim.step();
+      const ore = sim.ores[0];
+      ore.x = ore.px = sim.ship.x + GAME_DEFAULTS.tractorRange * 2;
+      ore.y = ore.py = sim.ship.y;
+      ore.vx = ore.vy = 0;
+      sim.step();
+      expect(ore.caughtBy).toBeNull();
+    });
+
     it("does nothing without the part", () => {
-      const sim = withOre(300);
+      const sim = withOre(near);
       sim.ship.parts.delete("tractor");
       run(sim, 2);
       expect(sim.ores[0].vx).toBe(0);

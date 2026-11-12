@@ -30,6 +30,8 @@ interface Scenario {
   fields: number;
   /** Traffic ships of each model. */
   traffic: number;
+  /** The camera parked out in empty space, away from every field: all traffic out of view. */
+  away?: boolean;
 }
 
 const SCENARIOS: Scenario[] = [
@@ -39,6 +41,8 @@ const SCENARIOS: Scenario[] = [
   { name: "20 traffic", fields: 1, traffic: 10 },
   { name: "100 traffic", fields: 1, traffic: 50 },
   { name: "10 fields, 100 traffic", fields: 10, traffic: 50 },
+  { name: "100 traffic, camera away", fields: 1, traffic: 50, away: true },
+  { name: "10 fields, 100 traffic, camera away", fields: 10, traffic: 50, away: true },
 ];
 
 function worldWith(fields: number): World {
@@ -53,13 +57,27 @@ function run(scenario: Scenario, minutes: number) {
   const sim = new Sim(1, tuning);
   useLayout(worldWith(scenario.fields), linkTo(sim));
   sim.reset(2);
+  const park = () => {
+    if (!scenario.away) return;
+    // 40,000 further out from the centre than the field: clear of every field and body.
+    const out = Math.hypot(sim.field.x, sim.field.y) || 1;
+    sim.ship.x = sim.ship.px = sim.field.x + (sim.field.x / out) * 40000;
+    sim.ship.y = sim.ship.py = sim.field.y + (sim.field.y / out) * 40000;
+    sim.ship.vx = sim.ship.vy = 0;
+  };
   // Let the world settle (traffic sets out, rocks spread) before timing.
-  for (let i = 0; i < 10 / TICK; i++) sim.step();
+  for (let i = 0; i < 10 / TICK; i++) {
+    park();
+    sim.step();
+  }
   const profile = new StepProfile();
   sim.profile = profile;
   const ticks = Math.round((minutes * 60) / TICK);
   const started = performance.now();
-  for (let i = 0; i < ticks; i++) sim.step();
+  for (let i = 0; i < ticks; i++) {
+    park();
+    sim.step();
+  }
   const wall = (performance.now() - started) / ticks;
   sim.profile = null;
   return { sim, report: profile.report(), wall };

@@ -306,6 +306,8 @@ export class Renderer {
     this.updateParticles(frameSeconds);
     this.drawTractor(sim, ship, shipX, shipY, alpha, true);
     for (const pilot of sim.traffic) {
+      // A trip record is always far out of view: nothing to draw.
+      if (pilot.record) continue;
       const other = pilot.ship;
       const x = lerp(other.px, other.x, alpha);
       const y = lerp(other.py, other.y, alpha);

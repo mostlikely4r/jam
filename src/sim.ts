@@ -1,6 +1,6 @@
 import { Chatter } from "./chatter";
 import { type BlueprintId, isProject, PARTS, partFits, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
-import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD } from "./pilot";
+import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./pilot";
 export { FIRST_FIELD };
 import { pathAround } from "./route";
 import { pilotKind, type StepProfile } from "./profile/step";
@@ -14,6 +14,12 @@ export const TICK = 1 / 120;
  */
 export const FIELD_WAKE_DISTANCE = 6000;
 export const FIELD_SLEEP_DISTANCE = 9000;
+/**
+ * Traffic further than the second from the camera becomes a trip record, and a record
+ * nearer than the first a flown ship again. Both past the widest zoom.
+ */
+export const TRAFFIC_WAKE_DISTANCE = 10000;
+export const TRAFFIC_SLEEP_DISTANCE = 12000;
 export const SHIP_RADIUS = 12;
 export const MAX_HULL = 100;
 const ORE_RADIUS = 5;
@@ -411,6 +417,25 @@ export interface SleepingField {
   rocks: Rock[];
 }
 
+/**
+ * A traffic ship far from the camera: not flown, just its next stop and when it gets
+ * there. At each stop its pilot decides what's next, exactly as a flown one would.
+ */
+export interface TripRecord {
+  /** Working a field, selling at a dock, or buying a load. */
+  goal: "field" | "dock" | "trade";
+  /** The field's id, the base's id, "pirate base", or a deposit's index. */
+  target: string;
+  /** On the way, or (for a field) mining it until `arrive`. */
+  stage: "travel" | "mining";
+  depart: number;
+  arrive: number;
+  /** The route's corners in the world as it set out. Mining: just its spot, from the field's centre. */
+  path: { x: number; y: number }[];
+  /** Where the target was due to be on arrival, when it set out. */
+  aim: { x: number; y: number };
+}
+
 interface ExtraField {
   spec: FieldSpec;
   poi: Poi;
@@ -798,6 +823,7 @@ export class Sim {
       wishlist: each.wishlist,
       working: each.working,
       habit: each.habit,
+      record: each.record,
     });
     return {
       tuning: this.tuning,
@@ -849,13 +875,14 @@ export class Sim {
     };
     this.controls = data.controls;
     this.ship = fill(data.ship);
-    const pilot = (each: { ship: Ship; buys: DronePilot["buys"]; flees: boolean; wishlist: PartId[]; working?: string; habit?: string | null }) => {
+    const pilot = (each: { ship: Ship; buys: DronePilot["buys"]; flees: boolean; wishlist: PartId[]; working?: string; habit?: string | null; record?: TripRecord | null }) => {
       const made = new DronePilot(fill(each.ship));
       made.buys = each.buys;
       made.flees = each.flees;
       made.wishlist = each.wishlist;
       made.working = each.working ?? FIRST_FIELD;
       made.habit = each.habit ?? null;
+      made.record = each.record ?? null;
       return made;
     };
     this.drones = data.drones.map(pilot);
@@ -1273,7 +1300,7 @@ export class Sim {
 
   /** Everything that flies itself. */
   private get pilots(): (DronePilot | FighterPilot)[] {
-    return [...this.drones, ...this.traffic, ...this.fighters];
+    return [...this.drones, ...this.traffic.filter((pilot) => !pilot.record), ...this.fighters];
   }
 
   /** Every ship in the world, the player's included. */
@@ -2326,6 +2353,8 @@ export class Sim {
     }
     this.clickPilot.update(this);
     lap?.("other");
+    this.recordTraffic();
+    lap?.("records");
     const pilots = this.pilots;
     if (lap) {
       for (const pilot of pilots) {
@@ -2849,6 +2878,287 @@ export class Sim {
    * start out of sight and drift in, and stop coming once the field is full.
    */
   /** Big rocks drift into each field that's short of its rocks. */
+  /**
+   * Traffic far from the camera runs as trip records: each tick only checks whether the
+   * next stop is due, where that puts the ship, and whether the camera has come near.
+   */
+  private recordTraffic(): void {
+    const viewer = this.viewer();
+    // Pirates and defenders are still flown, so a ship near one stays flown too, and any
+    // fight between them is a real one. Once they're records as well, only the camera counts.
+    const fighters = this.fighters.map((pilot) => pilot.ship);
+    const sight = this.tuning.visionRange;
+    const fighterWithin = (ship: Ship, range: number) => fighters.some((other) => Math.hypot(other.x - ship.x, other.y - ship.y) < range);
+    for (const pilot of this.traffic) {
+      const { ship } = pilot;
+      if (pilot.record) {
+        // A stop can lead straight to another, such as a dock with nothing to unload.
+        for (let stops = 0; stops < 8 && pilot.record.arrive <= this.clock; stops++) this.recordArrived(pilot);
+        this.placeRecord(pilot.record, ship);
+        if (Math.hypot(ship.x - viewer.x, ship.y - viewer.y) < TRAFFIC_WAKE_DISTANCE || fighterWithin(ship, sight * 2)) {
+          this.wakeRecord(pilot);
+        }
+      } else if (
+        this.tuning.trafficRecords &&
+        !pilot.busy &&
+        Math.hypot(ship.x - viewer.x, ship.y - viewer.y) > TRAFFIC_SLEEP_DISTANCE &&
+        !fighterWithin(ship, sight * 2.5)
+      ) {
+        this.startRecord(pilot);
+      }
+    }
+  }
+
+  /** Turns a flown traffic ship into a record of what it was doing. */
+  private startRecord(pilot: DronePilot): void {
+    const { ship } = pilot;
+    ship.vx = ship.vy = 0;
+    ship.spin = 0;
+    const dock = this.dockedAt(ship);
+    if (dock) {
+      const at = { x: ship.x, y: ship.y };
+      const target = (this.baseOf(dock) ?? this.bases[0]).id;
+      pilot.record = { goal: "dock", target, stage: "travel", depart: this.clock, arrive: this.clock, path: [at], aim: at };
+      return;
+    }
+    const field = this.miningFieldAt(ship.x, ship.y);
+    const mining =
+      !pilot.trading &&
+      !pilot.isHauling &&
+      ship.ore < this.deliveryLoad(ship) &&
+      field.id === pilot.working &&
+      Math.hypot(ship.x - field.poi.x, ship.y - field.poi.y) < field.radius;
+    if (mining) this.startMining(pilot, field);
+    else this.nextLeg(pilot);
+  }
+
+  /** Where a record's target is at a time on the clock. */
+  private recordTargetAt(record: TripRecord, time: number): { x: number; y: number } {
+    if (record.goal === "field") {
+      const fields = this.miningFields();
+      const field = fields.find((each) => each.id === record.target) ?? fields[0];
+      return this.poiAt(field.poi, time);
+    }
+    if (record.goal === "dock") {
+      const base = this.bases.find((each) => each.id === record.target) ?? this.bases[0];
+      return this.poiAt(base.poi, time);
+    }
+    if (record.target === "pirate base" && this.pirateBase) return this.poiAt(this.pirateBase, time);
+    const deposit = this.deposits[Number(record.target)];
+    return deposit ? { x: deposit.x, y: deposit.y } : this.poiAt(this.station, time);
+  }
+
+  /** Sets off for the next stop, the way its pilot would: a buying run, home to sell, or to its field. */
+  private nextLeg(pilot: DronePilot): void {
+    const { ship } = pilot;
+    let goal: TripRecord["goal"];
+    let target: string;
+    const fields = this.miningFields();
+    const lowHull = ship.hull < LOW_HULL && (ship.ore > 0 || this.canPayRepair(ship));
+    if (pilot.trading) {
+      goal = "trade";
+      target = pilot.trading === "pirate base" ? "pirate base" : String(this.deposits.indexOf(pilot.trading));
+      pilot.task = "to buy";
+    } else if (pilot.isHauling || ship.ore >= this.deliveryLoad(ship) || lowHull) {
+      goal = "dock";
+      target = (this.baseOf(this.nearestDock(ship.x, ship.y)) ?? this.bases[0]).id;
+      pilot.task = "to station";
+    } else {
+      goal = "field";
+      target = fields.some((field) => field.id === pilot.working) ? pilot.working : FIRST_FIELD;
+      pilot.task = target === FIRST_FIELD ? "to field" : "to far field";
+    }
+    const from = { x: ship.x, y: ship.y };
+    const record: TripRecord = { goal, target, stage: "travel", depart: this.clock, arrive: this.clock, path: [from], aim: from };
+    const { route, centre } = pilot.plan(this, () => from, (t) => this.recordTargetAt(record, t));
+    record.arrive = route.arrive;
+    record.path = route.path.points.map((point) => ({ x: point.x + centre.x, y: point.y + centre.y }));
+    record.aim = { x: route.aim.x + centre.x, y: route.aim.y + centre.y };
+    pilot.record = record;
+  }
+
+  /** Mines from where it is in a field until a load is due, at the rate flown ships manage. */
+  private startMining(pilot: DronePilot, field: MiningField): void {
+    const { ship, record } = pilot;
+    const want = Math.max(0, this.deliveryLoad(ship) - ship.ore);
+    const perMinute = ship.model === "racer" ? this.tuning.recordOreRacer : this.tuning.recordOreFloater;
+    const seconds = perMinute > 0 ? (want * 60) / perMinute : Infinity;
+    const offset = { x: ship.x - field.poi.x, y: ship.y - field.poi.y };
+    const start = record?.stage === "travel" ? record.arrive : this.clock;
+    pilot.record = { goal: "field", target: field.id, stage: "mining", depart: start, arrive: start + seconds, path: [offset], aim: offset };
+    pilot.task = "shooting";
+    pilot.habit = field.id;
+  }
+
+  /** The next stop is due: what happens there, and the leg after it. */
+  private recordArrived(pilot: DronePilot): void {
+    const record = pilot.record!;
+    const { ship } = pilot;
+    const due = record.arrive;
+    const at = this.recordTargetAt(record, due);
+    if (record.goal === "field" && record.stage === "travel") {
+      const fields = this.miningFields();
+      const field = fields.find((each) => each.id === record.target) ?? fields[0];
+      // Somewhere inside it, as a flown ship would be once it had found a rock.
+      const dir = this.random() * Math.PI * 2;
+      const dist = field.radius * 0.6 * Math.sqrt(this.random());
+      ship.x = ship.px = at.x + Math.cos(dir) * dist;
+      ship.y = ship.py = at.y + Math.sin(dir) * dist;
+      this.startMining(pilot, field);
+      return;
+    }
+    if (record.goal === "field") {
+      const want = Math.max(0, this.deliveryLoad(ship) - ship.ore);
+      ship.ore += Math.min(want, Math.floor(this.takeOre(record.target, want) + 1e-9));
+      // Mined out before the hold was full: home with what it has, or with nothing, back to the first field.
+      if (ship.ore === 0) pilot.working = FIRST_FIELD;
+      else if (ship.ore < this.deliveryLoad(ship)) pilot.startHauling();
+      this.nextLegAt(pilot, due);
+      return;
+    }
+    if (record.goal === "dock") {
+      const base = this.bases.find((each) => each.id === record.target) ?? this.bases[0];
+      const spot = this.dockPoint(false, base.poi);
+      const before = this.dockPoint(true, base.poi);
+      ship.x = spot.x;
+      ship.y = spot.y;
+      ship.px = before.x;
+      ship.py = before.y;
+      ship.vx = ship.vy = 0;
+      const stay = this.dockVisit(pilot);
+      this.nextLegAt(pilot, due + stay);
+      return;
+    }
+    // A buying run: it buys there as a flown ship would, and its pilot takes it from there.
+    ship.x = ship.px = at.x;
+    ship.y = ship.py = at.y;
+    pilot.update(this);
+    if (pilot.trading && record.goal === "trade") pilot.trading = null;
+    this.nextLegAt(pilot, due);
+  }
+
+  /** The next leg, setting out at a time already past (a stop that fell due between ticks). */
+  private nextLegAt(pilot: DronePilot, depart: number): void {
+    this.nextLeg(pilot);
+    const record = pilot.record!;
+    const shift = Math.max(0, depart - this.clock);
+    record.depart += shift;
+    record.arrive += shift;
+  }
+
+  /**
+   * A stay at the dock, run by the dock and the pilot as for a flown ship, but all at once:
+   * it unloads, repairs, shops and picks where to go next. Returns how long it took.
+   */
+  private dockVisit(pilot: DronePilot): number {
+    const { ship } = pilot;
+    const most = Math.round(120 / TICK);
+    let ticks = 0;
+    pilot.newStay();
+    do {
+      pilot.update(this);
+      this.unloadOre(ship, TICK);
+      this.repairHull(ship, TICK);
+      ticks++;
+    } while ((ship.ore > 0 || this.canRepair(ship)) && ticks < most);
+    // Now the hold is empty: it shops and picks its next field.
+    pilot.update(this);
+    return ticks * TICK;
+  }
+
+  /**
+   * Breaks rocks in a field until they've given about `want` ore on average, as mining
+   * them would, and returns how much they gave. Fewer if the field runs out.
+   */
+  private takeOre(fieldId: string, want: number): number {
+    const sleeping = this.sleeping.get(fieldId);
+    const rocks = sleeping ? sleeping.rocks : this.rocks;
+    const mine = (rock: Rock) => !rock.arriving && (sleeping !== undefined || this.miningFieldAt(rock.x, rock.y).id === fieldId);
+    let given = 0;
+    for (let broken = 0; given < want && broken < 1000; broken++) {
+      const start = Math.floor(this.random() * rocks.length);
+      let index = -1;
+      for (let i = 0; i < rocks.length; i++) {
+        const each = (start + i) % rocks.length;
+        if (mine(rocks[each])) {
+          index = each;
+          break;
+        }
+      }
+      if (index < 0) break;
+      const [rock] = rocks.splice(index, 1);
+      given += (rock.tier + 1) * this.tuning.oreChance;
+      if (rock.tier === 0) continue;
+      const pieces = 2 + Math.floor(this.random() * 2);
+      const offset = TIER_RADIUS[rock.tier - 1] / Math.sin(Math.PI / pieces);
+      for (let i = 0; i < pieces; i++) {
+        const dir = (i / pieces) * Math.PI * 2;
+        rocks.push(this.makeRock(rock.tier - 1, rock.x + Math.cos(dir) * offset, rock.y + Math.sin(dir) * offset, rock.vx, rock.vy));
+      }
+    }
+    return given;
+  }
+
+  /** Where a record puts its ship now: along its route, or at its spot in the field it mines. */
+  private placeRecord(record: TripRecord, ship: Ship): void {
+    ship.px = ship.x;
+    ship.py = ship.y;
+    if (record.stage === "mining") {
+      const field = this.recordTargetAt(record, this.clock);
+      ship.x = field.x + record.path[0].x;
+      ship.y = field.y + record.path[0].y;
+      return;
+    }
+    const { path } = record;
+    const span = record.arrive - record.depart;
+    const share = span > 0 ? Math.min(1, Math.max(0, (this.clock - record.depart) / span)) : 1;
+    let length = 0;
+    for (let i = 1; i < path.length; i++) length += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+    let left = share * length;
+    let x = path[path.length - 1].x;
+    let y = path[path.length - 1].y;
+    for (let i = 1; i < path.length; i++) {
+      const piece = Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+      if (left <= piece && piece > 0) {
+        x = path[i - 1].x + ((path[i].x - path[i - 1].x) * left) / piece;
+        y = path[i - 1].y + ((path[i].y - path[i - 1].y) * left) / piece;
+        break;
+      }
+      left -= piece;
+    }
+    // Wherever the target has really got to, it ends up there.
+    const target = this.recordTargetAt(record, this.clock);
+    ship.x = x + share * (target.x - record.aim.x);
+    ship.y = y + share * (target.y - record.aim.y);
+    // The route's straight pieces cut the corners of its curve round a body: never inside.
+    for (const body of this.bodies) {
+      const circle = this.keepOutAt(body);
+      const dx = ship.x - circle.x;
+      const dy = ship.y - circle.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance >= circle.radius || distance === 0) continue;
+      ship.x = circle.x + (dx / distance) * circle.radius * 1.001;
+      ship.y = circle.y + (dy / distance) * circle.radius * 1.001;
+    }
+  }
+
+  /** The camera has come near: it's a flown ship again, from wherever its record has it. */
+  private wakeRecord(pilot: DronePilot): void {
+    const record = pilot.record!;
+    const { ship } = pilot;
+    if (record.stage === "mining") {
+      // What it has mined so far.
+      const span = record.arrive - record.depart;
+      const share = span > 0 && Number.isFinite(span) ? Math.max(0, (this.clock - record.depart) / span) : 0;
+      const want = Math.floor(share * Math.max(0, this.deliveryLoad(ship) - ship.ore));
+      if (want > 0) ship.ore += Math.min(want, Math.floor(this.takeOre(record.target, want) + 1e-9));
+    }
+    pilot.record = null;
+    ship.px = ship.x;
+    ship.py = ship.y;
+    ship.vx = ship.vy = 0;
+  }
+
   /**
    * Where the camera is. Today it's always on the player's ship; a camera switch or a jump
    * would move it, and with it what's awake.

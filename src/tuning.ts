@@ -97,6 +97,11 @@ export const DEFAULTS = {
   trafficFloaters: 1,
   showTraffic: false,
   trafficFlees: true,
+  /** Traffic far from the camera runs as trip records instead of flown ships. */
+  trafficRecords: true,
+  /** Ore a minute a racer, then a floater, mines in a field while it's a record: measured from flown ones. */
+  recordOreRacer: 4.6,
+  recordOreFloater: 2.6,
   chatter: true,
   haulers: true,
   /** The shop only sells what the station has bought a blueprint for. */
@@ -369,11 +374,14 @@ export const GROUPS: Group[] = [
       { key: "trafficRacers", label: "First ships (on restart)", min: 0, max: 10, step: 1 },
       { key: "trafficFloaters", label: "New ships (on restart)", min: 0, max: 10, step: 1 },
       { key: "chatterRange", label: "Radio range", min: 300, max: 5000, step: 100 },
+      { key: "recordOreRacer", label: "Ore a minute a racer mines out of view", min: 0, max: 20, step: 0.1 },
+      { key: "recordOreFloater", label: "Ore a minute a floater mines out of view", min: 0, max: 20, step: 0.1 },
       { key: "bodySight", label: "Bodies show on the chart from this many radii", min: 1, max: 20, step: 0.5 },
     ],
     switches: [
       { key: "showTraffic", label: "Show traffic readouts and arrows" },
       { key: "trafficFlees", label: "Traffic flees from pirates" },
+      { key: "trafficRecords", label: "Traffic out of view runs as trip records" },
       { key: "sightLines", label: "Rocks block sight" },
       { key: "chatter", label: "Radio chatter" },
       { key: "haulers", label: "Haulers buy station ore" },

@@ -1115,9 +1115,14 @@ describe("pirate and defender", () => {
       const { ship } = sim.traffic[0];
       const pirate = sim.fighters[0].ship;
       pin(ship, 0, 0);
+      // The pirate is where its shot comes from, which keeps the ship it shoots flown.
+      pin(pirate, -400, 0);
       pin(sim.ship, 50000, 0);
       sim.shots.push({ x: -30, y: 0, px: -30, py: 0, vx: 800, vy: 0, life: 1, precise: false, from: pirate });
-      const heard = listen(sim, 0.2, () => pin(ship, 0, 0));
+      const heard = listen(sim, 0.2, () => {
+        pin(ship, 0, 0);
+        pin(pirate, -400, 0);
+      });
       const mayday = heard.find((line) => line.mayday);
       expect(mayday?.speaker).toBe(ship);
       expect(sim.hears(mayday!)).toBe(true);

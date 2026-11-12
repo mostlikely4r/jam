@@ -401,7 +401,8 @@ describe("station", () => {
     });
 
     it("stays awake while any ship is near it", () => {
-      const sim = withSecond({}, { trafficRacers: 1 });
+      // A flown ship: a record never keeps a field awake.
+      const sim = withSecond({}, { trafficRacers: 1, trafficRecords: false });
       const { poi } = sim.extraFields[0];
       const traffic = sim.traffic[0].ship;
       const park = () => {

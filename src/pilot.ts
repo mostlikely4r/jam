@@ -1,5 +1,5 @@
 import { DRONE_BUY_ORDER, type PartId } from "./parts";
-import { planRoute } from "./route";
+import { planRoute, type Route, type Vec } from "./route";
 import {
   type Body,
   type Deposit,
@@ -13,6 +13,7 @@ import {
   type Sim,
   STATION_HALF,
   TICK,
+  type TripRecord,
 } from "./sim";
 
 /** Well under what the rotation thrusters can reach, so turns look unhurried. */
@@ -76,7 +77,7 @@ const AVOID_LOOK_AHEAD = 500;
 const AVOID_MARGIN = 30;
 const DOCK_ARRIVAL_SLACK = 100;
 /** Below this it heads home early, as long as it can pay for the repair when it gets there. */
-const LOW_HULL = 30;
+export const LOW_HULL = 30;
 /** How close to a deposit it aims for. Trading starts as soon as it's in reach. */
 const DEPOSIT_ARRIVAL = 60;
 /** Within this distance and under this speed, a click order stops flying and starts stopping. */
@@ -511,6 +512,33 @@ export class DronePilot extends ShipPilot {
   private retarget = 0;
   private targetAge = 0;
   private ignored = new WeakSet<object>();
+  /**
+   * Set while it's far from the camera: it isn't flown, just a trip from one stop to the
+   * next on the clock (see `Sim.recordTraffic`). Its decisions at each stop are still its own.
+   */
+  record: TripRecord | null = null;
+
+  /** Running from danger or home to report: it stays a ship until that's over. */
+  get busy(): boolean {
+    return this.fleeing || this.reporting !== null;
+  }
+
+  /** Taking its load to sell. */
+  get isHauling(): boolean {
+    return this.hauling;
+  }
+
+  /** A record has come in to dock: a new stay, so it decides afresh where to go next. */
+  newStay(): void {
+    this.decidedField = false;
+    this.decidedTrade = false;
+  }
+
+  /** Done mining this load, full or not: it takes what it has home. */
+  startHauling(): void {
+    this.hauling = true;
+    this.dropsThisLoad = false;
+  }
 
   update(sim: Sim): void {
     const { ship } = this;
@@ -623,10 +651,23 @@ export class DronePilot extends ShipPilot {
 
   /** Seconds from one place to another, by the route planner, round any body in the way. */
   tripSeconds(sim: Sim, start: Poi, end: Poi): number {
+    const { route } = this.plan(
+      sim,
+      (t) => sim.poiAt(start, t),
+      (t) => sim.poiAt(end, t),
+    );
+    return route.arrive - route.depart;
+  }
+
+  /**
+   * A trip by the route planner from one moving spot to another, round the body in the way
+   * nearest the start. The route is in that body's frame; `centre` is where the body is now.
+   */
+  plan(sim: Sim, start: (t: number) => Vec, end: (t: number) => Vec): { route: Route; centre: Vec } {
     const { ship } = this;
     const flight = { accel: sim.tuning.thrust * sim.shipResponse(ship), cruise: this.cruiseSpeed(sim) };
-    const from = sim.poiAt(start, sim.now);
-    const to = sim.poiAt(end, sim.now);
+    const from = start(sim.now);
+    const to = end(sim.now);
     // Round the body nearest the station of those across the way, in that body's frame.
     let centre = { x: 0, y: 0 };
     let radius = 0;
@@ -641,13 +682,13 @@ export class DronePilot extends ShipPilot {
       }
     }
     const route = planRoute(
-      (t) => minus(sim.poiAt(start, t), centre),
-      (t) => minus(sim.poiAt(end, t), centre),
+      (t) => minus(start(t), centre),
+      (t) => minus(end(t), centre),
       sim.now,
       radius,
       flight,
     );
-    return route.arrive - route.depart;
+    return { route, centre };
   }
 
   /** The field it's working this trip, or the first if that one's gone. */

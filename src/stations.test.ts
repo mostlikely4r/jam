@@ -339,3 +339,72 @@ describe("blueprints per base", () => {
     expect(older.bases[1].blueprints.size).toBe(0);
   });
 });
+
+describe("the news board", () => {
+  const undock = (sim: Sim, ship: Ship) => {
+    ship.x = ship.px = sim.station.x + 20000;
+    ship.y = ship.py = sim.station.y;
+    sim.step();
+  };
+
+  it("carries word of a held part from the base that sells it to the next dock, with when it was seen", () => {
+    const { sim, outpost } = world({}, { blueprints: ["tractorAll"] });
+    const { ship } = sim;
+    const [first, second] = sim.bases;
+    dockAt(sim, ship, outpost);
+    sim.step();
+    const seen = sim.now;
+    expect(second.board).toEqual([{ base: second.id, item: "tractorAll", price: sim.partPrice("tractorAll"), seen: expect.any(Number) }]);
+    expect(ship.news).toHaveLength(1);
+    undock(sim, ship);
+    expect(first.board).toHaveLength(0);
+    dockAt(sim, ship, sim.station);
+    sim.step();
+    expect(first.board).toHaveLength(1);
+    expect(first.board[0].base).toBe(second.id);
+    expect(first.board[0].seen).toBeLessThanOrEqual(seen);
+  });
+
+  it("swaps once per stay, keeps the newest word, and drops what's too old", () => {
+    const { sim } = world({ newsLife: 600 });
+    const { ship } = sim;
+    const [first, second] = sim.bases;
+    first.board = [{ base: second.id, item: "tractorAll", price: 600, seen: sim.now - 100 }];
+    ship.news = [{ base: second.id, item: "tractorAll", price: 500, seen: sim.now - 10 }];
+    dockAt(sim, ship, sim.station);
+    sim.step();
+    expect(first.board.map((report) => report.price)).toEqual([500]);
+    // While it stays, a new word on the board isn't picked up again.
+    first.board = [];
+    sim.step();
+    expect(first.board).toEqual([]);
+    undock(sim, ship);
+    ship.news = [{ base: second.id, item: "tractorAll", price: 500, seen: sim.now - 601 }];
+    dockAt(sim, ship, sim.station);
+    sim.step();
+    expect(first.board).toEqual([]);
+    expect(ship.news).toEqual([]);
+  });
+
+  it("isn't swapped with pirates or defenders", () => {
+    const { sim } = world();
+    const [first, second] = sim.bases;
+    const ship = sim.ship;
+    ship.faction = "defender";
+    ship.news = [{ base: second.id, item: "tractorAll", price: 500, seen: sim.now }];
+    dockAt(sim, ship, sim.station);
+    sim.step();
+    expect(first.board).toEqual([]);
+  });
+
+  it("keeps boards and what ships have heard through a save", () => {
+    const { sim, outpost } = world({}, { blueprints: ["tractorAll"] });
+    dockAt(sim, sim.ship, outpost);
+    sim.step();
+    const { sim: into } = world({}, { blueprints: ["tractorAll"] });
+    roundTrip(sim, into);
+    expect(into.bases[1].board).toHaveLength(1);
+    expect(into.ship.news).toHaveLength(1);
+    expect(into.ship.news[0].item).toBe("tractorAll");
+  });
+});

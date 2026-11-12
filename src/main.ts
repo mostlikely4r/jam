@@ -574,7 +574,7 @@ function updateShop(): void {
     const title = `Dock shop - station ${Math.floor(base.account.credits)} credits - ${haulerText(base)}`;
     if (shopHeading.textContent !== title) shopHeading.textContent = title;
   }
-  const state = `${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks}`;
+  const state = `${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks} ${newsState()}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked;
@@ -625,6 +625,48 @@ function updateShop(): void {
   else if (!sim.unlocked("deposit")) depositGuardLine = { tag: "needs a deposit", text: "Deposit turrets", enabled: false };
   else depositGuardLine = lockedLine("depositGuards", `Deposit turrets (${tuning.depositGuardParts} parts)`);
   shop.append(shopButton("·", depositGuardLine, () => sim.fundBlueprint(ship, "depositGuards")));
+  appendNews();
+}
+
+/** The dock's news board, newest first: what's sold where, at what price, and how long ago it was seen. */
+function newsLines(): string[] {
+  const base = sim.baseAt();
+  if (!base) return [];
+  return [...base.board]
+    .sort((a, b) => b.seen - a.seen)
+    .map((report) => {
+      const item = PARTS.find((part) => part.id === report.item)?.label ?? report.item;
+      const where = report.base === base.id ? "here" : `at ${sim.baseName(report.base)}`;
+      const minutes = Math.floor((sim.now - report.seen) / 60);
+      const age = minutes < 1 ? "just now" : minutes < 120 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ago`;
+      return `${item} ${where}, ${report.price} credits, seen ${age}`;
+    });
+}
+
+/** Changes when the board does, or a minute passes, so the ages stay right. */
+function newsState(): string {
+  return `${newsLines().join("|")}`;
+}
+
+function appendNews(): void {
+  const lines = newsLines();
+  const heading = document.createElement("h2");
+  heading.textContent = "News board";
+  heading.className = "news";
+  shop.append(heading);
+  if (lines.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "news";
+    empty.textContent = "Nothing on the board.";
+    shop.append(empty);
+    return;
+  }
+  for (const line of lines) {
+    const item = document.createElement("p");
+    item.className = "news";
+    item.textContent = line;
+    shop.append(item);
+  }
 }
 
 /** Keys 1 to 9 and then 0 pick a part. The minus key buys a drone. */

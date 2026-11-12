@@ -43,6 +43,7 @@ export const STEP_PARTS: Record<string, FarSide> = {
   },
   driftInRocks: { out: "in view only", far: "A sleeping field gets the rocks that would have drifted in all at once on waking (`wakeField`)." },
   moveRocks: { out: "in view only", far: "Sleeping rocks don't move; a shot gap stays where it was." },
+  swapNews: { out: "in view only", far: "A record swaps news at the start of its dock visit (`dockVisit`)." },
   letGoOfOre: { out: "in view only", far: "Records hold no ore in a beam; loose ore out of view is caught by no one." },
   pullOre: { out: "in view only", far: "Records mine by the clock: `recordOre*` rates, measured from flown ships." },
   pullTowardBodies: { out: "in view only", far: "Records fly the route planner's path, which keeps out of every body's pull." },

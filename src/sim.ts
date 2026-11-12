@@ -106,6 +106,10 @@ export interface Ship extends Body {
   upkeep: number;
   repairTimer: number;
   trips: number;
+  /** What it has heard of what's sold where, passed on at every dock it visits. */
+  news: Report[];
+  /** The base it last swapped news with on this stay in a dock, or null once it's out. */
+  newsFrom: string | null;
   wrecks: number;
   damageTaken: number;
   /** What carries this ship the most: an open deposit it's inside, or a POI, or the nearest if none does. */
@@ -385,6 +389,17 @@ export interface StationSpec {
 export const FIRST_BASE = "station";
 
 /**
+ * One piece of news: a base sells an item at a price, as seen at a moment on the clock. It
+ * travels with ships from dock to dock and is dropped once it's too old to trust.
+ */
+export interface Report {
+  base: string;
+  item: PartId;
+  price: number;
+  seen: number;
+}
+
+/**
  * A station with a dock, and everything that's its own: money, a store of ore and parts, a
  * shop that sells from that store, and a hauler that trades with it. Every base is a full
  * starter base. The first is the game's own station; the rest are the designer's.
@@ -410,12 +425,14 @@ export interface Base {
   blueprintPaid: Map<BlueprintId, number>;
   /** Paid in full, waiting for its next hauler to bring them. Projects wait here while built. */
   blueprintsOrdered: Set<BlueprintId>;
+  /** The news board in its dock: what ships have told it, and what it tells them. */
+  board: Report[];
 }
 
 /** What a base holds, as saved. */
 type BaseState = Pick<
   Base,
-  "id" | "account" | "ore" | "parts" | "hauler" | "haulerTimer" | "lostTraffic" | "blueprints" | "blueprintPaid" | "blueprintsOrdered"
+  "id" | "account" | "ore" | "parts" | "hauler" | "haulerTimer" | "lostTraffic" | "blueprints" | "blueprintPaid" | "blueprintsOrdered" | "board"
 >;
 
 /**
@@ -863,8 +880,8 @@ export class Sim {
       fighterRecords: this.fighters.map((each) => each.record),
       pirateBase: this.pirateBase,
       bases: this.bases.map(
-        ({ id, account, ore, parts, hauler, haulerTimer, lostTraffic, blueprints, blueprintPaid, blueprintsOrdered }): BaseState => ({
-          id, account, ore, parts, hauler, haulerTimer, lostTraffic, blueprints, blueprintPaid, blueprintsOrdered,
+        ({ id, account, ore, parts, hauler, haulerTimer, lostTraffic, blueprints, blueprintPaid, blueprintsOrdered, board }): BaseState => ({
+          id, account, ore, parts, hauler, haulerTimer, lostTraffic, blueprints, blueprintPaid, blueprintsOrdered, board,
         }),
       ),
       deposits: this.deposits,
@@ -1121,6 +1138,7 @@ export class Sim {
       blueprints: new Set(spec?.blueprints ?? []),
       blueprintPaid: new Map(),
       blueprintsOrdered: new Set(),
+      board: [],
     };
   }
 
@@ -1139,6 +1157,7 @@ export class Sim {
       blueprints: saved.blueprints ?? base.blueprints,
       blueprintPaid: saved.blueprintPaid ?? base.blueprintPaid,
       blueprintsOrdered: saved.blueprintsOrdered ?? base.blueprintsOrdered,
+      board: saved.board ?? [],
     });
     return true;
   }
@@ -1878,6 +1897,8 @@ export class Sim {
       upkeep: 0,
       repairTimer: 0,
       trips: 0,
+      news: [],
+      newsFrom: null,
       wrecks: 0,
       damageTaken: 0,
       frame: this.field,
@@ -2530,12 +2551,14 @@ export class Sim {
     this.collectOre(this.ship);
     this.unloadOre(this.ship, dt);
     this.repairHull(this.ship, dt);
+    this.swapNews(this.ship);
     // Includes anything bought during the update above.
     for (const pilot of this.pilots) {
       this.fireShots(pilot.ship);
       this.collectOre(pilot.ship);
       this.unloadOre(pilot.ship, dt);
       this.repairHull(pilot.ship, dt);
+      this.swapNews(pilot.ship);
     }
     lap?.("fire, collect, unload");
     this.fireGuards(dt);
@@ -3436,6 +3459,9 @@ export class Sim {
     const most = Math.round(120 / TICK);
     let ticks = 0;
     pilot.newStay();
+    // A record's stay is all at once, so it swaps news whether or not it was here last.
+    ship.newsFrom = null;
+    this.swapNews(ship);
     do {
       pilot.update(this);
       this.unloadOre(ship, TICK);
@@ -4670,6 +4696,47 @@ export class Sim {
         from: by,
       });
     }
+  }
+
+  /** A base's name, as news and shops show it. */
+  baseName(id: string): string {
+    const base = this.bases.find((each) => each.id === id);
+    return base?.spec?.name ?? (id === FIRST_BASE ? "Station" : id);
+  }
+
+  /**
+   * Once per stay in a dock, a ship and the dock's board tell each other what they know:
+   * each keeps the newest word on every base and item, and both drop what's too old. The
+   * base first puts up what it sells that nobody else can. Pirates and defenders keep out of it.
+   */
+  private swapNews(ship: Ship): void {
+    if (ship.faction) return;
+    const dock = this.dockedAt(ship);
+    const base = dock && this.baseOf(dock);
+    if (!base) {
+      ship.newsFrom = null;
+      return;
+    }
+    if (ship.newsFrom === base.id) return;
+    ship.newsFrom = base.id;
+    const own: Report[] = PARTS.filter((part) => part.held && this.unlocked(part.id, base)).map((part) => ({
+      base: base.id,
+      item: part.id,
+      price: this.partPrice(part.id),
+      seen: this.clock,
+    }));
+    const newest = new Map<string, Report>();
+    const oldest = this.clock - this.tuning.newsLife;
+    for (const report of [...base.board, ...ship.news, ...own]) {
+      if (report.seen < oldest) continue;
+      const key = `${report.base} ${report.item}`;
+      const known = newest.get(key);
+      if (!known || report.seen > known.seen) newest.set(key, report);
+    }
+    // Word of a base that's gone goes with it.
+    const merged = [...newest.values()].filter((report) => this.bases.some((each) => each.id === report.base));
+    base.board = merged;
+    ship.news = [...merged];
   }
 
   /** Ore turns into credits one piece at a time while in the dock. */

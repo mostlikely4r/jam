@@ -132,6 +132,8 @@ export const DEFAULTS = {
   trafficStartShare: 0.4,
   /** The chance that traffic leaving the station with money makes a buying run instead of mining. */
   tradeChance: 0.5,
+  /** Seconds news of what's sold where is trusted, from when it was seen. */
+  newsLife: 7200,
   /** After pirates kill a ship, how many seconds before it will buy from them again. */
   pirateGrudgeSeconds: 900,
   /** Hits from one ship before traffic runs home to report it, and how many seconds each hit takes to be forgotten. */
@@ -490,6 +492,7 @@ export const GROUPS: Group[] = [
       { key: "stationCashBuffer", label: "Credits the station holds back from blueprints", min: 0, max: 5000, step: 50 },
       { key: "trafficBuffer", label: "Credits traffic keeps before buying parts", min: 0, max: 3000, step: 50 },
       { key: "tradeChance", label: "Chance traffic leaves the station to buy a load", min: 0, max: 1, step: 0.05 },
+      { key: "newsLife", label: "Seconds news of what's sold where is trusted", min: 600, max: 36000, step: 600 },
       { key: "pirateGrudgeSeconds", label: "Seconds traffic won't buy from pirates after they kill it", min: 0, max: 3600, step: 60 },
       { key: "trafficPatience", label: "Hits from one ship before traffic reports it", min: 1, max: 10, step: 1 },
       { key: "fieldWanderChance", label: "Chance traffic heads for any other field", min: 0, max: 1, step: 0.01 },

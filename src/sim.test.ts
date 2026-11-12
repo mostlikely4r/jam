@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PARTS } from "./parts";
+import { roundTrip } from "./save";
 import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
 import { bodyAt, DOCK_OFFSET, type FieldSpec, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, type SolidBody, STATION_HALF, TICK } from "./sim";
 
@@ -313,8 +314,15 @@ describe("station", () => {
       const { poi } = sim.extraFields[0];
       return sim.rocks.filter((rock) => Math.hypot(rock.x - poi.x, rock.y - poi.y) < 3000 + 500);
     };
-    function withSecond(extra: Partial<FieldSpec> = {}): Sim {
-      const sim = new Sim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800 });
+    /** Puts the player's ship, and so the camera, in the second field and lets it wake. */
+    function visitSecond(sim: Sim): void {
+      const { poi } = sim.extraFields[0];
+      sim.ship.x = sim.ship.px = poi.x;
+      sim.ship.y = sim.ship.py = poi.y;
+      sim.step();
+    }
+    function withSecond(extra: Partial<FieldSpec> = {}, tuning: Partial<typeof DEFAULTS> = {}): Sim {
+      const sim = new Sim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800, ...tuning });
       sim.applyLayout({}, [second(extra)]);
       return sim;
     }
@@ -331,6 +339,10 @@ describe("station", () => {
       const { poi } = sim.extraFields[0];
       const angle = Math.PI + ((2 * Math.PI) / 7200) * sim.now;
       expect(poi.x).toBeCloseTo(Math.cos(angle) * 90000, 3);
+      // Nobody's there, so it slept the whole way round, its rocks kept in its own frame.
+      expect(sim.sleeping.get("second:0")?.rocks.length).toBe(100);
+      visitSecond(sim);
+      expect(sim.sleeping.has("second:0")).toBe(false);
       expect(inSecond(sim).length).toBe(100);
     });
 
@@ -345,10 +357,13 @@ describe("station", () => {
       const { poi } = sim.extraFields[0];
       sim.rocks = sim.rocks.filter((rock) => Math.hypot(rock.x - poi.x, rock.y - poi.y) > 10000);
       run(sim, 30);
-      // Drifting in from outside it: count everything round it, well clear of the first field.
-      expect(sim.rocks.filter((rock) => Math.hypot(rock.x - poi.x, rock.y - poi.y) < 20000).length).toBeGreaterThan(5);
       const first = sim.rocks.filter((rock) => Math.hypot(rock.x - sim.field.x, rock.y - sim.field.y) < 20000);
       expect(first.length).toBe(50);
+      // It slept with none, and wakes with what drifted in meanwhile: about 30 at 60 a minute.
+      visitSecond(sim);
+      const grown = sim.rocks.filter((rock) => Math.hypot(rock.x - poi.x, rock.y - poi.y) < 20000).length;
+      expect(grown).toBeGreaterThan(20);
+      expect(grown).toBeLessThanOrEqual(30);
     });
 
     it("takes its rocks with it when it's taken away", () => {
@@ -356,6 +371,49 @@ describe("station", () => {
       sim.applyLayout({}, []);
       expect(sim.extraFields.length).toBe(0);
       expect(sim.rocks.length).toBe(50);
+    });
+
+    it("sleeps while nobody is near, and wakes with any gap shot in it still there", () => {
+      const sim = withSecond();
+      const { poi } = sim.extraFields[0];
+      // Shoot a hole in one side of it.
+      sim.rocks = sim.rocks.filter((rock) => !(Math.hypot(rock.x - poi.x, rock.y - poi.y) < 3500 && rock.x > poi.x));
+      const left = inSecond(sim).length;
+      run(sim, 60);
+      expect(sim.rocks.length).toBe(50);
+      visitSecond(sim);
+      const rocks = inSecond(sim);
+      expect(rocks.length).toBe(left);
+      // Still one-sided: the field doesn't spin here, so the hole is on the same side.
+      expect(rocks.filter((rock) => rock.x > poi.x + 100).length).toBe(0);
+    });
+
+    it("keeps a sleeping field through a save", () => {
+      const sim = withSecond();
+      run(sim, 5);
+      expect(sim.sleeping.has("second:0")).toBe(true);
+      const loaded = new Sim(1, { ...sim.tuning });
+      loaded.applyLayout({}, [second()]);
+      roundTrip(sim, loaded);
+      expect(loaded.sleeping.get("second:0")?.rocks.length).toBe(100);
+      visitSecond(loaded);
+      expect(inSecond(loaded).length).toBe(100);
+    });
+
+    it("stays awake while any ship is near it", () => {
+      const sim = withSecond({}, { trafficRacers: 1 });
+      const { poi } = sim.extraFields[0];
+      const traffic = sim.traffic[0].ship;
+      const park = () => {
+        traffic.x = traffic.px = poi.x;
+        traffic.y = traffic.py = poi.y;
+        traffic.vx = traffic.vy = 0;
+      };
+      for (let i = 0; i < Math.round(5 / TICK); i++) {
+        park();
+        sim.step();
+      }
+      expect(sim.sleeping.has("second:0")).toBe(false);
     });
 
     it("carries to its own range", () => {

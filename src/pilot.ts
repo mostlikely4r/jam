@@ -799,10 +799,13 @@ export class DronePilot extends ShipPilot {
   private mine(sim: Sim): void {
     const { ship } = this;
     const field = this.workingField(sim);
-    // Nearer another field than its own, or with a body still in the way, it's a trip there first.
+    // Nearer another field than its own, or with a body still in the way, it's a trip there
+    // first. So is a field still asleep: it wakes as the ship comes near, before it arrives.
     const away =
       sim.extraFields.length > 0 &&
-      (sim.miningFieldAt(ship.x, ship.y).id !== field.id || sim.cornerToward(ship.x, ship.y, field.poi.x, field.poi.y) !== null);
+      (sim.miningFieldAt(ship.x, ship.y).id !== field.id ||
+        sim.sleeping.has(field.id) ||
+        sim.cornerToward(ship.x, ship.y, field.poi.x, field.poi.y) !== null);
     if (away && ship.ore === 0) {
       this.task = field.id === FIRST_FIELD ? "to field" : "to far field";
       this.travel(sim, field.poi, field.radius * FIELD_ARRIVAL_SHARE, 0, null);

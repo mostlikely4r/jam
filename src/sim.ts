@@ -7,6 +7,13 @@ import { pilotKind, type StepProfile } from "./profile/step";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
 export const TICK = 1 / 120;
+/**
+ * A sleeping field wakes when the camera, or any ship, comes this far past its edge, and
+ * a waking one sleeps once they're all further than the second. Both well past what the
+ * widest zoom shows, so nobody sees rocks come or go; the gap stops it flickering.
+ */
+export const FIELD_WAKE_DISTANCE = 6000;
+export const FIELD_SLEEP_DISTANCE = 9000;
 export const SHIP_RADIUS = 12;
 export const MAX_HULL = 100;
 const ORE_RADIUS = 5;
@@ -392,6 +399,18 @@ export interface Base {
 /** What a base holds, as saved. */
 type BaseState = Pick<Base, "id" | "account" | "ore" | "parts" | "hauler" | "haulerTimer" | "lostTraffic">;
 
+/**
+ * A field nobody is near: its rocks kept as they were, in the field's own turning frame,
+ * and nothing about them worked out until someone comes near again.
+ */
+export interface SleepingField {
+  id: string;
+  /** When it fell asleep, on the clock. */
+  since: number;
+  /** Positions, velocities and angles relative to the field's centre and turn. */
+  rocks: Rock[];
+}
+
 interface ExtraField {
   spec: FieldSpec;
   poi: Poi;
@@ -730,6 +749,8 @@ export class Sim {
   /** Flies the player's ship to a clicked spot, if it has the part. */
   clickPilot!: ClickPilot;
   rocks: Rock[] = [];
+  /** Fields nobody is near, by id. Their rocks aren't in `rocks` and nothing moves them. */
+  sleeping = new Map<string, SleepingField>();
   /** Each POI's carry this tick, set at the start of `carryBodies`. */
   private carriers: Carriers | null = null;
   /** Times each part of `step` while set. Dev only: nothing in the game turns it on. */
@@ -807,6 +828,7 @@ export class Sim {
       stats: this.stats,
       discovered: this.discovered,
       inflowTimer: this.inflowTimer,
+      sleeping: [...this.sleeping.values()],
       randomState: this.randomState,
     };
   }
@@ -862,6 +884,8 @@ export class Sim {
     this.savedBases = new Map(bases.map((state) => [state.id, state]));
     for (const base of this.bases) this.takeSaved(base);
     this.discovered = data.discovered ?? new Set();
+    // A save from before fields slept has every rock awake: far fields fall asleep next tick.
+    this.sleeping = new Map(((data.sleeping ?? []) as SleepingField[]).map((field) => [field.id, field]));
     this.clickPilot = new ClickPilot(this.ship);
     this.chatter = new Chatter(this.randomState.a);
     this.grudges = new WeakMap();
@@ -872,6 +896,7 @@ export class Sim {
     this.randomState = { a: seed >>> 0 };
     this.chatter = new Chatter(seed);
     this.rocks = [];
+    this.sleeping = new Map();
     this.shots = [];
     this.ores = [];
     this.events = [];
@@ -1068,7 +1093,12 @@ export class Sim {
   /** Whether a field has been mined down below the share that's worth the trip. */
   fieldEmpty(field: MiningField): boolean {
     let count = 0;
-    for (const rock of this.rocks) if (!rock.arriving && this.rockIn(field, rock)) count++;
+    const sleeping = this.sleeping.get(field.id);
+    if (sleeping) {
+      for (const rock of sleeping.rocks) if (!rock.arriving) count++;
+    } else {
+      for (const rock of this.rocks) if (!rock.arriving && this.rockIn(field, rock)) count++;
+    }
     return count < field.full * this.tuning.fieldEmptyShare;
   }
 
@@ -2309,6 +2339,8 @@ export class Sim {
     this.moveDeposits();
     this.moveGuards();
     lap?.("places");
+    this.sleepAndWake();
+    lap?.("sleep and wake");
     this.carryBodies(dt);
     lap?.("carry");
     this.driftInRocks(dt);
@@ -2450,6 +2482,8 @@ export class Sim {
         this.rocks = this.rocks.filter((rock) => !gone.some(({ poi, spec }) => Math.hypot(rock.x - poi.x, rock.y - poi.y) < spec.radius * 1.5));
       }
       this.extraFields = next;
+      const ids = new Set([FIRST_FIELD, ...next.map((extra) => extra.spec.id)]);
+      for (const id of this.sleeping.keys()) if (!ids.has(id)) this.sleeping.delete(id);
     }
     if (stationSpecs) {
       const kept = new Map(this.bases.map((base) => [base.id, base]));
@@ -2815,14 +2849,119 @@ export class Sim {
    * start out of sight and drift in, and stop coming once the field is full.
    */
   /** Big rocks drift into each field that's short of its rocks. */
+  /**
+   * Where the camera is. Today it's always on the player's ship; a camera switch or a jump
+   * would move it, and with it what's awake.
+   */
+  viewer(): { x: number; y: number } {
+    return this.ship;
+  }
+
+  /**
+   * Puts to sleep every field the camera and every ship have left, and wakes every sleeping
+   * field one of them has come near. Ships keep a field awake only until they're trip
+   * records themselves: then only the camera will.
+   */
+  private sleepAndWake(): void {
+    const fields = this.miningFields();
+    const viewer = this.viewer();
+    const ships = this.pilots.map((pilot) => pilot.ship);
+    const near = (field: MiningField, distance: number): boolean => {
+      const reach = field.radius + distance;
+      const within = (at: { x: number; y: number }) => Math.hypot(at.x - field.poi.x, at.y - field.poi.y) < reach;
+      return within(viewer) || ships.some(within);
+    };
+    const falling: MiningField[] = [];
+    for (const field of fields) {
+      const sleeping = this.sleeping.get(field.id);
+      if (sleeping) {
+        if (near(field, FIELD_WAKE_DISTANCE)) this.wakeField(field, sleeping);
+      } else if (!near(field, FIELD_SLEEP_DISTANCE)) {
+        falling.push(field);
+      }
+    }
+    if (falling.length > 0) this.sleepFields(fields, falling);
+  }
+
+  private sleepFields(fields: MiningField[], falling: MiningField[]): void {
+    const kept: Rock[] = [];
+    const asleep = new Map(falling.map((field) => [field, [] as Rock[]]));
+    for (const rock of this.rocks) {
+      const field = fields[this.fieldAt(fields, rock.x, rock.y)];
+      const into = asleep.get(field);
+      if (!into) {
+        kept.push(rock);
+        continue;
+      }
+      const { poi } = field;
+      const cos = Math.cos(-poi.rotation);
+      const sin = Math.sin(-poi.rotation);
+      const dx = rock.x - poi.x;
+      const dy = rock.y - poi.y;
+      const { vx, vy } = rock;
+      rock.x = rock.px = dx * cos - dy * sin;
+      rock.y = rock.py = dx * sin + dy * cos;
+      rock.vx = vx * cos - vy * sin;
+      rock.vy = vx * sin + vy * cos;
+      rock.angle = rock.prevAngle = rock.angle - poi.rotation;
+      into.push(rock);
+    }
+    this.rocks = kept;
+    for (const [field, rocks] of asleep) this.sleeping.set(field.id, { id: field.id, since: this.clock, rocks });
+  }
+
+  /**
+   * Brings a field's rocks back where they were in its frame, so a gap shot in it is still
+   * there, plus the rocks that would have drifted in while it slept. Those arrive already
+   * settled in the field, out where nobody is looking.
+   */
+  private wakeField(field: MiningField, sleeping: SleepingField): void {
+    this.sleeping.delete(field.id);
+    const { poi } = field;
+    const cos = Math.cos(poi.rotation);
+    const sin = Math.sin(poi.rotation);
+    for (const rock of sleeping.rocks) {
+      const { x, y, vx, vy } = rock;
+      rock.x = rock.px = poi.x + x * cos - y * sin;
+      rock.y = rock.py = poi.y + x * sin + y * cos;
+      rock.vx = vx * cos - vy * sin;
+      rock.vy = vx * sin + vy * cos;
+      rock.angle = rock.prevAngle = rock.angle + poi.rotation;
+      this.rocks.push(rock);
+    }
+    const extra = this.extraFields.find((each) => each.spec.id === field.id);
+    const perMinute = extra ? extra.spec.rockInflow : this.tuning.rockInflow;
+    const drift = extra ? extra.spec.rockDrift : this.tuning.rockDrift;
+    const room = field.full - sleeping.rocks.length;
+    const grown = Math.min(room, Math.floor(((this.clock - sleeping.since) * perMinute) / 60));
+    const viewer = this.viewer();
+    for (let i = 0; i < grown; i++) {
+      // Clear of the camera, should it have jumped right into the field.
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const dist = field.radius * Math.sqrt(this.random());
+        const dir = this.random() * Math.PI * 2;
+        const x = poi.x + Math.cos(dir) * dist;
+        const y = poi.y + Math.sin(dir) * dist;
+        if (Math.hypot(x - viewer.x, y - viewer.y) < INFLOW_CLEAR_OF_PLAYER) continue;
+        const speed = drift * this.random();
+        const heading = this.random() * Math.PI * 2;
+        this.rocks.push(this.makeRock(INFLOW_TIER, x, y, Math.cos(heading) * speed, Math.sin(heading) * speed));
+        break;
+      }
+    }
+  }
+
   private driftInRocks(dt: number): void {
     const fields = this.rockFields();
     const counts = fields.map(() => 0);
     if (fields.length === 1) counts[0] = this.rocks.length;
     else for (const rock of this.rocks) counts[this.fieldAt(fields, rock.x, rock.y)]++;
     const { tuning } = this;
-    this.inflowTimer = this.driftInto(fields[0], tuning.rockInflow, tuning.rockCount, counts[0], this.inflowTimer, dt);
+    if (!this.sleeping.has(FIRST_FIELD)) {
+      this.inflowTimer = this.driftInto(fields[0], tuning.rockInflow, tuning.rockCount, counts[0], this.inflowTimer, dt);
+    }
     this.extraFields.forEach((extra, i) => {
+      if (this.sleeping.has(extra.spec.id)) return;
       extra.inflowTimer = this.driftInto(fields[i + 1], extra.spec.rockInflow, extra.spec.rocks, counts[i + 1], extra.inflowTimer, dt);
     });
   }

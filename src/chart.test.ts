@@ -154,10 +154,12 @@ describe("chart", () => {
     ship.px = ship.x;
     ship.py = ship.y;
     expect(sim.orderTravel(sim.field)).toBe(true);
+    // Where the course ends, before drifting rocks start nudging the ship about.
+    let out = Infinity;
     run(sim, 700, () => {
       sim.events.length = 0;
+      if (out === Infinity && !sim.clickPilot.flying) out = Math.hypot(ship.x - sim.field.x, ship.y - sim.field.y);
     });
-    const out = Math.hypot(ship.x - sim.field.x, ship.y - sim.field.y);
     expect(out).toBeLessThan(sim.field.reach);
     expect(out).toBeGreaterThan(sim.field.reach * 0.5);
   }, 60000);

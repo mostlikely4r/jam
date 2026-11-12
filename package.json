@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "economy": "vite-node src/economy/run.ts",
-    "profile": "vite-node src/profile/run.ts"
+    "profile": "vite-node src/profile/run.ts",
+    "census": "vite-node src/profile/census.ts"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

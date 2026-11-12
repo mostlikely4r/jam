@@ -102,6 +102,18 @@ export const DEFAULTS = {
   /** Ore a minute a racer, then a floater, mines in a field while it's a record: measured from flown ones. */
   recordOreRacer: 4.6,
   recordOreFloater: 2.6,
+  /** Pirates and defenders far from the camera with nothing to fight run as trip records too. */
+  fighterRecords: true,
+  /** Ore a minute a pirate mines in its field while it's a record. */
+  recordOrePirate: 4.6,
+  /**
+   * The chance each second that a pirate, then a defender, keeping watch as a record starts
+   * on a ship in its field it would go after. Then both are flown, and the fight is real.
+   * Measured from flown ones (`npm run census`): attacks begun per second spent calm in
+   * their field with such a ship there.
+   */
+  recordSpotPirate: 0.00026,
+  recordSpotDefender: 0.0004,
   chatter: true,
   haulers: true,
   /** The shop only sells what the station has bought a blueprint for. */
@@ -376,12 +388,16 @@ export const GROUPS: Group[] = [
       { key: "chatterRange", label: "Radio range", min: 300, max: 5000, step: 100 },
       { key: "recordOreRacer", label: "Ore a minute a racer mines out of view", min: 0, max: 20, step: 0.1 },
       { key: "recordOreFloater", label: "Ore a minute a floater mines out of view", min: 0, max: 20, step: 0.1 },
+      { key: "recordOrePirate", label: "Ore a minute a pirate mines out of view", min: 0, max: 20, step: 0.1 },
+      { key: "recordSpotPirate", label: "Chance a second a pirate out of view starts on a ship", min: 0, max: 0.01, step: 0.00002 },
+      { key: "recordSpotDefender", label: "Chance a second a defender out of view starts on a ship", min: 0, max: 0.01, step: 0.00002 },
       { key: "bodySight", label: "Bodies show on the chart from this many radii", min: 1, max: 20, step: 0.5 },
     ],
     switches: [
       { key: "showTraffic", label: "Show traffic readouts and arrows" },
       { key: "trafficFlees", label: "Traffic flees from pirates" },
       { key: "trafficRecords", label: "Traffic out of view runs as trip records" },
+      { key: "fighterRecords", label: "Pirates and defenders out of view run as trip records" },
       { key: "sightLines", label: "Rocks block sight" },
       { key: "chatter", label: "Radio chatter" },
       { key: "haulers", label: "Haulers buy station ore" },

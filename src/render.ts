@@ -314,7 +314,7 @@ export class Renderer {
       this.drawShip(other, x, y, alpha, TRAFFIC_COLOR);
       if (tuning.showTraffic) this.drawTask(sim, pilot, x, y, "#a8adb8");
     }
-    for (const pilot of sim.fighters) this.drawFighter(sim, pilot, alpha);
+    for (const pilot of sim.fighters) if (!pilot.record) this.drawFighter(sim, pilot, alpha);
     for (const drone of sim.drones) {
       const other = drone.ship;
       this.drawTractor(sim, other, lerp(other.px, other.x, alpha), lerp(other.py, other.y, alpha), alpha, false);

@@ -94,7 +94,7 @@ describe("traffic out of view", () => {
   }, 120000);
 
   it("stays a flown ship while a pirate is near it, so a fight is a real one", () => {
-    const sim = new Sim(1, { ...QUIET, pirates: 1, trafficRacers: 1, trafficFloaters: 0 });
+    const sim = new Sim(1, { ...QUIET, pirates: 1, trafficRacers: 1, trafficFloaters: 0, fighterRecords: false });
     const pirate = sim.fighters[0].ship;
     const { ship } = sim.traffic[0];
     run(sim, 2, () => {
@@ -103,5 +103,65 @@ describe("traffic out of view", () => {
       pirate.y = pirate.py = ship.y;
     });
     expect(sim.traffic[0].record).toBeNull();
+  });
+});
+
+describe("pirates and defenders out of view", () => {
+  /** One pirate, one defender and nobody else, with the camera far away. */
+  const ALONE = { ...QUIET, trafficRacers: 0, trafficFloaters: 0, pirates: 1, defenders: 1 };
+
+  it("become trip records, and ships again when the camera comes near", () => {
+    const sim = new Sim(1, { ...ALONE });
+    run(sim, 2, () => parkAway(sim));
+    expect(sim.fighters.every((pilot) => pilot.record)).toBe(true);
+    expect(sim.ships).toEqual([sim.ship]);
+    const { ship } = sim.fighters[0];
+    sim.ship.x = sim.ship.px = ship.x + TRAFFIC_WAKE_DISTANCE / 2;
+    sim.ship.y = sim.ship.py = ship.y;
+    sim.step();
+    expect(sim.fighters[0].record).toBeNull();
+    expect(sim.ships).toContain(ship);
+  });
+
+  it("a pirate as a record mines its field and sells the ore at its base", () => {
+    const sim = new Sim(1, { ...ALONE, defenders: 0 });
+    run(sim, 900, () => parkAway(sim));
+    expect(sim.fighters[0].record).not.toBeNull();
+    expect(sim.pirateOre).toBeGreaterThan(0);
+  }, 120000);
+
+  it("a pirate as a record spots laden traffic in its field: both are ships again, and it attacks", () => {
+    const sim = new Sim(1, { ...QUIET, pirates: 1, trafficRacers: 1, trafficFloaters: 0, recordSpotPirate: 1 });
+    const pirate = sim.fighters[0];
+    const trader = sim.traffic[0];
+    let met = false;
+    run(sim, 600, () => {
+      parkAway(sim);
+      if (!met && !pirate.record && !trader.record && pirate.task === "attacking") met = true;
+    });
+    expect(met).toBe(true);
+    expect(trader.ship.damageTaken).toBeGreaterThan(0);
+  }, 120000);
+
+  it("a defender as a record answers a call for help near its base", () => {
+    const sim = new Sim(1, { ...ALONE, pirates: 0 });
+    run(sim, 2, () => parkAway(sim));
+    const defender = sim.fighters[0];
+    expect(defender.record).not.toBeNull();
+    sim.distress = { ship: sim.ship, age: 0 };
+    sim.ship.x = sim.ship.px = sim.station.x + 40000;
+    sim.ship.y = sim.ship.py = sim.station.y;
+    sim.step();
+    expect(defender.record).toBeNull();
+  });
+
+  it("go into a save and carry on after loading", () => {
+    const sim = new Sim(1, { ...ALONE });
+    run(sim, 30, () => parkAway(sim));
+    const loaded = new Sim(1, { ...ALONE });
+    roundTrip(sim, loaded);
+    expect(loaded.fighters.map((pilot) => pilot.record)).toEqual(sim.fighters.map((pilot) => pilot.record));
+    run(loaded, 60, () => parkAway(loaded));
+    expect(loaded.fighters.every((pilot) => pilot.record)).toBe(true);
   });
 });

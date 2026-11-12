@@ -5,24 +5,7 @@
 import { Sim, TICK } from "../sim";
 import { StepProfile } from "./step";
 import { DEFAULTS } from "../tuning";
-import { linkedNodes, useLayout, type GameLink } from "../designer/link";
-import { shippedWorld } from "../designer/shipped";
-import type { World } from "../designer/world";
-
-function linkTo(sim: Sim): GameLink {
-  return {
-    tuning: sim.tuning,
-    clock: () => sim.now,
-    phases: () => sim.orbitPhases(),
-    where: () => ({ ship: sim.ship, field: sim.field }),
-    apply(phases, bodies, spawns, fields, stations, keep = false) {
-      sim.bodies = bodies;
-      sim.spawns = spawns;
-      sim.startPhases = phases;
-      sim.applyLayout(keep ? {} : phases, fields, stations);
-    },
-  };
-}
+import { useShippedWorld } from "./world";
 
 interface Scenario {
   name: string;
@@ -45,18 +28,10 @@ const SCENARIOS: Scenario[] = [
   { name: "10 fields, 100 traffic, camera away", fields: 10, traffic: 50, away: true },
 ];
 
-function worldWith(fields: number): World {
-  const world = shippedWorld();
-  const { field } = linkedNodes(world);
-  if (field) field.count = fields;
-  return world;
-}
-
 function run(scenario: Scenario, minutes: number) {
   const tuning = { ...DEFAULTS, trafficRacers: scenario.traffic, trafficFloaters: scenario.traffic };
   const sim = new Sim(1, tuning);
-  useLayout(worldWith(scenario.fields), linkTo(sim));
-  sim.reset(2);
+  useShippedWorld(sim, scenario.fields);
   const park = () => {
     if (!scenario.away) return;
     // 40,000 further out from the centre than the field: clear of every field and body.

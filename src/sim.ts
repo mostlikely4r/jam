@@ -15,10 +15,12 @@ export const TICK = 1 / 120;
 export const FIELD_WAKE_DISTANCE = 6000;
 export const FIELD_SLEEP_DISTANCE = 9000;
 /**
- * Traffic further than the second from the camera becomes a trip record, and a record
- * nearer than the first a flown ship again. Both past the widest zoom.
+ * Traffic, pirates and defenders further than the second from the camera become trip
+ * records, and a record nearer than the first a flown ship again. Both past the widest zoom.
  */
 export const TRAFFIC_WAKE_DISTANCE = 10000;
+/** How long a defender's watch lasts as a record when nothing happens: for good, in a way JSON can save. */
+const FOREVER = 1e9;
 export const TRAFFIC_SLEEP_DISTANCE = 12000;
 export const SHIP_RADIUS = 12;
 export const MAX_HULL = 100;
@@ -422,11 +424,11 @@ export interface SleepingField {
  * there. At each stop its pilot decides what's next, exactly as a flown one would.
  */
 export interface TripRecord {
-  /** Working a field, selling at a dock, or buying a load. */
-  goal: "field" | "dock" | "trade";
+  /** Working a field, selling at a dock, buying a load, or (a pirate or defender) going home. */
+  goal: "field" | "dock" | "trade" | "home";
   /** The field's id, the base's id, "pirate base", or a deposit's index. */
   target: string;
-  /** On the way, or (for a field) mining it until `arrive`. */
+  /** On the way, or (for a field) mining it, or keeping watch over it, until `arrive`. */
   stage: "travel" | "mining";
   depart: number;
   arrive: number;
@@ -832,6 +834,7 @@ export class Sim {
       drones: this.drones.map(pilot),
       traffic: this.traffic.map(pilot),
       fighters: this.fighters.map((each) => each.ship),
+      fighterRecords: this.fighters.map((each) => each.record),
       pirateBase: this.pirateBase,
       bases: this.bases.map(({ id, account, ore, parts, hauler, haulerTimer, lostTraffic }): BaseState => ({ id, account, ore, parts, hauler, haulerTimer, lostTraffic })),
       blueprints: this.blueprints,
@@ -888,6 +891,8 @@ export class Sim {
     this.drones = data.drones.map(pilot);
     this.traffic = data.traffic.map(pilot);
     this.fighters = data.fighters.map((ship: Ship) => new FighterPilot(fill(ship)));
+    const fighterRecords: (TripRecord | null)[] = data.fighterRecords ?? [];
+    this.fighters.forEach((pilot, i) => (pilot.record = fighterRecords[i] ?? null));
     for (const battery of data.batteries as Battery[]) for (const guard of battery.guns) fill(guard.gun);
     const plain = [
       "pirateBase", "blueprints", "blueprintPaid", "blueprintsOrdered", "deposits", "batteries", "pirateOre",
@@ -1300,7 +1305,7 @@ export class Sim {
 
   /** Everything that flies itself. */
   private get pilots(): (DronePilot | FighterPilot)[] {
-    return [...this.drones, ...this.traffic.filter((pilot) => !pilot.record), ...this.fighters];
+    return [...this.drones, ...this.traffic.filter((pilot) => !pilot.record), ...this.fighters.filter((pilot) => !pilot.record)];
   }
 
   /** Every ship in the world, the player's included. */
@@ -2055,6 +2060,7 @@ export class Sim {
   private fireGuards(dt: number): void {
     const { guardRange, guardShotsPerSecond, guardTurn, shotSpeed } = this.tuning;
     const pirates = this.fighters
+      .filter((pilot) => !pilot.record)
       .map((pilot) => pilot.ship)
       .filter((ship) => ship.faction === "pirate" && !this.isHome(ship));
     for (const battery of this.batteries) {
@@ -2353,6 +2359,7 @@ export class Sim {
     }
     this.clickPilot.update(this);
     lap?.("other");
+    this.recordFighters();
     this.recordTraffic();
     lap?.("records");
     const pilots = this.pilots;
@@ -2884,9 +2891,8 @@ export class Sim {
    */
   private recordTraffic(): void {
     const viewer = this.viewer();
-    // Pirates and defenders are still flown, so a ship near one stays flown too, and any
-    // fight between them is a real one. Once they're records as well, only the camera counts.
-    const fighters = this.fighters.map((pilot) => pilot.ship);
+    // A ship near a flown pirate or defender stays flown too, so any fight is a real one.
+    const fighters = this.fighters.filter((pilot) => !pilot.record).map((pilot) => pilot.ship);
     const sight = this.tuning.visionRange;
     const fighterWithin = (ship: Ship, range: number) => fighters.some((other) => Math.hypot(other.x - ship.x, other.y - ship.y) < range);
     for (const pilot of this.traffic) {
@@ -2907,6 +2913,245 @@ export class Sim {
         this.startRecord(pilot);
       }
     }
+  }
+
+  /**
+   * Pirates and defenders far from the camera with nothing to fight run as trip records
+   * too: a pirate's mines its field and takes the ore home, a defender's keeps watch over
+   * its own. Once a second, dice say whether one has caught sight of a ship in its field it
+   * would go after: then both are ships again, and the fight is a real one.
+   */
+  private recordFighters(): void {
+    const viewer = this.viewer();
+    const sight = this.tuning.visionRange;
+    const flown = this.pilots;
+    // Whether a flown ship is near enough that the two might fight.
+    const hostileWithin = (pilot: FighterPilot, range: number) =>
+      flown.some((other) => {
+        // One that became a record earlier this tick is out of it.
+        if (other === pilot || other.record) return false;
+        if (Math.hypot(other.ship.x - pilot.ship.x, other.ship.y - pilot.ship.y) >= range) return false;
+        return pilot.goesAfter(this, other.ship) || (other instanceof FighterPilot && other.goesAfter(this, pilot.ship));
+      });
+    const second = Math.floor(this.clock) !== Math.floor(this.clock - TICK);
+    for (const pilot of this.fighters) {
+      const { ship } = pilot;
+      if (pilot.record) {
+        for (let stops = 0; stops < 8 && pilot.record.arrive <= this.clock; stops++) this.fighterArrived(pilot);
+        this.placeRecord(pilot.record, ship);
+        if (Math.hypot(ship.x - viewer.x, ship.y - viewer.y) < TRAFFIC_WAKE_DISTANCE || hostileWithin(pilot, sight * 2) || this.answersDistress(pilot)) {
+          this.wakeFighter(pilot);
+        } else if (second && pilot.record.stage === "mining") {
+          this.lookAround(pilot);
+        }
+      } else if (
+        this.tuning.fighterRecords &&
+        pilot.calm &&
+        Math.hypot(ship.x - viewer.x, ship.y - viewer.y) > TRAFFIC_SLEEP_DISTANCE &&
+        !hostileWithin(pilot, sight * 2.5) &&
+        !this.answersDistress(pilot)
+      ) {
+        this.startFighterRecord(pilot);
+      }
+    }
+  }
+
+  /** Whether a defender would answer the call for help that's out: one near its own base. */
+  private answersDistress(pilot: FighterPilot): boolean {
+    const { ship } = pilot;
+    const { distress } = this;
+    if (ship.faction !== "defender" || !distress || distress.ship === ship) return false;
+    return this.nearestDock(distress.ship.x, distress.ship.y) === this.homeBaseOf(ship).poi;
+  }
+
+  /**
+   * A fighter keeping watch over a field: for each ship there it would go after, the dice
+   * say whether it starts on it this second, as often as flown ones do.
+   */
+  private lookAround(pilot: FighterPilot): void {
+    const field = pilot.patrolField(this);
+    const reach = field.radius + this.tuning.visionRange;
+    const chance = pilot.ship.faction === "pirate" ? this.tuning.recordSpotPirate : this.tuning.recordSpotDefender;
+    const others: { ship: Ship; pilot: DronePilot | FighterPilot | null }[] = [
+      { ship: this.ship, pilot: null },
+      ...this.drones.map((each) => ({ ship: each.ship, pilot: each })),
+      ...this.traffic.map((each) => ({ ship: each.ship, pilot: each })),
+      ...this.fighters.map((each) => ({ ship: each.ship, pilot: each })),
+    ];
+    for (const other of others) {
+      if (other.pilot === pilot) continue;
+      if (Math.hypot(other.ship.x - field.poi.x, other.ship.y - field.poi.y) > reach) continue;
+      if (!this.wouldGoAfter(pilot, other.ship, other.pilot)) continue;
+      if (this.random() >= chance) continue;
+      if (other.pilot?.record) {
+        if (other.pilot instanceof FighterPilot) this.wakeFighter(other.pilot);
+        else this.wakeRecord(other.pilot);
+      }
+      this.wakeFighter(pilot, other.ship);
+      return;
+    }
+  }
+
+  /**
+   * Whether a fighter would go after a ship, as its pilot decides. A record mining a field
+   * only takes its ore aboard when it's done: what it would have mined by now counts.
+   */
+  private wouldGoAfter(pilot: FighterPilot, other: Ship, otherPilot: DronePilot | FighterPilot | null): boolean {
+    if (pilot.goesAfter(this, other)) return true;
+    const record = otherPilot?.record;
+    if (!record || record.stage !== "mining" || other.ore > 0 || this.mined(otherPilot!) < 1) return false;
+    other.ore = 1;
+    const wants = pilot.goesAfter(this, other);
+    other.ore = 0;
+    return wants;
+  }
+
+  /** How much a record mining a field has got by now, all told, by its mining rate. */
+  private mined(pilot: DronePilot | FighterPilot): number {
+    const record = pilot.record!;
+    const span = record.arrive - record.depart;
+    const share = span > 0 && Number.isFinite(span) ? Math.max(0, (this.clock - record.depart) / span) : 0;
+    return Math.floor(share * Math.max(0, this.deliveryLoad(pilot.ship) - pilot.ship.ore));
+  }
+
+  /** Turns a flown pirate or defender into a record of its round. */
+  private startFighterRecord(pilot: FighterPilot): void {
+    const { ship } = pilot;
+    ship.vx = ship.vy = 0;
+    ship.spin = 0;
+    if (this.isHome(ship) && (ship.ore > 0 || this.canRepair(ship) || pilot.isHeadingHome)) {
+      const at = { x: ship.x, y: ship.y };
+      pilot.record = { goal: "home", target: this.fighterHome(ship), stage: "travel", depart: this.clock, arrive: this.clock, path: [at], aim: at };
+      return;
+    }
+    const field = pilot.patrolField(this);
+    const inField = Math.hypot(ship.x - field.poi.x, ship.y - field.poi.y) < field.radius;
+    if (inField && !this.fighterGoesHome(pilot)) this.startWatch(pilot, field);
+    else this.nextFighterLeg(pilot);
+  }
+
+  /** Where a pirate or defender sells and is repaired, as a record's target. */
+  private fighterHome(ship: Ship): string {
+    return ship.faction === "pirate" && this.pirateBase ? "pirate base" : this.homeBaseOf(ship).id;
+  }
+
+  /** Whether its pilot would head home: a full load, a low hull it can pay to mend, or already on its way. */
+  private fighterGoesHome(pilot: FighterPilot): boolean {
+    const { ship } = pilot;
+    const canPay = ship.ore > 0 || this.canPayRepair(ship);
+    return pilot.isHeadingHome || ship.ore >= this.deliveryLoad(ship) || (ship.hull < LOW_HULL && canPay);
+  }
+
+  /** Sets off home, or to its field. */
+  private nextFighterLeg(pilot: FighterPilot): void {
+    const { ship } = pilot;
+    const home = this.fighterGoesHome(pilot);
+    const target = home ? this.fighterHome(ship) : pilot.patrolField(this).id;
+    pilot.task = home ? "heading home" : "patrolling";
+    const from = { x: ship.x, y: ship.y };
+    const record: TripRecord = { goal: home ? "home" : "field", target, stage: "travel", depart: this.clock, arrive: this.clock, path: [from], aim: from };
+    const { route, centre } = pilot.plan(this, () => from, (t) => this.recordTargetAt(record, t));
+    record.arrive = route.arrive;
+    record.path = route.path.points.map((point) => ({ x: point.x + centre.x, y: point.y + centre.y }));
+    record.aim = { x: route.aim.x + centre.x, y: route.aim.y + centre.y };
+    pilot.record = record;
+  }
+
+  /**
+   * Keeps watch over its field from where it is: a pirate mines it until a load is due, a
+   * defender for as long as nothing happens.
+   */
+  private startWatch(pilot: FighterPilot, field: MiningField): void {
+    const { ship, record } = pilot;
+    const start = record?.stage === "travel" ? record.arrive : this.clock;
+    let seconds = FOREVER;
+    if (ship.faction === "pirate") {
+      const want = Math.max(0, this.deliveryLoad(ship) - ship.ore);
+      const perMinute = this.tuning.recordOrePirate;
+      if (perMinute > 0) seconds = (want * 60) / perMinute;
+    }
+    const offset = { x: ship.x - field.poi.x, y: ship.y - field.poi.y };
+    pilot.record = { goal: "field", target: field.id, stage: "mining", depart: start, arrive: start + seconds, path: [offset], aim: offset };
+    pilot.task = ship.faction === "pirate" ? "mining" : "patrolling";
+  }
+
+  /** A fighter's next stop is due. */
+  private fighterArrived(pilot: FighterPilot): void {
+    const record = pilot.record!;
+    const { ship } = pilot;
+    const due = record.arrive;
+    if (record.goal === "field" && record.stage === "travel") {
+      const fields = this.miningFields();
+      const field = fields.find((each) => each.id === record.target) ?? fields[0];
+      const at = this.poiAt(field.poi, due);
+      const dir = this.random() * Math.PI * 2;
+      const dist = field.radius * 0.6 * Math.sqrt(this.random());
+      ship.x = ship.px = at.x + Math.cos(dir) * dist;
+      ship.y = ship.py = at.y + Math.sin(dir) * dist;
+      this.startWatch(pilot, field);
+      return;
+    }
+    if (record.goal === "field") {
+      // A pirate's load is mined.
+      const want = Math.max(0, this.deliveryLoad(ship) - ship.ore);
+      ship.ore += Math.min(want, Math.floor(this.takeOre(record.target, want) + 1e-9));
+      this.nextLegAfter(pilot, due, ship.ore > 0);
+      return;
+    }
+    // Home: it sells and is mended as a flown one would be, all at once.
+    const spot = this.homeOf(ship);
+    const before = this.homeOf(ship, ship.faction, true);
+    ship.x = spot.x;
+    ship.y = spot.y;
+    ship.px = before.x;
+    ship.py = before.y;
+    ship.vx = ship.vy = 0;
+    const most = Math.round(120 / TICK);
+    let ticks = 0;
+    while ((ship.ore > 0 || this.canRepair(ship)) && ticks < most) {
+      this.unloadOre(ship, TICK);
+      this.repairHull(ship, TICK);
+      ticks++;
+    }
+    pilot.cameHome();
+    this.nextLegAfter(pilot, due + ticks * TICK, false);
+  }
+
+  /** The next leg from a stop that fell due between ticks: home, or back to its field. */
+  private nextLegAfter(pilot: FighterPilot, depart: number, home: boolean): void {
+    if (home) pilot.headHome();
+    this.nextFighterLeg(pilot);
+    const record = pilot.record!;
+    const shift = Math.max(0, depart - this.clock);
+    record.depart += shift;
+    record.arrive += shift;
+  }
+
+  /**
+   * The camera, a ship to fight, or a call for help has come near: it's a flown ship again.
+   * Woken by catching sight of `spotted`, it turns up within sight of it, looking its way.
+   */
+  private wakeFighter(pilot: FighterPilot, spotted: Ship | null = null): void {
+    const record = pilot.record!;
+    const { ship } = pilot;
+    if (record.stage === "mining" && ship.faction === "pirate") {
+      const want = this.mined(pilot);
+      if (want > 0) ship.ore += Math.min(want, Math.floor(this.takeOre(record.target, want) + 1e-9));
+    }
+    pilot.record = null;
+    pilot.wake();
+    if (spotted) {
+      const dir = this.random() * Math.PI * 2;
+      // Near the edge of sight, where a flown one mostly first sees its mark.
+      const dist = this.tuning.visionRange * 0.9;
+      ship.x = spotted.x + Math.cos(dir) * dist;
+      ship.y = spotted.y + Math.sin(dir) * dist;
+      ship.angle = ship.prevAngle = Math.atan2(spotted.y - ship.y, spotted.x - ship.x);
+      pilot.spot(this, spotted);
+    }
+    ship.px = ship.x;
+    ship.py = ship.y;
+    ship.vx = ship.vy = 0;
   }
 
   /** Turns a flown traffic ship into a record of what it was doing. */
@@ -2944,6 +3189,10 @@ export class Sim {
       return this.poiAt(base.poi, time);
     }
     if (record.target === "pirate base" && this.pirateBase) return this.poiAt(this.pirateBase, time);
+    if (record.goal === "home") {
+      const base = this.bases.find((each) => each.id === record.target) ?? this.bases[0];
+      return this.poiAt(base.poi, time);
+    }
     const deposit = this.deposits[Number(record.target)];
     return deposit ? { x: deposit.x, y: deposit.y } : this.poiAt(this.station, time);
   }

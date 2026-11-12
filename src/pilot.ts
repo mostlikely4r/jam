@@ -159,6 +159,13 @@ class ShipPilot {
   /** The direction the rotation thrusters are pushing, or 0. */
   private spinPush = 0;
 
+  /**
+   * Set while it's far from the camera: it isn't flown, just a trip from one stop to the
+   * next on the clock (see `Sim.recordTraffic` and `Sim.recordFighters`). Its decisions at
+   * each stop are still its own.
+   */
+  record: TripRecord | null = null;
+
   constructor(readonly ship: Ship) {}
 
   /** Whether another ship is in range with no rock in the way, whichever way the nose points. */
@@ -291,6 +298,38 @@ class ShipPilot {
     }
     const still = { x: corner.x, y: corner.y, px: corner.x, py: corner.y };
     this.flyTo(sim, still, 0, this.speedLimitHere(sim), null);
+  }
+
+  /**
+   * A trip by the route planner from one moving spot to another, round the body in the way
+   * nearest the start. The route is in that body's frame; `centre` is where the body is now.
+   */
+  plan(sim: Sim, start: (t: number) => Vec, end: (t: number) => Vec): { route: Route; centre: Vec } {
+    const { ship } = this;
+    const flight = { accel: sim.tuning.thrust * sim.shipResponse(ship), cruise: this.cruiseSpeed(sim) };
+    const from = start(sim.now);
+    const to = end(sim.now);
+    // Round the body nearest the station of those across the way, in that body's frame.
+    let centre = { x: 0, y: 0 };
+    let radius = 0;
+    let nearest = Infinity;
+    for (const body of sim.bodies) {
+      const circle = sim.keepOutAt(body);
+      const distance = Math.hypot(circle.x - from.x, circle.y - from.y);
+      if (distance < nearest && passesWithin(from, to, circle) < circle.radius) {
+        nearest = distance;
+        centre = circle;
+        radius = circle.radius;
+      }
+    }
+    const route = planRoute(
+      (t) => minus(start(t), centre),
+      (t) => minus(end(t), centre),
+      sim.now,
+      radius,
+      flight,
+    );
+    return { route, centre };
   }
 
   /** The speed it flies at between places. */
@@ -512,12 +551,6 @@ export class DronePilot extends ShipPilot {
   private retarget = 0;
   private targetAge = 0;
   private ignored = new WeakSet<object>();
-  /**
-   * Set while it's far from the camera: it isn't flown, just a trip from one stop to the
-   * next on the clock (see `Sim.recordTraffic`). Its decisions at each stop are still its own.
-   */
-  record: TripRecord | null = null;
-
   /** Running from danger or home to report: it stays a ship until that's over. */
   get busy(): boolean {
     return this.fleeing || this.reporting !== null;
@@ -657,38 +690,6 @@ export class DronePilot extends ShipPilot {
       (t) => sim.poiAt(end, t),
     );
     return route.arrive - route.depart;
-  }
-
-  /**
-   * A trip by the route planner from one moving spot to another, round the body in the way
-   * nearest the start. The route is in that body's frame; `centre` is where the body is now.
-   */
-  plan(sim: Sim, start: (t: number) => Vec, end: (t: number) => Vec): { route: Route; centre: Vec } {
-    const { ship } = this;
-    const flight = { accel: sim.tuning.thrust * sim.shipResponse(ship), cruise: this.cruiseSpeed(sim) };
-    const from = start(sim.now);
-    const to = end(sim.now);
-    // Round the body nearest the station of those across the way, in that body's frame.
-    let centre = { x: 0, y: 0 };
-    let radius = 0;
-    let nearest = Infinity;
-    for (const body of sim.bodies) {
-      const circle = sim.keepOutAt(body);
-      const distance = Math.hypot(circle.x - from.x, circle.y - from.y);
-      if (distance < nearest && passesWithin(from, to, circle) < circle.radius) {
-        nearest = distance;
-        centre = circle;
-        radius = circle.radius;
-      }
-    }
-    const route = planRoute(
-      (t) => minus(start(t), centre),
-      (t) => minus(end(t), centre),
-      sim.now,
-      radius,
-      flight,
-    );
-    return { route, centre };
   }
 
   /** The field it's working this trip, or the first if that one's gone. */
@@ -1406,6 +1407,65 @@ export class FighterPilot extends ShipPilot {
   /** Where the nose should stay this tick, or null to look where it's going. */
   private look: number | null = null;
 
+  /**
+   * Nothing on its mind but its round: no target, nobody to look for, no call to answer and
+   * no loose ore to pick up. Only then can it be a record.
+   */
+  get calm(): boolean {
+    return this.target === null && this.lastSeen === null && this.ore === null && this.task !== "responding";
+  }
+
+  /** After a ship or looking for one, or answering a call: anything but its round. */
+  get fighting(): boolean {
+    return this.target !== null || this.lastSeen !== null || this.task === "responding";
+  }
+
+  /** Going home to sell or be repaired. */
+  get isHeadingHome(): boolean {
+    return this.headingHome;
+  }
+
+  /** The field it keeps watch over: a defender's is the one by its base. */
+  patrolField(sim: Sim): MiningField {
+    if (this.ship.faction === "defender") {
+      const home = sim.homeBaseOf(this.ship).poi;
+      return sim.miningFieldAt(home.x, home.y);
+    }
+    return sim.miningFields()[0];
+  }
+
+  /** Done with its load: it takes it home. */
+  headHome(): void {
+    this.headingHome = true;
+  }
+
+  /** Home with its load sold and its hull seen to, as far as it could pay. */
+  cameHome(): void {
+    this.headingHome = false;
+  }
+
+  /**
+   * A record turned back into a ship: what it was doing as a record isn't anything it
+   * remembers as a ship, so it picks its next rock and patrol spot afresh.
+   */
+  wake(): void {
+    this.patrol = null;
+    this.rock = null;
+    this.ore = null;
+    this.look = null;
+  }
+
+  /** Woken out of view by catching sight of a ship: it goes after it as if just spotted. */
+  spot(sim: Sim, other: Ship): void {
+    this.spotting.set(other, sim.tuning.detectSeconds);
+    this.remember(sim, other.x, other.y);
+  }
+
+  /** Whether it goes after a ship when it sees one. */
+  goesAfter(sim: Sim, other: Ship): boolean {
+    return this.wants(sim, other);
+  }
+
   /** Whether another ship is inside this one's cone of vision, in range, with no rock in the way. */
   sees(sim: Sim, other: Ship): boolean {
     const { ship } = this;
@@ -1657,8 +1717,7 @@ export class FighterPilot extends ShipPilot {
   /** Flies from one random spot in the field to the next: a defender's is the one by its base. */
   private fly(sim: Sim): void {
     const { ship } = this;
-    const home = sim.homeBaseOf(ship).poi;
-    const { poi: field, radius } = ship.faction === "defender" ? sim.miningFieldAt(home.x, home.y) : sim.miningFields()[0];
+    const { poi: field, radius } = this.patrolField(sim);
     this.task = "patrolling";
     this.patrolAge += TICK;
     const reached =

@@ -30,6 +30,8 @@ const SOLO = {
   detectSeconds: 0,
   haulers: false,
   stationUnlocks: false,
+  // These place pirates and defenders far from the camera by hand: they're flown, not records.
+  fighterRecords: false,
 };
 
 function run(sim: Sim, seconds: number, each?: () => void): void {

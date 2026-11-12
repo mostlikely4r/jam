@@ -3,6 +3,7 @@ import { type BlueprintId, isProject, PARTS, partFits, PROJECTS, TRAFFIC_BUY_ORD
 import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD } from "./pilot";
 export { FIRST_FIELD };
 import { pathAround } from "./route";
+import { pilotKind, type StepProfile } from "./profile/step";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
 export const TICK = 1 / 120;
@@ -715,6 +716,8 @@ export class Sim {
   /** Flies the player's ship to a clicked spot, if it has the part. */
   clickPilot!: ClickPilot;
   rocks: Rock[] = [];
+  /** Times each part of `step` while set. Dev only: nothing in the game turns it on. */
+  profile: StepProfile | null = null;
   /** Stars, planets, moons and asteroids, from the system designer. None without it. */
   bodies: SolidBody[] = [];
   /** Where new games start, by ship. Several for one ship: one is picked at random. None: by the field. */
@@ -2268,6 +2271,7 @@ export class Sim {
   /** Advance one fixed tick. Display rate and time speedup never change its size. */
   step(): void {
     const dt = TICK;
+    const lap = this.profile ? this.profile.begin() : null;
     this.clock += dt;
     this.discover();
     if (this.distress) {
@@ -2275,25 +2279,40 @@ export class Sim {
       if (this.distress.age > DISTRESS_SECONDS) this.distress = null;
     }
     this.clickPilot.update(this);
+    lap?.("other");
     const pilots = this.pilots;
-    for (const pilot of pilots) pilot.update(this);
+    if (lap) {
+      for (const pilot of pilots) {
+        pilot.update(this);
+        lap(`think: ${pilotKind(pilot)}`);
+      }
+    } else {
+      for (const pilot of pilots) pilot.update(this);
+    }
     this.movePois(dt);
     this.moveDeposits();
     this.moveGuards();
+    lap?.("places");
     this.carryBodies(dt);
+    lap?.("carry");
     this.driftInRocks(dt);
     this.moveRocks(dt);
+    lap?.("rocks");
     this.pullOre(this.ship, dt);
     for (const pilot of pilots) this.pullOre(pilot.ship, dt);
     this.bodySpots = this.bodies.map((body) => ({ body, ...bodyAt(body, this.clock) }));
     this.pullTowardBodies(dt);
+    lap?.("pull");
     this.moveOres(dt);
+    lap?.("ore");
     this.moveShip(this.ship, dt);
     for (const pilot of pilots) this.moveShip(pilot.ship, dt);
     this.touchBodies(this.ship, dt);
     for (const pilot of pilots) this.touchBodies(pilot.ship, dt);
     this.burnOreOnBodies();
+    lap?.("ships");
     this.moveShots(dt);
+    lap?.("shots");
     this.fireShots(this.ship);
     this.collectOre(this.ship);
     this.unloadOre(this.ship, dt);
@@ -2305,6 +2324,7 @@ export class Sim {
       this.unloadOre(pilot.ship, dt);
       this.repairHull(pilot.ship, dt);
     }
+    lap?.("fire, collect, unload");
     this.fireGuards(dt);
     this.spendStationParts();
     this.buyBlueprints();
@@ -2312,7 +2332,10 @@ export class Sim {
     this.spendPirateCredits();
     for (const base of this.bases) this.moveHauler(base, dt);
     this.moveBlackMarket(dt);
+    lap?.("economy");
     if (this.tuning.chatter) this.chatter.update(this, dt);
+    lap?.("chatter");
+    this.profile?.end();
   }
 
   /** Each POI follows a fixed circle around its parent, or the system's center. */

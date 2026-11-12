@@ -8,9 +8,7 @@ import {
   orbitSpeed,
   parentOf,
   parseWorld,
-  pathTo,
   positions,
-  reachOf,
   limitCarrying,
   spinAngle,
   stringifyWorld,
@@ -25,8 +23,8 @@ import {
 } from "./world";
 import { linkSummary, linkedNodes, readGame, useLayout, type GameLink } from "./link";
 import { shippedWorld } from "./shipped";
-import { planRoute, type Flight, type Route } from "../route";
-import { DEFAULTS } from "../tuning";
+import { type Route } from "../route";
+import { FLIGHTS, tripBetween } from "./trips";
 import { PARTS } from "../parts";
 
 /** The game's zoom limits, for the screen boxes. */
@@ -40,11 +38,6 @@ const GROUPS_KEY = "jam-designer-open";
 const SPEEDS = [1, 10, 60, 600, 3600, 36000];
 const CLICK_PIXELS = 5;
 /** Ships to time a route with, from the game's own numbers. */
-const FLIGHTS: Record<string, { label: string; flight: Flight }> = {
-  floater: { label: "Floater, burn and brake", flight: { accel: DEFAULTS.thrust * DEFAULTS.floaterEngine, cruise: Infinity } },
-  racer: { label: "Racer, burn and brake", flight: { accel: DEFAULTS.thrust, cruise: Infinity } },
-  traffic: { label: "Traffic at cruise speed", flight: { accel: DEFAULTS.thrust, cruise: DEFAULTS.droneCruiseSpeed } },
-};
 
 const COLORS: Record<NodeKind, string> = {
   star: "#ffd56a",
@@ -357,16 +350,25 @@ export class Designer {
     }
   }
 
+  /** Loads the shipped world file, or a layout a recipe saved (npm run layout -- name --save file). */
   private async loadFile(): Promise<void> {
     try {
-      const response = await fetch("/__world");
+      const layouts: string[] = await fetch("/__layouts").then((response) => (response.ok ? response.json() : []));
+      let layout = "";
+      if (layouts.length > 0) {
+        const answer = window.prompt(`Load which? Leave empty for the shipped world.
+Layouts: ${layouts.join(", ")}`, "");
+        if (answer === null) return;
+        layout = answer.trim();
+      }
+      const response = await fetch(layout ? `/__world?layout=${encodeURIComponent(layout)}` : "/__world");
       const world = response.ok ? parseWorld(await response.text()) : null;
       if (!world) {
-        this.status.textContent = response.status === 404 ? "No world file saved yet" : "Couldn't read the world file";
+        this.status.textContent = response.status === 404 ? "No such file" : "Couldn't read the world file";
         return;
       }
       this.replace(world);
-      this.status.textContent = "Loaded src/designer/world.json";
+      this.status.textContent = layout ? `Loaded src/designer/layouts/${layout}.json` : "Loaded src/designer/world.json";
     } catch {
       this.status.textContent = "Couldn't load: run the game with npm run dev";
     }
@@ -435,18 +437,6 @@ export class Designer {
     this.routeTimer = 0;
   }
 
-  /**
-   * What a route is planned around: the nearest object both ends sit under (or one end, if
-   * the other orbits it). The trip is worked out in its frame, and kept out of it if it's a body.
-   */
-  private sharedParent(a: WorldNode, b: WorldNode): WorldNode {
-    const pa = pathTo(this.world, a);
-    const pb = pathTo(this.world, b);
-    let shared = 0;
-    while (shared < pa.length && shared < pb.length && pa[shared] === pb[shared]) shared++;
-    return pa[shared - 1] ?? this.world.root;
-  }
-
   private updateRoute(): void {
     const target = this.routeTo;
     if (!target || target === this.selected) {
@@ -454,18 +444,8 @@ export class Designer {
       this.routeText.textContent = "";
       return;
     }
-    const around = this.sharedParent(this.selected, target);
-    // Everything in the body's own frame, where it stands still.
-    const relative = (node: WorldNode) => (t: number) => {
-      const at = positions(this.world, t);
-      const p = at.get(node)!;
-      const c = at.get(around)!;
-      return { x: p.x - c.x, y: p.y - c.y };
-    };
-    // A place doesn't block, and a trip to or from the body itself has nothing to go round.
+    const { route, around } = tripBetween(this.world, this.selected, target, this.t, FLIGHTS[this.flightKind].flight);
     const blocks = isBody(around.kind) && this.selected !== around && target !== around;
-    const radius = blocks ? reachOf(around) : 0;
-    const route = planRoute(relative(this.selected), relative(target), this.t, radius, FLIGHTS[this.flightKind].flight);
     this.route = { route, around };
     const what = around.pull > around.radius ? "pull" : "surface";
     const lines = [

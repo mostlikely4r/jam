@@ -94,6 +94,13 @@ all-round tractor's blueprint; the home base doesn't.
 The trip there has to be worth looking at. Going round the planet's pull already is. Nothing
 else is added for the test.
 
+**Built 2026-11-12** by the first layout recipe (`npm run layout -- far-base --ship`):
+"Planet base" orbits the planet at 50,000, with a shipyard, holding the all-round tractor.
+From the home station, by the route planner: a racer burning and braking flat out 30 to 50 s,
+a floater 1 to 2 min, traffic at cruise speed 4 to 11 min. A player flies somewhere in between.
+That's shorter than the 5 to 10 minutes first planned, as the plan's own scale makes moon to
+planet a short hop; the long trips come with other planets and stars.
+
 ### 3. News on a board
 
 Each base keeps a board of reports: which base sells what, at what price, and when that was

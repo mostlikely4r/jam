@@ -18,6 +18,7 @@
     "carryNone": 0,
     "spawns": [],
     "shipyard": false,
+    "blueprints": [],
     "count": 1,
     "angleVariance": 0,
     "orbitVariance": 0,
@@ -44,6 +45,7 @@
         "carryNone": 0,
         "spawns": [],
         "shipyard": false,
+        "blueprints": [],
         "count": 1,
         "angleVariance": 0,
         "orbitVariance": 0,
@@ -70,6 +72,7 @@
             "carryNone": 0,
             "spawns": [],
             "shipyard": false,
+            "blueprints": [],
             "count": 1,
             "angleVariance": 0,
             "orbitVariance": 0,
@@ -96,6 +99,7 @@
                 "carryNone": 0,
                 "spawns": [],
                 "shipyard": false,
+                "blueprints": [],
                 "count": 1,
                 "angleVariance": 0,
                 "orbitVariance": 0,
@@ -122,6 +126,7 @@
                     "carryNone": 8000,
                     "spawns": [],
                     "shipyard": false,
+                    "blueprints": [],
                     "count": 1,
                     "angleVariance": 0,
                     "orbitVariance": 0,
@@ -146,18 +151,19 @@
                         "rockInflow": 0,
                         "carryFull": 2000,
                         "carryNone": 6000,
-                        "shipyard": true,
                         "spawns": [
                           "racer",
                           "floater"
                         ],
+                        "shipyard": true,
+                        "blueprints": [],
+                        "count": 1,
+                        "angleVariance": 0,
+                        "orbitVariance": 0,
                         "orbitRadius": 8100,
                         "orbitPeriod": 928,
                         "orbitPhase": 180,
                         "spinPeriod": 0,
-                        "count": 1,
-                        "angleVariance": 0,
-                        "orbitVariance": 0,
                         "children": []
                       },
                       {
@@ -176,15 +182,16 @@
                         "rockInflow": 0,
                         "carryFull": 2000,
                         "carryNone": 6000,
-                        "shipyard": false,
                         "spawns": [],
+                        "shipyard": false,
+                        "blueprints": [],
+                        "count": 1,
+                        "angleVariance": 0,
+                        "orbitVariance": 0,
                         "orbitRadius": 8100,
                         "orbitPeriod": 928,
                         "orbitPhase": 0,
                         "spinPeriod": 0,
-                        "count": 1,
-                        "angleVariance": 0,
-                        "orbitVariance": 0,
                         "children": []
                       }
                     ]
@@ -207,6 +214,7 @@
                     "carryNone": 8000,
                     "spawns": [],
                     "shipyard": false,
+                    "blueprints": [],
                     "count": 1,
                     "angleVariance": 0,
                     "orbitVariance": 0,
@@ -234,6 +242,7 @@
                     "carryNone": 8000,
                     "spawns": [],
                     "shipyard": false,
+                    "blueprints": [],
                     "count": 1,
                     "angleVariance": 0,
                     "orbitVariance": 0,
@@ -246,6 +255,36 @@
                 ]
               }
             ]
+          },
+          {
+            "id": "n9",
+            "name": "Planet base",
+            "kind": "station",
+            "radius": 300,
+            "surface": "none",
+            "pull": 0,
+            "pullFull": 0,
+            "pullAccel": 0,
+            "atmosphere": 0,
+            "burnSpeed": 0,
+            "rocks": 0,
+            "rockDrift": 0,
+            "rockInflow": 0,
+            "carryFull": 2000,
+            "carryNone": 6000,
+            "shipyard": true,
+            "blueprints": [
+              "tractorAll"
+            ],
+            "spawns": [],
+            "orbitRadius": 50000,
+            "orbitPeriod": 14230,
+            "orbitPhase": 1.2,
+            "spinPeriod": 300,
+            "count": 1,
+            "angleVariance": 0,
+            "orbitVariance": 0,
+            "children": []
           }
         ]
       }

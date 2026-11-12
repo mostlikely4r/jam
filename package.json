@@ -10,7 +10,8 @@
     "economy": "vite-node src/economy/run.ts",
     "profile": "vite-node src/profile/run.ts",
     "census": "vite-node src/profile/census.ts",
-    "parity": "vite-node src/profile/parity.ts"
+    "parity": "vite-node src/profile/parity.ts",
+    "layout": "vite-node src/designer/layout.ts"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

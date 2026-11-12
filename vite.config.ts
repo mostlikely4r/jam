@@ -1,9 +1,11 @@
 import { defineConfig, type Plugin } from "vite";
-import { readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 /** Where the system designer keeps its layout, which the built game ships with. */
 const WORLD_FILE = fileURLToPath(new URL("./src/designer/world.json", import.meta.url));
+/** Layouts made by recipes (npm run layout), for trying out. Never shipped. */
+const LAYOUTS = fileURLToPath(new URL("./src/designer/layouts/", import.meta.url));
 
 /** Lets the system designer read and write its world file while developing. Not in the built game. */
 function worldFile(): Plugin {
@@ -11,11 +13,18 @@ function worldFile(): Plugin {
     name: "world-file",
     apply: "serve",
     configureServer(server) {
+      server.middlewares.use("/__layouts", async (_req, res) => {
+        const names = await readdir(LAYOUTS).catch(() => [] as string[]);
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(names.filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5))));
+      });
       server.middlewares.use("/__world", async (req, res) => {
         try {
           if (req.method === "GET") {
+            const layout = new URL(req.url ?? "", "http://x").searchParams.get("layout");
+            const file = layout && /^[\w-]+$/.test(layout) ? `${LAYOUTS}${layout}.json` : WORLD_FILE;
             res.setHeader("Content-Type", "application/json");
-            res.end(await readFile(WORLD_FILE, "utf8"));
+            res.end(await readFile(file, "utf8"));
             return;
           }
           if (req.method === "POST") {
@@ -43,5 +52,5 @@ export default defineConfig({
   plugins: [worldFile()],
   // Saving the layout from the designer shouldn't reload the game under it: the designer's
   // draft is already in play, and the next start or build picks the file up.
-  server: { watch: { ignored: ["**/src/designer/world.json"] } },
+  server: { watch: { ignored: ["**/src/designer/world.json", "**/src/designer/layouts/**"] } },
 });

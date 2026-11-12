@@ -59,14 +59,25 @@ One blueprint is held, not sold: no government sells it, so the only way to get 
 from the base that knows it. That's the first counted blueprint. Loot, loss and the government
 come later.
 
-**Pick the item for its effect on play.** The tractor beam is the obvious candidate: it changes
-how you mine, and it's already borderline overpowered, so being hard to get suits it.
+**Pick the item for its effect on play.** The user's choice (2026-11-12): split the tractor beam
+in two.
+
+- **Tractor beam (home, sold as today):** half today's range, and it only catches loose ore in
+  a 30° cone ahead of the ship. Once caught, an ore stays caught and is pulled in wherever it
+  drifts. That's new: today the beam pulls every loose ore in range, all round, every tick. Now
+  you aim to catch.
+- **The far base's item:** today's beam, catching all round. It's an upgrade you can feel
+  straight away: you stop aiming.
+
+So the home tractor gets weaker for everyone. That fits on its own: the range needed halving
+anyway, as it was nearly overpowered. Traffic floaters buy the tractor first, so their mining
+changes too.
 
 ### 2. A second base, far away
 
 Add a base to the shipped layout at a different body, about 5 to 10 minutes' flight from the
-first. Today everything orbits the moon, so the planet is the natural spot. It holds the tractor
-blueprint; the home base doesn't.
+first. Today everything orbits the moon, so the planet is the natural spot. It holds the
+all-round tractor's blueprint; the home base doesn't.
 
 The trip there has to be worth looking at. Going round the planet's pull already is. Nothing
 else is added for the test.
@@ -78,7 +89,7 @@ seen. A ship that docks hands over the reports it carries that are newer than th
 takes the board's newer ones. Reports older than a set age drop off. With trip records this is
 one more thing done at the dock stop, so it costs nothing out of view.
 
-The player sees the board in the dock shop: *"Tractor beam at Planet base, 1,200, seen 40 min
+The player sees the board in the dock shop: *"All-round tractor at Planet base, 1,200, seen 40 min
 ago."* A traffic ship arriving with fresh news can also say it on the radio.
 
 For the test, traffic carries news but doesn't act on it. AI shoppers are step 4 or later.
@@ -87,7 +98,7 @@ For the test, traffic carries news but doesn't act on it. AI shoppers are step 4
 
 ### 4. The price gap (only if 1 to 3 pass)
 
-The home base sells the tractor too, but only stock that someone hauled from the planet base,
+The home base sells the all-round tractor too, but only stock that someone hauled from the planet base,
 at a higher price. This needs stock per item at each base, not today's single parts count. Then
 come shops lowering prices by days of stock, and traffic using the board to shop.
 

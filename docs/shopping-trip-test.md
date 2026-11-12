@@ -66,7 +66,7 @@ in two.
   a 30° cone ahead of the ship. Once caught, an ore stays caught and is pulled in wherever it
   drifts. That's new: today the beam pulls every loose ore in range, all round, every tick. Now
   you aim to catch.
-- **The far base's item:** today's beam, catching all round. It's an upgrade you can feel
+- **The far base's item:** today's beam, catching all round, at the same halved range. It's an upgrade you can feel
   straight away: you stop aiming.
 
 So the home tractor gets weaker for everyone. That fits on its own: the range needed halving

@@ -52,6 +52,7 @@ function world(tuning: Partial<typeof WORLD> = {}, outpost: Partial<StationSpec>
     carryFull: 2000,
     carryNone: 6000,
     shipyard: true,
+    blueprints: [],
     ...outpost,
   };
   sim.applyLayout({}, [second], [spec]);
@@ -264,5 +265,77 @@ describe("a second base's own defence", () => {
     roundTrip(sim, into);
     expect(into.bases[1].lostTraffic).toEqual(["floater"]);
     expect(into.fighters.filter((pilot) => pilot.ship.faction === "defender").map((pilot) => pilot.ship.home).sort()).toEqual(["outpost:0", "station"]);
+  });
+});
+
+describe("blueprints per base", () => {
+  it("sells a held part only where its blueprint is held, even when shops need no blueprints", () => {
+    const { sim, outpost } = world({}, { blueprints: ["tractorAll"] });
+    const { ship } = sim;
+    ship.credits = 100000;
+    expect(sim.buyPart(ship, "tractorAll")).toBe(false);
+    expect(sim.fundBlueprint(ship, "tractorAll")).toBe(false);
+    dockAt(sim, ship, outpost);
+    expect(sim.unlocked("tractorAll")).toBe(true);
+    expect(sim.buyPart(ship, "tractorAll")).toBe(true);
+    expect(ship.parts.has("tractorAll")).toBe(true);
+  });
+
+  it("isn't sold anywhere when no base holds it", () => {
+    const { sim, outpost } = world();
+    const { ship } = sim;
+    ship.credits = 100000;
+    dockAt(sim, ship, outpost);
+    expect(sim.buyPart(ship, "tractorAll")).toBe(false);
+    dockAt(sim, ship, sim.station);
+    expect(sim.buyPart(ship, "tractorAll")).toBe(false);
+  });
+
+  it("puts what a ship pays toward a blueprint into the base it's docked at", () => {
+    const { sim, outpost } = world({ stationUnlocks: true, stationCashBuffer: 1e9 });
+    const { ship } = sim;
+    const [first, second] = sim.bases;
+    ship.credits = 100000;
+    dockAt(sim, ship, outpost);
+    expect(sim.unlocked("reverse")).toBe(false);
+    expect(sim.fundBlueprint(ship, "reverse")).toBe(true);
+    expect(second.blueprintsOrdered.has("reverse")).toBe(true);
+    expect(first.blueprintsOrdered.has("reverse")).toBe(false);
+    // With no haulers, what's ordered arrives straight away, at that base only.
+    run(sim, 1);
+    expect(sim.unlocked("reverse", second)).toBe(true);
+    expect(sim.unlocked("reverse", first)).toBe(false);
+  });
+
+  it("only lets the first base order projects", () => {
+    const { sim, outpost } = world({ stationUnlocks: true, stationCashBuffer: 1e9 });
+    const { ship } = sim;
+    ship.credits = 100000;
+    dockAt(sim, ship, outpost);
+    expect(sim.fundBlueprint(ship, "deposit")).toBe(false);
+    expect(sim.blueprintQueue(sim.bases[1])).not.toContain("deposit");
+    expect(sim.blueprintQueue(sim.bases[0])).toContain("deposit");
+  });
+
+  it("keeps each base's blueprints through a save, and an older save's go to the first base", () => {
+    const { sim } = world({}, { blueprints: ["tractorAll"] });
+    sim.bases[0].blueprints.add("strafe");
+    sim.bases[1].blueprintPaid.set("reverse", 40);
+    const { sim: into } = world();
+    roundTrip(sim, into);
+    expect([...into.bases[0].blueprints]).toEqual(["strafe"]);
+    expect([...into.bases[1].blueprints]).toEqual(["tractorAll"]);
+    expect(into.bases[1].blueprintPaid.get("reverse")).toBe(40);
+
+    const old = sim.snapshot() as Record<string, unknown>;
+    const bases = old.bases as Record<string, unknown>[];
+    old.bases = bases.map(({ blueprints, blueprintPaid, blueprintsOrdered, ...rest }) => rest);
+    old.blueprints = new Set(["retro"]);
+    old.blueprintPaid = new Map();
+    old.blueprintsOrdered = new Set();
+    const { sim: older } = world();
+    older.restore(old);
+    expect([...older.bases[0].blueprints]).toEqual(["retro"]);
+    expect(older.bases[1].blueprints.size).toBe(0);
   });
 });

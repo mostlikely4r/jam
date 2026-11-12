@@ -8,6 +8,7 @@ export type PartId =
   | "clickMove"
   | "clickRoute"
   | "tractor"
+  | "tractorAll"
   | "clickTurn"
   | "turret"
   | "bay"
@@ -33,6 +34,11 @@ export interface Part {
   fits?: ShipModel[];
   /** 0 = sold from the start, 1 and 2 = once haulers have bought enough of the station's ore. */
   tier: 0 | 1 | 2;
+  /**
+   * Nobody sells its blueprint: only a base that holds one can sell the part, whatever the
+   * tier and whether or not shops need blueprints. Which bases hold it is set in the designer.
+   */
+  held?: boolean;
 }
 
 export function partFits(part: Part, model: ShipModel): boolean {
@@ -118,9 +124,19 @@ export const PARTS: Part[] = [
     short: "tractor",
     price: 300,
     weight: 0.1,
-    description: "Pulls in loose ore nearby",
+    description: "Catches loose ore ahead and pulls it in",
     fits: ["floater"],
     tier: 2,
+  },
+  {
+    id: "tractorAll",
+    label: "All-round tractor",
+    short: "tractor 360",
+    price: 600,
+    weight: 0.1,
+    description: "Catches loose ore all round, not just ahead",
+    tier: 2,
+    held: true,
   },
   {
     id: "clickTurn",

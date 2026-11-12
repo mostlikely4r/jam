@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PARTS } from "./parts";
+import { PARTS, partFits } from "./parts";
 import { FIRST_FIELD } from "./pilot";
 import { roundTrip } from "./save";
 import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
@@ -35,7 +35,7 @@ function fitAll(sim: Sim): Sim {
   sim.tuning.partWeightScale = 0;
   // Gun 2 replaces the gun rather than adding to it, so the shooting tests keep the first one.
   for (const part of PARTS) {
-    if (part.id !== "gun2" && part.id !== "tractor") sim.ship.parts.add(part.id);
+    if (part.id !== "gun2" && part.id !== "tractor" && part.id !== "tractorAll") sim.ship.parts.add(part.id);
   }
   return sim;
 }
@@ -1683,6 +1683,16 @@ describe("the new ship", () => {
       sim.tuning.tractorCone = 360;
       run(sim, 10);
       expect(sim.ship.ore).toBe(1);
+    });
+
+    it("catches behind the ship with the all-round tractor, which a racer can fit", () => {
+      const sim = withOre(near, 0, Math.PI);
+      sim.ship.parts.delete("tractor");
+      sim.ship.parts.add("tractorAll");
+      run(sim, 10);
+      expect(sim.ship.ore).toBe(1);
+      const racer = PARTS.find((part) => part.id === "tractorAll")!;
+      expect(partFits(racer, "racer")).toBe(true);
     });
 
     it("keeps hold of caught ore when the ship turns away", () => {

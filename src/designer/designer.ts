@@ -14,6 +14,7 @@ import {
   limitCarrying,
   spinAngle,
   stringifyWorld,
+  HELD_PARTS,
   SHIP_CHOICES,
   SURFACES,
   walk,
@@ -26,6 +27,7 @@ import { linkSummary, linkedNodes, readGame, useLayout, type GameLink } from "./
 import { shippedWorld } from "./shipped";
 import { planRoute, type Flight, type Route } from "../route";
 import { DEFAULTS } from "../tuning";
+import { PARTS } from "../parts";
 
 /** The game's zoom limits, for the screen boxes. */
 const DEFAULT_ZOOM = 0.8;
@@ -585,10 +587,23 @@ export class Designer {
         this.changed();
       });
       toggle.append(box, " Shipyard");
+      const held = HELD_PARTS.map((id) => {
+        const label = document.createElement("label");
+        const check = document.createElement("input");
+        check.type = "checkbox";
+        check.checked = node.blueprints.includes(id);
+        check.addEventListener("change", () => {
+          node.blueprints = check.checked ? [...node.blueprints, id] : node.blueprints.filter((each) => each !== id);
+          this.changed();
+        });
+        label.append(check, ` Holds the ${PARTS.find((part) => part.id === id)!.label.toLowerCase()} blueprint`);
+        return label;
+      });
       parts.push(
         ...this.group("Station", [
-          this.text("Every station buys ore and repairs. Only the main station, at the first field, has the shop. Wrecked ships are rebuilt at the nearest station with a shipyard."),
+          this.text("Every station is a base with its own shop. Wrecked ships are rebuilt at the nearest station with a shipyard. Nobody sells a held blueprint: only a station that holds one sells that part."),
           toggle,
+          ...held,
         ]),
       );
     }

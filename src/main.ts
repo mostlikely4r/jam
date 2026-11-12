@@ -456,7 +456,7 @@ interface ShopLine {
 
 /** An item the station can't sell yet: paid and on its way, or still to pay for. */
 function lockedLine(id: BlueprintId, label: string): ShopLine {
-  if (sim.blueprintsOrdered.has(id)) {
+  if (sim.shopBase().blueprintsOrdered.has(id)) {
     const coming = isProject(id) ? "being built from the station's parts" : "coming with the next hauler";
     return { tag: "pending", style: "pending", text: `${label}: paid, ${coming}`, enabled: false };
   }
@@ -574,7 +574,7 @@ function updateShop(): void {
     const title = `Dock shop - station ${Math.floor(base.account.credits)} credits - ${haulerText(base)}`;
     if (shopHeading.textContent !== title) shopHeading.textContent = title;
   }
-  const state = `${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.blueprints].join()} ${[...sim.blueprintPaid].join()} ${[...sim.blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks}`;
+  const state = `${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked;
@@ -583,6 +583,8 @@ function updateShop(): void {
   shop.replaceChildren(shopHeading);
   PARTS.forEach((part, index) => {
     const owned = ship.parts.has(part.id);
+    // A held part only shows where it's sold: elsewhere it's something you hear about.
+    if (part.held && !owned && !sim.unlocked(part.id)) return;
     const fits = partFits(part, ship.model);
     const price = sim.partPrice(part.id);
     const weight = (part.weight * tuning.partWeightScale).toFixed(2);

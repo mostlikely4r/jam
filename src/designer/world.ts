@@ -6,7 +6,12 @@
  * The system designer edits this. See link.ts for the parts the game flies in.
  */
 
+import { PARTS, type PartId } from "../parts";
+
 export const WORLD_VERSION = 1;
+
+/** Parts nobody sells the blueprint for: a station holds them or they aren't sold at all. */
+export const HELD_PARTS: PartId[] = PARTS.filter((part) => part.held).map((part) => part.id);
 
 /** Bodies are solid and drawn filled. The rest are places, drawn as outlines. */
 export const BODY_KINDS = ["star", "planet", "moon", "asteroid"] as const;
@@ -59,6 +64,8 @@ export interface WorldNode {
   spawns: ShipChoice[];
   /** Stations only: wrecked ships are rebuilt at the nearest station with a shipyard. */
   shipyard: boolean;
+  /** Stations only: the held blueprints it starts with, the only way those parts are sold. */
+  blueprints: PartId[];
   /** How many go round in this orbit, itself included. Copies are the same thing without children. */
   count: number;
   /** How far each copy may wander from even spacing, as a % of half the gap between them. */
@@ -149,11 +156,11 @@ export function bodyDefaults(
  * open space between them carries nothing: a spinning station carrying everything would
  * sweep a ship far out sideways faster than it can fly.
  */
-export function placeDefaults(kind: NodeKind): Pick<WorldNode, "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard"> {
-  if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, shipyard: false };
-  if (kind === "station") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true };
-  if (kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: false };
-  return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, shipyard: false };
+export function placeDefaults(kind: NodeKind): Pick<WorldNode, "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "blueprints"> {
+  if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, shipyard: false, blueprints: [] };
+  if (kind === "station") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true, blueprints: [] };
+  if (kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: false, blueprints: [] };
+  return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, shipyard: false, blueprints: [] };
 }
 
 /** Default carrying, from each place's edge: full out to the first, fading to nothing by the second. */
@@ -356,6 +363,7 @@ export function parseWorld(text: string): World | null {
         carryNone: num("carryNone"),
         spawns: Array.isArray(raw.spawns) ? SHIP_CHOICES.filter((ship) => (raw.spawns as unknown[]).includes(ship)) : [],
         shipyard: typeof raw.shipyard === "boolean" ? raw.shipyard : places.shipyard,
+        blueprints: Array.isArray(raw.blueprints) ? HELD_PARTS.filter((id) => (raw.blueprints as unknown[]).includes(id)) : [],
         count: Math.max(1, Math.floor(num("count", 1))),
         angleVariance: num("angleVariance"),
         orbitVariance: num("orbitVariance"),

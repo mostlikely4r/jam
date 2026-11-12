@@ -126,6 +126,20 @@ describe("the link between the designer and the game", () => {
     expect(linkSummary(world)).toContain("Map only: Hideout");
   });
 
+  it("hands a station's held blueprints over, and a saved world keeps only real held parts", () => {
+    const world = seedWorld();
+    const { planet } = linkedNodes(world);
+    const extra = makeChild(world, planet!, "field");
+    const outpost = makeChild(world, extra, "station");
+    Object.assign(outpost, { name: "Outpost", blueprints: ["tractorAll"] });
+    extra.children.push(outpost);
+    planet!.children.push(extra);
+    expect(stationsFor(world)[0].blueprints).toEqual(["tractorAll"]);
+    const text = stringifyWorld(world).replace('"tractorAll"', '"tractorAll", "reverse", "nonsense"');
+    const back = walk(parseWorld(text)!).find((entry) => entry.node.name === "Outpost")!.node;
+    expect(back.blueprints).toEqual(["tractorAll"]);
+  });
+
   it("hands every station but the first over as a dock, with its shipyard, copies included", () => {
     const world = seedWorld();
     const { planet, station } = linkedNodes(world);

@@ -123,6 +123,7 @@ export function stationsFor(world: World): StationSpec[] {
             carryFull,
             carryNone,
             shipyard: node.shipyard,
+            blueprints: node.blueprints,
           };
         }),
     );

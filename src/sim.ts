@@ -377,6 +377,8 @@ export interface StationSpec {
   carryFull: number;
   carryNone: number;
   shipyard: boolean;
+  /** Blueprints it starts with, held parts among them: the only way a held part is sold. */
+  blueprints: BlueprintId[];
 }
 
 /** The first base's id: the game's own station, placed by the tuning rather than the designer. */
@@ -402,10 +404,19 @@ export interface Base {
   haulerTimer: number;
   /** Its traffic gone for good, waiting for it to replace them. */
   lostTraffic: ShipModel[];
+  /** What its shop may sell beyond the first tier. */
+  blueprints: Set<BlueprintId>;
+  /** Credits paid toward blueprints it doesn't have yet. */
+  blueprintPaid: Map<BlueprintId, number>;
+  /** Paid in full, waiting for its next hauler to bring them. Projects wait here while built. */
+  blueprintsOrdered: Set<BlueprintId>;
 }
 
 /** What a base holds, as saved. */
-type BaseState = Pick<Base, "id" | "account" | "ore" | "parts" | "hauler" | "haulerTimer" | "lostTraffic">;
+type BaseState = Pick<
+  Base,
+  "id" | "account" | "ore" | "parts" | "hauler" | "haulerTimer" | "lostTraffic" | "blueprints" | "blueprintPaid" | "blueprintsOrdered"
+>;
 
 /**
  * A field nobody is near: its rocks kept as they were, in the field's own turning frame,
@@ -741,11 +752,16 @@ export class Sim {
     this.bases[0].hauler = hauler;
   }
   /** Blueprints the station has, so its shop can sell those things. */
-  blueprints = new Set<BlueprintId>();
-  /** Credits paid toward blueprints the station doesn't have yet. */
-  blueprintPaid = new Map<BlueprintId, number>();
-  /** Blueprints paid in full, waiting for the next hauler to bring them. */
-  blueprintsOrdered = new Set<BlueprintId>();
+  /** The first base's blueprints: the game's own station. Every base has its own. */
+  get blueprints(): Set<BlueprintId> {
+    return this.bases[0].blueprints;
+  }
+  get blueprintPaid(): Map<BlueprintId, number> {
+    return this.bases[0].blueprintPaid;
+  }
+  get blueprintsOrdered(): Set<BlueprintId> {
+    return this.bases[0].blueprintsOrdered;
+  }
   deposits: Deposit[] = [];
   batteries: Battery[] = [];
   /** Seconds until the first base's next hauler sets out. */
@@ -846,10 +862,11 @@ export class Sim {
       fighters: this.fighters.map((each) => each.ship),
       fighterRecords: this.fighters.map((each) => each.record),
       pirateBase: this.pirateBase,
-      bases: this.bases.map(({ id, account, ore, parts, hauler, haulerTimer, lostTraffic }): BaseState => ({ id, account, ore, parts, hauler, haulerTimer, lostTraffic })),
-      blueprints: this.blueprints,
-      blueprintPaid: this.blueprintPaid,
-      blueprintsOrdered: this.blueprintsOrdered,
+      bases: this.bases.map(
+        ({ id, account, ore, parts, hauler, haulerTimer, lostTraffic, blueprints, blueprintPaid, blueprintsOrdered }): BaseState => ({
+          id, account, ore, parts, hauler, haulerTimer, lostTraffic, blueprints, blueprintPaid, blueprintsOrdered,
+        }),
+      ),
       deposits: this.deposits,
       batteries: this.batteries,
       pirateOre: this.pirateOre,
@@ -906,7 +923,7 @@ export class Sim {
     this.fighters.forEach((pilot, i) => (pilot.record = fighterRecords[i] ?? null));
     for (const battery of data.batteries as Battery[]) for (const guard of battery.guns) fill(guard.gun);
     const plain = [
-      "pirateBase", "blueprints", "blueprintPaid", "blueprintsOrdered", "deposits", "batteries", "pirateOre",
+      "pirateBase", "deposits", "batteries", "pirateOre",
       "pirateCredits", "pirateCap", "blackMarket", "blackMarketTimer", "distress", "clock", "rocks",
       "shots", "ores", "field", "station", "stats", "inflowTimer", "randomState", "seed",
     ] as const;
@@ -923,6 +940,10 @@ export class Sim {
         lostTraffic: data.lostTraffic,
       },
     ];
+    // A save from before every base had its own blueprints: they were the first base's.
+    if (bases[0] && !bases[0].blueprints) {
+      Object.assign(bases[0], { blueprints: data.blueprints, blueprintPaid: data.blueprintPaid, blueprintsOrdered: data.blueprintsOrdered });
+    }
     this.bases[0].poi = this.station;
     this.savedBases = new Map(bases.map((state) => [state.id, state]));
     for (const base of this.bases) this.takeSaved(base);
@@ -969,9 +990,6 @@ export class Sim {
     this.clickPilot = new ClickPilot(this.ship);
     this.drones = [];
     this.distress = null;
-    this.blueprints = new Set();
-    this.blueprintPaid = new Map();
-    this.blueprintsOrdered = new Set();
     this.deposits = [];
     this.pirateOre = this.tuning.pirateStartOre;
     this.pirateCredits = this.tuning.pirateStartCredits;
@@ -1100,6 +1118,9 @@ export class Sim {
       hauler: null,
       haulerTimer: tuning.haulerFirst,
       lostTraffic: [],
+      blueprints: new Set(spec?.blueprints ?? []),
+      blueprintPaid: new Map(),
+      blueprintsOrdered: new Set(),
     };
   }
 
@@ -1115,6 +1136,9 @@ export class Sim {
       hauler: saved.hauler ?? null,
       haulerTimer: saved.haulerTimer ?? base.haulerTimer,
       lostTraffic: saved.lostTraffic ?? [],
+      blueprints: saved.blueprints ?? base.blueprints,
+      blueprintPaid: saved.blueprintPaid ?? base.blueprintPaid,
+      blueprintsOrdered: saved.blueprintsOrdered ?? base.blueprintsOrdered,
     });
     return true;
   }
@@ -1144,6 +1168,11 @@ export class Sim {
   /** The base that serves a ship: where it's docked, or else the first. */
   private serviceBase(ship: Ship): Base {
     return this.baseAt(ship) ?? this.bases[0];
+  }
+
+  /** The shop the player sees: the base they're docked at, or else the first. */
+  shopBase(): Base {
+    return this.serviceBase(this.ship);
   }
 
   private fitBase(base: Base): void {
@@ -1515,12 +1544,11 @@ export class Sim {
   private moveHauler(base: Base, dt: number): void {
     const { tuning } = this;
     const station = base.poi;
-    // Blueprints come in on the first base's haulers, as its station upgrades are its own.
-    const first = base === this.bases[0];
+    // Each base's blueprints come in on its own haulers.
     if (!base.hauler) {
       if (!tuning.haulers) {
         // With no haulers running, nothing would ever bring them.
-        if (first) this.deliverBlueprints();
+        this.deliverBlueprints(base);
         return;
       }
       base.haulerTimer -= dt;
@@ -1616,7 +1644,7 @@ export class Sim {
         hauler.stage = "loading";
         hauler.time = 0;
         if (tuning.chatter) this.chatter.haulerBerthed(this, base);
-        if (first) this.deliverBlueprints();
+        this.deliverBlueprints(base);
         return;
       }
       case "loading": {
@@ -1930,13 +1958,22 @@ export class Sim {
     return id === "drone" ? 2 : PARTS.find((part) => part.id === id)!.tier;
   }
 
-  /** Whether the station's shop can sell this. The first tier never needs a blueprint. */
-  unlocked(id: BlueprintId): boolean {
+  /** Whether nobody sells this blueprint, so only a base that holds it can sell the part. */
+  private held(id: BlueprintId): boolean {
+    return PARTS.some((part) => part.id === id && part.held);
+  }
+
+  /**
+   * Whether a base's shop can sell this: by default the one the player is docked at, or the
+   * first. The first tier never needs a blueprint; a held part always does.
+   */
+  unlocked(id: BlueprintId, base: Base = this.shopBase()): boolean {
     if (id === "deposit") return this.deposits.some((deposit) => deposit.partsLeft <= 0);
     if (id === "stationGuards" || id === "depositGuards") {
       return this.batteries.some((battery) => battery.id === id && battery.partsLeft <= 0);
     }
-    return !this.tuning.stationUnlocks || this.blueprintTier(id) === 0 || this.blueprints.has(id);
+    if (this.held(id)) return base.blueprints.has(id);
+    return !this.tuning.stationUnlocks || this.blueprintTier(id) === 0 || base.blueprints.has(id);
   }
 
   blueprintPrice(id: BlueprintId): number {
@@ -1948,17 +1985,17 @@ export class Sim {
   }
 
   /** What's still owed on a blueprint. */
-  blueprintLeft(id: BlueprintId): number {
-    return Math.max(0, this.blueprintPrice(id) - (this.blueprintPaid.get(id) ?? 0));
+  blueprintLeft(id: BlueprintId, base: Base = this.shopBase()): number {
+    return Math.max(0, this.blueprintPrice(id) - (base.blueprintPaid.get(id) ?? 0));
   }
 
-  /** The blueprints still to get, next first: most paid toward, then by tier, then cheapest. */
-  blueprintQueue(): BlueprintId[] {
+  /** A base's blueprints still to get, next first: most paid toward, then by tier, then cheapest. */
+  blueprintQueue(base: Base = this.bases[0]): BlueprintId[] {
     if (!this.tuning.stationUnlocks) return [];
-    const paid = (id: BlueprintId) => this.blueprintPaid.get(id) ?? 0;
+    const paid = (id: BlueprintId) => base.blueprintPaid.get(id) ?? 0;
     const ids: BlueprintId[] = [...PARTS.map((part) => part.id), "drone", ...PROJECTS];
     return ids
-      .filter((id) => this.canOrder(id))
+      .filter((id) => this.canOrder(id, base))
       .sort(
         (a, b) =>
           paid(b) - paid(a) ||
@@ -1967,56 +2004,66 @@ export class Sim {
       );
   }
 
-  /** Whether this can be paid toward now. Turrets for the deposit need a deposit to stand on. */
-  private canOrder(id: BlueprintId): boolean {
-    if (id === "depositGuards" && !this.unlocked("deposit")) return false;
-    return !this.unlocked(id) && !this.blueprintsOrdered.has(id);
+  /**
+   * Whether a base can pay toward this now. Nobody sells a held part's blueprint. Projects are
+   * built by the first field, so only the first base orders them, and turrets for the
+   * deposit need a deposit to stand on.
+   */
+  private canOrder(id: BlueprintId, base: Base): boolean {
+    if (this.held(id)) return false;
+    if (isProject(id) && base !== this.bases[0]) return false;
+    if (id === "depositGuards" && !this.unlocked("deposit", base)) return false;
+    return !this.unlocked(id, base) && !base.blueprintsOrdered.has(id);
   }
 
-  /** Puts the ship owner's credits toward a blueprint, as far as they go. Returns whether any went in. */
+  /** Puts the ship owner's credits toward a blueprint at its base, as far as they go. Returns whether any went in. */
   fundBlueprint(ship: Ship, id: BlueprintId): boolean {
-    if (!this.canOrder(id) || !this.atShop(ship)) return false;
+    const base = this.serviceBase(ship);
+    if (!this.canOrder(id, base) || !this.atShop(ship)) return false;
     const account = this.accountOf(ship);
-    const amount = Math.min(account.credits, this.blueprintLeft(id));
+    const amount = Math.min(account.credits, this.blueprintLeft(id, base));
     if (amount <= 0) return false;
     account.credits -= amount;
-    this.blueprintPaid.set(id, (this.blueprintPaid.get(id) ?? 0) + amount);
-    if (this.blueprintLeft(id) === 0) this.orderBlueprint(id);
+    base.blueprintPaid.set(id, (base.blueprintPaid.get(id) ?? 0) + amount);
+    if (this.blueprintLeft(id, base) === 0) this.orderBlueprint(id, base);
     return true;
   }
 
-  private orderBlueprint(id: BlueprintId): void {
-    this.blueprintPaid.delete(id);
-    this.blueprintsOrdered.add(id);
+  private orderBlueprint(id: BlueprintId, base: Base): void {
+    base.blueprintPaid.delete(id);
+    base.blueprintsOrdered.add(id);
     if (id === "deposit") this.addDeposit(false, this.tuning.depositParts);
     if (id === "stationGuards") this.addBattery(id, false, this.tuning.stationGuardParts);
     if (id === "depositGuards") this.addBattery(id, false, this.tuning.depositGuardParts);
   }
 
-  /** Everything on order arrives at once, and the shop can stock it from then on. */
-  private deliverBlueprints(): void {
+  /** Everything a base has on order arrives at once, and its shop can stock it from then on. */
+  private deliverBlueprints(base: Base): void {
     // A project is built here, not brought in.
-    const arrived = [...this.blueprintsOrdered].filter((id) => !isProject(id));
+    const arrived = [...base.blueprintsOrdered].filter((id) => !isProject(id));
     if (arrived.length === 0) return;
     for (const id of arrived) {
-      this.blueprintsOrdered.delete(id);
-      this.blueprints.add(id);
+      base.blueprintsOrdered.delete(id);
+      base.blueprints.add(id);
     }
-    if (!this.tuning.chatter) return;
+    // Only the game's own station has a voice on the radio so far.
+    if (!this.tuning.chatter || base !== this.bases[0]) return;
     this.chatter.unlocked(
       this,
       arrived.map((id) => (id === "drone" ? "drones" : PARTS.find((part) => part.id === id)!.label.toLowerCase())),
     );
   }
 
-  /** Whatever the station can spare past its cash buffer finishes paying for the next blueprint. */
+  /** Whatever each base can spare past its cash buffer finishes paying for its next blueprint. */
   private buyBlueprints(): void {
-    const next = this.blueprintQueue()[0];
-    if (!next) return;
-    const left = this.blueprintLeft(next);
-    if (this.stationAccount.credits - this.tuning.stationCashBuffer < left) return;
-    this.stationAccount.credits -= left;
-    this.orderBlueprint(next);
+    for (const base of this.bases) {
+      const next = this.blueprintQueue(base)[0];
+      if (!next) continue;
+      const left = this.blueprintLeft(next, base);
+      if (base.account.credits - this.tuning.stationCashBuffer < left) continue;
+      base.account.credits -= left;
+      this.orderBlueprint(next, base);
+    }
   }
 
   private depositSpot(at: Poi, toward: Poi): { x: number; y: number } {
@@ -2052,7 +2099,7 @@ export class Sim {
 
   private finishDeposit(deposit: Deposit): void {
     deposit.partsLeft = 0;
-    this.blueprintsOrdered.delete("deposit");
+    this.bases[0].blueprintsOrdered.delete("deposit");
     if (this.tuning.chatter) this.chatter.depositBuilt(this);
   }
 
@@ -2116,7 +2163,7 @@ export class Sim {
     // Turrets go when the deposit under them does.
     this.batteries = this.batteries.filter((battery) => {
       if (battery.host.name !== "field deposit" || this.deposits.includes(battery.host)) return true;
-      this.blueprintsOrdered.delete(battery.id);
+      this.bases[0].blueprintsOrdered.delete(battery.id);
       return false;
     });
     for (const battery of this.batteries) this.placeGuards(battery);
@@ -2124,7 +2171,7 @@ export class Sim {
 
   private finishBattery(battery: Battery): void {
     battery.partsLeft = 0;
-    this.blueprintsOrdered.delete(battery.id);
+    this.bases[0].blueprintsOrdered.delete(battery.id);
     if (this.tuning.chatter) this.chatter.guardsBuilt(this, battery.id === "stationGuards");
   }
 
@@ -2299,7 +2346,7 @@ export class Sim {
   buyPart(ship: Ship, id: PartId): boolean {
     const price = this.partPrice(id);
     const part = PARTS.find((candidate) => candidate.id === id)!;
-    if (!partFits(part, ship.model) || !this.unlocked(id)) return false;
+    if (!partFits(part, ship.model) || !this.unlocked(id, this.serviceBase(ship))) return false;
     const account = this.accountOf(ship);
     if (!this.atShop(ship) || ship.parts.has(id) || account.credits < price) return false;
     if (!this.hasPartsFor(price, ship)) return false;
@@ -2326,8 +2373,8 @@ export class Sim {
     const { tuning } = this;
     if (!this.atShop(buyer) || buyer.credits < tuning.dronePrice) return null;
     if (this.drones.length >= tuning.droneLimit || !this.hasPartsFor(tuning.dronePrice, buyer)) return null;
-    if (!this.unlocked("drone")) return null;
     const base = this.serviceBase(buyer);
+    if (!this.unlocked("drone", base)) return null;
     this.chargeForService(buyer, tuning.dronePrice, base);
     const dock = this.dockPoint(false, base.poi);
     this.events.push({ type: "sale", x: dock.x, y: dock.y });
@@ -3659,7 +3706,12 @@ export class Sim {
 
   /** Whether a ship's tractor beam is working: fitted, and room in the bay for what it pulls. */
   tractorOn(ship: Ship): boolean {
-    return ship.parts.has("tractor") && ship.ore < this.cargoSpace(ship);
+    return (ship.parts.has("tractor") || ship.parts.has("tractorAll")) && ship.ore < this.cargoSpace(ship);
+  }
+
+  /** How wide a ship's beam catches, in degrees: the all-round tractor's all the way round. */
+  tractorCone(ship: Ship): number {
+    return ship.parts.has("tractorAll") ? 360 : this.tuning.tractorCone;
   }
 
   /** Lets go of caught ore whose ship can't hold it any more: out of range, full, or no beam. */
@@ -3679,9 +3731,9 @@ export class Sim {
    */
   private pullOre(ship: Ship, dt: number): void {
     if (!this.tractorOn(ship)) return;
-    const { tractorRange, tractorPull, tractorSpeed, tractorCone } = this.tuning;
+    const { tractorRange, tractorPull, tractorSpeed } = this.tuning;
     const most = tractorPull * dt;
-    const edge = Math.cos(((Math.min(tractorCone, 360) / 2) * Math.PI) / 180);
+    const edge = Math.cos(((Math.min(this.tractorCone(ship), 360) / 2) * Math.PI) / 180);
     const noseX = Math.cos(ship.angle);
     const noseY = Math.sin(ship.angle);
     for (const ore of this.ores) {

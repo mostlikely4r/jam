@@ -585,7 +585,8 @@ export class Renderer {
   ): void {
     if (!sim.tractorOn(ship)) return;
     const { ctx } = this;
-    const { tractorRange: range, tractorCone } = sim.tuning;
+    const range = sim.tuning.tractorRange;
+    const tractorCone = sim.tractorCone(ship);
     ctx.lineWidth = 1;
     if (showRange) {
       ctx.strokeStyle = "rgba(111, 224, 200, 0.12)";

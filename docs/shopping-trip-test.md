@@ -147,6 +147,11 @@ starts in the same warmed world for now.
 
 **Play it here.** The user starts a new game, hears about the tractor, and decides whether to go.
 
+**Verdict (user, 2026-11-13): passed, as two separate halves.** The trip itself was flown and
+felt as expected for a two-base game. Hearing about it first wasn't part of that play, but the
+user trusts the news half without flying it. Step 4 is unblocked, and its per-item stock is the
+same foundation as a refined inventory, so the two are planned together.
+
 ### 4. The price gap (only if 1 to 3 pass)
 
 The home base sells the all-round tractor too, but only stock that someone hauled from the planet base,

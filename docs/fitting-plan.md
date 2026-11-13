@@ -110,6 +110,15 @@ Traffic buys parts today, so its "what next" list has to respect mounts too.
 
 *Played for:* does the ship read better, and is choosing programs a real decision?
 
+**Built 2026-11-13 (fd57ba0).** `src/fitting.ts` holds the mounts and fits. Each hull's six
+thruster mounts map onto the six thrusters the ship always had: main and the two turning ones
+come filled, reverse and the strafe pair are the empty three. The racer's thruster mounts are
+class 2 and the floater's class 1, so the racer can fit the floater's main thruster (and gets
+its gentle power) but not the other way round. Only the floater's gun mount takes a turret,
+and the gun moves up onto it. Computers: basic (2 slots, racer), flight (4, floater, also
+sold), navigation (6, sold). Programs weigh nothing now. One section mount, so bays no longer
+stack: the large bay replaces the small one.
+
 ### 2. Module damage
 
 A hit damages the nearest mount's module. Damaged stops working, destroyed is gone until
@@ -117,6 +126,11 @@ replaced, and the dock repairs or replaces. Damage shows on the ship. Pilots hav
 a part that's fitted but not working.
 
 *Played for:* does losing a thruster mid-fight feel like a moment or a punishment?
+
+**Built 2026-11-13 (92b7979).** Settings: `moduleToughness` 30 hull points (damaged at half),
+`coreToughness` 2.5 for the main and turning thrusters and the computer, so a ship rarely
+loses its engine before its hull. A crash lands on the side that touched. AI ships with no
+working gun head home.
 
 ### 3. Items as counted things
 
@@ -126,6 +140,14 @@ lists with the hull picture, opened by key or from the shop.
 
 *Played for:* move your stuff to Planet base. Does that feel like moving home?
 
+**Built 2026-11-13 (256d697).** A buy puts what it replaces in your locker at that base, and
+selling puts the hull's own part back from the locker if it's there. Anyone else's old part
+is sold to the base. A base keeps whole modules sold to it in its store, sells those first,
+and uses them to replace destroyed parts; damaged ones are broken down into its parts as
+before. Modules in the bay can be dropped in space and picked up by flying through them
+(only the player picks them up for now). Programs can't be sold from the shop any more:
+clicking one you own loads or unloads it.
+
 ### 4. Critical, pod and loot
 
 Critical, the pod flying itself to the nearest shipyard base, module damage during critical,
@@ -133,6 +155,15 @@ loot that drops and can be picked up into the bay, and the choice between a bare
 rebuild from the station's stock. Software stays with the player.
 
 *Played for:* die to a pirate, then decide whether to go back for what's left.
+
+**Built 2026-11-13 (cf5e931).** `criticalSeconds` 2.5; deadly ground explodes at once. The
+pod flies the route planner's corners by the clock at `podSpeed` 1500 and can't be hit yet.
+A rebuild costs the hull's price plus every part it had beyond the hull's own, takes
+`rebuildSeconds` 20 plus 4 per part, and needs the base to be able to supply each part. AI
+ships come back as bare hulls and buy their parts again, which is new: before, they kept
+everything. Nobody counts a critical ship as a threat, so pirates stop firing into it. No
+part is explosive yet. Older tests run with `criticalSeconds: 0, askHull: false`, which is
+the old instant wreck with a bare hull.
 
 ## Not in this plan
 

@@ -50,3 +50,27 @@ Looked at: not yet.
 
 Looked at: not yet.
 
+## 2026-11-13 18:25 — cf5e931 — 3 to check
+
+8 seeds × 60 game minutes, camera far away. Took 13 min; flown side 5799 s of work, records 797 s.
+
+| Total | Flown | Records | |
+|---|---:|---:|---|
+| traffic wrecked | 10 | 8 | ok |
+| pirate wrecked | 17 | 32 | ok |
+| defender wrecked | 2 | 3 | ok |
+| traffic left | 32 | 32 | ok |
+| pirates left | 15 | 10 | ok |
+| defenders left | 14 | 14 | ok |
+| traffic hits taken | 576 | 233 | **check** |
+| pirate hits taken | 697 | 909 | ok |
+| defender hits taken | 42 | 110 | **check** |
+| attacks begun by pirate | 19 | 34 | ok |
+| attacks begun by defender | 23 | 41 | ok |
+| traffic sold | 2746 | 3082 | ok |
+| pirate credits | 7353 | 3964 | **check** |
+| pirate ore | 0 | 0 | ok |
+| base ore | 526 | 596 | ok |
+
+Looked at: not yet.
+

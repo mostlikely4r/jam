@@ -1036,6 +1036,17 @@ export class Sim {
       extra.inflowTimer = 1;
       this.layExtraField(extra);
     }
+    // Every other base starts with traffic of its own, docked, working the field it sits by.
+    for (const base of this.bases.slice(1)) {
+      const dock = this.dockPoint(false, base.poi);
+      const field = this.miningFieldAt(base.poi.x, base.poi.y).id;
+      for (const model of models) {
+        this.addTraffic(dock.x, dock.y, model);
+        const pilot = this.traffic[this.traffic.length - 1];
+        pilot.working = field;
+        pilot.habit = field;
+      }
+    }
   }
 
   /** Scatters a field's rocks, clear of the player's ship. */

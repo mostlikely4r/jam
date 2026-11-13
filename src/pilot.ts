@@ -541,7 +541,7 @@ export class DronePilot extends ShipPilot {
   /** Whether it has decided on this stay at the dock whether to make a buying run. */
   private decidedTrade = false;
   /** The field it mines this trip, by id. Traffic picks one each time it leaves the dock. */
-  working = FIRST_FIELD;
+  working: string = FIRST_FIELD;
   /** The field it last mined, which it's a little drawn back to. */
   habit: string | null = null;
   /** Whether it has picked a field on this stay at the dock. */

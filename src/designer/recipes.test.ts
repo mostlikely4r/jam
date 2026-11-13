@@ -5,13 +5,16 @@ import { shippedWorld } from "./shipped";
 import { walk } from "./world";
 
 describe("layout recipes", () => {
-  it("far-base adds one base round the planet, holding the all-round tractor, however often it runs", () => {
+  it("far-base adds one field round the planet and a base round it, holding the all-round tractor, however often it runs", () => {
     const world = shippedWorld();
     RECIPES["far-base"].apply(world);
     const lines = RECIPES["far-base"].apply(world);
     const bases = walk(world).filter((entry) => entry.node.name === "Planet base");
     expect(bases).toHaveLength(1);
-    expect(bases[0].parent?.kind).toBe("planet");
+    expect(bases[0].parent?.name).toBe("Planet field");
+    const fields = walk(world).filter((entry) => entry.node.name === "Planet field");
+    expect(fields).toHaveLength(1);
+    expect(fields[0].parent?.kind).toBe("planet");
     const spec = stationsFor(world).find((station) => station.name === "Planet base")!;
     expect(spec.blueprints).toEqual(["tractorAll"]);
     expect(spec.shipyard).toBe(true);

@@ -61,33 +61,46 @@ function homeStation(world: World): WorldNode {
 
 export const RECIPES: Record<string, Recipe> = {
   "far-base": {
-    about: "A base round the planet that holds the all-round tractor's blueprint: the shopping trip test.",
+    about: "A field and base round the planet; the base holds the all-round tractor's blueprint: the shopping trip test.",
     start: "shipped",
     apply(world) {
       const name = "Planet base";
+      const fieldName = "Planet field";
       removeNamed(world, name);
+      removeNamed(world, fieldName);
       const planet = walk(world).find((entry) => entry.node.kind === "planet")?.node;
       if (!planet) throw new Error("This world has no planet");
-      const base = makeChild(world, planet, "station");
+      // Laid out like home: a field, with the base round it. Traffic that mines here sells
+      // here, and carries the base's news on to wherever it sells next.
+      const home = homeStation(world);
+      const field = makeChild(world, planet, "field");
+      Object.assign(field, {
+        name: fieldName,
+        orbitRadius: 50000,
+        orbitPeriod: Math.round(3600 * Math.pow(50000 / 20000, 1.5)),
+        orbitPhase: 1.2,
+      });
+      planet.children.push(field);
+      const base = makeChild(world, field, "station");
       Object.assign(base, {
         name,
-        orbitRadius: 50000,
-        orbitPeriod: 3600 * Math.pow(50000 / 20000, 1.5),
-        orbitPhase: 1.2,
+        orbitRadius: home.orbitRadius,
+        orbitPeriod: home.orbitPeriod,
+        orbitPhase: 0,
         spinPeriod: 300,
         shipyard: true,
+        spawns: [],
         blueprints: ["tractorAll"],
       });
-      base.orbitPeriod = Math.round(base.orbitPeriod);
-      planet.children.push(base);
-      const station = homeStation(world);
-      const span = tripSpan(world, station, base);
+      field.children.push(base);
+      const span = tripSpan(world, home, base);
       const clear = closestApproach(world, planet, base);
       return [
-        `Added ${name}: orbits ${planet.name} at ${base.orbitRadius} every ${minutes(base.orbitPeriod)}, holds the all-round tractor.`,
+        `Added ${fieldName}: orbits ${planet.name} at ${field.orbitRadius} every ${minutes(field.orbitPeriod)}.`,
+        `Added ${name} round it at ${base.orbitRadius}, holding the all-round tractor.`,
         `Keeps ${Math.round(clear.gap)} clear of ${planet.name}'s pull.`,
-        `Trips from ${station.name} over ${minutes(span)}:`,
-        ...tripReport(world, station, base, span),
+        `Trips from ${home.name} over ${minutes(span)}:`,
+        ...tripReport(world, home, base, span),
       ];
     },
   },

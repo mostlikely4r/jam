@@ -340,6 +340,17 @@ describe("blueprints per base", () => {
   });
 });
 
+describe("traffic of each base", () => {
+  it("starts docked at its own base, working the field by it, for every base but the first", () => {
+    const { sim, outpost } = world({ trafficRacers: 1, trafficFloaters: 1 });
+    sim.reset(1);
+    expect(sim.traffic).toHaveLength(4);
+    const theirs = sim.traffic.filter((pilot) => sim.dockedAt(pilot.ship) === outpost);
+    expect(theirs.map((pilot) => pilot.ship.model).sort()).toEqual(["floater", "racer"]);
+    expect(theirs.every((pilot) => pilot.working === "second:0")).toBe(true);
+  });
+});
+
 describe("the news board", () => {
   const undock = (sim: Sim, ship: Ship) => {
     ship.x = ship.px = sim.station.x + 20000;

@@ -113,6 +113,20 @@ ago."* A traffic ship arriving with fresh news can also say it on the radio.
 
 For the test, traffic carries news but doesn't act on it. AI shoppers are step 4 or later.
 
+**Built 2026-11-12/13.** Reports are base, item, price and when seen; a ship and a board swap
+once per stay, keeping the newest per item, and drop anything older than `newsLife` (2 h). A
+base posts its own held items. Pirates and defenders stay out of it.
+
+Carriers: at first no AI ship ever docked at Planet base: all traffic started at home and the
+planet field (8 min away against 1 to 2) only got picked by the 2% wander roll. Now the recipe
+lays Planet base out like home, round its own "Planet field", and **every base starts with its
+own traffic** (the same racer and floater count as home). Measured with `npm run news -- 240
+<seed>` (4 game hours, no player): home first hears of the tractor after 24 to 39 min and has
+live word of it about 82% of the time. Seen on the way: Planet base's traffic drifts to the
+moon fields within half an hour and mostly stays there (from home, the moon fields are
+cheapest), so Planet base is quiet most of the time. Fine for the test; where traffic comes
+from and how it flows is its own question (see the expansion idea in the memory notes).
+
 **Play it here.** The user starts a new game, hears about the tractor, and decides whether to go.
 
 ### 4. The price gap (only if 1 to 3 pass)

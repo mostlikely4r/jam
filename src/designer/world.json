@@ -258,33 +258,62 @@
           },
           {
             "id": "n9",
-            "name": "Planet base",
-            "kind": "station",
-            "radius": 300,
+            "name": "Planet field",
+            "kind": "field",
+            "radius": 5200,
             "surface": "none",
             "pull": 0,
             "pullFull": 0,
             "pullAccel": 0,
             "atmosphere": 0,
             "burnSpeed": 0,
-            "rocks": 0,
-            "rockDrift": 0,
-            "rockInflow": 0,
+            "rocks": 520,
+            "rockDrift": 12,
+            "rockInflow": 1,
             "carryFull": 2000,
-            "carryNone": 6000,
-            "shipyard": true,
-            "blueprints": [
-              "tractorAll"
-            ],
+            "carryNone": 8000,
+            "shipyard": false,
+            "blueprints": [],
             "spawns": [],
             "orbitRadius": 50000,
             "orbitPeriod": 14230,
             "orbitPhase": 1.2,
-            "spinPeriod": 300,
+            "spinPeriod": 0,
             "count": 1,
             "angleVariance": 0,
             "orbitVariance": 0,
-            "children": []
+            "children": [
+              {
+                "id": "n10",
+                "name": "Planet base",
+                "kind": "station",
+                "radius": 300,
+                "surface": "none",
+                "pull": 0,
+                "pullFull": 0,
+                "pullAccel": 0,
+                "atmosphere": 0,
+                "burnSpeed": 0,
+                "rocks": 0,
+                "rockDrift": 0,
+                "rockInflow": 0,
+                "carryFull": 2000,
+                "carryNone": 6000,
+                "shipyard": true,
+                "blueprints": [
+                  "tractorAll"
+                ],
+                "spawns": [],
+                "orbitRadius": 8100,
+                "orbitPeriod": 928,
+                "orbitPhase": 0,
+                "spinPeriod": 300,
+                "count": 1,
+                "angleVariance": 0,
+                "orbitVariance": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

@@ -6,7 +6,7 @@ import { linkedNodes, useLayout, type GameLink } from "../designer/link";
 import { shippedWorld } from "../designer/shipped";
 import type { World } from "../designer/world";
 
-function linkTo(sim: Sim): GameLink {
+export function linkTo(sim: Sim): GameLink {
   return {
     tuning: sim.tuning,
     clock: () => sim.now,

@@ -1,4 +1,5 @@
-import type { Base, Ore, Poi, Ship, Sim } from "./sim";
+import { PARTS } from "./parts";
+import type { Base, Ore, Poi, Report, Ship, Sim } from "./sim";
 
 /** One line on the radio. A null speaker is the station. */
 export interface ChatterLine {
@@ -75,6 +76,9 @@ export const THANKS = [
   "Appreciated, friend.",
   "That one's yours, really. Thanks.",
 ];
+const NEWS = ["Word from {base}: they sell {item}, {price} credits.", "Heard at {base}: {item} for {price} credits.", "{base} has {item} in, {price} credits."];
+const NEWS_FOR_PLAYER = ["On the board: {base} sells {item}, {price} credits.", "News on the board for you: {item} at {base}, {price} credits."];
+const NEWS_REPLY = ["Thanks, {name}. It's on the board.", "Noted, {name}. Putting it up on the board."];
 const GREETING = ["Welcome back.", "Good to see you again.", "Dock's open when you need it.", "Welcome home."];
 
 const DOCKING_COOLDOWN = 60;
@@ -284,6 +288,27 @@ export class Chatter {
         ? `${this.nameOf(sim, victim)} reports you fired on them. You're wanted.${law}`
         : `All ships, ${who} attacked ${this.nameOf(sim, victim)} and is wanted.${law}`;
     this.stationSays(sim, text, true);
+  }
+
+  /** A ship docked with word the board didn't have: it tells the station, which posts it. */
+  newsBrought(sim: Sim, ship: Ship, base: Base, reports: Report[]): void {
+    this.say(sim, ship, this.newsLine(sim, this.pick(NEWS), reports));
+    this.reply(this.pick(NEWS_REPLY).replace("{name}", this.nameOf(sim, ship)), STATION_REPLY_DELAY, base.poi);
+  }
+
+  /** The player docked where the board has word they hadn't heard: the station passes it on. */
+  newsForPlayer(sim: Sim, base: Base, reports: Report[]): void {
+    this.reply(this.newsLine(sim, this.pick(NEWS_FOR_PLAYER), reports), STATION_REPLY_DELAY, base.poi);
+  }
+
+  /** One report as a line, with a word on any others. */
+  private newsLine(sim: Sim, pattern: string, reports: Report[]): string {
+    const [report] = reports;
+    const label = PARTS.find((part) => part.id === report.item)?.label ?? report.item;
+    const item = /^[aeiou]/i.test(label) ? `an ${label.toLowerCase()}` : `a ${label.toLowerCase()}`;
+    const more = reports.length > 1 ? " And more, it's all on the board." : "";
+    const text = pattern.replace("{base}", sim.baseName(report.base)).replace("{item}", item).replace("{price}", report.price.toLocaleString("en-US"));
+    return `${text[0].toUpperCase()}${text.slice(1)}${more}`;
   }
 
   /** A ship other than the player bought a part at the station. */

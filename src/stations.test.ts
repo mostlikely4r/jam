@@ -351,6 +351,23 @@ describe("traffic of each base", () => {
   });
 });
 
+describe("traffic away from its base", () => {
+  it("goes back to the field by its own base after selling at another", () => {
+    const { sim, outpost } = world({ trafficRacers: 1, fieldWanderChance: 0, trafficRecords: false });
+    sim.reset(1);
+    const theirs = sim.traffic.find((pilot) => sim.dockedAt(pilot.ship) === outpost)!;
+    const ours = sim.traffic.find((pilot) => pilot !== theirs)!;
+    expect(theirs.ship.home).toBe(sim.bases[1].id);
+    for (const [pilot, at] of [[theirs, sim.station], [ours, outpost]] as const) {
+      pilot.working = "nowhere";
+      dockAt(sim, pilot.ship, at);
+    }
+    sim.step();
+    expect(theirs.working).toBe("second:0");
+    expect(ours.working).toBe("first");
+  });
+});
+
 describe("the news board", () => {
   const undock = (sim: Sim, ship: Ship) => {
     ship.x = ship.px = sim.station.x + 20000;
@@ -395,6 +412,63 @@ describe("the news board", () => {
     sim.step();
     expect(first.board).toEqual([]);
     expect(ship.news).toEqual([]);
+  });
+
+  it("is said on the radio by a ship that brings word the board didn't have, but not by the player", () => {
+    const { sim, outpost } = world({ trafficRacers: 1, trafficRecords: false, chatter: true }, { blueprints: ["tractorAll"] });
+    sim.reset(1);
+    const theirs = sim.traffic.find((pilot) => sim.dockedAt(pilot.ship) === outpost)!.ship;
+    const said = () => {
+      const lines = sim.events.flatMap((event) => (event.type === "chatter" ? [event.text] : []));
+      sim.events.length = 0;
+      return lines;
+    };
+    // The player brings it first: posted, but nobody says so.
+    dockAt(sim, sim.ship, outpost);
+    sim.step();
+    undock(sim, sim.ship);
+    dockAt(sim, sim.ship, sim.station);
+    sim.step();
+    expect(sim.bases[0].board).toHaveLength(1);
+    for (let i = 0; i < Math.round(3 / TICK); i++) sim.step();
+    expect(said().some((line) => line.includes("tractor"))).toBe(false);
+    // A traffic ship brings it to a board that has forgotten it.
+    sim.bases[0].board = [];
+    theirs.news = [];
+    theirs.newsFrom = null;
+    dockAt(sim, theirs, outpost);
+    sim.step();
+    expect(theirs.news).toHaveLength(1);
+    dockAt(sim, theirs, sim.station);
+    const lines: string[] = [];
+    for (let i = 0; i < Math.round(3 / TICK); i++) {
+      sim.step();
+      lines.push(...said());
+    }
+    expect(lines.filter((line) => /outpost.*all-round tractor.*600|all-round tractor.*outpost/i.test(line))).toHaveLength(1);
+    expect(lines.some((line) => line.includes("on the board"))).toBe(true);
+  });
+
+  it("is passed on to the player by the station, once, when they dock where the board has word they hadn't heard", () => {
+    const { sim, outpost } = world({ chatter: true });
+    const [first, second] = sim.bases;
+    first.board = [{ base: second.id, item: "tractorAll", price: 600, seen: sim.now }];
+    const lines: string[] = [];
+    const listen = (seconds: number) => {
+      for (let i = 0; i < Math.round(seconds / TICK); i++) {
+        sim.step();
+        for (const event of sim.events) if (event.type === "chatter" && event.text.includes("tractor")) lines.push(event.text);
+        sim.events.length = 0;
+      }
+    };
+    dockAt(sim, sim.ship, sim.station);
+    listen(3);
+    expect(lines).toEqual([expect.stringMatching(/all-round tractor.*outpost|outpost.*all-round tractor/i)]);
+    undock(sim, sim.ship);
+    dockAt(sim, sim.ship, sim.station);
+    listen(3);
+    expect(lines).toHaveLength(1);
+    expect(outpost).toBeDefined();
   });
 
   it("isn't swapped with pirates or defenders", () => {

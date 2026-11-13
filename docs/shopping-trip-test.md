@@ -127,6 +127,14 @@ moon fields within half an hour and mostly stays there (from home, the moon fiel
 cheapest), so Planet base is quiet most of the time. Fine for the test; where traffic comes
 from and how it flows is its own question (see the expansion idea in the memory notes).
 
+**Hearing it, and a base that stays busy (2026-11-13).** A traffic ship that docks with word
+the board didn't have says it on the radio (*"Word from Planet base: they sell an all-round
+tractor, 600 credits."*) and the station posts it. When the player docks where the board has
+word they hadn't heard, the station tells them. Traffic now belongs to the base it started at
+and, after selling at another base, goes back to the field by its own (unless the wander roll
+sends it elsewhere). Planet base keeps its traffic: 43 to 47 stays in 4 hours instead of 8 to
+20, and home still has live word of the tractor 79 to 90% of the time.
+
 **Warm start (2026-11-13).** A fresh world had nothing on its boards for its first half hour,
 so a new game now begins in a world that has already run for an hour: traffic on its way,
 home's board already carrying word of the tractor (44 min old at the start). Running that hour

@@ -1031,7 +1031,7 @@ export class Sim {
       const dock = this.dockPoint(false, base.poi);
       const field = this.miningFieldAt(base.poi.x, base.poi.y).id;
       for (const model of models) {
-        this.addTraffic(dock.x, dock.y, model);
+        this.addTraffic(dock.x, dock.y, model, base.id);
         const pilot = this.traffic[this.traffic.length - 1];
         pilot.working = field;
         pilot.habit = field;
@@ -1211,7 +1211,7 @@ export class Sim {
     return true;
   }
 
-  /** The base a ship belongs to: a defender's own, and the first for anyone else. */
+  /** The base a ship belongs to: its own if it has one (defenders, traffic), and the first for anyone else. */
   homeBaseOf(ship: Ship): Base {
     return (ship.home !== null && this.bases.find((base) => base.id === ship.home)) || this.bases[0];
   }
@@ -1439,9 +1439,10 @@ export class Sim {
     return drone;
   }
 
-  /** Traffic flies as it starts out, and doesn't buy anything or grow in number. */
-  private addTraffic(x: number, y: number, model: ShipModel): void {
+  /** Traffic flies as it starts out, and doesn't buy anything or grow in number. Its base is the first unless given. */
+  private addTraffic(x: number, y: number, model: ShipModel, home: string | null = null): void {
     const pilot = this.makePilot(x, y, model);
+    pilot.ship.home = home;
     pilot.buys = "upgrades";
     pilot.flees = true;
     if (model === "floater") pilot.ship.parts.add("gun2");
@@ -4480,7 +4481,7 @@ export class Sim {
     } else {
       if (spare < this.stockFor(tuning.rebuildCost)) return;
       this.chargeForService(base.account, tuning.rebuildCost, base);
-      this.addTraffic(dock.x, dock.y, base.lostTraffic.shift()!);
+      this.addTraffic(dock.x, dock.y, base.lostTraffic.shift()!, base === this.bases[0] ? null : base.id);
       if (this.tuning.chatter) this.chatter.trafficReplaced(this, this.traffic[this.traffic.length - 1].ship, base.poi);
     }
     this.events.push({ type: "sale", x: dock.x, y: dock.y });
@@ -4776,14 +4777,23 @@ export class Sim {
     }));
     const newest = new Map<string, Report>();
     const oldest = this.clock - this.tuning.newsLife;
+    const keyOf = (report: Report) => `${report.base} ${report.item}`;
+    const known = new Set(base.board.filter((report) => report.seen >= oldest).map(keyOf));
+    const heard = new Set(ship.news.filter((report) => report.seen >= oldest).map(keyOf));
     for (const report of [...base.board, ...ship.news, ...own]) {
       if (report.seen < oldest) continue;
-      const key = `${report.base} ${report.item}`;
-      const known = newest.get(key);
-      if (!known || report.seen > known.seen) newest.set(key, report);
+      const key = keyOf(report);
+      const before = newest.get(key);
+      if (!before || report.seen > before.seen) newest.set(key, report);
     }
     // Word of a base that's gone goes with it.
     const merged = [...newest.values()].filter((report) => this.bases.some((each) => each.id === report.base));
+    // Word the board had none of, from another base: whoever brought it says so on the radio.
+    const brought = merged.filter((report) => report.base !== base.id && !known.has(keyOf(report)));
+    if (brought.length > 0 && ship !== this.ship && this.tuning.chatter) this.chatter.newsBrought(this, ship, base, brought);
+    // Word the player hadn't heard, from another base: the station tells them as they dock.
+    const told = merged.filter((report) => report.base !== base.id && !heard.has(keyOf(report)));
+    if (told.length > 0 && ship === this.ship && this.tuning.chatter) this.chatter.newsForPlayer(this, base, told);
     base.board = merged;
     ship.news = [...merged];
   }

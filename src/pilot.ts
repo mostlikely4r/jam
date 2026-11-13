@@ -643,7 +643,8 @@ export class DronePilot extends ShipPilot {
    * the round trip from the route planner. An empty field, or one where pirates killed it
    * lately (some trips), costs so much it's the last resort. Going back to its last field
    * is a little cheaper, and luck takes a little off each. The cheapest wins. Now and then
-   * it heads for any other field just to see.
+   * it heads for any other field just to see. Docked at a base not its own, it goes back to
+   * the field by its own base.
    */
   private chooseField(sim: Sim): void {
     const { ship } = this;
@@ -662,6 +663,15 @@ export class DronePilot extends ShipPilot {
     if (elsewhere.length > 0 && sim.roll() < tuning.fieldWanderChance) {
       this.working = elsewhere[Math.floor(sim.roll() * elsewhere.length)].id;
       return;
+    }
+    // Selling away from its own base, it goes back to the field by its own.
+    const own = sim.homeBaseOf(ship);
+    if (sim.dockedAt(ship) !== own.poi) {
+      const home = sim.miningFieldAt(own.poi.x, own.poi.y);
+      if (open.includes(home)) {
+        this.working = home.id;
+        return;
+      }
     }
     const lately = ship.pirateKilledAt !== null && sim.now - ship.pirateKilledAt < tuning.fieldFearSeconds;
     const feared = lately && sim.roll() < tuning.fieldFearChance ? ship.pirateKilledIn : null;

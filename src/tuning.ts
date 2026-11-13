@@ -205,6 +205,12 @@ export const DEFAULTS = {
   sightLines: true,
   detectSeconds: 1,
   shotDamage: 4,
+  /** Hits wear the module on the nearest mount, as well as the hull. */
+  moduleDamage: true,
+  /** Hull points of hits a module takes before it's destroyed. Half that and it stops working. */
+  moduleToughness: 30,
+  /** How much tougher a ship's core is: main and turning thrusters, and the computer. */
+  coreToughness: 2.5,
   pirateStartOre: 40,
   pirateLimit: 2,
   /** The pirate base's starting money, and what it keeps back for rebuilds before buying anything. */
@@ -418,6 +424,8 @@ export const GROUPS: Group[] = [
       { key: "visionAngle", label: "Vision cone (degrees)", min: 10, max: 360, step: 5 },
       { key: "detectSeconds", label: "Seconds in the cone before being spotted", min: 0, max: 5, step: 0.25 },
       { key: "shotDamage", label: "Damage per shot to a ship", min: 0, max: 50, step: 1 },
+      { key: "moduleToughness", label: "Hits a part takes before it's destroyed (hull points)", min: 5, max: 200, step: 5 },
+      { key: "coreToughness", label: "How much tougher the core parts are", min: 1, max: 10, step: 0.5 },
       { key: "pirateStartOre", label: "Pirate base starting ore (on restart)", min: 0, max: 500, step: 5 },
       { key: "pirateLimit", label: "Pirates the base starts out fielding", min: 0, max: 10, step: 1 },
       { key: "pirateCapMax", label: "Most pirates it can grow to", min: 0, max: 10, step: 1 },

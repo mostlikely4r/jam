@@ -601,7 +601,7 @@ export class DronePilot extends ShipPilot {
       this.dropsThisLoad = sim.deposits.length > 0 && sim.roll() < sim.tuning.depositDropChance;
     }
     const canAffordRepair = ship.ore > 0 || sim.canPayRepair(ship);
-    if (ship.hull < LOW_HULL && canAffordRepair) this.hauling = true;
+    if ((ship.hull < LOW_HULL || sim.crippled(ship)) && canAffordRepair) this.hauling = true;
 
     // Repairs come before shopping, so it never spends its repair money on parts.
     if (ship.ore === 0 && sim.canRepair(ship)) {
@@ -1565,7 +1565,7 @@ export class FighterPilot extends ShipPilot {
   /** A hurt pirate breaks off even mid-fight, as long as going home would get it fixed. */
   private shouldRetreat(sim: Sim): boolean {
     const { ship } = this;
-    if (!this.isPirate || !sim.tuning.pirateRetreats || ship.hull >= LOW_HULL) return false;
+    if (!this.isPirate || !sim.tuning.pirateRetreats || (ship.hull >= LOW_HULL && !sim.crippled(ship))) return false;
     return ship.ore > 0 || sim.canPayRepair(ship);
   }
 
@@ -1578,7 +1578,7 @@ export class FighterPilot extends ShipPilot {
   private goHome(sim: Sim): boolean {
     const { ship } = this;
     const canPay = ship.ore > 0 || sim.canPayRepair(ship);
-    if (ship.ore >= sim.deliveryLoad(ship) || (ship.hull < LOW_HULL && canPay)) {
+    if (ship.ore >= sim.deliveryLoad(ship) || ((ship.hull < LOW_HULL || sim.crippled(ship)) && canPay)) {
       this.headingHome = true;
     }
     const busy = ship.ore > 0 || sim.canRepair(ship);

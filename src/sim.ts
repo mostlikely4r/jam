@@ -1,6 +1,6 @@
 import { Chatter } from "./chatter";
 import { type BlueprintId, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
-import { computerSize, fitPart, type Fitting, HULL_DEFAULTS, install, mountsFor, mountsHolding, newFitting, owns, trimPrograms, unfit, uninstall, works } from "./fitting";
+import { computerSize, DAMAGED_AT, fitPart, type Fitting, HULL_DEFAULTS, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
 import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./pilot";
 export { FIRST_FIELD };
 import { pathAround } from "./route";
@@ -3508,7 +3508,7 @@ export class Sim {
     let goal: TripRecord["goal"];
     let target: string;
     const fields = this.miningFields();
-    const lowHull = ship.hull < LOW_HULL && (ship.ore > 0 || this.canPayRepair(ship));
+    const lowHull = (ship.hull < LOW_HULL || this.crippled(ship)) && (ship.ore > 0 || this.canPayRepair(ship));
     if (pilot.trading) {
       goal = "trade";
       target = pilot.trading === "pirate base" ? "pirate base" : String(this.deposits.indexOf(pilot.trading));
@@ -4178,6 +4178,8 @@ export class Sim {
     if (damage > 0) {
       ship.hull -= damage;
       ship.damageTaken += damage;
+      // It lands on the side that touched.
+      this.damageModule(ship, -nx * SHIP_RADIUS, -ny * SHIP_RADIUS, damage);
       const player = ship === this.ship;
       this.events.push({ type: "impact", x: ship.x, y: ship.y, damage, player });
       if (ship.hull <= 0) this.wreckShip(ship);
@@ -4292,9 +4294,10 @@ export class Sim {
     if (player && this.tuning.chatter) this.chatter.playerRebuilt(rebuildCost, cleared, yard.poi);
   }
 
-  /** A wreck's cargo stays in the world for anyone to collect. */
-  private dropOre(ship: Ship): void {
-    for (let i = 0; i < ship.ore; i++) {
+  /** A wreck's cargo stays in the world for anyone to collect: all of it, or just so much. */
+  private dropOre(ship: Ship, amount = ship.ore): void {
+    if (amount <= 0) return;
+    for (let i = 0; i < amount; i++) {
       const dir = this.random() * Math.PI * 2;
       const kick = WRECK_ORE_SPEED * (0.5 + this.random() * 0.5);
       this.ores.push({
@@ -4308,7 +4311,7 @@ export class Sim {
         amount: 1,
       });
     }
-    ship.ore = 0;
+    ship.ore -= amount;
   }
 
   private removeShip(ship: Ship): void {
@@ -4673,6 +4676,7 @@ export class Sim {
     const damage = this.tuning.shotDamage;
     ship.hull -= damage;
     ship.damageTaken += damage;
+    this.damageModule(ship, shot.x - ship.x, shot.y - ship.y, damage);
     ship.shotFrom = { x: shot.from.x, y: shot.from.y };
     this.distress = { ship, age: 0 };
     if (this.tuning.chatter) this.chatter.shot(this, ship, shot.from);
@@ -4926,18 +4930,41 @@ export class Sim {
 
   /** Whether the ship has the money for a hull point, and its dock the ore. */
   canPayRepair(ship: Ship): boolean {
-    const { repairCost } = this.tuning;
-    if (ship.faction === "pirate") return this.pirateCredits >= repairCost;
-    if (!this.hasPartsFor(repairCost, ship)) return false;
-    return ship.faction === "defender" || this.accountOf(ship).credits >= repairCost;
+    return this.canPayFor(ship, this.tuning.repairCost);
   }
 
   /** Whether the dock could repair this ship right now. */
   canRepair(ship: Ship): boolean {
-    return this.isHome(ship) && ship.hull < MAX_HULL && this.canPayRepair(ship);
+    if (!this.isHome(ship)) return false;
+    const next = this.nextRepair(ship);
+    return next !== null && this.canPayFor(ship, next.cost);
   }
 
-  /** The dock repairs a hull point at a time, for as long as the ship can pay. */
+  /**
+   * What the dock fixes next: the hull a point at a time, then worn modules a point at a
+   * time, then destroyed ones replaced whole. Each step and what it costs.
+   */
+  private nextRepair(ship: Ship): { mount: MountId | null; cost: number } | null {
+    const { repairCost } = this.tuning;
+    if (ship.hull < MAX_HULL) return { mount: null, cost: repairCost };
+    let replace: { mount: MountId; cost: number } | null = null;
+    for (const [mount, module] of Object.entries(ship.fit) as [MountId, Module | undefined][]) {
+      if (!module || module.wear <= 0) continue;
+      if (module.wear < 1) return { mount, cost: repairCost };
+      const part = partOf(module.part);
+      replace ??= { mount, cost: Math.round(this.partPrice(module.part) / (part.set ?? 1)) };
+    }
+    return replace;
+  }
+
+  /** Whether the ship can pay for a service, and its dock has the parts for it. */
+  private canPayFor(ship: Ship, cost: number): boolean {
+    if (ship.faction === "pirate") return this.pirateCredits >= cost;
+    if (!this.hasPartsFor(cost, ship)) return false;
+    return ship.faction === "defender" || this.accountOf(ship).credits >= cost;
+  }
+
+  /** The dock repairs a point at a time, for as long as the ship can pay, and replaces what was destroyed. */
   private repairHull(ship: Ship, dt: number): void {
     const { tuning } = this;
     if (!this.canRepair(ship)) {
@@ -4947,11 +4974,46 @@ export class Sim {
     ship.repairTimer += dt * tuning.repairSpeed;
     while (ship.repairTimer >= 1 && this.canRepair(ship)) {
       ship.repairTimer -= 1;
-      ship.hull = Math.min(MAX_HULL, ship.hull + 1);
-      if (ship.faction === "pirate") this.pirateCredits -= tuning.repairCost;
-      else this.chargeForService(this.accountOf(ship), tuning.repairCost, this.serviceBase(ship));
-      ship.upkeep += tuning.repairCost;
+      const next = this.nextRepair(ship)!;
+      if (next.mount === null) ship.hull = Math.min(MAX_HULL, ship.hull + 1);
+      else {
+        const module = ship.fit[next.mount]!;
+        module.wear = module.wear >= 1 ? 0 : Math.max(0, module.wear - 1 / this.moduleToughness(module));
+        refresh(ship);
+      }
+      if (ship.faction === "pirate") this.pirateCredits -= next.cost;
+      else this.chargeForService(this.accountOf(ship), next.cost, this.serviceBase(ship));
+      ship.upkeep += next.cost;
     }
+  }
+
+  /** How many hull points of hits a module takes before it's destroyed. A ship's core is built tougher. */
+  moduleToughness(module: Module): number {
+    const part = partOf(module.part);
+    const core = part.kind === "computer" || part.roles?.some((role) => role === "thrusterMain" || role === "thrusterRotateLeft");
+    return this.tuning.moduleToughness * (core ? this.tuning.coreToughness : 1);
+  }
+
+  /**
+   * A hit at this spot (relative to the ship) wears the module on the nearest mount. Half
+   * worn, it stops working; fully worn, it's destroyed and stays a dead stub until replaced.
+   */
+  damageModule(ship: Ship, dx: number, dy: number, damage: number): void {
+    if (!this.tuning.moduleDamage || damage <= 0) return;
+    const mount = nearestMount(ship, dx, dy, SHIP_RADIUS);
+    if (!mount) return;
+    const module = ship.fit[mount]!;
+    const before = module.wear;
+    module.wear = Math.min(1, module.wear + damage / this.moduleToughness(module));
+    if (before < DAMAGED_AT === module.wear < DAMAGED_AT && before < 1 === module.wear < 1) return;
+    refresh(ship);
+    // A destroyed bay loses what it held beyond the room that's left.
+    if (module.wear >= 1) this.dropOre(ship, ship.ore - this.cargoSpace(ship));
+  }
+
+  /** Whether a ship can't do its work out there, whatever its hull: it has no working gun. */
+  crippled(ship: Ship): boolean {
+    return !ship.parts.has("gun1") && !ship.parts.has("gun2");
   }
 
   private collectOre(ship: Ship): void {

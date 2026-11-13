@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mountsFor, newFitting } from "./fitting";
+import { mountsFor, newFitting, refresh } from "./fitting";
 import { DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, Sim } from "./sim";
 
@@ -99,5 +99,70 @@ describe("the computer", () => {
     expect(ship.fit.computer!.part).toBe("basicComputer");
     expect(ship.programs.length).toBe(2);
     expect(ship.software.size).toBe(3);
+  });
+});
+
+describe("module damage", () => {
+  it("a hit wears the module nearest where it lands; half worn it stops, worn out it's destroyed", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    ship.angle = 0;
+    // A hit on the nose lands on the gun.
+    sim.damageModule(ship, 14, 0, sim.tuning.moduleToughness / 2);
+    expect(ship.fit.gun!.wear).toBeCloseTo(0.5, 9);
+    expect(ship.parts.has("gun1")).toBe(false);
+    expect(sim.crippled(ship)).toBe(true);
+    sim.damageModule(ship, 14, 0, sim.tuning.moduleToughness);
+    expect(ship.fit.gun!.wear).toBe(1);
+    // Once it's gone, the next hit there finds the next nearest.
+    sim.damageModule(ship, 14, 0, 1);
+    expect(ship.fit.tractor ?? ship.fit.thrusterRotateLeft).toBeDefined();
+  });
+
+  it("a ship without a working gun can't fire", () => {
+    const sim = docked("racer");
+    sim.ship.x += 2000;
+    sim.ship.fit.gun!.wear = 1;
+    refresh(sim.ship);
+    sim.controls.fire = true;
+    sim.step();
+    expect(sim.shots.length).toBe(0);
+  });
+
+  it("a broken thruster doesn't fire", () => {
+    const sim = docked("racer");
+    sim.ship.x += 2000;
+    sim.ship.fit.thrusterMain!.wear = 0.6;
+    refresh(sim.ship);
+    sim.controls.thrust = 1;
+    sim.step();
+    expect(sim.ship.firing.has("thrusterMain")).toBe(false);
+  });
+
+  it("the dock repairs worn modules, then replaces destroyed ones, for a price", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    ship.fit.gun!.wear = 1;
+    ship.fit.thrusterRotateLeft!.wear = 0.6;
+    const before = ship.credits;
+    for (let i = 0; i < 120 * 60 && sim.canRepair(ship); i++) sim.step();
+    expect(ship.fit.gun!.wear).toBe(0);
+    expect(ship.fit.thrusterRotateLeft!.wear).toBe(0);
+    expect(ship.parts.has("gun1")).toBe(true);
+    expect(ship.credits).toBeLessThan(before - sim.partPrice("gun1") + 1);
+  });
+
+  it("a destroyed bay spills what no longer fits", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    ship.x += 2000;
+    sim.devSet(ship, "bay", true);
+    ship.ore = sim.cargoSpace(ship);
+    const full = ship.ore;
+    ship.angle = 0;
+    sim.damageModule(ship, -30, 0, 1000);
+    expect(ship.fit.section!.wear).toBe(1);
+    expect(ship.ore).toBe(sim.cargoSpace(ship));
+    expect(sim.ores.length).toBe(full - ship.ore);
   });
 });

@@ -126,3 +126,47 @@ export function forgetSave(slot: SaveSlot): void {
 export function roundTrip(sim: Sim, into: Sim): void {
   into.restore(decode(JSON.parse(JSON.stringify(encode(sim.snapshot())))));
 }
+
+/**
+ * A world that has already run for a while, for new games to start in: traffic on its way
+ * and news on the boards. Made ahead of time (npm run warm), as running it takes too long
+ * to do when a game starts. It only fits the layout it was made in.
+ */
+export interface StartFile {
+  version: number;
+  /** A fingerprint of the layout it was made in (`layoutKey`). */
+  layout: string;
+  /** Game seconds it ran before a player joins. */
+  warmed: number;
+  data: Encoded;
+}
+
+/** A short fingerprint of a layout's text: any change to the layout changes it. */
+export function layoutKey(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return `${text.length}-${hash.toString(16)}`;
+}
+
+/** The world as it is now, as a start for new games. The player's ship is made anew on loading. */
+export function makeStart(sim: Sim, layout: string): StartFile {
+  return { version: SAVE_VERSION, layout, warmed: sim.warmedUp, data: encode(sim.snapshot()) };
+}
+
+/**
+ * Puts a start into the world, keeping the world's own tuning, if it fits this version and
+ * layout. Returns whether it did; if not, the world is left as it was. The caller then lays
+ * the places out at the start's clock and makes the player's ship (`Sim.startPlayer`).
+ */
+export function loadStart(sim: Sim, file: StartFile | null, layout: string): boolean {
+  if (!file || file.version !== SAVE_VERSION || file.layout !== layout) return false;
+  try {
+    const data = decode(file.data) as { tuning: object };
+    data.tuning = {};
+    sim.restore(data);
+    sim.warmedUp = file.warmed;
+    return true;
+  } catch {
+    return false;
+  }
+}

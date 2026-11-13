@@ -21,6 +21,8 @@ export const FIELD_SLEEP_DISTANCE = 9000;
 export const TRAFFIC_WAKE_DISTANCE = 10000;
 /** How long a defender's watch lasts as a record when nothing happens: for good, in a way JSON can save. */
 const FOREVER = 1e9;
+/** Where the player's ship waits during `warmUp`: far past everything, so all of it is out of view. */
+const WARM_UP_AWAY = 4e6;
 export const TRAFFIC_SLEEP_DISTANCE = 12000;
 export const SHIP_RADIUS = 12;
 export const MAX_HULL = 100;
@@ -808,6 +810,8 @@ export class Sim {
   distress: { ship: Ship; age: number } | null = null;
   /** Seconds since the world began, for things that fade. */
   private clock = 0;
+  /** How long the world ran before the player joined (see `warmUp`). */
+  warmedUp = 0;
 
   get now(): number {
     return this.clock;
@@ -989,22 +993,8 @@ export class Sim {
     // Every base starts out as a starter base, the designer's included.
     this.bases = [this.makeBase(FIRST_BASE, null, this.station), ...this.bases.slice(1).map((base) => this.makeBase(base.id, base.spec, base.poi))];
     this.savedBases = new Map();
-    // The field the ship starts beside is where it works: the chart knows it from the start.
-    this.discovered.add(`chart:${this.chartKey(this.field)}`);
-    this.resetPlayerControls();
-    const model = this.tuning.floaterStart ? "floater" : "racer";
-    this.ship = this.makeShip(this.startX(), this.field.y, this.controls, model);
-    const spawns = this.spawns.filter((spawn) => spawn.ship === model);
-    if (spawns.length > 0) {
-      const at = orbitsAt(spawns[Math.floor(this.random() * spawns.length)].orbits, this.clock);
-      Object.assign(this.ship, { x: at.x, y: at.y, px: at.x, py: at.y });
-    }
-    if (model === "floater") {
-      this.ship.parts.add("gun2");
-      this.ship.parts.add("clickMove");
-      this.ship.parts.add("clickTurn");
-    }
-    this.clickPilot = new ClickPilot(this.ship);
+    this.startPlayer();
+    this.warmedUp = 0;
     this.drones = [];
     this.distress = null;
     this.deposits = [];
@@ -1047,6 +1037,54 @@ export class Sim {
         pilot.habit = field;
       }
     }
+  }
+
+  /**
+   * Runs the world for a while before the player joins, with the player's ship far out of
+   * view, so traffic is already on its way between places and news has reached the boards.
+   * Then the ship goes back where the game started it, which has moved with its orbits.
+   */
+  warmUp(seconds: number): void {
+    if (seconds <= 0) return;
+    const { ship } = this;
+    const chatter = this.tuning.chatter;
+    this.tuning.chatter = false;
+    const startClock = this.clock;
+    for (let i = 0; i < Math.round(seconds / TICK); i++) {
+      ship.x = ship.px = WARM_UP_AWAY;
+      ship.y = ship.py = WARM_UP_AWAY;
+      ship.vx = ship.vy = 0;
+      this.step();
+      this.events.length = 0;
+    }
+    this.tuning.chatter = chatter;
+    this.startPlayer();
+    this.warmedUp = this.clock - startClock;
+  }
+
+  /**
+   * A new player's ship, in the ship picked, where new games start (a designer spawn for that
+   * ship, or by the field), at the clock as it is now. The world around it is left as it is,
+   * so it also starts a player in a world that has already been running.
+   */
+  startPlayer(): void {
+    // The field the ship starts beside is where it works: the chart knows it from the start.
+    this.discovered.add(`chart:${this.chartKey(this.field)}`);
+    this.stats = { bestOre: this.stats.bestOre, topSpeed: 0 };
+    this.resetPlayerControls();
+    const model = this.tuning.floaterStart ? "floater" : "racer";
+    this.ship = this.makeShip(this.startX(), this.field.y, this.controls, model);
+    const spawns = this.spawns.filter((spawn) => spawn.ship === model);
+    if (spawns.length > 0) {
+      const at = orbitsAt(spawns[Math.floor(this.random() * spawns.length)].orbits, this.clock);
+      Object.assign(this.ship, { x: at.x, y: at.y, px: at.x, py: at.y });
+    }
+    if (model === "floater") {
+      this.ship.parts.add("gun2");
+      this.ship.parts.add("clickMove");
+      this.ship.parts.add("clickTurn");
+    }
+    this.clickPilot = new ClickPilot(this.ship);
   }
 
   /** Scatters a field's rocks, clear of the player's ship. */

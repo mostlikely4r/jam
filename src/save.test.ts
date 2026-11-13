@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { roundTrip } from "./save";
+import { layoutKey, loadStart, makeStart, roundTrip, type StartFile } from "./save";
 import { Sim, TICK } from "./sim";
 import { DEFAULTS } from "./tuning";
 
@@ -65,5 +65,55 @@ describe("save and load", () => {
     const into = new Sim(2, { ...DEFAULTS });
     roundTrip(sim, into);
     expect(into.ship.wanted).toBe(false);
+  });
+});
+
+describe("a warmed start", () => {
+  it("starts a new game in a world that has already run, with a fresh ship by the field, only in the layout it was made in", async () => {
+    const { useLayout } = await import("./designer/link");
+    const { shippedWorld } = await import("./designer/shipped");
+    const { stringifyWorld } = await import("./designer/world");
+    const { linkTo, useShippedWorld } = await import("./profile/world");
+    const tuning = { ...DEFAULTS, floaterStart: false, chatter: false };
+    const warm = new Sim(1, { ...tuning });
+    useShippedWorld(warm, 1, 1);
+    const fresh = Math.hypot(warm.ship.x - warm.station.x, warm.ship.y - warm.station.y);
+    warm.warmUp(60);
+    expect(warm.warmedUp).toBeCloseTo(60, 0);
+    // The ship is back where a game starts, at the station, which has moved on.
+    expect(Math.hypot(warm.ship.x - warm.station.x, warm.ship.y - warm.station.y)).toBeCloseTo(fresh, 0);
+    const key = layoutKey(stringifyWorld(shippedWorld()));
+    const file: StartFile = JSON.parse(JSON.stringify(makeStart(warm, key)));
+
+    const sim = new Sim(5, { ...tuning, floaterStart: true });
+    useShippedWorld(sim, 1, 5);
+    expect(loadStart(sim, file, "another layout")).toBe(false);
+    expect(loadStart(sim, file, key)).toBe(true);
+    useLayout(shippedWorld(), linkTo(sim), true);
+    sim.startPlayer();
+    expect(sim.now).toBeCloseTo(warm.now, 5);
+    expect(sim.traffic.length).toBe(warm.traffic.length);
+    expect(sim.tuning.floaterStart).toBe(true);
+    expect(sim.ship.model).toBe("floater");
+    expect(sim.ship.credits).toBe(new Sim(1, tuning).ship.credits);
+    expect(Math.hypot(sim.ship.x - sim.station.x, sim.ship.y - sim.station.y)).toBeLessThan(fresh + 1);
+    for (let i = 0; i < Math.round(5 / TICK); i++) sim.step();
+  });
+});
+
+describe("the shipped start", () => {
+  it("fits the shipped world, so new games begin warmed up (if not: npm run warm -- 60 1 --ship)", async () => {
+    const { shippedWorld } = await import("./designer/shipped");
+    const { stringifyWorld } = await import("./designer/world");
+    const { useLayout } = await import("./designer/link");
+    const { linkTo, useShippedWorld } = await import("./profile/world");
+    const file = (await import("./start.json")).default as unknown as StartFile;
+    const sim = new Sim(1, { ...DEFAULTS, chatter: false });
+    useShippedWorld(sim, 1, 1);
+    expect(loadStart(sim, file, layoutKey(stringifyWorld(shippedWorld())))).toBe(true);
+    useLayout(shippedWorld(), linkTo(sim), true);
+    sim.startPlayer();
+    expect(sim.bases[0].board.some((report) => report.item === "tractorAll")).toBe(true);
+    for (let i = 0; i < Math.round(5 / TICK); i++) sim.step();
   });
 });

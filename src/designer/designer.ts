@@ -195,6 +195,7 @@ export class Designer {
     this.routeText.className = "route";
     this.status = document.createElement("div");
     this.status.className = "status";
+    this.status.style.whiteSpace = "pre-line";
     this.linkText = document.createElement("div");
     this.linkText.className = "route";
     side.append(
@@ -216,6 +217,7 @@ export class Designer {
       this.title("World file"),
       this.button("Save to file", () => void this.saveFile()),
       this.button("Load from file", () => void this.loadFile()),
+      this.button("Warm up a start for new games", () => void this.warmStart()),
       this.button("Start over from the default layout", () => this.replace(shippedWorld()), "danger"),
       this.status,
     );
@@ -260,6 +262,11 @@ export class Designer {
     this.setPlaying(false);
     this.linkToGame();
     this.onClose();
+  }
+
+  /** The layout as text, as the game has it: for telling whether a start file fits it. */
+  layoutText(): string {
+    return stringifyWorld(this.world);
   }
 
   /** Hands the game this layout. `keep`: the places stay where they are on their orbits. */
@@ -347,6 +354,26 @@ export class Designer {
       this.status.textContent = response.ok ? "Saved to src/designer/world.json" : `Couldn't save (${response.status})`;
     } catch {
       this.status.textContent = "Couldn't save: run the game with npm run dev";
+    }
+  }
+
+  /**
+   * Saves the layout, then has the dev server run it for a while with no player and keep the
+   * result as the world new games start in (npm run warm -- minutes seed --ship).
+   */
+  private async warmStart(): Promise<void> {
+    const answer = window.prompt("Game minutes to run before a player joins (it takes about half a second each):", "60");
+    if (answer === null) return;
+    const minutes = Math.max(1, Math.round(Number(answer) || 60));
+    try {
+      await this.saveFile();
+      this.status.textContent = `Warming up ${minutes} game minutes...`;
+      const response = await fetch(`/__warm?minutes=${minutes}`, { method: "POST" });
+      const report = await response.text();
+      this.status.textContent = response.ok ? `${report.trim()}
+Reload the page for new games to use it.` : `Couldn't warm up: ${report}`;
+    } catch {
+      this.status.textContent = "Couldn't warm up: run the game with npm run dev";
     }
   }
 

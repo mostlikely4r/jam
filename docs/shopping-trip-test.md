@@ -127,6 +127,16 @@ moon fields within half an hour and mostly stays there (from home, the moon fiel
 cheapest), so Planet base is quiet most of the time. Fine for the test; where traffic comes
 from and how it flows is its own question (see the expansion idea in the memory notes).
 
+**Warm start (2026-11-13).** A fresh world had nothing on its boards for its first half hour,
+so a new game now begins in a world that has already run for an hour: traffic on its way,
+home's board already carrying word of the tractor (44 min old at the start). Running that hour
+takes 5 to 60 s (fights out of view wake a field now and then, and an awake field costs the
+normal step), too slow for New Game, so it runs ahead of time: `npm run warm -- 60 1 --ship`,
+or "Warm up a start for new games" in the designer. It writes src/start.json (600 KB, 200 KB
+zipped); New Game loads it and makes the player's ship anew. It only fits the layout it was
+made in, and a test fails when the shipped world has moved on without it. Every new game
+starts in the same warmed world for now.
+
 **Play it here.** The user starts a new game, hears about the tractor, and decides whether to go.
 
 ### 4. The price gap (only if 1 to 3 pass)

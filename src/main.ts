@@ -3,7 +3,8 @@ import { Chart } from "./chart";
 import { Designer } from "./designer/designer";
 import { useLayout, type GameLink } from "./designer/link";
 import { shippedWorld } from "./designer/shipped";
-import { loadGame, saveGame, saveInfo, type SaveSlot } from "./save";
+import { layoutKey, loadGame, loadStart, saveGame, saveInfo, type SaveSlot, type StartFile } from "./save";
+import { stringifyWorld } from "./designer/world";
 import { Audio } from "./audio";
 import { Radio } from "./radio";
 import { type Base, type Deposit, MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
@@ -255,9 +256,21 @@ let timeScale = 1;
 /** The menu is up, or the designer covers the game. */
 const pausedNow = () => paused || (designer?.isOpen ?? false);
 
+/**
+ * The world new games start in, already running for a while (npm run warm makes it). Only
+ * used while the layout is the one it was made in; otherwise a game starts from scratch.
+ */
+const START: StartFile | null = Object.values(import.meta.glob<StartFile>("./start.json", { eager: true, import: "default" }))[0] ?? null;
+
 function restart(): void {
   seed++;
   sim.reset(seed);
+  const layout = layoutKey(designer ? designer.layoutText() : stringifyWorld(shippedWorld()));
+  if (loadStart(sim, START, layout)) {
+    // The places as they are at the start's clock, then a new ship for the player.
+    layOut(true);
+    sim.startPlayer();
+  }
   buildPanel();
 }
 

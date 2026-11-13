@@ -14,7 +14,20 @@ export type PartId =
   | "bay"
   | "largeBay"
   | "starmap"
-  | "autopilot";
+  | "autopilot"
+  | "racerMain"
+  | "floaterMain"
+  | "turnThrusters"
+  | "gun1"
+  | "basicComputer"
+  | "flightComputer"
+  | "navComputer";
+
+/**
+ * Where a part goes: on a mount of that kind, or (a program) into a computer's slots.
+ * Programs are software: they belong to the pilot, not the ship.
+ */
+export type PartKind = "thruster" | "gun" | "turret" | "tractor" | "computer" | "section" | "program";
 
 /** The racer is the quick ship with an arrow shape. The floater is slow and square. */
 export type ShipModel = "racer" | "floater";
@@ -39,7 +52,29 @@ export interface Part {
    * tier and whether or not shops need blueprints. Which bases hold it is set in the designer.
    */
   held?: boolean;
+  kind: PartKind;
+  /**
+   * How demanding it is to fit: a mount takes parts of its own class or below. Racer
+   * thruster mounts are class 2, the floater's class 1, so the racer can fit the floater's
+   * thrusters but not the other way round. Without this, 1.
+   */
+  class?: number;
+  /** A thruster's jobs: the thrusters it can stand in for. */
+  roles?: ThrusterRole[];
+  /** Sold and fitted this many at a time, one per mount (a pair of strafe thrusters). Without this, 1. */
+  set?: number;
+  /** A main thruster sets the power of all a ship's thrusters: the racer's full, the floater's a fraction. */
+  engine?: ShipModel;
+  /** A computer: how many programs it runs at once. */
+  slots?: number;
+  /** Part of a hull as it comes from the yard. Only sold to fill a mount that has none. */
+  builtIn?: boolean;
+  /** How much room it takes in a cargo bay, in ore. */
+  size: number;
 }
+
+/** The thrusters a ship can have, one mount each. */
+export type ThrusterRole = "thrusterMain" | "thrusterReverse" | "thrusterStrafeLeft" | "thrusterStrafeRight" | "thrusterRotateLeft" | "thrusterRotateRight";
 
 export function partFits(part: Part, model: ShipModel): boolean {
   return part.fits === undefined || part.fits.includes(model);
@@ -48,6 +83,8 @@ export function partFits(part: Part, model: ShipModel): boolean {
 export const PARTS: Part[] = [
   {
     id: "spinStabilizer",
+    kind: "program",
+    size: 0,
     label: "Spin stabilizer",
     short: "spin",
     price: 100,
@@ -57,6 +94,9 @@ export const PARTS: Part[] = [
   },
   {
     id: "reverse",
+    kind: "thruster",
+    roles: ["thrusterReverse"],
+    size: 4,
     label: "Reverse thruster",
     short: "rev",
     price: 200,
@@ -66,6 +106,10 @@ export const PARTS: Part[] = [
   },
   {
     id: "strafe",
+    kind: "thruster",
+    roles: ["thrusterStrafeLeft", "thrusterStrafeRight"],
+    set: 2,
+    size: 4,
     label: "Strafe thrusters",
     short: "strafe",
     price: 300,
@@ -75,6 +119,8 @@ export const PARTS: Part[] = [
   },
   {
     id: "retro",
+    kind: "program",
+    size: 0,
     label: "Retro",
     short: "retro",
     price: 300,
@@ -84,6 +130,8 @@ export const PARTS: Part[] = [
   },
   {
     id: "meters",
+    kind: "program",
+    size: 0,
     label: "Speed and distance meters",
     short: "meters",
     price: 50,
@@ -93,15 +141,19 @@ export const PARTS: Part[] = [
   },
   {
     id: "gun2",
+    kind: "gun",
+    size: 6,
     label: "Gun 2",
     short: "gun2",
     price: 250,
     weight: 0.05,
-    description: "Replaces your gun. Slower, and hits free ore that stays with the rock. No flung ore",
+    description: "A slower gun that hits free ore that stays with the rock. No flung ore",
     tier: 0,
   },
   {
     id: "clickMove",
+    kind: "program",
+    size: 0,
     label: "Click to move",
     short: "click",
     price: 400,
@@ -111,6 +163,8 @@ export const PARTS: Part[] = [
   },
   {
     id: "clickRoute",
+    kind: "program",
+    size: 0,
     label: "Route planner",
     short: "route",
     price: 200,
@@ -120,6 +174,8 @@ export const PARTS: Part[] = [
   },
   {
     id: "tractor",
+    kind: "tractor",
+    size: 6,
     label: "Tractor beam",
     short: "tractor",
     price: 300,
@@ -130,6 +186,8 @@ export const PARTS: Part[] = [
   },
   {
     id: "tractorAll",
+    kind: "tractor",
+    size: 6,
     label: "All-round tractor",
     short: "tractor 360",
     price: 600,
@@ -140,6 +198,8 @@ export const PARTS: Part[] = [
   },
   {
     id: "clickTurn",
+    kind: "program",
+    size: 0,
     label: "Click to turn",
     short: "turn",
     price: 150,
@@ -149,6 +209,8 @@ export const PARTS: Part[] = [
   },
   {
     id: "starmap",
+    kind: "program",
+    size: 0,
     label: "System chart",
     short: "chart",
     price: 350,
@@ -158,6 +220,8 @@ export const PARTS: Part[] = [
   },
   {
     id: "autopilot",
+    kind: "program",
+    size: 0,
     label: "Autopilot",
     short: "auto",
     price: 800,
@@ -167,6 +231,8 @@ export const PARTS: Part[] = [
   },
   {
     id: "turret",
+    kind: "turret",
+    size: 8,
     label: "Turret mount",
     short: "turret",
     price: 300,
@@ -177,6 +243,8 @@ export const PARTS: Part[] = [
   },
   {
     id: "bay",
+    kind: "section",
+    size: 10,
     label: "Cargo bay",
     short: "bay",
     price: 250,
@@ -187,6 +255,8 @@ export const PARTS: Part[] = [
   },
   {
     id: "largeBay",
+    kind: "section",
+    size: 20,
     label: "Large cargo bay",
     short: "bay+",
     price: 600,
@@ -195,7 +265,112 @@ export const PARTS: Part[] = [
     description: "Room for 50 more ore, and you'll feel the weight",
     tier: 2,
   },
+  {
+    id: "flightComputer",
+    kind: "computer",
+    slots: 4,
+    size: 3,
+    label: "Flight computer",
+    short: "comp4",
+    price: 500,
+    weight: 0.03,
+    description: "Runs 4 programs at once",
+    tier: 1,
+  },
+  {
+    id: "navComputer",
+    kind: "computer",
+    slots: 6,
+    size: 3,
+    label: "Navigation computer",
+    short: "comp6",
+    price: 1200,
+    weight: 0.04,
+    description: "Runs 6 programs at once",
+    tier: 2,
+  },
+  // A hull's own gear, as it comes from the yard.
+  {
+    id: "gun1",
+    kind: "gun",
+    builtIn: true,
+    size: 6,
+    label: "Gun 1",
+    short: "gun1",
+    price: 100,
+    weight: 0,
+    description: "A quick gun. Breaks rocks and sometimes flings ore off, worth more",
+    tier: 0,
+  },
+  {
+    id: "racerMain",
+    kind: "thruster",
+    roles: ["thrusterMain"],
+    class: 2,
+    engine: "racer",
+    builtIn: true,
+    size: 8,
+    label: "Racer main thruster",
+    short: "main",
+    price: 300,
+    weight: 0,
+    description: "Full power for every thruster on the ship",
+    tier: 0,
+  },
+  {
+    id: "floaterMain",
+    kind: "thruster",
+    roles: ["thrusterMain"],
+    engine: "floater",
+    builtIn: true,
+    size: 8,
+    label: "Floater main thruster",
+    short: "main",
+    price: 200,
+    weight: 0,
+    description: "Gentle power for every thruster on the ship",
+    tier: 0,
+  },
+  {
+    id: "turnThrusters",
+    kind: "thruster",
+    roles: ["thrusterRotateLeft", "thrusterRotateRight"],
+    set: 2,
+    builtIn: true,
+    size: 2,
+    label: "Turning thrusters",
+    short: "turn",
+    price: 100,
+    weight: 0,
+    description: "Turn the ship",
+    tier: 0,
+  },
+  {
+    id: "basicComputer",
+    kind: "computer",
+    slots: 2,
+    builtIn: true,
+    size: 3,
+    label: "Basic computer",
+    short: "comp2",
+    price: 150,
+    weight: 0,
+    description: "Runs 2 programs at once",
+    tier: 0,
+  },
 ];
+
+/** A part by its id. */
+export function partOf(id: PartId): Part {
+  return PARTS_BY_ID.get(id)!;
+}
+
+/** A program goes into a computer's slots and belongs to the pilot. Anything else is fitted. */
+export function isProgram(id: PartId): boolean {
+  return partOf(id).kind === "program";
+}
+
+const PARTS_BY_ID = new Map(PARTS.map((part) => [part.id, part]));
 
 /** The order a drone buys in: its gun and engine work first, its comfort comes last. */
 export const DRONE_BUY_ORDER: PartId[] = ["spinStabilizer", "reverse", "strafe", "retro", "meters"];

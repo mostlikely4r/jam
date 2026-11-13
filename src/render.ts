@@ -1,5 +1,7 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
+import { DAMAGED_AT, HULL_MOUNTS, type Module } from "./fitting";
+import { partOf } from "./parts";
 import {
   BLACK_MARKET_LENGTH,
   BLACK_MARKET_WIDTH,
@@ -1164,26 +1166,92 @@ export class Renderer {
       ctx.closePath();
       ctx.fill();
     }
+    this.drawModules(ship);
     this.drawCargo(ship);
-    if (ship.parts.has("turret")) {
+    const turret = ship.fit.gun && partOf(ship.fit.gun.part).kind === "turret" ? ship.fit.gun : null;
+    if (turret) {
+      const gun = ship.fit.turretGun;
       const turn = Math.atan2(
         Math.sin(ship.turretAngle - ship.prevTurretAngle),
         Math.cos(ship.turretAngle - ship.prevTurretAngle),
       );
+      ctx.translate(HULL_MOUNTS[ship.model].find((mount) => mount.id === "gun")!.x * r, 0);
       ctx.rotate(ship.prevTurretAngle + turn * alpha);
-      ctx.fillStyle = "#c9d4e6";
-      ctx.strokeStyle = "#c9d4e6";
-      ctx.lineWidth = 3;
+      ctx.fillStyle = moduleColor(turret, "#c9d4e6");
       ctx.beginPath();
       ctx.arc(0, 0, r * 0.35, 0, Math.PI * 2);
       ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(r * 1.15, 0);
-      ctx.stroke();
+      if (gun) {
+        ctx.strokeStyle = moduleColor(gun, "#c9d4e6");
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(gun.wear >= 1 ? r * 0.5 : r * 1.15, 0);
+        ctx.stroke();
+      }
     }
     ctx.restore();
     this.drawStanding(ship, x, y);
+  }
+
+  /**
+   * What's fitted, where it's fitted: thruster nozzles, the gun, the tractor's dish, the
+   * computer, and a cargo section as a box at the back. Damaged parts glow orange and
+   * spark; destroyed ones are dark stubs. Drawn in the ship's own frame.
+   */
+  private drawModules(ship: Ship): void {
+    const { ctx } = this;
+    const r = SHIP_RADIUS;
+    for (const mount of HULL_MOUNTS[ship.model]) {
+      const module = ship.fit[mount.id];
+      if (!module) continue;
+      const part = partOf(module.part);
+      if (part.kind === "turret") continue;
+      const x = mount.x * r;
+      const y = mount.y * r;
+      const color = moduleColor(module, part.kind === "section" ? "#7d8799" : "#a9b4c6");
+      ctx.fillStyle = color;
+      ctx.strokeStyle = color;
+      switch (part.kind) {
+        case "thruster": {
+          const size = mount.id === "thrusterMain" ? 3 : 1.6;
+          ctx.fillRect(x - size / 2, y - size / 2, size, size);
+          break;
+        }
+        case "gun":
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x - r * 0.25, y);
+          ctx.lineTo(x + (module.wear >= 1 ? r * 0.05 : r * 0.3), y);
+          ctx.stroke();
+          break;
+        case "tractor":
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(x, y, r * 0.22, -Math.PI / 2, Math.PI / 2);
+          ctx.stroke();
+          break;
+        case "computer":
+          ctx.fillRect(x - 2, y - 2, 4, 4);
+          break;
+        case "section": {
+          const long = (part.cargo ?? 20) >= 50 ? 0.9 : 0.6;
+          ctx.fillRect(x - long * r * 0.5, y - r * 0.45, long * r, r * 0.9);
+          break;
+        }
+      }
+      if (module.wear >= DAMAGED_AT && module.wear < 1) this.drawSparks(x, y);
+    }
+  }
+
+  /** A few flickering sparks: a part that's broken but not gone. */
+  private drawSparks(x: number, y: number): void {
+    const { ctx } = this;
+    ctx.fillStyle = "rgba(255, 220, 120, 0.9)";
+    for (let i = 0; i < 2; i++) {
+      if (Math.random() < 0.6) continue;
+      ctx.fillRect(x + (Math.random() - 0.5) * 6, y + (Math.random() - 0.5) * 6, 1.2, 1.2);
+    }
   }
 
   /** Lumps of ore on the hull, more the fuller the hold, scattered the same way each time for this ship. */
@@ -1374,4 +1442,11 @@ export class Renderer {
 function hash(n: number): number {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
+}
+
+/** A module's colour: its own while it works, orange once damaged, near black once destroyed. */
+function moduleColor(module: Module, working: string): string {
+  if (module.wear >= 1) return "#2e2a28";
+  if (module.wear >= DAMAGED_AT) return "#ff8a3a";
+  return working;
 }

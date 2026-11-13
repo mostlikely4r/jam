@@ -4,6 +4,12 @@ import { FIRST_FIELD } from "./pilot";
 import { roundTrip } from "./save";
 import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
 import { bodyAt, DOCK_OFFSET, type FieldSpec, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, type SolidBody, STATION_HALF, TICK } from "./sim";
+import { partOf as partInfo } from "./parts";
+
+/** What a ship has beyond its hull's own gear, sorted. */
+function bought(ship: { parts: Set<import("./parts").PartId> }): string[] {
+  return [...ship.parts].filter((id) => !partInfo(id).builtIn).sort();
+}
 
 /** The same carrying ranges for every POI. */
 function carrying(full: number, none: number) {
@@ -35,7 +41,9 @@ function fitAll(sim: Sim): Sim {
   sim.tuning.partWeightScale = 0;
   // Gun 2 replaces the gun rather than adding to it, so the shooting tests keep the first one.
   for (const part of PARTS) {
-    if (part.id !== "gun2" && part.id !== "tractor" && part.id !== "tractorAll") sim.ship.parts.add(part.id);
+    if (part.builtIn || part.id === "gun2" || part.id === "tractor" || part.id === "tractorAll") continue;
+    // The turret only fits the floater's gun mount.
+    if (part.id !== "turret") sim.devSet(sim.ship, part.id, true);
   }
   return sim;
 }
@@ -80,7 +88,7 @@ describe("thrusters", () => {
 
   it("rotation accelerates and keeps spinning after input stops", () => {
     const sim = emptySim();
-    sim.ship.parts.delete("spinStabilizer");
+    sim.devSet(sim.ship, "spinStabilizer", false);
     sim.controls.turn = 1;
     run(sim, 1);
     expect(degrees(sim.ship.spin)).toBeCloseTo(DEFAULTS.rotationThrust, 3);
@@ -158,7 +166,9 @@ describe("thrusters", () => {
 describe("turret mount", () => {
   function turretSim() {
     const sim = emptySim();
-    sim.ship.parts.add("turret");
+    // Only the floater's gun mount takes a turret: this racer gets the floater's mounts.
+    sim.ship.model = "floater";
+    sim.devSet(sim.ship, "turret", true);
     sim.ship.angle = 0;
     sim.ship.aim = { x: sim.ship.x, y: sim.ship.y + 1000 };
     return sim;
@@ -185,7 +195,7 @@ describe("turret mount", () => {
 
   it("without a turret the gun fires from the nose at full range", () => {
     const sim = emptySim();
-    sim.ship.parts.delete("turret");
+    sim.devSet(sim.ship, "turret", false);
     sim.ship.angle = 0;
     sim.ship.aim = { x: sim.ship.x, y: sim.ship.y + 1000 };
     sim.controls.fire = true;
@@ -1026,7 +1036,7 @@ describe("parts", () => {
   it("adds weight, which divides all thrust", () => {
     const sim = bareSim();
     const part = PARTS.find((candidate) => candidate.id === "strafe")!;
-    sim.ship.parts.add("strafe");
+    sim.devSet(sim.ship, "strafe", true);
     expect(sim.shipWeight(sim.ship)).toBeCloseTo(DEFAULTS.weight + part.weight, 5);
     sim.controls.strafe = 1;
     sim.step();
@@ -1036,11 +1046,11 @@ describe("parts", () => {
 
   it("makes reverse and strafe work once owned", () => {
     const sim = bareSim();
-    sim.ship.parts.add("reverse");
+    sim.devSet(sim.ship, "reverse", true);
     sim.controls.thrust = -1;
     sim.step();
     expect(sim.ship.firing.has("thrusterReverse")).toBe(true);
-    sim.ship.parts.add("strafe");
+    sim.devSet(sim.ship, "strafe", true);
     sim.controls.strafe = 1;
     sim.step();
     expect(sim.ship.firing.has("thrusterStrafeRight")).toBe(true);
@@ -1049,7 +1059,7 @@ describe("parts", () => {
   it("stabilizer stops rotation and leaves drift alone", () => {
     const sim = bareSim();
     sim.ship.x += 3000;
-    sim.ship.parts.add("spinStabilizer");
+    sim.devSet(sim.ship, "spinStabilizer", true);
     sim.ship.spin = 2;
     sim.ship.vx = 50;
     run(sim, 1);
@@ -1076,13 +1086,13 @@ describe("parts", () => {
   it("retro can only brake with the thrusters the ship owns", () => {
     const sim = bareSim();
     sim.ship.x += 3000;
-    sim.ship.parts.add("retro");
+    sim.devSet(sim.ship, "retro", true);
     sim.tuning.retro = true;
     sim.ship.vy = 0;
     sim.ship.vx = 100; // Forward, which only a reverse thruster could slow.
     run(sim, 1);
     expect(sim.ship.vx).toBeCloseTo(100, 1);
-    sim.ship.parts.add("reverse");
+    sim.devSet(sim.ship, "reverse", true);
     run(sim, 2);
     expect(sim.ship.vx).toBeCloseTo(0, 3);
   });
@@ -1403,7 +1413,7 @@ describe("the new ship", () => {
   it("can be switched off", () => {
     const sim = floater({ floaterStart: false });
     expect(sim.ship.model).toBe("racer");
-    expect(sim.ship.parts.size).toBe(0);
+    expect(bought(sim.ship)).toEqual([]);
   });
 
   it("gun 2 fires slower than the first gun", () => {
@@ -1590,8 +1600,10 @@ describe("the new ship", () => {
     for (const planner of [false, true]) {
       const sim = floater();
       // Measured at the weight this was tuned for: the planner's margin is thin.
-      sim.ship.parts.delete("clickTurn");
-      if (planner) sim.ship.parts.add("clickRoute");
+      sim.devSet(sim.ship, "clickTurn", false);
+      if (planner) sim.devSet(sim.ship, "clickRoute", true);
+      // Programs weigh nothing now: this is the weight the planner was tuned at.
+      if (planner) sim.tuning.weight += 0.01;
       const rock = sim.makeRock(2, sim.ship.x + 500, sim.ship.y, 0, 0);
       sim.rocks.push(rock);
       sim.orderMove(sim.ship.x + 1000, sim.ship.y);
@@ -1639,7 +1651,7 @@ describe("the new ship", () => {
     /** Loose ore `distance` from the ship, `off` radians off its nose. */
     function withOre(distance: number, vy = 0, off = 0): Sim {
       const sim = floater();
-      sim.ship.parts.add("tractor");
+      sim.devSet(sim.ship, "tractor", true);
       const angle = sim.ship.angle + off;
       const x = sim.ship.x + Math.cos(angle) * distance;
       const y = sim.ship.y + Math.sin(angle) * distance;
@@ -1687,8 +1699,8 @@ describe("the new ship", () => {
 
     it("catches behind the ship with the all-round tractor, which a racer can fit", () => {
       const sim = withOre(near, 0, Math.PI);
-      sim.ship.parts.delete("tractor");
-      sim.ship.parts.add("tractorAll");
+      sim.devSet(sim.ship, "tractor", false);
+      sim.devSet(sim.ship, "tractorAll", true);
       run(sim, 10);
       expect(sim.ship.ore).toBe(1);
       const racer = PARTS.find((part) => part.id === "tractorAll")!;
@@ -1718,7 +1730,7 @@ describe("the new ship", () => {
 
     it("does nothing without the part", () => {
       const sim = withOre(near);
-      sim.ship.parts.delete("tractor");
+      sim.devSet(sim.ship, "tractor", false);
       run(sim, 2);
       expect(sim.ores[0].vx).toBe(0);
     });
@@ -1833,7 +1845,7 @@ describe("the new ship", () => {
 
     it("a left click needs the same part as any other move", () => {
       const sim = floater();
-      sim.ship.parts.delete("clickMove");
+      sim.devSet(sim.ship, "clickMove", false);
       expect(sim.orderTranslate(sim.ship.x + 300, sim.ship.y)).toBe(false);
       expect(sim.clickPilot.active).toBe(false);
     });
@@ -1911,7 +1923,7 @@ describe("the new ship", () => {
 
     it("facing needs its part", () => {
       const sim = floater();
-      sim.ship.parts.delete("clickTurn");
+      sim.devSet(sim.ship, "clickTurn", false);
       expect(sim.orderFace(1)).toBe(false);
       expect(sim.clickPilot.active).toBe(false);
     });

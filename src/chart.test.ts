@@ -97,7 +97,7 @@ describe("chart", () => {
 
   it("a course chases its place: the target stays at the moving dock", () => {
     const sim = new Sim(1, { ...ALONE });
-    sim.ship.parts.add("autopilot");
+    sim.devSet(sim.ship, "autopilot", true);
     expect(sim.orderTravel(sim.station)).toBe(true);
     expect(sim.clickPilot.active).toBe(true);
     run(sim, 20);
@@ -109,10 +109,10 @@ describe("chart", () => {
   it("the autopilot flies a long course, round whatever's in the way, and docks", () => {
     const sim = new Sim(1, { ...ALONE });
     const { ship } = sim;
-    ship.parts.add("autopilot");
-    ship.parts.add("reverse");
-    ship.parts.add("strafe");
-    ship.parts.add("spinStabilizer");
+    sim.devSet(ship, "autopilot", true);
+    sim.devSet(ship, "reverse", true);
+    sim.devSet(ship, "strafe", true);
+    sim.devSet(ship, "spinStabilizer", true);
     ship.hull = MAX_HULL;
     // Out past the far side of the field's orbit, so the trip is a real one.
     ship.x = sim.station.x + 600000;
@@ -134,10 +134,10 @@ describe("chart", () => {
   it("selling the autopilot mid-course cancels the course", () => {
     const sim = new Sim(1, { ...ALONE });
     const { ship } = sim;
-    ship.parts.add("autopilot");
+    sim.devSet(ship, "autopilot", true);
     expect(sim.orderTravel(sim.station)).toBe(true);
     expect(sim.clickPilot.active).toBe(true);
-    ship.parts.delete("autopilot");
+    sim.devSet(ship, "autopilot", false);
     run(sim, 1);
     expect(sim.clickPilot.active).toBe(false);
   });
@@ -145,9 +145,9 @@ describe("chart", () => {
   it("a course for a field stops short, just inside its edge", () => {
     const sim = new Sim(1, { ...ALONE });
     const { ship } = sim;
-    ship.parts.add("autopilot");
-    ship.parts.add("reverse");
-    ship.parts.add("strafe");
+    sim.devSet(ship, "autopilot", true);
+    sim.devSet(ship, "reverse", true);
+    sim.devSet(ship, "strafe", true);
     // Parked a long way out, pointing at the field from beyond it.
     ship.x = sim.field.x;
     ship.y = sim.field.y + sim.field.reach + 300000;

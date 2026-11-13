@@ -1,5 +1,6 @@
 import { Chatter } from "./chatter";
-import { type BlueprintId, isProject, PARTS, partFits, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
+import { type BlueprintId, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
+import { computerSize, fitPart, type Fitting, HULL_DEFAULTS, install, mountsFor, mountsHolding, newFitting, owns, trimPrograms, unfit, uninstall, works } from "./fitting";
 import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./pilot";
 export { FIRST_FIELD };
 import { pathAround } from "./route";
@@ -56,12 +57,6 @@ const INFLOW_SPEED = 25;
 /** A rock doesn't start closer to the player than this, so none appears on screen. */
 const INFLOW_CLEAR_OF_PLAYER = 2000;
 const INFLOW_TIER = 2;
-/** Parts that add thrusters. Every ship has the main engine, rotation, and a gun. */
-const THRUSTER_PARTS: Partial<Record<ThrusterId, PartId>> = {
-  thrusterReverse: "reverse",
-  thrusterStrafeLeft: "strafe",
-  thrusterStrafeRight: "strafe",
-};
 
 export interface Controls {
   /** -1 (reverse) to 1 (forward). */
@@ -90,14 +85,13 @@ export interface Body {
 
 export type Faction = "pirate" | "defender";
 
-export interface Ship extends Body {
+export interface Ship extends Body, Fitting {
   model: ShipModel;
   /** Pirates and defenders. Everyone else is null. */
   faction: Faction | null;
   /** Where the last shot to hit this ship came from, until something reads it. */
   shotFrom: { x: number; y: number } | null;
   controls: Controls;
-  parts: Set<PartId>;
   /** The ship whose account this one shares, or null if it keeps its own. */
   owner: Ship | null;
   /** Goes below zero when a wreck is rebuilt on credit. Earnings pay it back. */
@@ -1079,11 +1073,8 @@ export class Sim {
       const at = orbitsAt(spawns[Math.floor(this.random() * spawns.length)].orbits, this.clock);
       Object.assign(this.ship, { x: at.x, y: at.y, px: at.x, py: at.y });
     }
-    if (model === "floater") {
-      this.ship.parts.add("gun2");
-      this.ship.parts.add("clickMove");
-      this.ship.parts.add("clickTurn");
-    }
+    // The floater's pilot comes knowing how to fly it by clicks.
+    if (model === "floater") for (const id of ["clickMove", "clickTurn"] as const) this.giveProgram(this.ship, id);
     this.clickPilot = new ClickPilot(this.ship);
   }
 
@@ -1445,7 +1436,6 @@ export class Sim {
     pilot.ship.home = home;
     pilot.buys = "upgrades";
     pilot.flees = true;
-    if (model === "floater") pilot.ship.parts.add("gun2");
     this.traffic.push(pilot);
   }
 
@@ -1458,8 +1448,8 @@ export class Sim {
     );
     ship.faction = faction;
     ship.home = home;
-    ship.parts.add("reverse");
-    ship.parts.add("strafe");
+    fitPart(ship, "reverse");
+    fitPart(ship, "strafe");
     this.fighters.push(new FighterPilot(ship));
   }
 
@@ -1940,7 +1930,7 @@ export class Sim {
       vx: 0,
       vy: 0,
       controls,
-      parts: new Set(),
+      ...newFitting(model),
       owner: null,
       credits: 0,
       earned: 0,
@@ -2007,15 +1997,19 @@ export class Sim {
   /** Every part adds weight, which divides all of the ship's thrust. */
   shipWeight(ship: Ship): number {
     let weight = this.tuning.weight;
-    for (const part of PARTS) {
-      if (ship.parts.has(part.id)) weight += part.weight * this.tuning.partWeightScale;
+    for (const module of Object.values(ship.fit)) {
+      if (!module) continue;
+      const part = partOf(module.part);
+      weight += (part.weight / (part.set ?? 1)) * this.tuning.partWeightScale;
     }
     return weight;
   }
 
   /** Acceleration per unit of thrust: the ship's engine power divided by its weight. */
   shipResponse(ship: Ship): number {
-    const engine = ship.model === "floater" ? this.tuning.floaterEngine : 1;
+    // The main thruster sets the power of them all, working or not: it's what feeds them.
+    const main = ship.fit.thrusterMain;
+    const engine = (main ? partOf(main.part).engine : ship.model) === "floater" ? this.tuning.floaterEngine : 1;
     return engine / this.shipWeight(ship);
   }
 
@@ -2363,7 +2357,8 @@ export class Sim {
   cargoSpace(ship: Ship): number {
     const { playerCargo, droneCargo } = this.tuning;
     let space = ship === this.ship ? playerCargo : droneCargo;
-    for (const part of PARTS) if (part.cargo && ship.parts.has(part.id)) space += part.cargo;
+    const section = ship.fit.section;
+    if (section && section.wear < 1) space += partOf(section.part).cargo ?? 0;
     return space;
   }
 
@@ -2410,33 +2405,138 @@ export class Sim {
 
   /** The parts this ship would buy next, in order, if it could afford them and the shop had them. */
   wishlistFor(ship: Ship): PartId[] {
-    return TRAFFIC_BUY_ORDER[ship.model].filter((id) => !ship.parts.has(id));
+    return TRAFFIC_BUY_ORDER[ship.model].filter((id) => this.wouldUse(ship, id));
+  }
+
+  /**
+   * Whether the shop can sell this ship the part: a program it doesn't own yet, or a part
+   * with mounts for it. A hull's own gear is only sold to fill a mount that has none.
+   */
+  canBuy(ship: Ship, id: PartId): boolean {
+    if (isProgram(id)) return !ship.software.has(id);
+    const mounts = mountsFor(ship, id);
+    if (mounts.length === 0) return false;
+    if (partOf(id).builtIn) return mounts.some((mount) => !ship.fit[mount] || ship.fit[mount]!.wear >= 1);
+    return mounts.some((mount) => ship.fit[mount]?.part !== id);
+  }
+
+  /** Whether an AI ship would buy it: something it can use that it lacks, with a free slot for a program. */
+  wouldUse(ship: Ship, id: PartId): boolean {
+    if (!this.canBuy(ship, id) || owns(ship, id)) return false;
+    return !isProgram(id) || ship.programs.length < computerSize(ship);
+  }
+
+  /** What a module is worth to a shop: full price working, half damaged, nothing destroyed. */
+  moduleValue(module: { part: PartId; wear: number }): number {
+    const part = partOf(module.part);
+    const share = module.wear < 0.5 ? 1 : module.wear < 1 ? 0.5 : 0;
+    return Math.round((this.partPrice(module.part) / (part.set ?? 1)) * share);
+  }
+
+  /**
+   * Puts a part on a ship, or a program in its pilot's hands and computer. What it replaces
+   * is traded in at the base, if there is one: otherwise it's gone.
+   */
+  private equip(ship: Ship, id: PartId, base: Base | null = null): void {
+    if (isProgram(id)) {
+      this.giveProgram(ship, id);
+      return;
+    }
+    const off = fitPart(ship, id);
+    if (base) for (const module of off) this.chargeForService(this.accountOf(ship), -this.moduleValue(module), base);
+    if (partOf(id).kind === "computer") trimPrograms(ship);
+  }
+
+  /** The pilot owns a program from now on, and loads it if the computer has room. */
+  giveProgram(ship: Ship, id: PartId): void {
+    ship.software.add(id);
+    install(ship, id);
+  }
+
+  /** Loads or unloads one of the pilot's programs. Only in a dock. Returns whether it changed. */
+  setProgram(ship: Ship, id: PartId, loaded: boolean): boolean {
+    if (!this.atShop(ship)) return false;
+    const changed = loaded ? install(ship, id) : uninstall(ship, id);
+    if (changed && !loaded) this.dropOrderFor(ship, id);
+    return changed;
+  }
+
+  /** The player's click order or course stops when the program flying it goes. */
+  private dropOrderFor(ship: Ship, id: PartId): void {
+    if (ship === this.ship && (id === "clickMove" || id === "clickTurn" || id === "autopilot")) this.clickPilot.cancel();
   }
 
   /** Parts are only sold in the dock. Returns whether the sale went through. */
   buyPart(ship: Ship, id: PartId): boolean {
     const price = this.partPrice(id);
-    const part = PARTS.find((candidate) => candidate.id === id)!;
-    if (!partFits(part, ship.model) || !this.unlocked(id, this.serviceBase(ship))) return false;
+    const part = partOf(id);
+    const base = this.serviceBase(ship);
+    if (!this.canBuy(ship, id) || !this.unlocked(id, base)) return false;
     const account = this.accountOf(ship);
-    if (!this.atShop(ship) || ship.parts.has(id) || account.credits < price) return false;
+    if (!this.atShop(ship) || account.credits < price) return false;
     if (!this.hasPartsFor(price, ship)) return false;
-    this.chargeForService(account, price, this.serviceBase(ship));
-    ship.parts.add(id);
+    this.chargeForService(account, price, base);
+    this.equip(ship, id, base);
     if (id === "retro" && ship === this.ship) this.tuning.retro = true;
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     if (ship !== this.ship && this.tuning.chatter) this.chatter.bought(this, ship, part.label.toLowerCase());
     return true;
   }
 
-  /** Sells a part back at full price, so a ship can go back to being light. */
+  /**
+   * Sells a part back at what it's worth, so a ship can go back to being light. A hull's
+   * own gear goes back on where the part came off, paid for out of the sale.
+   */
   sellPart(ship: Ship, id: PartId): boolean {
-    if (!this.atShop(ship) || !ship.parts.has(id)) return false;
-    this.chargeForService(ship, -this.partPrice(id), this.serviceBase(ship));
-    ship.parts.delete(id);
-    if ((id === "clickMove" || id === "clickTurn") && ship === this.ship) this.clickPilot.cancel();
+    if (!this.atShop(ship)) return false;
+    const base = this.serviceBase(ship);
+    const account = this.accountOf(ship);
+    if (isProgram(id)) {
+      if (!ship.software.has(id)) return false;
+      ship.software.delete(id);
+      uninstall(ship, id);
+      this.chargeForService(account, -this.partPrice(id), base);
+      this.dropOrderFor(ship, id);
+    } else {
+      const mounts = mountsHolding(ship, id);
+      if (mounts.length === 0 || partOf(id).builtIn) return false;
+      let value = 0;
+      for (const mount of mounts) value += this.moduleValue(unfit(ship, mount)!);
+      this.chargeForService(account, -value, base);
+      this.refitDefaults(ship, base);
+    }
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     return true;
+  }
+
+  /** For the dev panel: puts a part on or takes it off for free. */
+  devSet(ship: Ship, id: PartId, on: boolean): void {
+    if (isProgram(id)) {
+      if (on) {
+        // Free testing: a computer big enough to run it, if this one is full.
+        if (ship.programs.length >= computerSize(ship) && computerSize(ship) < 6) fitPart(ship, "navComputer");
+        this.giveProgram(ship, id);
+      } else {
+        ship.software.delete(id);
+        uninstall(ship, id);
+      }
+      return;
+    }
+    if (on) {
+      fitPart(ship, id);
+      trimPrograms(ship);
+    } else for (const mount of mountsHolding(ship, id)) unfit(ship, mount);
+  }
+
+  /** Puts the hull's own gear back on any mount left without it, bought from the base. */
+  private refitDefaults(ship: Ship, base: Base): void {
+    for (const id of new Set(Object.values(HULL_DEFAULTS[ship.model]))) {
+      const mounts = mountsFor(ship, id);
+      if (mounts.length === 0 || mounts.some((mount) => ship.fit[mount])) continue;
+      this.chargeForService(this.accountOf(ship), this.partPrice(id), base);
+      fitPart(ship, id);
+    }
+    trimPrograms(ship);
   }
 
   /** Any ship in the dock can pay for a new drone, which starts there and earns for itself. */
@@ -3974,8 +4074,7 @@ export class Sim {
   /** A thruster needs its part. The panel's switches can also turn off the player's. */
   private canFire(ship: Ship, thruster: ThrusterId): boolean {
     if (ship === this.ship && !this.tuning[thruster]) return false;
-    const part = THRUSTER_PARTS[thruster];
-    return part === undefined || ship.parts.has(part);
+    return works(ship.fit[thruster]);
   }
 
   private moveShipWithCollision(ship: Ship, dt: number): void {
@@ -4240,7 +4339,7 @@ export class Sim {
 
   /** The parts a pirate still lacks that would fit it, in the order the base buys them. */
   pirateWishlist(ship: Ship): PartId[] {
-    return PIRATE_PARTS.filter((id) => !ship.parts.has(id) && partFits(PARTS.find((part) => part.id === id)!, ship.model));
+    return PIRATE_PARTS.filter((id) => this.wouldUse(ship, id));
   }
 
   /**
@@ -4259,7 +4358,7 @@ export class Sim {
       const price = this.partPrice(next);
       if (spare < price) return;
       this.pirateCredits -= price;
-      ship.parts.add(next);
+      this.equip(ship, next);
       ship.upkeep += price;
       this.events.push({ type: "sale", x: ship.x, y: ship.y });
       return;
@@ -4660,6 +4759,8 @@ export class Sim {
   private fireShots(ship: Ship): void {
     const { tuning } = this;
     if (!ship.controls.fire || ship.cooldown > 0) return;
+    // No working gun, no shot.
+    if (!ship.parts.has("gun1") && !ship.parts.has("gun2")) return;
     const precise = ship.parts.has("gun2");
     const turret = ship.parts.has("turret");
     ship.cooldown = 1 / (precise ? tuning.gun2ShotsPerSecond : tuning.shotsPerSecond);

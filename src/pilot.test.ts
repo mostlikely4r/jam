@@ -3,6 +3,12 @@ import { APPROACH, BOUGHT, HEADING_BACK, OUTBOUND, THANKS } from "./chatter";
 import { PARTS } from "./parts";
 import { DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, MAX_HULL, Sim, TICK } from "./sim";
+import { partOf as partInfo } from "./parts";
+
+/** What a ship has beyond its hull's own gear, sorted. */
+function bought(ship: { parts: Set<import("./parts").PartId> }): string[] {
+  return [...ship.parts].filter((id) => !partInfo(id).builtIn).sort();
+}
 
 /**
  * These tests run minutes of simulation without ever letting the worker look at its
@@ -121,9 +127,9 @@ describe("drone", () => {
     placeInDock(sim, ship);
     ship.credits = 320;
     run(sim, 0.1);
-    expect([...ship.parts]).toEqual(["spinStabilizer", "reverse"]);
+    expect(bought(ship)).toEqual(["reverse", "spinStabilizer"]);
     expect(ship.credits).toBe(20);
-    expect(sim.ship.parts.size).toBe(0);
+    expect(bought(sim.ship)).toEqual([]);
   });
 
   it("stops buying at the limit", () => {
@@ -132,7 +138,7 @@ describe("drone", () => {
     placeInDock(sim, ship);
     ship.credits = 1000;
     run(sim, 0.1);
-    expect([...ship.parts]).toEqual(["spinStabilizer"]);
+    expect(bought(ship)).toEqual(["spinStabilizer"]);
   });
 
   it("sells a new drone only in the dock, for the price, and up to the limit", () => {
@@ -149,7 +155,7 @@ describe("drone", () => {
     expect(sim.ship.credits).toBe(DEFAULTS.dronePrice);
     expect(sim.isDocked(drone!.ship)).toBe(true);
     expect(drone!.ship.credits).toBe(0);
-    expect(drone!.ship.parts.size).toBe(0);
+    expect(bought(drone!.ship)).toEqual([]);
     expect(sim.buyDrone(sim.ship)).toBeNull();
   });
 
@@ -190,12 +196,12 @@ describe("drone", () => {
     ship.credits = 150;
     run(sim, 0.5);
     expect(sim.drones[0].task).toBe("repairing");
-    expect(ship.parts.size).toBe(0);
+    expect(bought(ship)).toEqual([]);
     run(sim, 2);
     expect(ship.hull).toBe(MAX_HULL);
     expect(ship.credits).toBe(50);
     expect(ship.upkeep).toBe(100);
-    expect(ship.parts.size).toBe(0);
+    expect(bought(ship)).toEqual([]);
   });
 
   it("heads home early on a low hull when it can pay", () => {
@@ -233,7 +239,7 @@ describe("drone", () => {
       placeInDock(sim, drone.ship);
       sim.ship.credits = 500 + sim.partPrice("reverse") - 1;
       run(sim, 1, () => placeInDock(sim, drone.ship));
-      expect(drone.ship.parts.size).toBe(0);
+      expect(bought(drone.ship)).toEqual([]);
       sim.ship.credits = 500 + sim.partPrice("reverse");
       run(sim, 1, () => placeInDock(sim, drone.ship));
       expect(drone.ship.parts.has("reverse")).toBe(true);
@@ -305,10 +311,10 @@ describe("drone", () => {
       placeInDock(sim, ship);
       ship.credits = sim.partPrice("reverse") + 399;
       run(sim, 1, () => placeInDock(sim, ship));
-      expect(ship.parts.size).toBe(0);
+      expect(bought(ship)).toEqual([]);
       ship.credits = 100000;
       run(sim, 2, () => placeInDock(sim, ship));
-      expect([...ship.parts].sort()).toEqual(["bay", "reverse", "spinStabilizer", "strafe"]);
+      expect(bought(ship)).toEqual(["bay", "reverse", "spinStabilizer", "strafe"]);
       expect(sim.traffic.length).toBe(1);
       expect(sim.drones.length).toBe(0);
     });
@@ -334,7 +340,7 @@ describe("drone", () => {
         trafficBuffer: 1e9,
       });
       const pilot = sim.traffic[0];
-      pilot.ship.parts.add("turret");
+      sim.devSet(pilot.ship, "turret", true);
       let turned = 0;
       run(sim, 240, () => {
         if (pilot.task === "shooting") turned = Math.max(turned, Math.abs(pilot.ship.turretAngle));
@@ -385,7 +391,7 @@ describe("drone", () => {
   ] as const)("still completes trips with %s", (_name, parts) => {
     const sim = new Sim(1, { ...SOLO });
     const { ship } = sim.drones[0];
-    for (const part of parts) ship.parts.add(part);
+    for (const part of parts) sim.devSet(ship, part, true);
     run(sim, 420);
     expect(ship.trips).toBeGreaterThanOrEqual(1);
     expect(ship.wrecks).toBe(0);
@@ -394,8 +400,8 @@ describe("drone", () => {
   it("uses reverse when it has it, and strafe when it has it", () => {
     const sim = new Sim(1, { ...SOLO });
     const { ship } = sim.drones[0];
-    ship.parts.add("reverse");
-    ship.parts.add("strafe");
+    sim.devSet(ship, "reverse", true);
+    sim.devSet(ship, "strafe", true);
     const used = new Set<string>();
     run(sim, 120, () => {
       for (const thruster of ship.firing.keys()) used.add(thruster);
@@ -1451,22 +1457,22 @@ describe("pirate and defender", () => {
       expect(sim.ores[0].amount).toBe(2);
     });
 
-    it("bays add room and weight, and stack", () => {
+    it("bays add room and weight, one at a time on the section mount", () => {
       const sim = bayWorld();
       const { ship } = sim;
       const light = sim.shipWeight(ship);
       expect(sim.cargoSpace(ship)).toBe(10);
-      ship.parts.add("bay");
+      sim.devSet(ship, "bay", true);
       expect(sim.cargoSpace(ship)).toBe(30);
-      ship.parts.add("largeBay");
-      expect(sim.cargoSpace(ship)).toBe(80);
+      sim.devSet(ship, "largeBay", true);
+      expect(sim.cargoSpace(ship)).toBe(60);
       expect(sim.shipWeight(ship)).toBeGreaterThan(light);
     });
 
     it("a tractor doesn't pull ore a full ship can't take", () => {
       const sim = bayWorld();
       const { ship } = sim;
-      ship.parts.add("tractor");
+      sim.devSet(ship, "tractor", true);
       ship.ore = 10;
       const ore = looseOre(sim, ship.x + 200, ship.y);
       ore.vx = 0;
@@ -1480,7 +1486,7 @@ describe("pirate and defender", () => {
       const sim = bayWorld({ trafficRacers: 1, chatter: false, deliverShare: 0.5 });
       const pilot = sim.traffic[0];
       expect(sim.deliveryLoad(pilot.ship)).toBe(5);
-      pilot.ship.parts.add("bay");
+      sim.devSet(pilot.ship, "bay", true);
       expect(sim.deliveryLoad(pilot.ship)).toBe(15);
       sim.tuning.deliverShare = 1;
       expect(sim.deliveryLoad(pilot.ship)).toBe(30);
@@ -1761,8 +1767,8 @@ describe("pirate and defender", () => {
           const sim = depositWorld(moving);
           const deposit = sim.deposits[0];
           const { ship } = sim;
-          ship.parts.add("clickMove");
-          for (const part of kit) ship.parts.add(part);
+          sim.devSet(ship, "clickMove", true);
+          for (const part of kit) sim.devSet(ship, part, true);
           moveTo(ship, deposit.x + 20, deposit.y);
           ship.vx = 30;
           ship.px = ship.x - 30 * TICK;
@@ -1785,8 +1791,8 @@ describe("pirate and defender", () => {
           const sim = depositWorld(moving);
           const deposit = sim.deposits[0];
           const { ship } = sim;
-          ship.parts.add("clickMove");
-          for (const part of kit) ship.parts.add(part);
+          sim.devSet(ship, "clickMove", true);
+          for (const part of kit) sim.devSet(ship, part, true);
           moveTo(ship, deposit.x - 80, deposit.y);
           expect(sim.orderMove(deposit.x + 60, deposit.y + 30)).toBe(true);
           run(sim, 30, () => false);

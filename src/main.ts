@@ -9,7 +9,8 @@ import { Audio } from "./audio";
 import { Radio } from "./radio";
 import { type Base, type Deposit, MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
-import { type BlueprintId, isProject, PARTS, partFits, type Part } from "./parts";
+import { type BlueprintId, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartId } from "./parts";
+import { computerSize, mountsFor, mountsHolding, owns } from "./fitting";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
 const STORAGE_KEY = "flight-test-tuning";
@@ -310,8 +311,7 @@ const HELP: [string, HelpLine[]][] = [
   [
     "Trading",
     [
-      ["In the dock: 1 to 9, 0, =", "Buy or sell a part", found("dock")],
-      ["In the dock: -", "Buy a drone", () => sim.discovered.has("dock") && sim.unlocked("drone")],
+      ["In the dock: click a part", "Buy it and fit it, or sell it; click a program you own to load or unload it", found("dock")],
       ["At a deposit: 1 / 2", "Drop your ore / load ore to haul", found("deposit")],
       ["Where someone's selling ore: 1", "Buy a load", found("seller")],
     ],
@@ -446,10 +446,12 @@ function showPage(page: "main" | "help" | "settings"): void {
   pauseBox.replaceChildren(title, sub, heading("Settings"), volumeLabel, volume, mute, back);
 }
 
-/** Buys a part, or sells it back if the ship already has it. */
+/** Buys a part, or sells it back if it's fitted. A program the pilot owns is loaded or unloaded instead. */
 function tradePart(part: Part): void {
-  if (sim.ship.parts.has(part.id)) sim.sellPart(sim.ship, part.id);
-  else if (sim.unlocked(part.id)) sim.buyPart(sim.ship, part.id);
+  const { ship } = sim;
+  if (isProgram(part.id) && ship.software.has(part.id)) sim.setProgram(ship, part.id, !ship.programs.includes(part.id));
+  else if (owns(ship, part.id)) sim.sellPart(ship, part.id);
+  else if (sim.unlocked(part.id)) sim.buyPart(ship, part.id);
   else if (partFits(part, sim.ship.model)) sim.fundBlueprint(sim.ship, part.id);
   if (!panel.hidden) buildPanel();
 }
@@ -493,7 +495,7 @@ function shopButton(key: string, line: ShopLine, onClick: () => void): HTMLButto
   const button = document.createElement("button");
   button.className = line.style ?? "";
   button.disabled = !line.enabled;
-  button.textContent = `${key} [${line.tag}] ${line.text}`;
+  button.textContent = `${key ? `${key} ` : ""}[${line.tag}] ${line.text}`;
   button.addEventListener("click", () => {
     onClick();
     button.blur();
@@ -594,22 +596,20 @@ function updateShop(): void {
   if (!docked) return;
 
   shop.replaceChildren(shopHeading);
-  PARTS.forEach((part, index) => {
-    const owned = ship.parts.has(part.id);
-    // A held part only shows where it's sold: elsewhere it's something you hear about.
-    if (part.held && !owned && !sim.unlocked(part.id)) return;
-    const fits = partFits(part, ship.model);
-    const price = sim.partPrice(part.id);
-    const weight = (part.weight * tuning.partWeightScale).toFixed(2);
-    const line: ShopLine = owned
-      ? { tag: "sell", style: "sell", text: `${part.label} for ${price}, -${weight} weight`, enabled: true }
-      : !fits
-        ? { tag: "doesn't fit", text: part.label, enabled: false }
-        : !sim.unlocked(part.id)
-          ? lockedLine(part.id, part.label)
-          : saleLine(price, part.label, `${part.label}: ${price} credits, +${weight} weight. ${part.description}`);
-    shop.append(shopButton(partKey(index), line, () => tradePart(part)));
-  });
+  for (const part of PARTS) {
+    if (isProgram(part.id)) continue;
+    const line = partLine(part);
+    if (line) shop.append(shopButton("", line, () => tradePart(part)));
+  }
+  const programs = document.createElement("h2");
+  programs.className = "news";
+  programs.textContent = `Programs - computer runs ${ship.programs.length} of ${computerSize(ship)}`;
+  shop.append(programs);
+  for (const part of PARTS) {
+    if (!isProgram(part.id)) continue;
+    const line = partLine(part);
+    if (line) shop.append(shopButton("", line, () => tradePart(part)));
+  }
 
   const full = sim.drones.length >= tuning.droneLimit;
   const droneLine: ShopLine = full
@@ -621,23 +621,23 @@ function updateShop(): void {
           "New drone",
           `New drone: ${tuning.dronePrice} credits. Earns for you (${sim.drones.length}/${tuning.droneLimit})`,
         );
-  shop.append(shopButton("-", droneLine, tradeDrone));
+  shop.append(shopButton("", droneLine, tradeDrone));
 
   const depositLine: ShopLine = sim.unlocked("deposit")
     ? { tag: "built", text: "Field deposit: open at the field's edge", enabled: false }
     : lockedLine("deposit", `Field deposit (${tuning.depositParts} parts)`);
-  shop.append(shopButton("·", depositLine, () => sim.fundBlueprint(ship, "deposit")));
+  shop.append(shopButton("", depositLine, () => sim.fundBlueprint(ship, "deposit")));
 
   const stationGuardLine: ShopLine = sim.unlocked("stationGuards")
     ? { tag: "built", text: "Station turrets: on guard", enabled: false }
     : lockedLine("stationGuards", `Station turrets (${tuning.stationGuardParts} parts)`);
-  shop.append(shopButton("·", stationGuardLine, () => sim.fundBlueprint(ship, "stationGuards")));
+  shop.append(shopButton("", stationGuardLine, () => sim.fundBlueprint(ship, "stationGuards")));
 
   let depositGuardLine: ShopLine;
   if (sim.unlocked("depositGuards")) depositGuardLine = { tag: "built", text: "Deposit turrets: on guard", enabled: false };
   else if (!sim.unlocked("deposit")) depositGuardLine = { tag: "needs a deposit", text: "Deposit turrets", enabled: false };
   else depositGuardLine = lockedLine("depositGuards", `Deposit turrets (${tuning.depositGuardParts} parts)`);
-  shop.append(shopButton("·", depositGuardLine, () => sim.fundBlueprint(ship, "depositGuards")));
+  shop.append(shopButton("", depositGuardLine, () => sim.fundBlueprint(ship, "depositGuards")));
   appendNews();
 }
 
@@ -682,11 +682,47 @@ function appendNews(): void {
   }
 }
 
-/** Keys 1 to 9 and then 0 pick a part. The minus key buys a drone. */
-function partKey(index: number): string {
-  if (index > 10) return "·";
-  if (index === 10) return "=";
-  return index === 9 ? "0" : String(index + 1);
+/**
+ * One part's line in the shop, or null when it has no place there: a held part not sold
+ * here, or a hull's own gear while its mount is filled.
+ */
+function partLine(part: Part): ShopLine | null {
+  const { ship } = sim;
+  const price = sim.partPrice(part.id);
+  if (isProgram(part.id)) {
+    if (ship.software.has(part.id)) {
+      const loaded = ship.programs.includes(part.id);
+      if (loaded) return { tag: "loaded", style: "sell", text: `${part.label}: running. Unload to free a slot`, enabled: true };
+      const room = ship.programs.length < computerSize(ship);
+      return room
+        ? { tag: "load", style: "buy", text: `${part.label}: yours, not running`, enabled: true }
+        : { tag: "no free slot", text: `${part.label}: yours, not running`, enabled: false };
+    }
+  } else if (owns(ship, part.id)) {
+    if (part.builtIn) return null;
+    const value = mountsHolding(ship, part.id).reduce((sum, mount) => sum + sim.moduleValue(ship.fit[mount]!), 0);
+    return { tag: "sell", style: "sell", text: `${part.label} for ${value}, -${(part.weight * tuning.partWeightScale).toFixed(2)} weight`, enabled: true };
+  }
+  if (part.held && !sim.unlocked(part.id)) return null;
+  if (part.builtIn && !sim.canBuy(ship, part.id)) return null;
+  if (!sim.canBuy(ship, part.id)) return { tag: "doesn't fit", text: part.label, enabled: false };
+  if (!sim.unlocked(part.id)) return lockedLine(part.id, part.label);
+  const weight = isProgram(part.id) ? "" : `, +${(part.weight * tuning.partWeightScale).toFixed(2)} weight`;
+  const replaces = replacedBy(part);
+  return saleLine(price, part.label, `${part.label}: ${price} credits${weight}. ${part.description}${replaces}`);
+}
+
+/** What buying a part would take off the ship, in words, if anything. */
+function replacedBy(part: Part): string {
+  if (isProgram(part.id)) return "";
+  const { ship } = sim;
+  const off = new Set(
+    mountsFor(ship, part.id)
+      .map((mount) => ship.fit[mount]?.part)
+      // A gun isn't traded in for a turret: it moves onto it.
+      .filter((id): id is PartId => id !== undefined && !(part.kind === "turret" && partOf(id).kind === "gun")),
+  );
+  return off.size > 0 ? ` Trades in your ${[...off].map((id) => partOf(id).label.toLowerCase()).join(" and ")}` : "";
 }
 
 function saveTuning(): void {
@@ -782,10 +818,9 @@ function buildPanel(): void {
         toggle.className = "toggle";
         const box = document.createElement("input");
         box.type = "checkbox";
-        box.checked = sim.ship.parts.has(part.id);
+        box.checked = owns(sim.ship, part.id);
         box.addEventListener("change", () => {
-          if (box.checked) sim.ship.parts.add(part.id);
-          else sim.ship.parts.delete(part.id);
+          sim.devSet(sim.ship, part.id, box.checked);
           box.blur();
         });
         toggle.append(box, ` ${part.label}`);
@@ -942,17 +977,10 @@ window.addEventListener("keydown", (event) => {
   if (event.repeat) return;
   if (event.code === "KeyR" && dev) restart();
   if (event.code === "KeyX") setRetro(!tuning.retro);
-  const digit = /^Digit([0-9])$/.exec(event.code);
-  if (digit && sim.atShop()) {
-    const part = PARTS[digit[1] === "0" ? 9 : Number(digit[1]) - 1];
-    if (part) tradePart(part);
-  }
   const deposit = sim.isDocked() ? null : sim.depositAt();
   if (deposit && event.code === "Digit1") sim.sellToDeposit(sim.ship, deposit);
   if (deposit && event.code === "Digit2") sim.buyFromDeposit(sim.ship, deposit);
   if (!deposit && !sim.isDocked() && sim.atPirateBase() && event.code === "Digit1") sim.buyFromPirateBase(sim.ship);
-  if (event.code === "Equal" && sim.atShop() && PARTS[10]) tradePart(PARTS[10]);
-  if (event.code === "Minus" && sim.atShop()) tradeDrone();
   keys.add(event.code);
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));
@@ -1063,7 +1091,7 @@ function cargoText(ship: Ship): string {
 }
 
 function partList(ship: Ship): string {
-  const owned = PARTS.filter((part) => ship.parts.has(part.id));
+  const owned = PARTS.filter((part) => ship.parts.has(part.id) && !part.builtIn);
   return owned.length > 0 ? owned.map((part) => part.short).join(" ") : "none";
 }
 

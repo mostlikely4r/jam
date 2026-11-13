@@ -813,7 +813,7 @@ export class DronePilot extends ShipPilot {
     }
     if (ship.owner) return;
     const allowed = this.wishlist.slice(0, sim.tuning.droneParts);
-    const next = allowed.find((part) => !ship.parts.has(part));
+    const next = allowed.find((part) => sim.wouldUse(ship, part));
     if (next) sim.buyPart(ship, next);
     else sim.buyDrone(ship);
   }

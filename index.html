@@ -88,6 +88,17 @@
       #shop button.partial { color: #f0a868; border-color: #c97f3c; background: #2b1d10; }
       #shop button.pending { color: #c4a4f0; border-color: #8f6fc9; background: #211a30; }
       #shop button.poor { color: #e88a8a; border-color: #a84f4f; background: #2a1616; }
+      #shop button.small { display: inline-block; width: auto; margin: 0 0 6px; font-size: 12px; }
+      #inventory { position: fixed; left: 12px; bottom: 44px; width: 420px; max-height: calc(100vh - 64px); overflow-y: auto;
+                   box-sizing: border-box; padding: 10px 12px; background: #0b0f18e8; border: 1px solid #46b4bd; font-size: 13px; }
+      #inventory[hidden] { display: none; }
+      #inventory h2 { font-size: 12px; margin: 10px 0 6px; color: #7fdfe6; text-transform: uppercase; letter-spacing: 1px; }
+      #inventory h2:first-child { margin-top: 0; }
+      #inventory p { margin: 0 0 4px; color: #b8c3d4; }
+      #inventory .row { display: flex; align-items: center; gap: 6px; margin: 2px 0; color: #cfd8e6; }
+      #inventory .row span { flex: 1; }
+      #inventory button { background: #1a2233; color: #cfd8e6; border: 1px solid #33405a; padding: 1px 6px; font: inherit; font-size: 12px; cursor: pointer; }
+      #inventory button:hover { background: #26324a; }
     </style>
   </head>
   <body>
@@ -95,6 +106,7 @@
     <div id="hud" hidden></div>
     <div id="chatter"></div>
     <div id="shop" hidden></div>
+    <div id="inventory" hidden></div>
     <div id="panel" hidden></div>
     <div id="pause" hidden><div class="box"></div></div>
     <div id="start" hidden><div class="box"></div></div>

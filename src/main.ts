@@ -11,6 +11,7 @@ import { type Base, type Deposit, MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } 
 import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartId } from "./parts";
 import { computerSize, mountsFor, mountsHolding, owns } from "./fitting";
+import { Inventory } from "./inventory";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
 const STORAGE_KEY = "flight-test-tuning";
@@ -57,6 +58,7 @@ const canvas = document.getElementById("view") as HTMLCanvasElement;
 const hud = document.getElementById("hud") as HTMLDivElement;
 const panel = document.getElementById("panel") as HTMLDivElement;
 const shop = document.getElementById("shop") as HTMLDivElement;
+const inventoryBox = document.getElementById("inventory") as HTMLDivElement;
 const renderer = new Renderer(canvas);
 const audio = new Audio();
 /** `?dev` on the address shows the tuning panel, the status lines and every pointer. */
@@ -312,6 +314,8 @@ const HELP: [string, HelpLine[]][] = [
     "Trading",
     [
       ["In the dock: click a part", "Buy it and fit it, or sell it; click a program you own to load or unload it", found("dock")],
+      ["I", "Your ship: what's fitted, what's in the bay, your programs", found("used:inventory")],
+      ["L", "Your locker at the base you're docked at", found("used:locker")],
       ["At a deposit: 1 / 2", "Drop your ore / load ore to haul", found("deposit")],
       ["Where someone's selling ore: 1", "Buy a load", found("seller")],
     ],
@@ -461,6 +465,13 @@ function tradeDrone(): void {
   else sim.fundBlueprint(sim.ship, "drone");
 }
 
+/** The ship and locker screens, made for whatever world is loaded now. */
+let inventoryScreen: Inventory | null = null;
+function inventory(): Inventory {
+  if (!inventoryScreen || inventoryScreen.sim !== sim) inventoryScreen = new Inventory(inventoryBox, sim);
+  return inventoryScreen;
+}
+
 /** One line of the shop. The style names its color, and without one the line is greyed out. */
 interface ShopLine {
   tag: string;
@@ -485,8 +496,9 @@ function lockedLine(id: BlueprintId, label: string): ShopLine {
 }
 
 /** An item the station can sell, as far as it has the parts and the buyer has the credits. */
-function saleLine(price: number, label: string, text: string): ShopLine {
-  if (!sim.hasPartsFor(price)) return { tag: "out of parts", text: label, enabled: false };
+function saleLine(price: number, label: string, text: string, part: PartId | null = null): ShopLine {
+  const supplied = part && !isProgram(part) ? sim.canSupply(sim.shopBase(), part) : sim.hasPartsFor(price);
+  if (!supplied) return { tag: "out of parts", text: label, enabled: false };
   if (sim.ship.credits < price) return { tag: "not enough money", style: "poor", text, enabled: false };
   return { tag: "buy", style: "buy", text, enabled: true };
 }
@@ -589,13 +601,21 @@ function updateShop(): void {
     const title = `Dock shop - station ${Math.floor(base.account.credits)} credits - ${haulerText(base)}`;
     if (shopHeading.textContent !== title) shopHeading.textContent = title;
   }
-  const state = `${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks} ${newsState()}`;
+  const state = `${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked;
   if (!docked) return;
 
   shop.replaceChildren(shopHeading);
+  const open = document.createElement("button");
+  open.className = "small";
+  open.textContent = "Ship and locker";
+  open.addEventListener("click", () => {
+    inventory().openBoth();
+    open.blur();
+  });
+  shop.append(open);
   for (const part of PARTS) {
     if (isProgram(part.id)) continue;
     const line = partLine(part);
@@ -709,7 +729,9 @@ function partLine(part: Part): ShopLine | null {
   if (!sim.unlocked(part.id)) return lockedLine(part.id, part.label);
   const weight = isProgram(part.id) ? "" : `, +${(part.weight * tuning.partWeightScale).toFixed(2)} weight`;
   const replaces = replacedBy(part);
-  return saleLine(price, part.label, `${part.label}: ${price} credits${weight}. ${part.description}${replaces}`);
+  const stocked = isProgram(part.id) ? 0 : sim.stockOf(sim.shopBase(), part.id);
+  const store = stocked > 0 ? ` (${stocked} in the store)` : "";
+  return saleLine(price, part.label, `${part.label}: ${price} credits${weight}${store}. ${part.description}${replaces}`, part.id);
 }
 
 /** What buying a part would take off the ship, in words, if anything. */
@@ -722,7 +744,7 @@ function replacedBy(part: Part): string {
       // A gun isn't traded in for a turret: it moves onto it.
       .filter((id): id is PartId => id !== undefined && !(part.kind === "turret" && partOf(id).kind === "gun")),
   );
-  return off.size > 0 ? ` Trades in your ${[...off].map((id) => partOf(id).label.toLowerCase()).join(" and ")}` : "";
+  return off.size > 0 ? ` Your ${[...off].map((id) => partOf(id).label.toLowerCase()).join(" and ")} goes in your locker here` : "";
 }
 
 function saveTuning(): void {
@@ -963,6 +985,8 @@ window.addEventListener("keydown", (event) => {
   // The menu is up: the game waits.
   if (paused) return;
   // The chart needs its part. Without it the key does nothing: JAM is meant to be discovered.
+  if (event.code === "KeyI" && !event.repeat) inventory().toggleShip();
+  if (event.code === "KeyL" && !event.repeat) inventory().toggleLocker();
   if (event.code === "KeyC" && !event.repeat && sim.ship.parts.has("starmap")) {
     keys.clear();
     chart.open();
@@ -1139,6 +1163,7 @@ function frame(now: number): void {
   sim.events.length = 0;
   audio.setThrust(!paused && sim.ship.firing.size > 0);
   updateShop();
+  inventory().update();
   renderer.drag = drag && {
     ...drag,
     dragged: Math.hypot(drag.toX - drag.fromX, drag.toY - drag.fromY) >= DRAG_PIXELS,

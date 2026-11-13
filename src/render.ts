@@ -303,6 +303,7 @@ export class Renderer {
     this.drawClickTarget(sim, alpha);
     this.drawRocks(sim, alpha, visible);
     this.drawOres(sim, alpha, visible);
+    this.drawLoot(sim, alpha, visible);
     this.drawShots(sim, alpha);
     this.drawPings(alpha, frameSeconds);
     this.updateParticles(frameSeconds);
@@ -790,6 +791,21 @@ export class Renderer {
       } else {
         ctx.fillRect(x - 4, y - 4, 8, 8);
       }
+    }
+  }
+
+  /** Modules adrift: little crates, bright-edged so they read as something to pick up. */
+  private drawLoot(sim: Sim, alpha: number, visible: (x: number, y: number, r: number) => boolean): void {
+    const { ctx } = this;
+    for (const loot of sim.loot) {
+      const x = lerp(loot.px, loot.x, alpha);
+      const y = lerp(loot.py, loot.y, alpha);
+      if (!visible(x, y, 8)) continue;
+      ctx.fillStyle = loot.item.wear >= 0.5 ? "#8a5a3a" : "#8d99ad";
+      ctx.fillRect(x - 5, y - 4, 10, 8);
+      ctx.strokeStyle = "#e6f0ff";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x - 5, y - 4, 10, 8);
     }
   }
 

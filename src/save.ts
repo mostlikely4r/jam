@@ -4,7 +4,7 @@ import type { Sim } from "./sim";
  * Bump this whenever what a save holds changes shape, so an old save is turned away
  * rather than loaded into a world it no longer fits.
  */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 /** Where the two saves live: the one kept for you, and the one you make yourself. */
 export const SAVE_SLOTS = { auto: "jam-save-auto", manual: "jam-save-manual" } as const;

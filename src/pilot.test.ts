@@ -2412,7 +2412,7 @@ describe("pirate and defender", () => {
         expect(sim.ship.hull).toBe(100);
       });
 
-      it("a part needs ore in the pile, and selling it back returns the ore", () => {
+      it("a part needs ore in the pile, and selling it back puts it whole in the store", () => {
         const sim = arena({ ...STOCK, stationReserveParts: Infinity });
         placeInDock(sim, sim.ship);
         sim.ship.credits = 10000;
@@ -2423,7 +2423,8 @@ describe("pirate and defender", () => {
         expect(sim.buyPart(sim.ship, id)).toBe(true);
         expect(sim.stationParts).toBe(0);
         expect(sim.sellPart(sim.ship, id)).toBe(true);
-        expect(sim.stationParts).toBe(ore);
+        expect(sim.stationParts).toBe(0);
+        expect(sim.stockOf(sim.bases[0], id)).toBe(1);
       });
 
       it("a damaged ship doesn't wait in the dock for ore that may never come", () => {

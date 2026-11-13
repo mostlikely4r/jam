@@ -147,6 +147,9 @@ export interface Ship extends Body, Fitting {
   home: string | null;
 }
 
+/** Where an item sits, for moving it: a mount, a place in the bay, or a place in the locker of the base the ship is at. */
+export type ItemPlace = { at: "mount"; mount: MountId } | { at: "hold"; index: number } | { at: "locker"; index: number };
+
 export interface Rock extends Body {
   /** Still on its way in from outside the field. */
   arriving: boolean;
@@ -410,6 +413,8 @@ export interface Base {
   ore: number;
   /** Parts held. Every service it sells uses them up. */
   parts: number;
+  /** Whole modules in its store, ready to sell or fit as they are: what ships sold it. */
+  stock: Map<PartId, number>;
   hauler: Hauler | null;
   /** Seconds until its next hauler sets out. */
   haulerTimer: number;
@@ -428,7 +433,7 @@ export interface Base {
 /** What a base holds, as saved. */
 type BaseState = Pick<
   Base,
-  "id" | "account" | "ore" | "parts" | "hauler" | "haulerTimer" | "lostTraffic" | "blueprints" | "blueprintPaid" | "blueprintsOrdered" | "board"
+  "id" | "account" | "ore" | "parts" | "stock" | "hauler" | "haulerTimer" | "lostTraffic" | "blueprints" | "blueprintPaid" | "blueprintsOrdered" | "board"
 >;
 
 /**
@@ -588,6 +593,11 @@ export interface Ore extends Body {
   caughtBy?: Ship | null;
 }
 
+/** A module adrift: dropped from a bay, or what was left of a wreck. The player can fly through it to pick it up. */
+export interface Loot extends Body {
+  item: Module;
+}
+
 export type SimEvent =
   | { type: "shot"; x: number; y: number }
   | { type: "hit"; x: number; y: number }
@@ -734,6 +744,8 @@ export class Sim {
   pirateBase: Poi | null = null;
   /** Every station with a dock: the game's own first, then the designer's. */
   bases: Base[] = [];
+  /** The player's lockers, by base id: what was left at each base stays there. */
+  lockers = new Map<string, Module[]>();
   /** Saved bases the designer hasn't handed over yet: picked up when it does. */
   private savedBases = new Map<string, BaseState>();
   /** The first base's money. Defenders earn it, and it pays for defenders. */
@@ -834,6 +846,7 @@ export class Sim {
   private bodySpots: { body: SolidBody; x: number; y: number; vx: number; vy: number }[] = [];
   shots: Shot[] = [];
   ores: Ore[] = [];
+  loot: Loot[] = [];
   field!: Poi;
   station!: Poi;
   events: SimEvent[] = [];
@@ -878,8 +891,8 @@ export class Sim {
       fighterRecords: this.fighters.map((each) => each.record),
       pirateBase: this.pirateBase,
       bases: this.bases.map(
-        ({ id, account, ore, parts, hauler, haulerTimer, lostTraffic, blueprints, blueprintPaid, blueprintsOrdered, board }): BaseState => ({
-          id, account, ore, parts, hauler, haulerTimer, lostTraffic, blueprints, blueprintPaid, blueprintsOrdered, board,
+        ({ id, account, ore, parts, stock, hauler, haulerTimer, lostTraffic, blueprints, blueprintPaid, blueprintsOrdered, board }): BaseState => ({
+          id, account, ore, parts, stock, hauler, haulerTimer, lostTraffic, blueprints, blueprintPaid, blueprintsOrdered, board,
         }),
       ),
       deposits: this.deposits,
@@ -894,12 +907,14 @@ export class Sim {
       rocks: this.rocks,
       shots: this.shots,
       ores: this.ores,
+      loot: this.loot,
       field: this.field,
       station: this.station,
       stats: this.stats,
       discovered: this.discovered,
       inflowTimer: this.inflowTimer,
       sleeping: [...this.sleeping.values()],
+      lockers: this.lockers,
       randomState: this.randomState,
       seed: this.seed,
     };
@@ -940,7 +955,7 @@ export class Sim {
     const plain = [
       "pirateBase", "deposits", "batteries", "pirateOre",
       "pirateCredits", "pirateCap", "blackMarket", "blackMarketTimer", "distress", "clock", "rocks",
-      "shots", "ores", "field", "station", "stats", "inflowTimer", "randomState", "seed",
+      "shots", "ores", "loot", "field", "station", "stats", "inflowTimer", "randomState", "seed",
     ] as const;
     for (const key of plain) if (key in data) Object.assign(this, { [key]: data[key] });
     // A save from before every base had its own: what it held was the first base's.
@@ -963,6 +978,7 @@ export class Sim {
     this.savedBases = new Map(bases.map((state) => [state.id, state]));
     for (const base of this.bases) this.takeSaved(base);
     this.discovered = data.discovered ?? new Set();
+    this.lockers = data.lockers ?? new Map();
     // A save from before fields slept has every rock awake: far fields fall asleep next tick.
     this.sleeping = new Map(((data.sleeping ?? []) as SleepingField[]).map((field) => [field.id, field]));
     this.clickPilot = new ClickPilot(this.ship);
@@ -979,9 +995,11 @@ export class Sim {
     this.sleeping = new Map();
     this.shots = [];
     this.ores = [];
+    this.loot = [];
     this.events = [];
     this.stats = { bestOre: this.stats.bestOre, topSpeed: 0 };
     this.discovered = new Set();
+    this.lockers = new Map();
     this.inflowTimer = 1;
     this.placePois();
     // Every base starts out as a starter base, the designer's included.
@@ -1172,6 +1190,7 @@ export class Sim {
       account: { credits: tuning.stationStartCredits },
       ore: tuning.stationStartOre,
       parts: tuning.stationStartParts,
+      stock: new Map(),
       hauler: null,
       haulerTimer: tuning.haulerFirst,
       lostTraffic: [],
@@ -1191,6 +1210,7 @@ export class Sim {
       account: saved.account ?? base.account,
       ore: saved.ore ?? base.ore,
       parts: saved.parts ?? base.parts,
+      stock: saved.stock ?? new Map(),
       hauler: saved.hauler ?? null,
       haulerTimer: saved.haulerTimer ?? base.haulerTimer,
       lostTraffic: saved.lostTraffic ?? [],
@@ -2353,13 +2373,28 @@ export class Sim {
     return Math.max(0, Math.min(ship.ore, this.tuning.depositCapacity - deposit.ore));
   }
 
-  /** How much cargo a ship has room for: what it starts with plus its bays. */
+  /** How much ore a ship has room for: its bay, less what modules take up there. */
   cargoSpace(ship: Ship): number {
+    return this.bayTotal(ship) - this.holdSize(ship);
+  }
+
+  /** All the room in a ship's bay, for ore and modules together. */
+  bayTotal(ship: Ship): number {
     const { playerCargo, droneCargo } = this.tuning;
     let space = ship === this.ship ? playerCargo : droneCargo;
     const section = ship.fit.section;
     if (section && section.wear < 1) space += partOf(section.part).cargo ?? 0;
     return space;
+  }
+
+  /** How much room the modules loose in the bay take. */
+  holdSize(ship: Ship): number {
+    return ship.hold.reduce((sum, item) => sum + partOf(item.part).size, 0);
+  }
+
+  /** Whether a module would fit in the bay beside what's there now. */
+  hasRoomFor(ship: Ship, item: Module): boolean {
+    return this.bayTotal(ship) - this.holdSize(ship) - ship.ore >= partOf(item.part).size;
   }
 
   /** The load an AI ship waits for before heading in to deliver. */
@@ -2429,22 +2464,75 @@ export class Sim {
   /** What a module is worth to a shop: full price working, half damaged, nothing destroyed. */
   moduleValue(module: { part: PartId; wear: number }): number {
     const part = partOf(module.part);
-    const share = module.wear < 0.5 ? 1 : module.wear < 1 ? 0.5 : 0;
+    const share = module.wear < DAMAGED_AT ? 1 : module.wear < 1 ? 0.5 : 0;
     return Math.round((this.partPrice(module.part) / (part.set ?? 1)) * share);
+  }
+
+  /** How many whole modules of a part a base has in its store. */
+  stockOf(base: Base, id: PartId): number {
+    return base.stock.get(id) ?? 0;
+  }
+
+  /**
+   * Whether a base can supply a part: a set's worth from its store, or made from its parts.
+   * Either way the buyer pays the same.
+   */
+  canSupply(base: Base, id: PartId): boolean {
+    return this.stockOf(base, id) >= (partOf(id).set ?? 1) || this.hasStockFor(this.partPrice(id), base);
+  }
+
+  /** The buyer pays for a part: out of the base's store if it has a set's worth, or made from its parts. */
+  private supply(buyer: { credits: number }, id: PartId, base: Base, count = partOf(id).set ?? 1): void {
+    const price = Math.round((this.partPrice(id) / (partOf(id).set ?? 1)) * count);
+    const stocked = this.stockOf(base, id);
+    if (stocked >= count) {
+      base.stock.set(id, stocked - count);
+      buyer.credits -= price;
+      base.account.credits += price;
+    } else this.chargeForService(buyer, price, base);
+  }
+
+  /**
+   * A base takes a module back and pays what it's worth. A working one goes into its store
+   * as it is; a damaged one is broken down into its parts.
+   */
+  private takeBack(seller: { credits: number }, module: Module, base: Base): void {
+    const value = this.moduleValue(module);
+    if (module.wear < DAMAGED_AT) {
+      base.stock.set(module.part, this.stockOf(base, module.part) + 1);
+      seller.credits += value;
+      base.account.credits -= value;
+    } else this.chargeForService(seller, -value, base);
+  }
+
+  /** The player's locker at a base, made empty the first time it's needed. */
+  lockerAt(base: Base): Module[] {
+    let locker = this.lockers.get(base.id);
+    if (!locker) {
+      locker = [];
+      this.lockers.set(base.id, locker);
+    }
+    return locker;
   }
 
   /**
    * Puts a part on a ship, or a program in its pilot's hands and computer. What it replaces
-   * is traded in at the base, if there is one: otherwise it's gone.
+   * goes into the player's locker at the base, or (for anyone else) is sold back there.
    */
-  private equip(ship: Ship, id: PartId, base: Base | null = null): void {
+  private equip(ship: Ship, id: PartId, base: Base | null = null, wear = 0): void {
     if (isProgram(id)) {
       this.giveProgram(ship, id);
       return;
     }
-    const off = fitPart(ship, id);
-    if (base) for (const module of off) this.chargeForService(this.accountOf(ship), -this.moduleValue(module), base);
+    const off = fitPart(ship, id, wear);
+    if (base) this.stow(ship, off, base);
     if (partOf(id).kind === "computer") trimPrograms(ship);
+  }
+
+  /** Modules that came off a ship in a dock: into the player's locker, or sold to the base by anyone else. */
+  private stow(ship: Ship, modules: Module[], base: Base): void {
+    if (ship === this.ship) this.lockerAt(base).push(...modules);
+    else for (const module of modules) this.takeBack(this.accountOf(ship), module, base);
   }
 
   /** The pilot owns a program from now on, and loads it if the computer has room. */
@@ -2474,8 +2562,13 @@ export class Sim {
     if (!this.canBuy(ship, id) || !this.unlocked(id, base)) return false;
     const account = this.accountOf(ship);
     if (!this.atShop(ship) || account.credits < price) return false;
-    if (!this.hasPartsFor(price, ship)) return false;
-    this.chargeForService(account, price, base);
+    if (isProgram(id)) {
+      if (!this.hasPartsFor(price, ship)) return false;
+      this.chargeForService(account, price, base);
+    } else {
+      if (!this.canSupply(base, id)) return false;
+      this.supply(account, id, base);
+    }
     this.equip(ship, id, base);
     if (id === "retro" && ship === this.ship) this.tuning.retro = true;
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
@@ -2484,8 +2577,9 @@ export class Sim {
   }
 
   /**
-   * Sells a part back at what it's worth, so a ship can go back to being light. A hull's
-   * own gear goes back on where the part came off, paid for out of the sale.
+   * Sells a part back for what it's worth, so a ship can go back to being light. A hull's
+   * own gear goes back on where the part came off: from the player's locker if it's there,
+   * or bought out of the sale.
    */
   sellPart(ship: Ship, id: PartId): boolean {
     if (!this.atShop(ship)) return false;
@@ -2500,11 +2594,128 @@ export class Sim {
     } else {
       const mounts = mountsHolding(ship, id);
       if (mounts.length === 0 || partOf(id).builtIn) return false;
-      let value = 0;
-      for (const mount of mounts) value += this.moduleValue(unfit(ship, mount)!);
-      this.chargeForService(account, -value, base);
+      for (const mount of mounts) this.takeBack(account, unfit(ship, mount)!, base);
       this.refitDefaults(ship, base);
     }
+    this.events.push({ type: "sale", x: ship.x, y: ship.y });
+    return true;
+  }
+
+  /** Puts the hull's own gear back on any mount left without it: from the player's locker, or bought. */
+  private refitDefaults(ship: Ship, base: Base): void {
+    for (const id of new Set(Object.values(HULL_DEFAULTS[ship.model]))) {
+      const mounts = mountsFor(ship, id);
+      if (mounts.length === 0 || mounts.some((mount) => ship.fit[mount])) continue;
+      const locker = ship === this.ship ? this.lockerAt(base) : [];
+      const kept = locker.filter((item) => item.part === id && item.wear < 1);
+      if (kept.length >= mounts.length) {
+        for (const mount of mounts) {
+          const item = kept.shift()!;
+          locker.splice(locker.indexOf(item), 1);
+          ship.fit[mount] = item;
+        }
+        refresh(ship);
+        continue;
+      }
+      this.supply(this.accountOf(ship), id, base);
+      fitPart(ship, id);
+    }
+    trimPrograms(ship);
+  }
+
+  /** Where an item is, for moving it about: on a mount, loose in the bay, or in the locker where the ship is docked. */
+  itemAt(ship: Ship, from: ItemPlace): Module | null {
+    if (from.at === "mount") return ship.fit[from.mount] ?? null;
+    if (from.at === "hold") return ship.hold[from.index] ?? null;
+    const base = this.baseAt(ship);
+    return base ? this.lockerAt(base)[from.index] ?? null : null;
+  }
+
+  /** Takes an item out of where it is. */
+  private takeItem(ship: Ship, from: ItemPlace): Module | null {
+    const item = this.itemAt(ship, from);
+    if (!item) return null;
+    if (from.at === "mount") unfit(ship, from.mount);
+    else if (from.at === "hold") ship.hold.splice(from.index, 1);
+    else this.lockerAt(this.baseAt(ship)!).splice(from.index, 1);
+    if (from.at === "mount" && partOf(item.part).kind === "computer") trimPrograms(ship);
+    return item;
+  }
+
+  /** Puts a module from the bay or the locker on the ship. Only in a dock. What comes off goes where it came from. */
+  fitItem(ship: Ship, from: ItemPlace): boolean {
+    const base = this.baseAt(ship);
+    const item = this.itemAt(ship, from);
+    if (!base || !item || from.at === "mount" || item.wear >= 1) return false;
+    if (mountsFor(ship, item.part).length === 0) return false;
+    // A pair goes on as a pair: the other half has to be where this one is.
+    const set = partOf(item.part).set ?? 1;
+    const pile = from.at === "hold" ? ship.hold : this.lockerAt(base);
+    const pair = pile.filter((other) => other.part === item.part && other.wear < 1).slice(0, set);
+    if (pair.length < set) return false;
+    for (const each of pair) pile.splice(pile.indexOf(each), 1);
+    const mounts = mountsFor(ship, item.part);
+    const off: Module[] = [];
+    for (const [i, mount] of mounts.entries()) {
+      const old = ship.fit[mount];
+      if (old) off.push(old);
+      ship.fit[mount] = pair[i];
+    }
+    if (partOf(item.part).kind === "turret") {
+      const gun = off.find((module) => partOf(module.part).kind === "gun");
+      if (gun) {
+        ship.fit.turretGun = gun;
+        off.splice(off.indexOf(gun), 1);
+      }
+    }
+    refresh(ship);
+    if (partOf(item.part).kind === "computer") trimPrograms(ship);
+    pile.push(...off);
+    return true;
+  }
+
+  /** Throws a module out of the bay, to drift beside the ship. */
+  dropItem(ship: Ship, index: number): boolean {
+    const item = ship.hold[index];
+    if (!item || this.isDocked(ship)) return false;
+    ship.hold.splice(index, 1);
+    this.setAdrift(ship, item, 25);
+    return true;
+  }
+
+  /** A module set loose beside a ship, drifting off at about this speed. */
+  private setAdrift(ship: Ship, item: Module, speed: number): void {
+    const dir = this.random() * Math.PI * 2;
+    const kick = speed * (0.5 + this.random() * 0.5);
+    const x = ship.x + Math.cos(dir) * SHIP_RADIUS;
+    const y = ship.y + Math.sin(dir) * SHIP_RADIUS;
+    this.loot.push({ x, y, px: x, py: y, vx: ship.vx + Math.cos(dir) * kick, vy: ship.vy + Math.sin(dir) * kick, item });
+  }
+
+  /** Moves an item into the locker where the ship is docked. */
+  toLocker(ship: Ship, from: ItemPlace): boolean {
+    const base = this.baseAt(ship);
+    if (!base || from.at === "locker" || !this.itemAt(ship, from)) return false;
+    this.lockerAt(base).push(this.takeItem(ship, from)!);
+    return true;
+  }
+
+  /** Moves an item into the bay, if there's room for it beside the ore. Off a mount or out of a locker: only in a dock. */
+  toHold(ship: Ship, from: ItemPlace): boolean {
+    const item = this.itemAt(ship, from);
+    if (!item || from.at === "hold" || !this.baseAt(ship)) return false;
+    // A section can't carry itself.
+    if (from.at === "mount" && from.mount === "section") return false;
+    if (!this.hasRoomFor(ship, item)) return false;
+    ship.hold.push(this.takeItem(ship, from)!);
+    return true;
+  }
+
+  /** Sells an item from the bay or the locker to the base the ship is docked at. */
+  sellItem(ship: Ship, from: ItemPlace): boolean {
+    const base = this.baseAt(ship);
+    if (!base || from.at === "mount" || !this.itemAt(ship, from)) return false;
+    this.takeBack(this.accountOf(ship), this.takeItem(ship, from)!, base);
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     return true;
   }
@@ -2526,17 +2737,6 @@ export class Sim {
       fitPart(ship, id);
       trimPrograms(ship);
     } else for (const mount of mountsHolding(ship, id)) unfit(ship, mount);
-  }
-
-  /** Puts the hull's own gear back on any mount left without it, bought from the base. */
-  private refitDefaults(ship: Ship, base: Base): void {
-    for (const id of new Set(Object.values(HULL_DEFAULTS[ship.model]))) {
-      const mounts = mountsFor(ship, id);
-      if (mounts.length === 0 || mounts.some((mount) => ship.fit[mount])) continue;
-      this.chargeForService(this.accountOf(ship), this.partPrice(id), base);
-      fitPart(ship, id);
-    }
-    trimPrograms(ship);
   }
 
   /** Any ship in the dock can pay for a new drone, which starts there and earns for itself. */
@@ -2984,6 +3184,7 @@ export class Sim {
       rock.angle += turn;
     }
     for (const ore of this.ores) this.carry(ore);
+    for (const loot of this.loot) this.carry(loot);
     for (const shot of this.shots) this.carry(shot);
     // An order's destination moves like any loose body at its spot.
     const spot = this.clickPilot.spot;
@@ -3936,18 +4137,18 @@ export class Sim {
    * ship, so nobody could see it or know where it went, it's gone.
    */
   private moveOres(dt: number): void {
-    for (const ore of this.ores) {
-      ore.x += ore.vx * dt;
-      ore.y += ore.vy * dt;
+    for (const thing of [...this.ores, ...this.loot]) {
+      thing.x += thing.vx * dt;
+      thing.y += thing.vy * dt;
     }
     const forget = this.tuning.oreForgetDistance;
     if (forget === Infinity) return;
     const ships = [this.ship, ...this.pilots.map((pilot) => pilot.ship)];
-    this.ores = this.ores.filter(
-      (ore) =>
-        this.pois.some((poi) => this.edgeDistance(poi, ore.x, ore.y) < forget) ||
-        ships.some((ship) => Math.hypot(ship.x - ore.x, ship.y - ore.y) < forget),
-    );
+    const kept = (thing: Body) =>
+      this.pois.some((poi) => this.edgeDistance(poi, thing.x, thing.y) < forget) ||
+      ships.some((ship) => Math.hypot(ship.x - thing.x, ship.y - thing.y) < forget);
+    this.ores = this.ores.filter(kept);
+    this.loot = this.loot.filter(kept);
   }
 
   /** Gentle pull so drifting rocks stay in the field during long sessions. */
@@ -4202,6 +4403,7 @@ export class Sim {
     };
     for (const ship of [this.ship, ...this.pilots.map((pilot) => pilot.ship)]) if (!this.isDocked(ship)) pull(ship);
     for (const ore of this.ores) pull(ore);
+    for (const loot of this.loot) pull(loot);
   }
 
   /** A ship in a body's air or on its ground: burning, through it, off it with a knock, or wrecked. */
@@ -4252,7 +4454,9 @@ export class Sim {
   private burnOreOnBodies(): void {
     const solid = this.bodySpots.filter((spot) => spot.body.surface !== "none");
     if (solid.length === 0) return;
-    this.ores = this.ores.filter((ore) => solid.every(({ body, x, y }) => Math.hypot(ore.x - x, ore.y - y) >= body.radius));
+    const clear = (thing: Body) => solid.every(({ body, x, y }) => Math.hypot(thing.x - x, thing.y - y) >= body.radius);
+    this.ores = this.ores.filter(clear);
+    this.loot = this.loot.filter(clear);
   }
 
   private wreckShip(ship: Ship): void {
@@ -4937,30 +5141,32 @@ export class Sim {
   canRepair(ship: Ship): boolean {
     if (!this.isHome(ship)) return false;
     const next = this.nextRepair(ship);
-    return next !== null && this.canPayFor(ship, next.cost);
+    return next !== null && this.canPayFor(ship, next.cost, next.stocked);
   }
 
   /**
    * What the dock fixes next: the hull a point at a time, then worn modules a point at a
    * time, then destroyed ones replaced whole. Each step and what it costs.
    */
-  private nextRepair(ship: Ship): { mount: MountId | null; cost: number } | null {
+  private nextRepair(ship: Ship): { mount: MountId | null; cost: number; stocked?: boolean } | null {
     const { repairCost } = this.tuning;
     if (ship.hull < MAX_HULL) return { mount: null, cost: repairCost };
-    let replace: { mount: MountId; cost: number } | null = null;
+    let replace: { mount: MountId; cost: number; stocked: boolean } | null = null;
+    const base = this.serviceBase(ship);
     for (const [mount, module] of Object.entries(ship.fit) as [MountId, Module | undefined][]) {
       if (!module || module.wear <= 0) continue;
       if (module.wear < 1) return { mount, cost: repairCost };
       const part = partOf(module.part);
-      replace ??= { mount, cost: Math.round(this.partPrice(module.part) / (part.set ?? 1)) };
+      const stocked = ship.faction !== "pirate" && this.stockOf(base, module.part) > 0;
+      replace ??= { mount, cost: Math.round(this.partPrice(module.part) / (part.set ?? 1)), stocked };
     }
     return replace;
   }
 
   /** Whether the ship can pay for a service, and its dock has the parts for it. */
-  private canPayFor(ship: Ship, cost: number): boolean {
+  private canPayFor(ship: Ship, cost: number, stocked = false): boolean {
     if (ship.faction === "pirate") return this.pirateCredits >= cost;
-    if (!this.hasPartsFor(cost, ship)) return false;
+    if (!stocked && !this.hasPartsFor(cost, ship)) return false;
     return ship.faction === "defender" || this.accountOf(ship).credits >= cost;
   }
 
@@ -4982,6 +5188,7 @@ export class Sim {
         refresh(ship);
       }
       if (ship.faction === "pirate") this.pirateCredits -= next.cost;
+      else if (next.stocked) this.supply(this.accountOf(ship), ship.fit[next.mount!]!.part, this.serviceBase(ship), 1);
       else this.chargeForService(this.accountOf(ship), next.cost, this.serviceBase(ship));
       ship.upkeep += next.cost;
     }
@@ -5018,6 +5225,17 @@ export class Sim {
 
   private collectOre(ship: Ship): void {
     const reach = SHIP_RADIUS + ORE_RADIUS + PICKUP_MARGIN;
+    // Only the player picks up modules for now: nobody else has a use for them yet.
+    if (ship === this.ship && this.loot.length > 0) {
+      this.loot = this.loot.filter((loot) => {
+        if (!this.hasRoomFor(ship, loot.item)) return true;
+        const touch = sweepCircle(loot.px - ship.px, loot.py - ship.py, loot.x - loot.px - (ship.x - ship.px), loot.y - loot.py - (ship.y - ship.py), reach);
+        if (touch === null) return true;
+        ship.hold.push(loot.item);
+        this.events.push({ type: "pickup", x: loot.x, y: loot.y, kind: 0 });
+        return false;
+      });
+    }
     this.ores = this.ores.filter((ore) => {
       const room = this.cargoSpace(ship) - ship.ore;
       if (room <= 0) return true;

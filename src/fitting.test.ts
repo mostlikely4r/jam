@@ -45,15 +45,31 @@ describe("mounts", () => {
 });
 
 describe("the shop fits what it sells", () => {
-  it("a new gun trades in the old one, and selling it puts the hull's own back", () => {
+  it("a new gun puts the old one in the locker, and selling it puts the old one back on", () => {
     const sim = docked("racer");
     const { ship } = sim;
+    const base = sim.baseAt()!;
     expect(sim.buyPart(ship, "gun2")).toBe(true);
     expect(ship.fit.gun!.part).toBe("gun2");
-    expect(ship.credits).toBe(10000 - sim.partPrice("gun2") + sim.partPrice("gun1"));
+    expect(ship.credits).toBe(10000 - sim.partPrice("gun2"));
+    expect(sim.lockerAt(base).map((item) => item.part)).toEqual(["gun1"]);
     expect(sim.sellPart(ship, "gun2")).toBe(true);
     expect(ship.fit.gun!.part).toBe("gun1");
+    expect(sim.lockerAt(base)).toEqual([]);
     expect(ship.credits).toBe(10000);
+  });
+
+  it("AI ships sell back what comes off instead", () => {
+    const sim = new Sim(1, { ...WORLD, floaterStart: false, trafficRacers: 1 });
+    const { ship } = sim.traffic[0];
+    ship.x = ship.px = sim.station.x + DOCK_OFFSET;
+    ship.y = ship.py = sim.station.y;
+    ship.credits = 1000;
+    const base = sim.baseAt(ship)!;
+    expect(sim.buyPart(ship, "gun2")).toBe(true);
+    expect(sim.stockOf(base, "gun1")).toBe(1);
+    expect(ship.credits).toBe(1000 - sim.partPrice("gun2") + sim.partPrice("gun1"));
+    expect(sim.lockers.size).toBe(0);
   });
 
   it("a turret takes the gun onto itself, and gives it back when it goes", () => {
@@ -164,5 +180,74 @@ describe("module damage", () => {
     expect(ship.fit.section!.wear).toBe(1);
     expect(ship.ore).toBe(sim.cargoSpace(ship));
     expect(sim.ores.length).toBe(full - ship.ore);
+  });
+});
+
+describe("items as counted things", () => {
+  it("a module sold to a base goes into its store, and the next buyer gets that one", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    const base = sim.baseAt()!;
+    sim.buyPart(ship, "reverse");
+    expect(sim.sellPart(ship, "reverse")).toBe(true);
+    expect(sim.stockOf(base, "reverse")).toBe(1);
+    const parts = base.parts;
+    expect(sim.buyPart(ship, "reverse")).toBe(true);
+    expect(sim.stockOf(base, "reverse")).toBe(0);
+    // Sold from the store: none of the base's parts went into it.
+    expect(base.parts).toBe(parts);
+  });
+
+  it("modules ride in the bay and take room from the ore", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    const room = sim.cargoSpace(ship);
+    sim.buyPart(ship, "gun2");
+    expect(sim.toHold(ship, { at: "locker", index: 0 })).toBe(true);
+    expect(ship.hold.map((item) => item.part)).toEqual(["gun1"]);
+    expect(sim.cargoSpace(ship)).toBe(room - 6);
+  });
+
+  it("what's left at a base stays there; other bases have their own lockers", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    const base = sim.baseAt()!;
+    sim.buyPart(ship, "strafe");
+    expect(sim.toLocker(ship, { at: "mount", mount: "thrusterStrafeLeft" })).toBe(true);
+    expect(sim.lockerAt(base).length).toBe(1);
+    ship.x += 3000;
+    expect(sim.toLocker(ship, { at: "mount", mount: "thrusterStrafeRight" })).toBe(false);
+    expect(sim.itemAt(ship, { at: "locker", index: 0 })).toBeNull();
+  });
+
+  it("a pair is fitted from the locker as a pair", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    sim.buyPart(ship, "strafe");
+    sim.toLocker(ship, { at: "mount", mount: "thrusterStrafeLeft" });
+    expect(sim.fitItem(ship, { at: "locker", index: 0 })).toBe(false);
+    sim.toLocker(ship, { at: "mount", mount: "thrusterStrafeRight" });
+    expect(sim.fitItem(ship, { at: "locker", index: 0 })).toBe(true);
+    expect(ship.parts.has("strafe")).toBe(true);
+    expect(sim.lockerAt(sim.baseAt()!)).toEqual([]);
+  });
+
+  it("a dropped module drifts, and flying through it picks it up", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    sim.buyPart(ship, "gun2");
+    sim.toHold(ship, { at: "locker", index: 0 });
+    ship.x += 3000;
+    ship.px = ship.x;
+    expect(sim.dropItem(ship, 0)).toBe(true);
+    expect(sim.loot.length).toBe(1);
+    const loot = sim.loot[0];
+    loot.x = loot.px = ship.x + 5;
+    loot.y = loot.py = ship.y;
+    loot.vx = ship.vx;
+    loot.vy = ship.vy;
+    sim.step();
+    expect(sim.loot.length).toBe(0);
+    expect(ship.hold.map((item) => item.part)).toEqual(["gun1"]);
   });
 });

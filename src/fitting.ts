@@ -33,6 +33,8 @@ export interface Fitting {
   programs: PartId[];
   /** What works right now: every working module's part and every running program. Kept up by `refresh`. */
   parts: Set<PartId>;
+  /** Modules carried loose in the cargo bay, taking room from the ore. */
+  hold: Module[];
 }
 
 export const DAMAGED_AT = 0.5;
@@ -91,7 +93,7 @@ export const HULL_DEFAULTS: Record<ShipModel, Partial<Record<MountId, PartId>>> 
 const TURRET_GUN: Omit<Mount, "x" | "y"> = { id: "turretGun", accepts: ["gun"], class: ANY };
 
 export function newFitting(model: ShipModel): Fitting {
-  const fitting: Fitting = { fit: {}, software: new Set(), programs: [], parts: new Set() };
+  const fitting: Fitting = { fit: {}, software: new Set(), programs: [], parts: new Set(), hold: [] };
   for (const [mount, part] of Object.entries(HULL_DEFAULTS[model])) fitting.fit[mount as MountId] = { part, wear: 0 };
   refresh(fitting);
   return fitting;

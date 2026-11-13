@@ -10,7 +10,7 @@
  */
 import { linkedNodes } from "./link";
 import { FLIGHTS, sharedParent, tripSpread } from "./trips";
-import { closestApproach, makeChild, parentOf, walk, type World, type WorldNode } from "./world";
+import { bodyDefaults, closestApproach, isBody, makeChild, parentOf, walk, type NodeKind, type World, type WorldNode } from "./world";
 
 export interface Recipe {
   about: string;
@@ -51,6 +51,13 @@ export function tripSpan(world: World, a: WorldNode, b: WorldNode): number {
   }
   return span;
 }
+
+/** Everything filled-system adds, by name. */
+const FILLED = [
+  "Ember", "Ember scatter", "Mire", "Speck", "Tessel", "Tessel drift", "Kettle", "Kettle belt",
+  "Bulwark", "Bulwark inner ring", "Bulwark outer ring", "Ferrum", "Ferrum shoals", "Ringside",
+  "Pale", "Duo", "Duo minor", "Gloam", "Gloam reach",
+];
 
 /** The game's own station, by the first field. */
 function homeStation(world: World): WorldNode {
@@ -102,6 +109,73 @@ export const RECIPES: Record<string, Recipe> = {
         `Trips from ${home.name} over ${minutes(span)}:`,
         ...tripReport(world, home, base, span),
       ];
+    },
+  },
+  "filled-system": {
+    about: "A basic but filled home system: ten planets, two moons, a dozen fields and a third base, on top of far-base.",
+    start: "shipped",
+    apply(world) {
+      const lines = RECIPES["far-base"].apply(world);
+      const star = world.root;
+      const home = homeStation(world);
+      const homePlanet = walk(world).find((entry) => entry.node.kind === "planet" && entry.parent === star)?.node;
+      if (!homePlanet) throw new Error("This world has no planet round its star");
+      // Everything this recipe adds is named in FILLED, so it can take it all out and run again.
+      for (const name of FILLED) removeNamed(world, name);
+      // Orbit times grow like the home planet's does with distance: further out, slower round.
+      const period = (radius: number, like: { radius: number; period: number }) => Math.round(like.period * Math.pow(radius / like.radius, 1.5));
+      const round = { radius: homePlanet.orbitRadius, period: homePlanet.orbitPeriod };
+      const add = (parent: WorldNode, kind: NodeKind, name: string, settings: Partial<WorldNode>, like = round): WorldNode => {
+        const node = makeChild(world, parent, kind);
+        const radius = settings.radius ?? node.radius;
+        Object.assign(node, bodyDefaults(kind, radius), { name, radius }, settings);
+        if (settings.orbitPeriod === undefined) node.orbitPeriod = period(node.orbitRadius, like);
+        parent.children.push(node);
+        return node;
+      };
+
+      // Inner: a small scorched rock, a heavy cloud world and a speck.
+      const ember = add(star, "planet", "Ember", { radius: 7000, orbitRadius: 820000, orbitPhase: 200, atmosphere: 7000 * 1.6, burnSpeed: 200 });
+      add(ember, "field", "Ember scatter", { orbitRadius: 36000, orbitPeriod: 5200, orbitPhase: 40, rocks: 380 });
+      add(star, "planet", "Mire", { radius: 16000, orbitRadius: 1150000, orbitPhase: 95, atmosphere: 16000 * 1.7, burnSpeed: 160, pullAccel: 170 });
+      add(star, "planet", "Speck", { radius: 3500, orbitRadius: 1380000, orbitPhase: 320, pullAccel: 70, atmosphere: 0, burnSpeed: 0 });
+      // Past home: a rock you can scrape along, and a belt round a big asteroid.
+      const tessel = add(star, "planet", "Tessel", { radius: 9000, orbitRadius: 2150000, orbitPhase: 150, surface: "damage", atmosphere: 0, burnSpeed: 0, pullAccel: 120 });
+      add(tessel, "field", "Tessel drift", { orbitRadius: 42000, orbitPeriod: 7400, orbitPhase: 300 });
+      const kettle = add(star, "asteroid", "Kettle", { radius: 1800, orbitRadius: 2700000, orbitPhase: 30 });
+      add(kettle, "field", "Kettle belt", { radius: 6500, orbitRadius: 10500, orbitPeriod: -4200, orbitPhase: 0, rocks: 640 });
+      // The giant: a wall forty thousand across that traps a Floater, two ring fields, and a moon with a base.
+      const bulwark = add(star, "planet", "Bulwark", { radius: 40000, orbitRadius: 3600000, orbitPhase: 250, pull: 100000, pullFull: 52000, pullAccel: 150, atmosphere: 46000, burnSpeed: 260 });
+      add(bulwark, "field", "Bulwark inner ring", { orbitRadius: 112000, orbitPeriod: 9000, orbitPhase: 10, rocks: 600 });
+      add(bulwark, "field", "Bulwark outer ring", { orbitRadius: 128000, orbitPeriod: 11000, orbitPhase: 190, rocks: 600 });
+      const ferrum = add(bulwark, "moon", "Ferrum", { radius: 3500, orbitRadius: 300000, orbitPeriod: 21000, orbitPhase: 120 });
+      const shoals = add(ferrum, "field", "Ferrum shoals", { orbitRadius: 22000, orbitPeriod: 5600, orbitPhase: 0 });
+      const ringside = add(shoals, "station", "Ringside", {
+        orbitRadius: home.orbitRadius,
+        orbitPeriod: home.orbitPeriod,
+        orbitPhase: 90,
+        spinPeriod: 420,
+        shipyard: true,
+        spawns: [],
+        blueprints: [],
+      });
+      // Outer: an ice ball, a pair of planets round each other, and a dark far world with one lonely field.
+      add(star, "planet", "Pale", { radius: 11000, orbitRadius: 4600000, orbitPhase: 10, atmosphere: 0, burnSpeed: 0 });
+      const duo = add(star, "planet", "Duo", { radius: 8000, orbitRadius: 5500000, orbitPhase: 140, atmosphere: 0, burnSpeed: 0 });
+      add(duo, "planet", "Duo minor", { radius: 5000, orbitRadius: 70000, orbitPeriod: 30000, orbitPhase: 0, atmosphere: 0, burnSpeed: 0, pullAccel: 110 });
+      const gloam = add(star, "planet", "Gloam", { radius: 20000, orbitRadius: 7000000, orbitPhase: 285, atmosphere: 20000 * 1.25, burnSpeed: 240 });
+      add(gloam, "field", "Gloam reach", { orbitRadius: 62000, orbitPeriod: 12000, orbitPhase: 200, rocks: 700 });
+
+      const count = (kind: NodeKind) => walk(world).filter((entry) => entry.node.kind === kind).length;
+      lines.push(`Filled: ${count("planet")} planets, ${count("moon")} moons, ${count("field")} fields, ${count("station")} bases, ${count("asteroid")} big asteroid.`);
+      for (const { node, parent } of walk(world)) {
+        if (!parent || !FILLED.includes(node.name) || isBody(node.kind)) continue;
+        const clear = closestApproach(world, parent, node);
+        if (isBody(parent.kind)) lines.push(`  ${node.name} keeps ${Math.round(clear.gap)} clear of ${parent.name}'s pull.`);
+      }
+      const span = tripSpan(world, home, ringside);
+      lines.push(`Trips from ${home.name} to ${ringside.name} over ${minutes(span)}:`, ...tripReport(world, home, ringside, span));
+      return lines;
     },
   },
 };

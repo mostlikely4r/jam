@@ -71,6 +71,8 @@ export interface Part {
   builtIn?: boolean;
   /** How much room it takes in a cargo bay, in ore. */
   size: number;
+  /** When the ship it's on explodes, it goes up too, wearing every other module by this many hull points. */
+  explosive?: number;
 }
 
 /** The thrusters a ship can have, one mount each. */

@@ -145,6 +145,8 @@ export interface Ship extends Body, Fitting {
   pirateKilledIn: string | null;
   /** The base a defender belongs to, by id: it guards near there and is paid from there. Null: the first. */
   home: string | null;
+  /** Seconds left before it explodes, once its hull has given out: out of control meanwhile. 0 while it's whole. */
+  critical: number;
 }
 
 /** Where an item sits, for moving it: a mount, a place in the bay, or a place in the locker of the base the ship is at. */
@@ -598,6 +600,34 @@ export interface Loot extends Body {
   item: Module;
 }
 
+/**
+ * The player's ship is gone: its pod flies itself to the nearest shipyard, then the player
+ * picks a bare hull or a rebuild of what they had, which takes a while.
+ */
+export interface Down {
+  stage: "pod" | "choosing" | "rebuilding";
+  /** The base with the shipyard the pod is making for. */
+  base: string;
+  /** The pod's route and timing, laid out like a trip record's. */
+  path: { x: number; y: number }[];
+  aim: { x: number; y: number };
+  depart: number;
+  arrive: number;
+  /** Where the pod is now, and was last tick. */
+  x: number;
+  y: number;
+  px: number;
+  py: number;
+  /** The ship as it was fitted when it went critical, for a rebuild. */
+  lost: Partial<Record<MountId, PartId>>;
+  /** Whether the ship has gone up yet. Until then it's still out there, tumbling. */
+  exploded: boolean;
+  /** When a rebuild will be ready. */
+  readyAt: number;
+  /** Whether it died marked or wanted: the new ship starts with a clean name, and the station says so. */
+  cleared: boolean;
+}
+
 export type SimEvent =
   | { type: "shot"; x: number; y: number }
   | { type: "hit"; x: number; y: number }
@@ -847,6 +877,8 @@ export class Sim {
   shots: Shot[] = [];
   ores: Ore[] = [];
   loot: Loot[] = [];
+  /** Set while the player has lost their ship and not yet got a new one. */
+  down: Down | null = null;
   field!: Poi;
   station!: Poi;
   events: SimEvent[] = [];
@@ -908,6 +940,7 @@ export class Sim {
       shots: this.shots,
       ores: this.ores,
       loot: this.loot,
+      down: this.down,
       field: this.field,
       station: this.station,
       stats: this.stats,
@@ -955,7 +988,7 @@ export class Sim {
     const plain = [
       "pirateBase", "deposits", "batteries", "pirateOre",
       "pirateCredits", "pirateCap", "blackMarket", "blackMarketTimer", "distress", "clock", "rocks",
-      "shots", "ores", "loot", "field", "station", "stats", "inflowTimer", "randomState", "seed",
+      "shots", "ores", "loot", "down", "field", "station", "stats", "inflowTimer", "randomState", "seed",
     ] as const;
     for (const key of plain) if (key in data) Object.assign(this, { [key]: data[key] });
     // A save from before every base had its own: what it held was the first base's.
@@ -996,6 +1029,7 @@ export class Sim {
     this.shots = [];
     this.ores = [];
     this.loot = [];
+    this.down = null;
     this.events = [];
     this.stats = { bestOre: this.stats.bestOre, topSpeed: 0 };
     this.discovered = new Set();
@@ -1985,6 +2019,7 @@ export class Sim {
       pirateKilledAt: null,
       pirateKilledIn: null,
       home: null,
+      critical: 0,
     };
   }
 
@@ -2893,6 +2928,7 @@ export class Sim {
     for (const pilot of pilots) this.moveShip(pilot.ship, dt);
     this.touchBodies(this.ship, dt);
     for (const pilot of pilots) this.touchBodies(pilot.ship, dt);
+    this.burnDown(dt);
     this.burnOreOnBodies();
     lap?.("ships");
     this.moveShots(dt);
@@ -3413,6 +3449,7 @@ export class Sim {
       } else if (
         this.tuning.trafficRecords &&
         !pilot.busy &&
+        ship.critical <= 0 &&
         Math.hypot(ship.x - viewer.x, ship.y - viewer.y) > TRAFFIC_SLEEP_DISTANCE &&
         !fighterWithin(ship, sight * 2.5)
       ) {
@@ -3453,6 +3490,7 @@ export class Sim {
       } else if (
         this.tuning.fighterRecords &&
         pilot.calm &&
+        ship.critical <= 0 &&
         Math.hypot(ship.x - viewer.x, ship.y - viewer.y) > TRAFFIC_SLEEP_DISTANCE &&
         !hostileWithin(pilot, sight * 2.5) &&
         !this.answersDistress(pilot)
@@ -4168,6 +4206,8 @@ export class Sim {
 
     const perTick = dt * this.shipResponse(ship);
     ship.firing.clear();
+    // Critical: nobody's flying it any more.
+    if (ship.critical > 0) Object.assign(ship.controls, { thrust: 0, strafe: 0, turn: 0, fire: false, retro: false, stabilize: false });
     // On a click order the pilot decides, or the retro switch would fight its coasting.
     const usesSwitch = ship === this.ship && !this.clickPilot.flying;
     const retro = ship.parts.has("retro") && (usesSwitch ? tuning.retro : controls.retro);
@@ -4436,9 +4476,9 @@ export class Sim {
       const reach = body.radius + SHIP_RADIUS;
       if (body.surface === "none" || distance >= reach) continue;
       if (body.surface === "death") {
-        ship.damageTaken += ship.hull;
+        ship.damageTaken += Math.max(0, ship.hull);
         ship.hull = 0;
-        this.wreckShip(ship);
+        this.wreckShip(ship, true);
         return;
       }
       const nx = distance > 0 ? dx / distance : 1;
@@ -4459,13 +4499,62 @@ export class Sim {
     this.loot = this.loot.filter(clear);
   }
 
-  private wreckShip(ship: Ship): void {
+  /**
+   * The hull has given out: the ship goes critical, out of control, and explodes once its
+   * time is up, or at once (on deadly ground). A player's pod launches as it goes critical.
+   */
+  private wreckShip(ship: Ship, now = false): void {
+    if (ship.critical <= 0) this.goCritical(ship);
+    if (now || this.tuning.criticalSeconds <= 0) this.explode(ship);
+  }
+
+  private goCritical(ship: Ship): void {
+    ship.critical = Math.max(TICK, this.tuning.criticalSeconds);
+    // It tumbles as control goes.
+    ship.spin += (this.random() - 0.5) * 6;
+    if (ship !== this.ship) return;
+    this.clickPilot.cancel();
+    if (this.tuning.askHull) this.launchPod(ship);
+  }
+
+  /** Counts down every critical ship, blowing up those whose time is up, and flies the player's pod. */
+  private burnDown(dt: number): void {
+    for (const ship of [this.ship, ...this.pilots.map((pilot) => pilot.ship)]) {
+      if (ship.critical <= 0) continue;
+      ship.critical -= dt;
+      if (ship.critical <= 0) this.explode(ship);
+    }
+    this.movePod();
+  }
+
+  /**
+   * The ship goes up. What it carried and whatever modules came through whole are left
+   * drifting; destroyed modules are gone. Explosive modules go up with it first. Then it's
+   * rebuilt as before, as a bare hull, except the player's, which waits for its pod.
+   */
+  private explode(ship: Ship): void {
+    ship.critical = 0;
     const player = ship === this.ship;
     this.events.push({ type: "wreck", x: ship.x, y: ship.y, player });
     ship.wrecks++;
     this.dropOre(ship);
+    this.blowUp(ship);
     const { rebuildCost } = this.tuning;
     const account = this.accountOf(ship);
+    if (player) {
+      const cleared = ship.marked || ship.wanted;
+      const yard = this.baseOf(this.nearestDock(ship.x, ship.y, true)) ?? this.bases[0];
+      this.respawn(ship);
+      if (this.down) {
+        this.down.exploded = true;
+        this.down.cleared = cleared;
+        return;
+      }
+      // Nobody asked: a bare hull from the nearest yard, straight away.
+      this.bareHull(ship);
+      this.finishRebuild(yard, rebuildCost, cleared);
+      return;
+    }
     // A pirate is rebuilt from its base's money, or it's gone for good.
     if (ship.faction === "pirate") {
       if (this.pirateCredits < rebuildCost) {
@@ -4474,6 +4563,7 @@ export class Sim {
       }
       this.pirateCredits -= rebuildCost;
       ship.upkeep += rebuildCost;
+      this.bareHull(ship);
       this.respawn(ship);
       return;
     }
@@ -4484,18 +4574,175 @@ export class Sim {
     }
     // Rebuilt at the nearest base with a shipyard, which takes the pay and spends its parts.
     const yard = this.baseOf(this.nearestDock(ship.x, ship.y, true)) ?? this.bases[0];
-    // Only the player can always rebuild. Anyone else needs the money, and the base the parts.
-    if (!player && rebuildCost > 0) {
-      if (account.credits < rebuildCost || !this.hasStockFor(rebuildCost, yard)) {
-        this.removeShip(ship);
-        return;
-      }
+    if (rebuildCost > 0 && (account.credits < rebuildCost || !this.hasStockFor(rebuildCost, yard))) {
+      this.removeShip(ship);
+      return;
     }
     this.chargeForService(account, rebuildCost, yard);
     ship.upkeep += rebuildCost;
-    const cleared = ship.marked || ship.wanted;
+    this.bareHull(ship);
     this.respawn(ship);
-    if (player && this.tuning.chatter) this.chatter.playerRebuilt(rebuildCost, cleared, yard.poi);
+  }
+
+  /** Explosive modules go up, wearing the rest; then whatever's still whole is set adrift, with what was in the bay. */
+  private blowUp(ship: Ship): void {
+    const modules = Object.values(ship.fit).filter((module): module is Module => module !== undefined);
+    for (const bomb of modules) {
+      const blast = partOf(bomb.part).explosive ?? 0;
+      if (blast <= 0 || bomb.wear >= 1) continue;
+      bomb.wear = 1;
+      for (const other of modules) if (other !== bomb) other.wear = Math.min(1, other.wear + blast / this.moduleToughness(other));
+    }
+    for (const module of [...modules, ...ship.hold]) if (module.wear < 1) this.setAdrift(ship, module, WRECK_ORE_SPEED * 2);
+    ship.fit = {};
+    ship.hold = [];
+    refresh(ship);
+  }
+
+  /** A hull as the yard makes it, with its pilot's programs loaded again as far as they fit. */
+  private bareHull(ship: Ship): void {
+    const { software, programs } = ship;
+    Object.assign(ship, newFitting(ship.model));
+    ship.software = software;
+    ship.programs = programs;
+    trimPrograms(ship);
+  }
+
+  /** The player's pod sets out for the nearest shipyard, round whatever's in the way. */
+  private launchPod(ship: Ship): void {
+    const dock = this.nearestDock(ship.x, ship.y, true);
+    const base = this.baseOf(dock) ?? this.bases[0];
+    const end = this.dockPoint(false, base.poi);
+    const path = [{ x: ship.x, y: ship.y }];
+    for (let i = 0; i < 6; i++) {
+      const at = path[path.length - 1];
+      const corner = this.cornerToward(at.x, at.y, end.x, end.y);
+      if (!corner) break;
+      path.push(corner);
+    }
+    path.push(end);
+    let length = 0;
+    for (let i = 1; i < path.length; i++) length += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+    const lost: Down["lost"] = {};
+    for (const [mount, module] of Object.entries(ship.fit) as [MountId, Module | undefined][]) if (module) lost[mount] = module.part;
+    this.down = {
+      stage: "pod",
+      base: base.id,
+      path,
+      aim: { ...end },
+      depart: this.clock,
+      arrive: this.clock + 2 + length / Math.max(1, this.tuning.podSpeed),
+      x: ship.x,
+      y: ship.y,
+      px: ship.x,
+      py: ship.y,
+      lost,
+      exploded: false,
+      readyAt: 0,
+      cleared: false,
+    };
+  }
+
+  /** Flies the pod along its route by the clock, and keeps the player's lost ship parked at the yard meanwhile. */
+  private movePod(): void {
+    const down = this.down;
+    if (!down) return;
+    const base = this.bases.find((each) => each.id === down.base) ?? this.bases[0];
+    const dock = this.dockPoint(false, base.poi);
+    down.px = down.x;
+    down.py = down.y;
+    if (down.stage === "pod") {
+      const share = Math.min(1, (this.clock - down.depart) / Math.max(TICK, down.arrive - down.depart));
+      const at = alongPath(down.path, share);
+      down.x = at.x + share * (dock.x - down.aim.x);
+      down.y = at.y + share * (dock.y - down.aim.y);
+      if (share >= 1 && down.exploded) down.stage = "choosing";
+    } else {
+      down.x = dock.x;
+      down.y = dock.y;
+    }
+    if (down.exploded) {
+      const { ship } = this;
+      ship.x = ship.px = dock.x;
+      ship.y = ship.py = dock.y;
+      ship.vx = ship.vy = 0;
+      ship.spin = 0;
+      Object.assign(this.controls, { thrust: 0, strafe: 0, turn: 0, fire: false });
+    }
+    if (down.stage === "rebuilding" && this.clock >= down.readyAt) {
+      const { ship } = this;
+      for (const [mount, part] of Object.entries(down.lost) as [MountId, PartId][]) ship.fit[mount] = { part, wear: 0 };
+      refresh(ship);
+      trimPrograms(ship);
+      this.finishRebuild(base, this.tuning.rebuildCost, down.cleared);
+    }
+  }
+
+  /** What a rebuild of the lost ship costs beyond a bare hull: every part it had that the hull doesn't come with. */
+  rebuildExtras(): PartId[] {
+    if (!this.down) return [];
+    const defaults = HULL_DEFAULTS[this.ship.model];
+    const extras: PartId[] = [];
+    for (const [mount, part] of Object.entries(this.down.lost) as [MountId, PartId][]) if (defaults[mount] !== part) extras.push(part);
+    return extras;
+  }
+
+  /** The price of a rebuild, and whether the pod's base can supply everything for it. */
+  rebuildOffer(): { cost: number; seconds: number; missing: PartId[] } {
+    const down = this.down;
+    const base = (down && this.bases.find((each) => each.id === down.base)) || this.bases[0];
+    const extras = this.rebuildExtras();
+    let cost = this.tuning.rebuildCost;
+    const needed = new Map<PartId, number>();
+    for (const id of extras) {
+      cost += Math.round(this.partPrice(id) / (partOf(id).set ?? 1));
+      needed.set(id, (needed.get(id) ?? 0) + 1);
+    }
+    const missing = [...needed.keys()].filter((id) => !this.canSupply(base, id));
+    const seconds = this.tuning.rebuildSeconds + this.tuning.rebuildSecondsPerPart * extras.length;
+    return { cost, seconds, missing };
+  }
+
+  /**
+   * The player picks what to fly next, once the pod is in: a bare hull with its own gear at
+   * once, or the ship they lost, rebuilt from the base's store, which costs more and takes a
+   * while. Returns whether it went ahead.
+   */
+  chooseHull(rebuild: boolean): boolean {
+    const down = this.down;
+    if (!down || down.stage !== "choosing") return false;
+    const base = this.bases.find((each) => each.id === down.base) ?? this.bases[0];
+    const { ship } = this;
+    if (!rebuild) {
+      this.bareHull(ship);
+      this.finishRebuild(base, this.tuning.rebuildCost, down.cleared);
+      return true;
+    }
+    const offer = this.rebuildOffer();
+    if (offer.missing.length > 0 || ship.credits < offer.cost - this.tuning.rebuildCost) return false;
+    // The hull itself is paid on the same terms as ever; the parts on top, from the store or made.
+    this.chargeForService(ship, this.tuning.rebuildCost, base);
+    ship.upkeep += this.tuning.rebuildCost;
+    for (const id of this.rebuildExtras()) this.supply(ship, id, base, 1);
+    down.stage = "rebuilding";
+    down.readyAt = this.clock + offer.seconds;
+    return true;
+  }
+
+  /** The player's new ship is ready in the yard's dock. The hull's price was paid when it was chosen, or is paid now. */
+  private finishRebuild(base: Base, cost: number, cleared: boolean): void {
+    const { ship } = this;
+    const rebuilt = this.down?.stage === "rebuilding";
+    if (!rebuilt) {
+      this.chargeForService(ship, cost, base);
+      ship.upkeep += cost;
+    }
+    this.down = null;
+    this.respawn(ship);
+    const dock = this.dockPoint(false, base.poi);
+    ship.x = ship.px = dock.x;
+    ship.y = ship.py = dock.y;
+    if (this.tuning.chatter) this.chatter.playerRebuilt(cost, cleared, base.poi);
   }
 
   /** A wreck's cargo stays in the world for anyone to collect: all of it, or just so much. */
@@ -4960,6 +5207,8 @@ export class Sim {
    */
   threatens(attacker: Ship, target: Ship): boolean {
     if (attacker === target || attacker.hull <= 0) return false;
+    // A ship already going up is no danger, and shooting it more only wrecks what it would leave.
+    if (target.critical > 0) return false;
     if (attacker.faction === "pirate") return target.faction !== "pirate" && (target.ore > 0 || target.marked);
     return attacker.wanted;
   }
@@ -5260,4 +5509,19 @@ export class Sim {
       return false;
     });
   }
+}
+
+/** The point a share of the way along a path of straight pieces. */
+function alongPath(path: { x: number; y: number }[], share: number): { x: number; y: number } {
+  let length = 0;
+  for (let i = 1; i < path.length; i++) length += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+  let left = share * length;
+  for (let i = 1; i < path.length; i++) {
+    const piece = Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+    if (left <= piece && piece > 0) {
+      return { x: path[i - 1].x + ((path[i].x - path[i - 1].x) * left) / piece, y: path[i - 1].y + ((path[i].y - path[i - 1].y) * left) / piece };
+    }
+    left -= piece;
+  }
+  return path[path.length - 1];
 }

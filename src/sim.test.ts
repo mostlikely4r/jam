@@ -6,6 +6,10 @@ import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
 import { bodyAt, DOCK_OFFSET, type FieldSpec, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, type SolidBody, STATION_HALF, TICK } from "./sim";
 import { partOf as partInfo } from "./parts";
 
+// Written for wrecks that happen at once, with a bare hull straight away: critical, the pod
+// and the choice at the yard have their own tests in fitting.test.ts.
+Object.assign(GAME_DEFAULTS, { criticalSeconds: 0, askHull: false });
+
 /** What a ship has beyond its hull's own gear, sorted. */
 function bought(ship: { parts: Set<import("./parts").PartId> }): string[] {
   return [...ship.parts].filter((id) => !partInfo(id).builtIn).sort();

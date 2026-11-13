@@ -3,6 +3,10 @@ import { DEFAULTS } from "./tuning";
 import { roundTrip } from "./save";
 import { type FieldSpec, MAX_HULL, type Poi, type Ship, Sim, type StationSpec, TICK } from "./sim";
 
+// Written for wrecks that happen at once, with a bare hull straight away: critical, the pod
+// and the choice at the yard have their own tests in fitting.test.ts.
+Object.assign(DEFAULTS, { criticalSeconds: 0, askHull: false });
+
 // Long runs never give the worker a turn of the event loop otherwise (see pilot.test.ts).
 afterEach(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 

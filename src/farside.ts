@@ -50,6 +50,10 @@ export const STEP_PARTS: Record<string, FarSide> = {
   moveOres: { out: "in view only", far: "Loose ore out of view just lies there until someone flown comes by." },
   moveShip: { out: "in view only", far: "Records are placed along their route by the clock (`placeRecord`)." },
   touchBodies: { out: "in view only", far: "Record routes never touch a body." },
+  burnDown: {
+    out: "in view only",
+    far: "Only flown ships go critical (from flown hits), and a critical one is never made a record, so it explodes flown. The player's pod flies by the clock wherever it is.",
+  },
   burnOreOnBodies: { out: "in view only", far: "Only loose ore burns, and loose ore out of view doesn't move." },
   moveShots: { out: "in view only", far: "Fights out of view are flown: the dice only say when one starts. Stray shots between traffic aren't modelled yet." },
   fireShots: { out: "in view only", far: "As for shots." },

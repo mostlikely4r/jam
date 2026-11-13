@@ -275,8 +275,12 @@ export class Renderer {
     if (this.wreck) this.wreck.age += frameSeconds;
     if (this.wreck && this.wreck.age > WRECK_WATCH_SECONDS + WRECK_FADE_SECONDS * 2) this.wreck = null;
     const onWreck = this.wreck !== null && this.wreck.age < WRECK_WATCH_SECONDS + WRECK_FADE_SECONDS;
-    const camX = onWreck ? this.wreck!.x : shipX + ship.vx * tuning.lookahead;
-    const camY = onWreck ? this.wreck!.y : shipY + ship.vy * tuning.lookahead;
+    // Once the wreck has been watched, the view rides with the escape pod until there's a new ship.
+    const pod = sim.down?.exploded ? sim.down : null;
+    const podX = pod ? lerp(pod.px, pod.x, alpha) : 0;
+    const podY = pod ? lerp(pod.py, pod.y, alpha) : 0;
+    const camX = onWreck ? this.wreck!.x : pod ? podX : shipX + ship.vx * tuning.lookahead;
+    const camY = onWreck ? this.wreck!.y : pod ? podY : shipY + ship.vy * tuning.lookahead;
     const scale = tuning.zoom * dpr;
     this.view = { camX, camY, scale, dpr, width, height };
 
@@ -323,7 +327,8 @@ export class Renderer {
       this.drawTractor(sim, other, lerp(other.px, other.x, alpha), lerp(other.py, other.y, alpha), alpha, false);
       this.drawDrone(sim, drone, alpha);
     }
-    this.drawShip(ship, shipX, shipY, alpha, [200, 215, 235]);
+    if (!sim.down?.exploded) this.drawShip(ship, shipX, shipY, alpha, [200, 215, 235]);
+    if (sim.down && sim.down.stage === "pod") this.drawPod(lerp(sim.down.px, sim.down.x, alpha), lerp(sim.down.py, sim.down.y, alpha));
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.drawEdgePings(alpha);
@@ -1157,7 +1162,7 @@ export class Renderer {
     flame("thrusterRotateLeft", r * 0.6, r * 0.2, down, 0.7, 2);
     flame("thrusterRotateLeft", -r * 0.7, -r * 0.55, up, 0.7, 2);
 
-    const damage = 1 - ship.hull / 100;
+    const damage = 1 - Math.max(0, ship.hull) / 100;
     ctx.fillStyle = `rgb(${red + damage * 55}, ${green - damage * 120}, ${blue - damage * 150})`;
     ctx.beginPath();
     if (ship.model === "floater") {
@@ -1184,6 +1189,8 @@ export class Renderer {
     }
     this.drawModules(ship);
     this.drawCargo(ship);
+    // Critical: it's coming apart.
+    if (ship.critical > 0) for (let i = 0; i < 3; i++) this.drawSparks((Math.random() - 0.5) * r * 2, (Math.random() - 0.5) * r * 1.6);
     const turret = ship.fit.gun && partOf(ship.fit.gun.part).kind === "turret" ? ship.fit.gun : null;
     if (turret) {
       const gun = ship.fit.turretGun;
@@ -1257,6 +1264,19 @@ export class Renderer {
         }
       }
       if (module.wear >= DAMAGED_AT && module.wear < 1) this.drawSparks(x, y);
+    }
+  }
+
+  /** The escape pod: a small capsule with a blinking light, flying itself to a shipyard. */
+  private drawPod(x: number, y: number): void {
+    const { ctx } = this;
+    ctx.fillStyle = "#dfe7f3";
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    if (Math.floor(performance.now() / 400) % 2 === 0) {
+      ctx.fillStyle = "#ff6b5c";
+      ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
     }
   }
 

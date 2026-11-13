@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mountsFor, newFitting, refresh } from "./fitting";
 import { DEFAULTS } from "./tuning";
+import { partOf as partOfForTest } from "./parts";
 import { DOCK_OFFSET, Sim } from "./sim";
 
 const WORLD = {
@@ -249,5 +250,110 @@ describe("items as counted things", () => {
     sim.step();
     expect(sim.loot.length).toBe(0);
     expect(ship.hold.map((item) => item.part)).toEqual(["gun1"]);
+  });
+});
+
+describe("critical, the pod and the yard", () => {
+  /** A racer out in the open, away from the dock, with a bay and a strafe pair fitted. */
+  function outThere(): Sim {
+    const sim = docked("racer");
+    const { ship } = sim;
+    sim.buyPart(ship, "strafe");
+    sim.buyPart(ship, "bay");
+    sim.buyPart(ship, "spinStabilizer");
+    ship.x = ship.px = ship.x + 2500;
+    sim.step();
+    return sim;
+  }
+
+  function wreck(sim: Sim): void {
+    sim.ship.hull = 1;
+    sim.damageModule(sim.ship, 0, 0, 0);
+    // The hull gives out to a knock against nothing in particular.
+    (sim as unknown as { wreckShip(ship: unknown): void }).wreckShip(sim.ship);
+  }
+
+  it("a ship whose hull gives out loses control, launches its pod, and explodes after a while", () => {
+    const sim = outThere();
+    wreck(sim);
+    expect(sim.ship.critical).toBeGreaterThan(0);
+    expect(sim.down?.stage).toBe("pod");
+    expect(sim.down?.exploded).toBe(false);
+    sim.controls.thrust = 1;
+    sim.step();
+    expect(sim.ship.firing.size).toBe(0);
+    for (let i = 0; i < 120 * 3; i++) sim.step();
+    expect(sim.down?.exploded).toBe(true);
+    expect(sim.ship.critical).toBe(0);
+  });
+
+  it("what came through whole is left drifting; destroyed parts are gone; programs stay with the pilot", () => {
+    const sim = outThere();
+    const { ship } = sim;
+    ship.fit.thrusterStrafeLeft!.wear = 1;
+    wreck(sim);
+    for (let i = 0; i < 120 * 3; i++) sim.step();
+    const drifting = sim.loot.map((loot) => loot.item.part).sort();
+    expect(drifting).toContain("bay");
+    expect(drifting.filter((id) => id === "strafe").length).toBe(1);
+    expect(ship.software.has("spinStabilizer")).toBe(true);
+  });
+
+  it("the pod flies itself to the yard, and there it's a bare hull now or a rebuild that takes a while", () => {
+    const sim = outThere();
+    const before = sim.ship.credits;
+    wreck(sim);
+    for (let i = 0; i < 120 * 60 && sim.down?.stage === "pod"; i++) sim.step();
+    expect(sim.down?.stage).toBe("choosing");
+    const offer = sim.rebuildOffer();
+    expect(offer.missing).toEqual([]);
+    expect(offer.cost).toBe(sim.tuning.rebuildCost + sim.partPrice("strafe") + sim.partPrice("bay"));
+    expect(sim.chooseHull(true)).toBe(true);
+    expect(sim.down?.stage).toBe("rebuilding");
+    for (let i = 0; i < 120 * (offer.seconds + 1) && sim.down; i++) sim.step();
+    expect(sim.down).toBeNull();
+    expect(sim.ship.fit.section!.part).toBe("bay");
+    expect(sim.ship.parts.has("strafe")).toBe(true);
+    expect(sim.ship.parts.has("spinStabilizer")).toBe(true);
+    expect(sim.isDocked()).toBe(true);
+    expect(sim.ship.credits).toBe(before - offer.cost);
+  });
+
+  it("a bare hull is the hull's own gear and nothing more", () => {
+    const sim = outThere();
+    wreck(sim);
+    for (let i = 0; i < 120 * 60 && sim.down?.stage !== "choosing"; i++) sim.step();
+    expect(sim.chooseHull(false)).toBe(true);
+    expect(sim.down).toBeNull();
+    expect(Object.keys(sim.ship.fit).sort()).toEqual(Object.keys(newFitting("racer").fit).sort());
+    expect(sim.ship.parts.has("spinStabilizer")).toBe(true);
+  });
+
+  it("a rebuild needs the store to be able to supply every part", () => {
+    const sim = outThere();
+    wreck(sim);
+    for (let i = 0; i < 120 * 60 && sim.down?.stage !== "choosing"; i++) sim.step();
+    sim.bases[0].parts = 0;
+    expect(sim.rebuildOffer().missing.length).toBeGreaterThan(0);
+    expect(sim.chooseHull(true)).toBe(false);
+  });
+
+  it("a pirate stops counting a ship that's going up as a threat", () => {
+    const sim = outThere();
+    sim.ship.ore = 5;
+    wreck(sim);
+    expect(sim.threatens({ ...sim.ship, faction: "pirate", hull: 100 } as never, sim.ship)).toBe(false);
+  });
+
+  it("explosive modules go up with the ship and take the rest with them", () => {
+    const sim = outThere();
+    partOfForTest("bay").explosive = 1000;
+    try {
+      wreck(sim);
+      for (let i = 0; i < 120 * 3; i++) sim.step();
+      expect(sim.loot.length).toBe(0);
+    } finally {
+      delete partOfForTest("bay").explosive;
+    }
   });
 });

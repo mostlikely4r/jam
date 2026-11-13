@@ -583,8 +583,54 @@ function updatePirateShop(): void {
   shop.replaceChildren(shopHeading, shopButton("1", line, () => sim.buyFromPirateBase(ship)));
 }
 
+/** After losing the ship: the pod on its way, then the choice of what to fly next, then a rebuild under way. */
+function updatePodPanel(): void {
+  const down = sim.down!;
+  const where = sim.baseName(down.base);
+  const offer = down.stage === "choosing" ? sim.rebuildOffer() : null;
+  const left = down.stage === "rebuilding" ? Math.ceil(down.readyAt - sim.now) : 0;
+  const state = `down ${down.stage} ${sim.ship.credits} ${left} ${offer ? JSON.stringify(offer) : ""}`;
+  if (state === shopState) return;
+  shopState = state;
+  shop.hidden = false;
+  const heading = document.createElement("h2");
+  if (down.stage === "pod") {
+    heading.textContent = `Escape pod - flying itself to ${where}`;
+    const note = document.createElement("p");
+    note.className = "news";
+    note.textContent = "Your programs are with you. What survived of the ship is drifting where it went up.";
+    shop.replaceChildren(heading, note);
+    return;
+  }
+  if (down.stage === "rebuilding") {
+    heading.textContent = `${where} shipyard - rebuilding your ship, ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")} to go`;
+    shop.replaceChildren(heading);
+    return;
+  }
+  heading.textContent = `${where} shipyard - your pod is in. What do you fly next?`;
+  const bare: ShopLine = { tag: "bare hull", style: "buy", text: `A new ${sim.ship.model} with its own gear: ${tuning.rebuildCost} credits, ready now`, enabled: true };
+  const extras = sim.rebuildExtras();
+  const seconds = Math.ceil(offer!.seconds);
+  const list = extras.length > 0 ? `, with ${[...new Set(extras)].map((id) => partOf(id).label.toLowerCase()).join(", ")}` : "";
+  const rebuild: ShopLine =
+    offer!.missing.length > 0
+      ? { tag: "can't", text: `Rebuild as it was: the store can't supply ${offer!.missing.map((id) => partOf(id).label.toLowerCase()).join(", ")}`, enabled: false }
+      : sim.ship.credits < offer!.cost - tuning.rebuildCost
+        ? { tag: "not enough money", style: "poor", text: `Rebuild as it was${list}: ${offer!.cost} credits`, enabled: false }
+        : { tag: "rebuild", style: "unlock", text: `Rebuild as it was${list}: ${offer!.cost} credits, ${seconds} s`, enabled: true };
+  shop.replaceChildren(
+    heading,
+    shopButton("", bare, () => sim.chooseHull(false)),
+    shopButton("", rebuild, () => sim.chooseHull(true)),
+  );
+}
+
 function updateShop(): void {
   const { ship } = sim;
+  if (sim.down) {
+    updatePodPanel();
+    return;
+  }
   // Every base has a shop, selling from its own stock.
   const base = sim.baseAt();
   const docked = base !== null;
@@ -927,8 +973,8 @@ function updateThrottle(seconds: number): void {
 
 function readControls(seconds: number): void {
   updateThrottle(seconds);
-  // Watching the wreck: the rebuilt ship waits in the dock until the view gets there.
-  if (renderer.watchingWreck) {
+  // Watching the wreck, or riding in the pod: there's nothing to fly.
+  if (renderer.watchingWreck || sim.down) {
     Object.assign(sim.controls, { thrust: 0, strafe: 0, turn: 0, fire: false });
     return;
   }

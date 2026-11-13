@@ -211,6 +211,15 @@ export const DEFAULTS = {
   moduleToughness: 30,
   /** How much tougher a ship's core is: main and turning thrusters, and the computer. */
   coreToughness: 2.5,
+  /** Seconds a ship is out of control after its hull gives out, before it explodes. */
+  criticalSeconds: 2.5,
+  /** After a wreck, the pod flies to a shipyard and you pick a bare hull or a rebuild. Off: a bare hull, at once. */
+  askHull: true,
+  /** How fast the player's escape pod flies itself to a shipyard. */
+  podSpeed: 1500,
+  /** How long a full rebuild takes, and how much longer for each part beyond the bare hull. */
+  rebuildSeconds: 20,
+  rebuildSecondsPerPart: 4,
   pirateStartOre: 40,
   pirateLimit: 2,
   /** The pirate base's starting money, and what it keeps back for rebuilds before buying anything. */

@@ -5,6 +5,10 @@ import { DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, MAX_HULL, Sim, TICK } from "./sim";
 import { partOf as partInfo } from "./parts";
 
+// Written for wrecks that happen at once, with a bare hull straight away: critical, the pod
+// and the choice at the yard have their own tests in fitting.test.ts.
+Object.assign(DEFAULTS, { criticalSeconds: 0, askHull: false });
+
 /** What a ship has beyond its hull's own gear, sorted. */
 function bought(ship: { parts: Set<import("./parts").PartId> }): string[] {
   return [...ship.parts].filter((id) => !partInfo(id).builtIn).sort();
@@ -2448,7 +2452,10 @@ describe("pirate and defender", () => {
       for (let i = 0; i < Math.round(30 / TICK) && sim.traffic.length > 0; i++) sim.step();
       expect(sim.traffic.length).toBe(0);
       run(sim, 2);
-      expect(sim.ores.length + pirate.ore + pirate.earned / DEFAULTS.creditsPerOre).toBe(2);
+      // Whichever pirate picks it up: the base may have sent out another.
+      const pirates = sim.fighters.map((each) => each.ship).filter((ship) => ship.faction === "pirate");
+      const held = pirates.reduce((sum, ship) => sum + ship.ore + ship.earned / DEFAULTS.creditsPerOre, 0);
+      expect(sim.ores.length + held).toBe(2);
     }, 30000);
   });
 

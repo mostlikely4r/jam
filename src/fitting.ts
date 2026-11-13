@@ -2,7 +2,7 @@ import { isProgram, partFits, partOf, type PartId, type PartKind, type ShipModel
 
 /**
  * Where things fit on a hull. Each ship has its six thrusters, a gun, a tractor, a computer
- * and a section at the back. A turret on the gun mount brings a gun mount of its own.
+ * and a cargo section inside the hull. A turret on the gun mount brings a gun mount of its own.
  */
 export type MountId = ThrusterRole | "gun" | "turretGun" | "tractor" | "computer" | "section";
 
@@ -60,14 +60,14 @@ export const HULL_MOUNTS: Record<ShipModel, Mount[]> = {
     { id: "gun", accepts: ["gun"], class: ANY, x: 1.05, y: 0 },
     { id: "tractor", accepts: ["tractor"], class: ANY, x: 0.45, y: 0 },
     { id: "computer", accepts: ["computer"], class: ANY, x: -0.25, y: 0 },
-    { id: "section", accepts: ["section"], class: ANY, x: -1.35, y: 0 },
+    { id: "section", accepts: ["section"], class: ANY, x: -0.55, y: 0.35 },
   ],
   floater: [
     ...thrusters(1, -1),
     { id: "gun", accepts: ["gun", "turret"], class: ANY, x: 0.1, y: 0 },
     { id: "tractor", accepts: ["tractor"], class: ANY, x: 0.8, y: 0 },
     { id: "computer", accepts: ["computer"], class: ANY, x: -0.55, y: 0 },
-    { id: "section", accepts: ["section"], class: ANY, x: -1.45, y: 0 },
+    { id: "section", accepts: ["section"], class: ANY, x: -0.2, y: 0.4 },
   ],
 };
 

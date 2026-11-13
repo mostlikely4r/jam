@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mountsFor, newFitting, refresh } from "./fitting";
+import { HULL_MOUNTS, mountsFor, newFitting, refresh } from "./fitting";
 import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
-import { DOCK_OFFSET, Sim } from "./sim";
+import { DOCK_OFFSET, SHIP_RADIUS, Sim } from "./sim";
 
 const WORLD = {
   ...DEFAULTS,
@@ -177,7 +177,9 @@ describe("module damage", () => {
     ship.ore = sim.cargoSpace(ship);
     const full = ship.ore;
     ship.angle = 0;
-    sim.damageModule(ship, -30, 0, 1000);
+    // Right on the bay, inside the hull.
+    const bay = HULL_MOUNTS.racer.find((mount) => mount.id === "section")!;
+    sim.damageModule(ship, bay.x * SHIP_RADIUS, bay.y * SHIP_RADIUS, 1000);
     expect(ship.fit.section!.wear).toBe(1);
     expect(ship.ore).toBe(sim.cargoSpace(ship));
     expect(sim.ores.length).toBe(full - ship.ore);
@@ -285,6 +287,24 @@ describe("critical, the pod and the yard", () => {
     for (let i = 0; i < 120 * 3; i++) sim.step();
     expect(sim.down?.exploded).toBe(true);
     expect(sim.ship.critical).toBe(0);
+  });
+
+  it("the pod pops out and drifts clear while the ship goes up, and is still flying once the wreck's been watched", () => {
+    const sim = outThere();
+    const { x, y } = sim.ship;
+    wreck(sim);
+    // Ship critical, then the wreck watch: the pod is out there to be seen, a little way off.
+    for (let i = 0; i < 120 * (sim.tuning.criticalSeconds + 2.6); i++) sim.step();
+    const down = sim.down!;
+    expect(down.exploded).toBe(true);
+    expect(down.stage).toBe("pod");
+    const off = Math.hypot(down.x - x, down.y - y);
+    expect(off).toBeGreaterThan(50);
+    expect(off).toBeLessThan(1500);
+    // Then it sets out, and the flight takes long enough to watch.
+    for (let i = 0; i < 120 * 4; i++) sim.step();
+    expect(sim.down?.stage).toBe("pod");
+    expect(sim.down!.path.length).toBeGreaterThan(1);
   });
 
   it("what came through whole is left drifting; destroyed parts are gone; programs stay with the pilot", () => {

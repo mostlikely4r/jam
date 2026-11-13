@@ -20,6 +20,7 @@ import {
   type PoiReading,
   type Ship,
   type SimEvent,
+  type Down,
 } from "./sim";
 
 const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
@@ -129,6 +130,8 @@ export class Renderer {
   dev = false;
   /** The player's wreck, watched for a moment before the view returns to the rebuilt ship. */
   private wreck: { x: number; y: number; age: number } | null = null;
+  /** Which way the escape pod points: the way it last moved. */
+  private podAngle = 0;
   /** The world being drawn, for details drawn deep inside. */
   private sim: Sim | null = null;
   /** Each ship's own scatter of cargo lumps. */
@@ -328,7 +331,7 @@ export class Renderer {
       this.drawDrone(sim, drone, alpha);
     }
     if (!sim.down?.exploded) this.drawShip(ship, shipX, shipY, alpha, [200, 215, 235]);
-    if (sim.down && sim.down.stage === "pod") this.drawPod(lerp(sim.down.px, sim.down.x, alpha), lerp(sim.down.py, sim.down.y, alpha));
+    if (sim.down && sim.down.stage === "pod") this.drawPod(sim.down, alpha);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.drawEdgePings(alpha);
@@ -1219,7 +1222,7 @@ export class Renderer {
 
   /**
    * What's fitted, where it's fitted: thruster nozzles, the gun, the tractor's dish, the
-   * computer, and a cargo section as a box at the back. Damaged parts glow orange and
+   * computer. A cargo section sits inside the hull and isn't drawn. Damaged parts glow orange and
    * spark; destroyed ones are dark stubs. Drawn in the ship's own frame.
    */
   private drawModules(ship: Ship): void {
@@ -1232,7 +1235,7 @@ export class Renderer {
       if (part.kind === "turret") continue;
       const x = mount.x * r;
       const y = mount.y * r;
-      const color = moduleColor(module, part.kind === "section" ? "#7d8799" : "#a9b4c6");
+      const color = moduleColor(module, "#a9b4c6");
       ctx.fillStyle = color;
       ctx.strokeStyle = color;
       switch (part.kind) {
@@ -1257,26 +1260,68 @@ export class Renderer {
         case "computer":
           ctx.fillRect(x - 2, y - 2, 4, 4);
           break;
-        case "section": {
-          const long = (part.cargo ?? 20) >= 50 ? 0.9 : 0.6;
-          ctx.fillRect(x - long * r * 0.5, y - r * 0.45, long * r, r * 0.9);
+        case "section":
+          // A bay sits inside the hull: nothing shows outside it.
           break;
-        }
       }
       if (module.wear >= DAMAGED_AT && module.wear < 1) this.drawSparks(x, y);
     }
   }
 
   /** The escape pod: a small capsule with a blinking light, flying itself to a shipyard. */
-  private drawPod(x: number, y: number): void {
+  private drawPod(down: Down, alpha: number): void {
     const { ctx } = this;
+    const x = lerp(down.px, down.x, alpha);
+    const y = lerp(down.py, down.y, alpha);
+    const dx = down.x - down.px;
+    const dy = down.y - down.py;
+    const moving = Math.hypot(dx, dy) > 0.01;
+    if (moving) this.podAngle = Math.atan2(dy, dx);
+    const cruising = down.path.length > 0;
+    const now = performance.now();
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(this.podAngle);
+    if (cruising) {
+      const flicker = 0.8 + Math.random() * 0.4;
+      ctx.fillStyle = "rgba(255, 170, 80, 0.9)";
+      ctx.beginPath();
+      ctx.moveTo(-6, -2.5);
+      ctx.lineTo(-6 - 12 * flicker, 0);
+      ctx.lineTo(-6, 2.5);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // A blunt capsule, nose forward.
     ctx.fillStyle = "#dfe7f3";
+    ctx.strokeStyle = "#8d99ad";
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.moveTo(8, 0);
+    ctx.quadraticCurveTo(6, -5, 0, -5);
+    ctx.lineTo(-6, -4);
+    ctx.lineTo(-6, 4);
+    ctx.lineTo(0, 5);
+    ctx.quadraticCurveTo(6, 5, 8, 0);
+    ctx.closePath();
     ctx.fill();
-    if (Math.floor(performance.now() / 400) % 2 === 0) {
+    ctx.stroke();
+    ctx.fillStyle = "#4a6a8f";
+    ctx.beginPath();
+    ctx.arc(2.5, 0, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    // A beacon that blinks, with a ring so it reads at any zoom.
+    if (Math.floor(now / 450) % 2 === 0) {
       ctx.fillStyle = "#ff6b5c";
-      ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+      ctx.beginPath();
+      ctx.arc(x, y, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255, 107, 92, 0.45)";
+      ctx.lineWidth = 1.5 / Math.max(0.3, this.view.scale / this.view.dpr);
+      ctx.beginPath();
+      ctx.arc(x, y, 16, 0, Math.PI * 2);
+      ctx.stroke();
     }
   }
 

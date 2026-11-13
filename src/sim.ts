@@ -608,7 +608,14 @@ export interface Down {
   stage: "pod" | "choosing" | "rebuilding";
   /** The base with the shipyard the pod is making for. */
   base: string;
-  /** The pod's route and timing, laid out like a trip record's. */
+  /**
+   * The pod's route and timing, laid out like a trip record's. It first drifts clear of the
+   * ship at `vx, vy` (dying away) until `depart`, while the ship goes up and the view watches;
+   * the route is laid out from wherever it has drifted to.
+   */
+  launched: number;
+  vx: number;
+  vy: number;
   path: { x: number; y: number }[];
   aim: { x: number; y: number };
   depart: number;
@@ -4608,30 +4615,26 @@ export class Sim {
     trimPrograms(ship);
   }
 
-  /** The player's pod sets out for the nearest shipyard, round whatever's in the way. */
+  /**
+   * The player's pod pops out sideways as the ship goes critical, drifts clear while it goes
+   * up, then sets out for the nearest shipyard, round whatever's in the way.
+   */
   private launchPod(ship: Ship): void {
     const dock = this.nearestDock(ship.x, ship.y, true);
     const base = this.baseOf(dock) ?? this.bases[0];
-    const end = this.dockPoint(false, base.poi);
-    const path = [{ x: ship.x, y: ship.y }];
-    for (let i = 0; i < 6; i++) {
-      const at = path[path.length - 1];
-      const corner = this.cornerToward(at.x, at.y, end.x, end.y);
-      if (!corner) break;
-      path.push(corner);
-    }
-    path.push(end);
-    let length = 0;
-    for (let i = 1; i < path.length; i++) length += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+    const side = ship.angle + (this.random() < 0.5 ? 1 : -1) * Math.PI * 0.6;
     const lost: Down["lost"] = {};
     for (const [mount, module] of Object.entries(ship.fit) as [MountId, Module | undefined][]) if (module) lost[mount] = module.part;
     this.down = {
       stage: "pod",
       base: base.id,
-      path,
-      aim: { ...end },
-      depart: this.clock,
-      arrive: this.clock + 2 + length / Math.max(1, this.tuning.podSpeed),
+      launched: this.clock,
+      vx: ship.vx * 0.5 + Math.cos(side) * POD_EJECT_SPEED,
+      vy: ship.vy * 0.5 + Math.sin(side) * POD_EJECT_SPEED,
+      path: [],
+      aim: { x: 0, y: 0 },
+      depart: this.clock + Math.max(0, this.tuning.criticalSeconds) + POD_DRIFT_SECONDS,
+      arrive: 0,
       x: ship.x,
       y: ship.y,
       px: ship.x,
@@ -4643,6 +4646,25 @@ export class Sim {
     };
   }
 
+  /** Lays out the pod's route from where it has drifted to, and when it gets in. */
+  private planPod(down: Down): void {
+    const base = this.bases.find((each) => each.id === down.base) ?? this.bases[0];
+    const end = this.dockPoint(false, base.poi);
+    const path = [{ x: down.x, y: down.y }];
+    for (let i = 0; i < 6; i++) {
+      const at = path[path.length - 1];
+      const corner = this.cornerToward(at.x, at.y, end.x, end.y);
+      if (!corner) break;
+      path.push(corner);
+    }
+    path.push(end);
+    let length = 0;
+    for (let i = 1; i < path.length; i++) length += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+    down.path = path;
+    down.aim = { ...end };
+    down.arrive = Math.max(this.clock, down.depart) + Math.max(POD_MIN_FLIGHT_SECONDS, length / Math.max(1, this.tuning.podSpeed));
+  }
+
   /** Flies the pod along its route by the clock, and keeps the player's lost ship parked at the yard meanwhile. */
   private movePod(): void {
     const down = this.down;
@@ -4651,12 +4673,23 @@ export class Sim {
     const dock = this.dockPoint(false, base.poi);
     down.px = down.x;
     down.py = down.y;
-    if (down.stage === "pod") {
-      const share = Math.min(1, (this.clock - down.depart) / Math.max(TICK, down.arrive - down.depart));
+    if (down.stage === "pod" && down.path.length === 0 && (this.clock < down.depart || !down.exploded)) {
+      // Drifting clear of the wreck, the push dying away.
+      const fade = Math.exp(-(this.clock - down.launched) / POD_DRIFT_EASE);
+      down.x += down.vx * fade * TICK;
+      down.y += down.vy * fade * TICK;
+    } else if (down.stage === "pod") {
+      if (down.path.length === 0) {
+        down.depart = this.clock;
+        this.planPod(down);
+      }
+      // Eases out of the drift and into the dock, cruising between.
+      const raw = Math.min(1, (this.clock - down.depart) / Math.max(TICK, down.arrive - down.depart));
+      const share = raw * raw * (3 - 2 * raw);
       const at = alongPath(down.path, share);
       down.x = at.x + share * (dock.x - down.aim.x);
       down.y = at.y + share * (dock.y - down.aim.y);
-      if (share >= 1 && down.exploded) down.stage = "choosing";
+      if (raw >= 1) down.stage = "choosing";
     } else {
       down.x = dock.x;
       down.y = dock.y;
@@ -5510,6 +5543,16 @@ export class Sim {
     });
   }
 }
+
+/**
+ * How fast the escape pod pops out of a critical ship, how long it drifts clear once the ship
+ * has gone up (about the wreck watch), and how fast that drift dies away.
+ */
+const POD_EJECT_SPEED = 90;
+const POD_DRIFT_SECONDS = 2.6;
+const POD_DRIFT_EASE = 2;
+/** The shortest flight to the yard, so there's always a ride to watch. */
+const POD_MIN_FLIGHT_SECONDS = 6;
 
 /** The point a share of the way along a path of straight pieces. */
 function alongPath(path: { x: number; y: number }[], share: number): { x: number; y: number } {

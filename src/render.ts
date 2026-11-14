@@ -2,6 +2,7 @@ import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
 import { DAMAGED_AT, HULL_MOUNTS, type Module } from "./fitting";
 import { partOf } from "./parts";
+import { drawPixelShip, drawVectorShip, SHIP_ARTS, type ShipArt } from "./shipArt";
 import {
   BLACK_MARKET_LENGTH,
   BLACK_MARKET_WIDTH,
@@ -132,6 +133,8 @@ export class Renderer {
   private wreck: { x: number; y: number; age: number } | null = null;
   /** Which way the escape pod points: the way it last moved. */
   private podAngle = 0;
+  /** How ships and their parts are drawn: a player setting (V), while the look is being chosen. */
+  shipArt: ShipArt = "vector";
   /** The world being drawn, for details drawn deep inside. */
   private sim: Sim | null = null;
   /** Each ship's own scatter of cargo lumps. */
@@ -1166,31 +1169,38 @@ export class Renderer {
     flame("thrusterRotateLeft", -r * 0.7, -r * 0.55, up, 0.7, 2);
 
     const damage = 1 - Math.max(0, ship.hull) / 100;
-    ctx.fillStyle = `rgb(${red + damage * 55}, ${green - damage * 120}, ${blue - damage * 150})`;
-    ctx.beginPath();
-    if (ship.model === "floater") {
-      // Square, a little slimmer at the front. A pale front edge shows which way it faces.
-      ctx.moveTo(r, -r * 0.7);
-      ctx.lineTo(-r, -r);
-      ctx.lineTo(-r, r);
-      ctx.lineTo(r, r * 0.7);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = "#f4f8ff";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(r, -r * 0.7);
-      ctx.lineTo(r, r * 0.7);
-      ctx.stroke();
+    const art = SHIP_ARTS.indexOf(this.shipArt);
+    if (art >= 1) {
+      const tint = [red + damage * 55, green - damage * 120, blue - damage * 150].map((v) => Math.round(Math.max(0, Math.min(255, v)))) as [number, number, number];
+      const broken = art >= 2 ? drawPixelShip(ctx, ship, tint) : drawVectorShip(ctx, ship, tint);
+      for (const [bx, by] of broken) this.drawSparks(bx, by);
     } else {
-      ctx.moveTo(SHIP_RADIUS * 1.25, 0);
-      ctx.lineTo(-SHIP_RADIUS, -SHIP_RADIUS * 0.8);
-      ctx.lineTo(-SHIP_RADIUS * 0.55, 0);
-      ctx.lineTo(-SHIP_RADIUS, SHIP_RADIUS * 0.8);
-      ctx.closePath();
-      ctx.fill();
+      ctx.fillStyle = `rgb(${red + damage * 55}, ${green - damage * 120}, ${blue - damage * 150})`;
+      ctx.beginPath();
+      if (ship.model === "floater") {
+        // Square, a little slimmer at the front. A pale front edge shows which way it faces.
+        ctx.moveTo(r, -r * 0.7);
+        ctx.lineTo(-r, -r);
+        ctx.lineTo(-r, r);
+        ctx.lineTo(r, r * 0.7);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "#f4f8ff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(r, -r * 0.7);
+        ctx.lineTo(r, r * 0.7);
+        ctx.stroke();
+      } else {
+        ctx.moveTo(SHIP_RADIUS * 1.25, 0);
+        ctx.lineTo(-SHIP_RADIUS, -SHIP_RADIUS * 0.8);
+        ctx.lineTo(-SHIP_RADIUS * 0.55, 0);
+        ctx.lineTo(-SHIP_RADIUS, SHIP_RADIUS * 0.8);
+        ctx.closePath();
+        ctx.fill();
+      }
+      this.drawModules(ship);
     }
-    this.drawModules(ship);
     this.drawCargo(ship);
     // Critical: it's coming apart.
     if (ship.critical > 0) for (let i = 0; i < 3; i++) this.drawSparks((Math.random() - 0.5) * r * 2, (Math.random() - 0.5) * r * 1.6);

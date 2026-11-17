@@ -10,7 +10,7 @@ import { Audio } from "./audio";
 import { Radio } from "./radio";
 import { type Base, type Deposit, MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
-import { type BlueprintId, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartId } from "./parts";
+import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartId } from "./parts";
 import { computerSize, mountsFor, mountsHolding, owns } from "./fitting";
 import { Inventory } from "./inventory";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
@@ -683,7 +683,7 @@ function updateShop(): void {
   });
   shop.append(open);
   for (const part of PARTS) {
-    if (isProgram(part.id)) continue;
+    if (isProgram(part.id) || !isGear(part)) continue;
     const line = partLine(part);
     if (line) shop.append(shopButton("", line, () => tradePart(part)));
   }
@@ -901,7 +901,7 @@ function buildPanel(): void {
       note.textContent = "Your ship's parts, free for testing:";
       body.append(note);
       for (const part of PARTS) {
-        if (!partFits(part, sim.ship.model)) continue;
+        if (!partFits(part, sim.ship.model) || !isGear(part)) continue;
         const toggle = document.createElement("label");
         toggle.className = "toggle";
         const box = document.createElement("input");

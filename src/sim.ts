@@ -1,6 +1,6 @@
 import { Chatter } from "./chatter";
-import { type BlueprintId, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
-import { computerSize, DAMAGED_AT, facing, fitPart, mountsOf, mountWith, thrustOf, turretMount, type Fitting, HULL_DEFAULTS, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
+import { type BlueprintId, isGear, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
+import { computerSize, DAMAGED_AT, facing, fitPart, mountsOf, mountWith, thrustOf, turretMount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
 import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./pilot";
 export { FIRST_FIELD };
 import { pathAround } from "./route";
@@ -894,6 +894,8 @@ export class Sim {
   discovered = new Set<string>();
   /** The world's own random numbers, from a state that can be saved. */
   private randomState = { a: 1 };
+  /** Picks the decals new ships wear: apart from the world's random numbers, so looks never change play. */
+  private lookState = { a: 1 };
   /** The seed the world was made from: each never-seen field lays its rocks from it. */
   private seed = 1;
   private random = (): number => nextRandom(this.randomState);
@@ -956,6 +958,7 @@ export class Sim {
       sleeping: [...this.sleeping.values()],
       lockers: this.lockers,
       randomState: this.randomState,
+      lookState: this.lookState,
       seed: this.seed,
     };
   }
@@ -995,7 +998,7 @@ export class Sim {
     const plain = [
       "pirateBase", "deposits", "batteries", "pirateOre",
       "pirateCredits", "pirateCap", "blackMarket", "blackMarketTimer", "distress", "clock", "rocks",
-      "shots", "ores", "loot", "down", "field", "station", "stats", "inflowTimer", "randomState", "seed",
+      "shots", "ores", "loot", "down", "field", "station", "stats", "inflowTimer", "randomState", "lookState", "seed",
     ] as const;
     for (const key of plain) if (key in data) Object.assign(this, { [key]: data[key] });
     // A save from before every base had its own: what it held was the first base's.
@@ -1030,6 +1033,7 @@ export class Sim {
   reset(seed: number): void {
     this.seed = seed >>> 0;
     this.randomState = { a: seed >>> 0 };
+    this.lookState = { a: (seed ^ 0x5bd1e995) >>> 0 };
     this.chatter = new Chatter(seed);
     this.rocks = [];
     this.sleeping = new Map();
@@ -1132,8 +1136,7 @@ export class Sim {
       const at = orbitsAt(spawns[Math.floor(this.random() * spawns.length)].orbits, this.clock);
       Object.assign(this.ship, { x: at.x, y: at.y, px: at.x, py: at.y });
     }
-    // The floater's pilot comes knowing how to fly it by clicks.
-    if (model === "floater") for (const id of ["clickMove", "clickTurn"] as const) this.giveProgram(this.ship, id);
+    // A pilot comes knowing the programs the hull comes with: the floater's, to fly it by clicks.
     this.clickPilot = new ClickPilot(this.ship);
   }
 
@@ -1991,7 +1994,7 @@ export class Sim {
       vx: 0,
       vy: 0,
       controls,
-      ...newFitting(model),
+      ...newFitting(model, () => nextRandom(this.lookState)),
       owner: null,
       credits: 0,
       earned: 0,
@@ -2123,7 +2126,7 @@ export class Sim {
   blueprintQueue(base: Base = this.bases[0]): BlueprintId[] {
     if (!this.tuning.stationUnlocks) return [];
     const paid = (id: BlueprintId) => base.blueprintPaid.get(id) ?? 0;
-    const ids: BlueprintId[] = [...PARTS.map((part) => part.id), "drone", ...PROJECTS];
+    const ids: BlueprintId[] = [...PARTS.filter(isGear).map((part) => part.id), "drone", ...PROJECTS];
     return ids
       .filter((id) => this.canOrder(id, base))
       .sort(
@@ -2647,7 +2650,7 @@ export class Sim {
 
   /** Puts the hull's own gear back on any mount left without it: from the player's locker, or bought. */
   private refitDefaults(ship: Ship, base: Base): void {
-    for (const id of new Set(Object.values(HULL_DEFAULTS[ship.model]) as PartId[])) {
+    for (const id of new Set(Object.values(hullDefaults(ship.model)) as PartId[])) {
       const mounts = mountsFor(ship, id);
       if (mounts.length === 0 || mounts.some((mount) => ship.fit[mount])) continue;
       const locker = ship === this.ship ? this.lockerAt(base) : [];
@@ -2724,7 +2727,7 @@ export class Sim {
    */
   tidyMounts(): void {
     for (const ship of [this.ship, ...this.pilots.map((pilot) => pilot.ship)]) {
-      const ids = new Set(mountsOf(ship).map((mount) => mount.id));
+      const ids = new Set(mountsOf(ship).filter((mount) => !mount.decal).map((mount) => mount.id));
       let moved = false;
       for (const [mount, module] of Object.entries(ship.fit) as [MountId, Module | undefined][]) {
         if (ids.has(mount) || !module) continue;
@@ -4675,10 +4678,12 @@ export class Sim {
 
   /** A hull as the yard makes it, with its pilot's programs loaded again as far as they fit. */
   private bareHull(ship: Ship): void {
-    const { software, programs } = ship;
+    const { software, programs, decals } = ship;
     Object.assign(ship, newFitting(ship.model));
     ship.software = software;
     ship.programs = programs;
+    // It's the same hull, so it keeps its look.
+    ship.decals = decals;
     trimPrograms(ship);
   }
 
@@ -4781,7 +4786,7 @@ export class Sim {
   /** What a rebuild of the lost ship costs beyond a bare hull: every part it had that the hull doesn't come with. */
   rebuildExtras(): PartId[] {
     if (!this.down) return [];
-    const defaults = HULL_DEFAULTS[this.ship.model];
+    const defaults = hullDefaults(this.ship.model);
     const extras: PartId[] = [];
     for (const [mount, part] of Object.entries(this.down.lost) as [MountId, PartId][]) if (defaults[mount] !== part) extras.push(part);
     return extras;

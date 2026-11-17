@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { HULL_MOUNTS, mountOf, mountsFor, newFitting, refresh, shipFileNow, thrustOf, useShipFile } from "./fitting";
+import { decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, isDecal, mountOf, mountsFor, mountTakes, newFitting, refresh, shipFileNow, thrustOf, useShipFile } from "./fitting";
+import { SHIP_MODELS } from "./parts";
+import { drawVectorShip } from "./shipArt";
 import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
 import { DOCK_OFFSET, SHIP_RADIUS, Sim } from "./sim";
@@ -535,5 +537,151 @@ describe("turned mounts", () => {
     sim.ship.fit.section = { part: "bay", wear: 0 };
     refresh(sim.ship);
     expect(sim.bayTotal(sim.ship)).toBe(before + 20);
+  });
+});
+
+describe("hulls, defaults and decals", () => {
+  /** Runs `body` with the ship file changed, and puts it back after. */
+  function withFile(change: () => void, body: () => void): void {
+    const was = shipFileNow();
+    try {
+      change();
+      body();
+    } finally {
+      useShipFile(was);
+    }
+  }
+
+  it("has a defender, a drone and a pirate hull beside the racer and the floater", () => {
+    expect([...SHIP_MODELS].sort()).toEqual(["defender", "drone", "floater", "pirate", "racer"]);
+    for (const model of SHIP_MODELS) {
+      expect(HULL_MOUNTS[model].length).toBeGreaterThan(6);
+      expect(newFitting(model).fit.thrusterMain).toBeDefined();
+      expect(newFitting(model).fit.computer).toBeDefined();
+    }
+  });
+
+  it("each mount's own default part is what a bare hull comes with", () => {
+    expect(hullDefaults("racer")).toEqual({
+      thrusterMain: "racerMain",
+      thrusterRotateLeft: "turnThrusters",
+      thrusterRotateRight: "turnThrusters",
+      gun: "gun1",
+      computer: "basicComputer",
+    });
+    withFile(
+      () => (mountOf("racer", "gun")!.default = "gun2"),
+      () => expect(newFitting("racer").fit.gun!.part).toBe("gun2"),
+    );
+    // A default that no longer fits its mount is left off.
+    withFile(
+      () => (mountOf("racer", "gun")!.default = "bay"),
+      () => expect(newFitting("racer").fit.gun).toBeUndefined(),
+    );
+  });
+
+  it("a hull's computer comes with its default programs, as far as it has slots", () => {
+    expect([...newFitting("floater").software].sort()).toEqual(["clickMove", "clickTurn"]);
+    expect([...newFitting("floater").programs].sort()).toEqual(["clickMove", "clickTurn"]);
+    expect(newFitting("racer").software.size).toBe(0);
+    withFile(
+      () => (HULL_INFO.racer.programs = ["spinStabilizer", "meters", "retro"]),
+      () => {
+        const racer = newFitting("racer");
+        expect(racer.software.size).toBe(3);
+        // The basic computer runs two.
+        expect(racer.programs).toEqual(["spinStabilizer", "meters"]);
+      },
+    );
+  });
+
+  it("the new game's ship is given the floater's programs by its hull", () => {
+    const sim = docked("floater");
+    expect(sim.ship.software.has("clickMove")).toBe(true);
+    expect(sim.ship.programs).toContain("clickTurn");
+  });
+
+  it("keeps what each hull is used for", () => {
+    expect(HULL_INFO.racer.usedBy).toContain("newGame");
+    expect(HULL_INFO.pirate.usedBy).toEqual(["pirate"]);
+    expect(HULL_USES).toEqual(["newGame", "sold", "traffic", "defender", "pirate", "drone"]);
+    withFile(
+      () => (HULL_INFO.drone.usedBy = ["drone", "traffic"]),
+      () => {
+        const file = shipFileNow();
+        expect(file.hullInfo!.drone.usedBy).toEqual(["drone", "traffic"]);
+        useShipFile(file);
+        expect(HULL_INFO.drone.usedBy).toEqual(["drone", "traffic"]);
+      },
+    );
+  });
+
+  it("a decal mount shows a random decal part that fits it, and takes nothing real", () => {
+    expect(isDecal("cockpitKite")).toBe(true);
+    expect(isDecal("gun1")).toBe(false);
+    const cockpit = mountOf("floater", "cockpit")!;
+    expect(cockpit.decal).toBe(true);
+    expect(decalChoices("floater", cockpit).sort()).toEqual(["cockpitBar", "cockpitDome", "cockpitKite", "cockpitVisor"]);
+    // The racer's cockpit takes the small ones only.
+    expect(decalChoices("racer", mountOf("racer", "cockpit")!).sort()).toEqual(["cockpitDome", "cockpitKite", "cockpitVisor"]);
+    // Nothing real is fitted to it, and no decal goes on a real mount.
+    expect(mountTakes(cockpit, "gun1")).toBe(false);
+    expect(mountTakes(mountOf("floater", "gun")!, "cockpitKite")).toBe(false);
+    expect(mountsFor({ ...newFitting("racer"), model: "racer" }, "cockpitKite")).toEqual([]);
+    // Ships are given different ones.
+    const seen = new Set<string>();
+    for (let i = 0; i < 40; i++) seen.add(newFitting("floater").decals!.cockpit!);
+    expect(seen.size).toBeGreaterThan(1);
+    // The same random numbers, the same look.
+    const draws = () => {
+      let n = 0;
+      return () => [0.1, 0.4, 0.7, 0.95][n++ % 4];
+    };
+    expect(newFitting("floater", draws()).decals).toEqual(newFitting("floater", draws()).decals);
+    expect(newFitting("floater", () => 0).decals!.cockpit).not.toBe(newFitting("floater", () => 0.99).decals!.cockpit);
+  });
+
+  it("a ship without a decal of its own, such as one from an old save, shows the first that fits", () => {
+    const racer = { model: "racer" as const, fit: {} };
+    const first = decalChoices("racer", mountOf("racer", "cockpit")!)[0];
+    expect(decalOf(racer, mountOf("racer", "cockpit")!)).toBe(first);
+    // And one that no longer fits is replaced.
+    expect(decalOf({ ...racer, decals: { cockpit: "cockpitBar" } }, mountOf("racer", "cockpit")!)).toBe(first);
+  });
+
+  it("a mount flagged as a decal stops taking real parts", () => {
+    withFile(
+      () => (mountOf("floater", "gun")!.decal = true),
+      () => {
+        expect(mountTakes(mountOf("floater", "gun")!, "gun1")).toBe(false);
+        expect(decalChoices("floater", mountOf("floater", "gun")!)).toEqual([]);
+      },
+    );
+  });
+
+  it("a bare hull keeps its look, and decal mounts aren't loose ends when mounts are tidied", () => {
+    const sim = docked("racer");
+    const look = sim.ship.decals!.cockpit;
+    sim.tidyMounts();
+    expect(sim.ship.hold).toEqual([]);
+    expect(sim.ship.decals!.cockpit).toBe(look);
+    // The shop's blueprints are only real gear.
+    expect(sim.blueprintQueue().some((id) => String(id).startsWith("cockpit"))).toBe(false);
+  });
+
+  it("draws every hull, with its decals, without trouble", () => {
+    const calls: string[] = [];
+    const ctx = new Proxy({} as CanvasRenderingContext2D, {
+      get: (_target, name: string) => {
+        if (name === "createRadialGradient") return () => ({ addColorStop() {} });
+        return () => void calls.push(name);
+      },
+      set: () => true,
+    });
+    for (const model of SHIP_MODELS) {
+      const ship = { ...newFitting(model), model };
+      expect(() => drawVectorShip(ctx, ship, [120, 150, 190])).not.toThrow();
+    }
+    expect(calls).toContain("ellipse");
   });
 });

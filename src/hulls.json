@@ -1,5 +1,5 @@
 {
-  "mountTypes": ["large engine", "small engine", "turn thruster", "reverse thruster", "strafe thruster", "gun", "turret", "tractor", "computer", "cargo bay"],
+  "mountTypes": ["large engine", "small engine", "turn thruster", "reverse thruster", "strafe thruster", "gun", "turret", "tractor", "computer", "cargo bay", "cockpit", "wide cockpit"],
   "partMounts": {
     "racerMain": ["large engine"],
     "floaterMain": ["small engine"],
@@ -15,32 +15,88 @@
     "flightComputer": ["computer"],
     "navComputer": ["computer"],
     "bay": ["cargo bay"],
-    "largeBay": ["cargo bay"]
+    "largeBay": ["cargo bay"],
+    "cockpitKite": ["cockpit"],
+    "cockpitBar": ["wide cockpit"],
+    "cockpitDome": ["cockpit"],
+    "cockpitVisor": ["cockpit"]
   },
+  "decalParts": ["cockpitKite", "cockpitBar", "cockpitDome", "cockpitVisor"],
   "hulls": {
     "racer": [
-      { "id": "thrusterMain", "name": "Main thruster", "role": "thrusterMain", "types": ["large engine", "small engine"], "x": -0.8, "y": 0, "angle": 180, "scale": 1 },
-      { "id": "thrusterRotateLeft", "name": "Turn left", "role": "thrusterRotateLeft", "types": ["turn thruster"], "x": -0.7, "y": -0.55, "angle": -90, "scale": 1 },
-      { "id": "thrusterRotateRight", "name": "Turn right", "role": "thrusterRotateRight", "types": ["turn thruster"], "x": -0.7, "y": 0.55, "angle": 90, "scale": 1 },
+      { "id": "thrusterMain", "name": "Main thruster", "role": "thrusterMain", "types": ["large engine", "small engine"], "x": -0.8, "y": 0, "angle": 180, "scale": 1, "default": "racerMain" },
+      { "id": "thrusterRotateLeft", "name": "Turn left", "role": "thrusterRotateLeft", "types": ["turn thruster"], "x": -0.7, "y": -0.55, "angle": -90, "scale": 1, "default": "turnThrusters" },
+      { "id": "thrusterRotateRight", "name": "Turn right", "role": "thrusterRotateRight", "types": ["turn thruster"], "x": -0.7, "y": 0.55, "angle": 90, "scale": 1, "default": "turnThrusters" },
       { "id": "thrusterReverse", "name": "Reverse", "role": "thrusterReverse", "types": ["reverse thruster"], "x": 0.9, "y": 0, "angle": 0, "scale": 1 },
       { "id": "thrusterStrafeLeft", "name": "Strafe left", "role": "thrusterStrafeLeft", "types": ["strafe thruster"], "x": 0, "y": 0.45, "angle": 90, "scale": 1 },
       { "id": "thrusterStrafeRight", "name": "Strafe right", "role": "thrusterStrafeRight", "types": ["strafe thruster"], "x": 0, "y": -0.45, "angle": -90, "scale": 1 },
-      { "id": "gun", "name": "Gun", "types": ["gun"], "x": 1.05, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "gun", "name": "Gun", "types": ["gun"], "x": 1.05, "y": 0, "angle": 0, "scale": 1, "default": "gun1" },
       { "id": "tractor", "name": "Tractor", "types": ["tractor"], "x": 0.45, "y": 0, "angle": 0, "scale": 1 },
-      { "id": "computer", "name": "Computer", "types": ["computer"], "x": -0.25, "y": 0, "angle": 0, "scale": 1 },
-      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.15, "y": 0, "angle": 0, "scale": 1 }
+      { "id": "computer", "name": "Computer", "types": ["computer"], "x": -0.25, "y": 0, "angle": 0, "scale": 1, "default": "basicComputer" },
+      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.15, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "cockpit", "name": "Cockpit", "types": ["cockpit"], "x": 0.54, "y": 0, "angle": 0, "scale": 1, "decal": true }
     ],
     "floater": [
-      { "id": "thrusterMain", "name": "Main thruster", "role": "thrusterMain", "types": ["small engine"], "x": -1, "y": 0, "angle": 180, "scale": 1 },
-      { "id": "thrusterRotateLeft", "name": "Turn left", "role": "thrusterRotateLeft", "types": ["turn thruster"], "x": -0.7, "y": -0.55, "angle": -90, "scale": 1 },
-      { "id": "thrusterRotateRight", "name": "Turn right", "role": "thrusterRotateRight", "types": ["turn thruster"], "x": -0.7, "y": 0.55, "angle": 90, "scale": 1 },
+      { "id": "thrusterMain", "name": "Main thruster", "role": "thrusterMain", "types": ["small engine"], "x": -1, "y": 0, "angle": 180, "scale": 1, "default": "floaterMain" },
+      { "id": "thrusterRotateLeft", "name": "Turn left", "role": "thrusterRotateLeft", "types": ["turn thruster"], "x": -0.7, "y": -0.55, "angle": -90, "scale": 1, "default": "turnThrusters" },
+      { "id": "thrusterRotateRight", "name": "Turn right", "role": "thrusterRotateRight", "types": ["turn thruster"], "x": -0.7, "y": 0.55, "angle": 90, "scale": 1, "default": "turnThrusters" },
       { "id": "thrusterReverse", "name": "Reverse", "role": "thrusterReverse", "types": ["reverse thruster"], "x": 0.9, "y": 0, "angle": 0, "scale": 1 },
       { "id": "thrusterStrafeLeft", "name": "Strafe left", "role": "thrusterStrafeLeft", "types": ["strafe thruster"], "x": 0, "y": 0.45, "angle": 90, "scale": 1 },
       { "id": "thrusterStrafeRight", "name": "Strafe right", "role": "thrusterStrafeRight", "types": ["strafe thruster"], "x": 0, "y": -0.45, "angle": -90, "scale": 1 },
-      { "id": "gun", "name": "Gun", "types": ["gun", "turret"], "x": 0.1, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "gun", "name": "Gun", "types": ["gun", "turret"], "x": 0.1, "y": 0, "angle": 0, "scale": 1, "default": "gun2" },
       { "id": "tractor", "name": "Tractor", "types": ["tractor"], "x": 0.8, "y": 0, "angle": 0, "scale": 1 },
-      { "id": "computer", "name": "Computer", "types": ["computer"], "x": -0.55, "y": 0, "angle": 0, "scale": 1 },
-      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.5, "y": 0, "angle": 0, "scale": 1 }
+      { "id": "computer", "name": "Computer", "types": ["computer"], "x": -0.55, "y": 0, "angle": 0, "scale": 1, "default": "flightComputer" },
+      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.5, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "cockpit", "name": "Cockpit", "types": ["cockpit", "wide cockpit"], "x": 0.79, "y": 0, "angle": 0, "scale": 1, "decal": true }
+    ],
+    "defender": [
+      { "id": "thrusterMain", "name": "Main thruster", "role": "thrusterMain", "types": ["large engine", "small engine"], "x": -0.85, "y": 0, "angle": 180, "scale": 1, "default": "racerMain" },
+      { "id": "thrusterRotateLeft", "name": "Turn left", "role": "thrusterRotateLeft", "types": ["turn thruster"], "x": -0.7, "y": -0.6, "angle": -90, "scale": 1, "default": "turnThrusters" },
+      { "id": "thrusterRotateRight", "name": "Turn right", "role": "thrusterRotateRight", "types": ["turn thruster"], "x": -0.7, "y": 0.6, "angle": 90, "scale": 1, "default": "turnThrusters" },
+      { "id": "thrusterReverse", "name": "Reverse", "role": "thrusterReverse", "types": ["reverse thruster"], "x": 0.9, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "thrusterStrafeLeft", "name": "Strafe left", "role": "thrusterStrafeLeft", "types": ["strafe thruster"], "x": 0, "y": 0.45, "angle": 90, "scale": 1 },
+      { "id": "thrusterStrafeRight", "name": "Strafe right", "role": "thrusterStrafeRight", "types": ["strafe thruster"], "x": 0, "y": -0.45, "angle": -90, "scale": 1 },
+      { "id": "gunLeft", "name": "Gun left", "types": ["gun"], "x": 0.85, "y": -0.4, "angle": 0, "scale": 1, "default": "gun1" },
+      { "id": "gunRight", "name": "Gun right", "types": ["gun"], "x": 0.85, "y": 0.4, "angle": 0, "scale": 1, "default": "gun1" },
+      { "id": "tractor", "name": "Tractor", "types": ["tractor"], "x": 0.55, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "computer", "name": "Computer", "types": ["computer"], "x": -0.25, "y": 0, "angle": 0, "scale": 1, "default": "basicComputer" },
+      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.15, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "cockpit", "name": "Cockpit", "types": ["cockpit"], "x": 0.3, "y": 0, "angle": 0, "scale": 1, "decal": true }
+    ],
+    "drone": [
+      { "id": "thrusterMain", "name": "Main thruster", "role": "thrusterMain", "types": ["large engine", "small engine"], "x": -0.9, "y": 0, "angle": 180, "scale": 1, "default": "racerMain" },
+      { "id": "thrusterRotateLeft", "name": "Turn left", "role": "thrusterRotateLeft", "types": ["turn thruster"], "x": -0.7, "y": -0.55, "angle": -90, "scale": 1, "default": "turnThrusters" },
+      { "id": "thrusterRotateRight", "name": "Turn right", "role": "thrusterRotateRight", "types": ["turn thruster"], "x": -0.7, "y": 0.55, "angle": 90, "scale": 1, "default": "turnThrusters" },
+      { "id": "thrusterReverse", "name": "Reverse", "role": "thrusterReverse", "types": ["reverse thruster"], "x": 0.8, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "thrusterStrafeLeft", "name": "Strafe left", "role": "thrusterStrafeLeft", "types": ["strafe thruster"], "x": 0, "y": 0.4, "angle": 90, "scale": 1 },
+      { "id": "thrusterStrafeRight", "name": "Strafe right", "role": "thrusterStrafeRight", "types": ["strafe thruster"], "x": 0, "y": -0.4, "angle": -90, "scale": 1 },
+      { "id": "gun", "name": "Gun", "types": ["gun"], "x": 0.95, "y": 0, "angle": 0, "scale": 1, "default": "gun1" },
+      { "id": "tractor", "name": "Tractor", "types": ["tractor"], "x": 0.55, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "computer", "name": "Computer", "types": ["computer"], "x": -0.25, "y": 0, "angle": 0, "scale": 1, "default": "basicComputer" },
+      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.15, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "cockpit", "name": "Cockpit", "types": ["cockpit"], "x": 0.3, "y": 0, "angle": 0, "scale": 0.8, "decal": true }
+    ],
+    "pirate": [
+      { "id": "thrusterMain", "name": "Main thruster", "role": "thrusterMain", "types": ["large engine", "small engine"], "x": -0.75, "y": 0, "angle": 180, "scale": 1, "default": "racerMain" },
+      { "id": "thrusterRotateLeft", "name": "Turn left", "role": "thrusterRotateLeft", "types": ["turn thruster"], "x": -0.7, "y": -0.45, "angle": -90, "scale": 1, "default": "turnThrusters" },
+      { "id": "thrusterRotateRight", "name": "Turn right", "role": "thrusterRotateRight", "types": ["turn thruster"], "x": -0.7, "y": 0.45, "angle": 90, "scale": 1, "default": "turnThrusters" },
+      { "id": "thrusterReverse", "name": "Reverse", "role": "thrusterReverse", "types": ["reverse thruster"], "x": 0.8, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "thrusterStrafeLeft", "name": "Strafe left", "role": "thrusterStrafeLeft", "types": ["strafe thruster"], "x": 0, "y": 0.35, "angle": 90, "scale": 1 },
+      { "id": "thrusterStrafeRight", "name": "Strafe right", "role": "thrusterStrafeRight", "types": ["strafe thruster"], "x": 0, "y": -0.35, "angle": -90, "scale": 1 },
+      { "id": "gun", "name": "Nose gun", "types": ["gun"], "x": 1.15, "y": 0, "angle": 0, "scale": 1, "default": "gun1" },
+      { "id": "gunLeft", "name": "Wing gun left", "types": ["gun"], "x": -0.1, "y": -0.9, "angle": 0, "scale": 1 },
+      { "id": "gunRight", "name": "Wing gun right", "types": ["gun"], "x": -0.1, "y": 0.9, "angle": 0, "scale": 1 },
+      { "id": "tractor", "name": "Tractor", "types": ["tractor"], "x": 0.5, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "computer", "name": "Computer", "types": ["computer"], "x": -0.2, "y": 0, "angle": 0, "scale": 1, "default": "basicComputer" },
+      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.3, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "cockpit", "name": "Cockpit", "types": ["cockpit"], "x": 0.55, "y": 0, "angle": 0, "scale": 0.8, "decal": true }
     ]
+  },
+  "hullInfo": {
+    "racer": { "programs": [], "usedBy": ["newGame", "sold", "traffic"] },
+    "floater": { "programs": ["clickMove", "clickTurn"], "usedBy": ["newGame", "sold", "traffic"] },
+    "defender": { "programs": [], "usedBy": ["defender"] },
+    "drone": { "programs": [], "usedBy": ["drone"] },
+    "pirate": { "programs": [], "usedBy": ["pirate"] }
   }
 }

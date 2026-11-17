@@ -21,16 +21,24 @@ export type PartId =
   | "gun1"
   | "basicComputer"
   | "flightComputer"
-  | "navComputer";
+  | "navComputer"
+  | "cockpitKite"
+  | "cockpitBar"
+  | "cockpitDome"
+  | "cockpitVisor";
 
 /**
  * Where a part goes: on a mount of that kind, or (a program) into a computer's slots.
  * Programs are software: they belong to the pilot, not the ship.
  */
-export type PartKind = "thruster" | "gun" | "turret" | "tractor" | "computer" | "section" | "program";
+export type PartKind = "thruster" | "gun" | "turret" | "tractor" | "computer" | "section" | "program" | "cockpit";
 
-/** The racer is the quick ship with an arrow shape. The floater is slow and square. */
-export type ShipModel = "racer" | "floater";
+/**
+ * The hulls there are. The racer is the quick ship with an arrow shape. The floater is slow and
+ * square. The defender, drone and pirate hulls are drawn and fitted in the hull designer.
+ */
+export const SHIP_MODELS = ["racer", "floater", "defender", "drone", "pirate"] as const;
+export type ShipModel = (typeof SHIP_MODELS)[number];
 
 export interface Part {
   id: PartId;
@@ -347,7 +355,58 @@ export const PARTS: Part[] = [
     description: "Runs 2 programs at once",
     tier: 0,
   },
+  // Cockpit glass: looks only. In the hull designer these are flagged as decals, which only go
+  // on decal mounts and are never sold or fitted for real.
+  {
+    id: "cockpitKite",
+    kind: "cockpit",
+    size: 0,
+    label: "Kite cockpit",
+    short: "kite",
+    price: 0,
+    weight: 0,
+    description: "A pointed glass canopy. Looks only",
+    tier: 0,
+  },
+  {
+    id: "cockpitBar",
+    kind: "cockpit",
+    size: 0,
+    label: "Bar cockpit",
+    short: "bar",
+    price: 0,
+    weight: 0,
+    description: "A wide glass strip across the front. Looks only",
+    tier: 0,
+  },
+  {
+    id: "cockpitDome",
+    kind: "cockpit",
+    size: 0,
+    label: "Dome cockpit",
+    short: "dome",
+    price: 0,
+    weight: 0,
+    description: "A round glass bubble. Looks only",
+    tier: 0,
+  },
+  {
+    id: "cockpitVisor",
+    kind: "cockpit",
+    size: 0,
+    label: "Visor cockpit",
+    short: "visor",
+    price: 0,
+    weight: 0,
+    description: "A narrow slit of glass. Looks only",
+    tier: 0,
+  },
 ];
+
+/** Whether a part is for fitting and selling: cockpit glass is looks only. */
+export function isGear(part: Part): boolean {
+  return part.kind !== "cockpit";
+}
 
 /** A part by its id. */
 export function partOf(id: PartId): Part {
@@ -371,6 +430,9 @@ export const DRONE_BUY_ORDER: PartId[] = ["spinStabilizer", "reverse", "strafe",
 export const TRAFFIC_BUY_ORDER: Record<ShipModel, PartId[]> = {
   racer: ["reverse", "strafe", "spinStabilizer", "bay"],
   floater: ["tractor", "turret", "reverse", "strafe", "spinStabilizer", "bay"],
+  defender: [],
+  drone: [],
+  pirate: [],
 };
 
 /** What the station builds on site from its own parts, rather than having a hauler bring it. */

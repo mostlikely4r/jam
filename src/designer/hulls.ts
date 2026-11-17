@@ -1,17 +1,25 @@
 /**
  * Dev only: the hull designer. Three pages:
- * - Hulls: each hull's mounts drawn big, as a blueprint, to add, remove, move, turn and size. A
- *   mount has a name, the mount types it supports and, for a thruster, the control that fires it.
- *   What's on a mount goes with it and works the way it faces: a thruster pushes away from its
- *   flame, a gun fires and a tractor looks the way they point.
- * - Parts: which mount types each part fits. A part goes on a mount that supports one of them.
+ * - Hulls: pick a hull from the list. It has what it's used for and the programs its computer
+ *   comes with, and its mounts drawn big, as a blueprint, to add, remove, move, turn and size. A
+ *   mount has a name, the mount types it supports, the part a bare hull comes with there and, for
+ *   a thruster, the control that fires it. What's on a mount goes with it and works the way it
+ *   faces: a thruster pushes away from its flame, a gun fires and a tractor looks the way they point.
+ *   A decal mount shows a random decal part that fits it (the cockpit glass, say), for looks only.
+ * - Parts: pick a part from the list. Which mount types it fits: it goes on a mount that supports
+ *   one of them. A decal part is looks only, and only for decal mounts.
  * - Mount types: the list both pick from.
  * Changes are in the game at once; Save writes them all to src/hulls.json, which the game ships with.
  */
 import {
+  decalChoices,
+  DECAL_PARTS,
   facing,
-  HULL_DEFAULTS,
+  HULL_INFO,
   HULL_MOUNTS,
+  HULL_USE_NAMES,
+  HULL_USES,
+  isDecal,
   MOUNT_TYPES,
   mountTakes,
   mountThrust,
@@ -20,17 +28,20 @@ import {
   shipFileNow,
   THRUSTER_ROLES,
   useShipFile,
+  type HullUse,
   type Mount,
   type MountId,
   type ShipFile,
 } from "../fitting";
-import { partFits, partOf, PARTS, type PartId, type ShipModel, type ThrusterRole } from "../parts";
-import { drawHull, drawPart } from "../shipArt";
+import { partFits, partOf, PARTS, SHIP_MODELS, type PartId, type ShipModel, type ThrusterRole } from "../parts";
+import { drawDecals, drawHull, drawPart } from "../shipArt";
 
 const R = 12;
 const DRAFT_KEY = "jam-ships-draft";
-const MODELS: ShipModel[] = ["racer", "floater"];
-const MODEL_NAMES: Record<ShipModel, string> = { racer: "Racer", floater: "Floater" };
+const MODEL_NAMES: Record<ShipModel, string> = { racer: "Racer", floater: "Floater", defender: "Defender", drone: "Drone", pirate: "Pirate" };
+const byName = (a: string, b: string) => a.localeCompare(b);
+/** Every hull, alphabetically by name: the order of the drop down lists. */
+const MODELS: ShipModel[] = [...SHIP_MODELS].sort((a, b) => byName(MODEL_NAMES[a], MODEL_NAMES[b]));
 const ROLE_NAMES: Record<ThrusterRole, string> = {
   thrusterMain: "Main (W)",
   thrusterReverse: "Reverse (S)",
@@ -46,8 +57,10 @@ const MIRROR_ROLE: Partial<Record<ThrusterRole, ThrusterRole>> = {
   thrusterStrafeLeft: "thrusterStrafeRight",
   thrusterStrafeRight: "thrusterStrafeLeft",
 };
-/** The parts that go on mounts, in the parts page's order. */
-const FITTED = PARTS.filter((part) => part.kind !== "program");
+/** The parts that go on mounts (or show as decals), alphabetically by label: the parts page's order. */
+const FITTED = PARTS.filter((part) => part.kind !== "program").sort((a, b) => byName(a.label, b.label));
+/** The programs a hull's computer can come with, alphabetically. */
+const PROGRAMS = PARTS.filter((part) => part.kind === "program").sort((a, b) => byName(a.label, b.label));
 
 type Page = "hulls" | "parts" | "types";
 
@@ -87,10 +100,11 @@ const wrapDegrees = (angle: number) => {
   return a === -180 ? 180 : a;
 };
 
-/** What a mount is drawn holding: the hull's own part there, or else the first part that fits it. */
+/** What a mount is drawn holding: the hull's own part there, or else the first part that fits it. A decal mount holds none: its decal is drawn on the hull. */
 function shownPart(model: ShipModel, mount: Mount): PartId | null {
-  const own = HULL_DEFAULTS[model][mount.id];
-  if (own && mountTakes(mount, own)) return own;
+  if (mount.decal) return null;
+  const own = mount.default;
+  if (own && mountTakes(mount, own) && partFits(partOf(own), model)) return own;
   return FITTED.find((part) => partFits(part, model) && mountTakes(mount, part.id))?.id ?? null;
 }
 
@@ -104,6 +118,8 @@ export class HullDesigner {
   private selected: MountId | null = "thrusterMain";
   private part: PartId = FITTED[0].id;
   private hover: MountId | null = null;
+  /** Which of its decals each decal mount shows in the blueprint: "Show another decal" steps it on. */
+  private look = 0;
   private drag: { kind: "move" | "turn"; moved: boolean } | null = null;
   private status = "";
   /** Screen pixels per world unit, and where the ship's middle is on screen. */
@@ -206,21 +222,48 @@ export class HullDesigner {
     return h;
   }
 
-  /** Ticks for each mount type, `has` saying which are on; `toggle` flips one. */
-  private checks(has: (type: string) => boolean, toggle: (type: string, on: boolean) => void): HTMLDivElement {
+  /** A drop down list: `options` are [value, text] in the order shown. */
+  private dropdown(options: [string, string][], value: string, onChange: (value: string) => void): HTMLSelectElement {
+    const box = document.createElement("select");
+    for (const [optionValue, text] of options) {
+      const option = document.createElement("option");
+      option.value = optionValue;
+      option.textContent = text;
+      box.append(option);
+    }
+    box.value = value;
+    box.addEventListener("change", () => onChange(box.value));
+    return box;
+  }
+
+  /** A control with a caption above it, for the side panel. */
+  private labelled(text: string, box: HTMLElement): HTMLLabelElement {
+    const label = document.createElement("label");
+    label.textContent = text;
+    label.append(box);
+    return label;
+  }
+
+  /** Ticks for each of `items` ([id, text]), `has` saying which are on; `toggle` flips one. Mount types by default. */
+  private checks(
+    has: (id: string) => boolean,
+    toggle: (id: string, on: boolean) => void,
+    items: [string, string][] = MOUNT_TYPES.map((type) => [type, type]),
+    none = "No mount types yet: add some on the Mount types page.",
+  ): HTMLDivElement {
     const box = document.createElement("div");
     box.className = "checks";
-    if (MOUNT_TYPES.length === 0) box.textContent = "No mount types yet: add some on the Mount types page.";
-    for (const type of MOUNT_TYPES) {
+    if (items.length === 0) box.textContent = none;
+    for (const [id, text] of items) {
       const label = document.createElement("label");
       const input = document.createElement("input");
       input.type = "checkbox";
-      input.checked = has(type);
+      input.checked = has(id);
       input.addEventListener("change", () => {
-        toggle(type, input.checked);
+        toggle(id, input.checked);
         this.changed();
       });
-      label.append(input, type);
+      label.append(input, text);
       box.append(label);
     }
     return box;
@@ -263,20 +306,37 @@ export class HullDesigner {
     const intro = document.createElement("p");
     intro.textContent = "Drag a mount to move it, its knob to turn it. What's on it moves with it and works the way it faces.";
 
-    const models = document.createElement("div");
-    for (const model of MODELS) {
-      models.append(
-        this.button(
-          MODEL_NAMES[model],
-          () => {
-            this.model = model;
-            this.selected = this.mounts()[0]?.id ?? null;
-            this.rebuild();
-          },
-          model === this.model ? "on" : "",
-        ),
-      );
-    }
+    const models = this.labelled(
+      "Hull",
+      this.dropdown(
+        MODELS.map((model) => [model, MODEL_NAMES[model]]),
+        this.model,
+        (value) => {
+          this.model = value as ShipModel;
+          this.selected = this.mounts()[0]?.id ?? null;
+          this.rebuild();
+        },
+      ),
+    );
+    const info = HULL_INFO[this.model];
+    const usedBy = this.checks(
+      (use) => info.usedBy.includes(use as HullUse),
+      (use, on) => {
+        info.usedBy = on ? [...info.usedBy, use as HullUse] : info.usedBy.filter((each) => each !== use);
+      },
+      HULL_USES.map((use) => [use, HULL_USE_NAMES[use]]),
+    );
+    const usedNote = document.createElement("p");
+    usedNote.textContent = "Kept for later: the game doesn't pick hulls by these yet.";
+    const programs = this.checks(
+      (id) => info.programs.includes(id as PartId),
+      (id, on) => {
+        info.programs = on ? [...info.programs, id as PartId] : info.programs.filter((each) => each !== id);
+      },
+      PROGRAMS.map((part) => [part.id, part.label]),
+    );
+    const programsNote = document.createElement("p");
+    programsNote.textContent = "Loaded into its computer as far as it has slots, and the pilot owns them.";
 
     const list = document.createElement("div");
     list.className = "list";
@@ -292,7 +352,22 @@ export class HullDesigner {
     }
     const add = this.button("Add a mount", () => this.addMount());
 
-    const out: HTMLElement[] = [intro, this.heading("Hull"), models, this.heading("Mounts"), list, add];
+    const decals = this.button("Show another decal", () => ((this.look += 1), this.rebuild()));
+    const out: HTMLElement[] = [
+      intro,
+      this.heading("Hull"),
+      models,
+      this.heading("Used by"),
+      usedBy,
+      usedNote,
+      this.heading("Default programs"),
+      programs,
+      programsNote,
+      this.heading("Mounts"),
+      list,
+      add,
+      decals,
+    ];
     const mount = this.mount();
     if (!mount) return out;
 
@@ -306,6 +381,22 @@ export class HullDesigner {
       this.changed();
     });
     name.append(nameBox);
+
+    const decal = document.createElement("label");
+    const decalBox = document.createElement("input");
+    decalBox.type = "checkbox";
+    decalBox.checked = mount.decal === true;
+    decalBox.addEventListener("change", () => {
+      if (decalBox.checked) {
+        mount.decal = true;
+        delete mount.role;
+        delete mount.default;
+      } else delete mount.decal;
+      this.onMountsChanged();
+      this.changed();
+    });
+    decal.style.color = "#cfd8e6";
+    decal.append(decalBox, " Decal: shows a random decal part, looks only");
 
     const role = document.createElement("label");
     role.textContent = "Fired by (for a thruster on it)";
@@ -331,8 +422,28 @@ export class HullDesigner {
       },
     );
     const takes = document.createElement("p");
-    const fits = FITTED.filter((part) => partFits(part, this.model) && mountTakes(mount, part.id)).map((part) => part.label);
-    takes.textContent = fits.length ? `Takes: ${fits.join(", ")}` : "Takes nothing yet.";
+    const fitting = FITTED.filter((part) => partFits(part, this.model) && mountTakes(mount, part.id));
+    const fits = fitting.map((part) => part.label);
+    takes.textContent = mount.decal
+      ? fits.length
+        ? `Shows one of: ${fits.join(", ")}`
+        : "Shows nothing yet: flag a part as a decal on the Parts page and give it one of these types."
+      : fits.length
+        ? `Takes: ${fits.join(", ")}`
+        : "Takes nothing yet.";
+
+    const bare = this.labelled(
+      "Bare hull comes with",
+      this.dropdown(
+        [["", "nothing"], ...fitting.map((part): [string, string] => [part.id, part.label])],
+        fitting.some((part) => part.id === mount.default) ? mount.default! : "",
+        (value) => {
+          if (value) mount.default = value as PartId;
+          else delete mount.default;
+          this.changed();
+        },
+      ),
+    );
 
     const grid = document.createElement("div");
     grid.className = "fields";
@@ -366,6 +477,9 @@ export class HullDesigner {
         this.button("Back as shipped", () => {
           Object.assign(mount, JSON.parse(JSON.stringify(was)));
           if (!was.role) delete mount.role;
+          if (!was.default) delete mount.default;
+          if (!was.decal) delete mount.decal;
+          this.onMountsChanged();
           this.changed();
         }),
       );
@@ -385,23 +499,51 @@ export class HullDesigner {
       "Green arrows: which way each thruster pushes the ship.",
     ].join("\n");
 
-    return [...out, this.heading(mount.name), name, role, this.heading("Supports"), supports, takes, grid, this.does, tools, this.heading("Keys"), keys];
+    return [
+      ...out,
+      this.heading(mount.name),
+      name,
+      decal,
+      ...(mount.decal ? [] : [role, bare]),
+      this.heading("Supports"),
+      supports,
+      takes,
+      grid,
+      this.does,
+      tools,
+      this.heading("Keys"),
+      keys,
+    ];
   }
 
   private partsPage(): HTMLElement[] {
     const intro = document.createElement("p");
     intro.textContent = "Which mount types each part fits. It goes on any mount that supports one of them. The blueprint lights up the mounts it would go on.";
-    const list = document.createElement("div");
-    list.className = "list";
-    for (const part of FITTED) {
-      const b = this.button(part.label, () => ((this.part = part.id), this.rebuild()), part.id === this.part ? "on" : "");
-      const types = document.createElement("span");
-      types.className = "dim";
-      types.textContent = `  ${(PART_MOUNTS[part.id] ?? []).join(", ") || "fits nothing"}`;
-      b.append(types);
-      list.append(b);
-    }
+    const list = this.labelled(
+      "Part",
+      this.dropdown(
+        FITTED.map((each): [string, string] => [each.id, each.label + (isDecal(each.id) ? " (decal)" : "")]),
+        this.part,
+        (value) => {
+          this.part = value as PartId;
+          this.rebuild();
+        },
+      ),
+    );
     const part = partOf(this.part);
+    const decal = document.createElement("label");
+    const decalBox = document.createElement("input");
+    decalBox.type = "checkbox";
+    decalBox.checked = isDecal(part.id);
+    decalBox.addEventListener("change", () => {
+      const at = DECAL_PARTS.indexOf(part.id);
+      if (decalBox.checked && at < 0) DECAL_PARTS.push(part.id);
+      else if (!decalBox.checked && at >= 0) DECAL_PARTS.splice(at, 1);
+      this.onMountsChanged();
+      this.changed();
+    });
+    decal.style.color = "#cfd8e6";
+    decal.append(decalBox, " Decal: looks only. It shows, at random, on decal mounts that fit it, and is never fitted or sold");
     const fits = this.checks(
       (type) => (PART_MOUNTS[part.id] ?? []).includes(type),
       (type, on) => {
@@ -419,9 +561,18 @@ export class HullDesigner {
     where.style.whiteSpace = "pre-line";
     const set = document.createElement("p");
     if ((part.set ?? 1) > 1) set.textContent = `Comes as a set of ${part.set}: it needs that many mounts it fits.`;
-    const models = document.createElement("div");
-    for (const model of MODELS) models.append(this.button(`Show on ${MODEL_NAMES[model]}`, () => ((this.model = model), this.rebuild()), model === this.model ? "on" : ""));
-    return [intro, this.heading("Parts"), list, this.heading(`${part.label} fits`), fits, set, this.heading("Goes on"), where, models];
+    const models = this.labelled(
+      "Show on hull",
+      this.dropdown(
+        MODELS.map((model) => [model, MODEL_NAMES[model]]),
+        this.model,
+        (value) => {
+          this.model = value as ShipModel;
+          this.rebuild();
+        },
+      ),
+    );
+    return [intro, this.heading("Part"), list, decal, this.heading(`${part.label} fits`), fits, set, this.heading("Goes on"), where, models];
   }
 
   private typesPage(): HTMLElement[] {
@@ -543,6 +694,10 @@ export class HullDesigner {
       return `${what} ${Math.abs(a)}° ${a > 0 ? "right" : "left"} of the nose`;
     };
     const lines: string[] = [];
+    if (mount.decal) {
+      lines.push("A decal mount: it shows a random decal part that fits it, for looks only. Nothing real goes here, and hits pass it by.");
+      return lines.join("\n");
+    }
     if (mount.role) {
       const { push, turn } = mountThrust(mount);
       if (mount.role === "thrusterRotateLeft" || mount.role === "thrusterRotateRight") {
@@ -784,6 +939,10 @@ export class HullDesigner {
     ctx.translate(this.cx, this.cy);
     ctx.scale(this.zoom, this.zoom);
     drawHull(ctx, this.model, [120, 150, 190]);
+    drawDecals(ctx, this.model, (mount) => {
+      const choices = decalChoices(this.model, mount);
+      return choices.length ? choices[this.look % choices.length] : null;
+    });
     for (const mount of this.mounts()) {
       const shown = shownPart(this.model, mount);
       if (!shown) continue;

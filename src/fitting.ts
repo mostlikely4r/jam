@@ -1,4 +1,4 @@
-import { isProgram, partFits, partOf, PARTS, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "./parts";
+import { isProgram, partFits, partOf, PARTS, SHIP_MODELS, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "./parts";
 import shipFile from "./hulls.json";
 
 /**
@@ -6,6 +6,8 @@ import shipFile from "./hulls.json";
  * with the hull designer: as shipped, six thrusters, a gun, a tractor, a computer and a cargo bay.
  * A mount supports some mount types and a part fits some: it goes on where they share one.
  * A turret brings a gun mount of its own while it's on.
+ * A decal mount only shows a look: a ship gets a random decal part that fits it, and nothing
+ * real is ever fitted there.
  */
 export type MountId = string;
 
@@ -27,16 +29,46 @@ export interface Mount {
   angle: number;
   /** How big what's on it is drawn. Looks only. */
   scale: number;
+  /** What a bare hull comes from the yard with on this mount. Must be a part that fits it. */
+  default?: PartId;
+  /** A decal mount: shows a random decal part that fits it, for looks only. Nothing real goes on it. */
+  decal?: boolean;
 }
 
 /** Where a mount sits and faces. */
 export type MountPlace = Pick<Mount, "x" | "y" | "angle" | "scale">;
 
-/** What src/hulls.json holds: the mount types, which each part fits, and each hull's mounts. */
+/** What a hull is used for. The flags are kept for the parts of the game that will pick hulls by them. */
+export const HULL_USES = ["newGame", "sold", "traffic", "defender", "pirate", "drone"] as const;
+export type HullUse = (typeof HULL_USES)[number];
+export const HULL_USE_NAMES: Record<HullUse, string> = {
+  newGame: "New game",
+  sold: "Sold",
+  traffic: "Traffic",
+  defender: "Defender",
+  pirate: "Pirate",
+  drone: "Drone",
+};
+
+/** What a hull has besides its mounts. */
+export interface HullInfo {
+  /** The programs a ship of this hull comes with, loaded into its computer as far as it has slots. */
+  programs: PartId[];
+  /** What the hull is used for. */
+  usedBy: HullUse[];
+}
+
+/**
+ * What src/hulls.json holds: the mount types, which each part fits, which parts are decals,
+ * each hull's mounts and what else each hull has.
+ */
 export interface ShipFile {
   mountTypes: string[];
   partMounts: Partial<Record<PartId, string[]>>;
+  /** The parts flagged as decals: looks only, and only for decal mounts. */
+  decalParts?: PartId[];
   hulls: Record<ShipModel, Mount[]>;
+  hullInfo?: Record<ShipModel, HullInfo>;
 }
 
 /** One fitted part: what it is and how worn. */
@@ -57,6 +89,8 @@ export interface Fitting {
   parts: Set<PartId>;
   /** Modules carried loose in the cargo bay, taking room from the ore. */
   hold: Module[];
+  /** The decal part each decal mount shows. Looks only. A ship without one shows the first that fits. */
+  decals?: Partial<Record<MountId, PartId>>;
 }
 
 export const DAMAGED_AT = 0.5;
@@ -81,7 +115,16 @@ function readMount(raw: Partial<Mount>, index: number): Mount {
     scale: finite(raw.scale, 1),
   };
   if (raw.role && THRUSTER_ROLES.includes(raw.role)) mount.role = raw.role;
+  if (typeof raw.default === "string" && PARTS.some((part) => part.id === raw.default)) mount.default = raw.default;
+  if (raw.decal === true) mount.decal = true;
   return mount;
+}
+
+/** A hull's settings read from a file, with anything missing or unknown left out. */
+function readHullInfo(raw: Partial<HullInfo> | undefined): HullInfo {
+  const programs = strings(raw?.programs).filter((id): id is PartId => PARTS.some((part) => part.id === id && part.kind === "program"));
+  const usedBy = strings(raw?.usedBy).filter((use): use is HullUse => (HULL_USES as readonly string[]).includes(use));
+  return { programs: [...new Set(programs)], usedBy: [...new Set(usedBy)] };
 }
 
 /** The ship file the game shipped with, as read. */
@@ -91,8 +134,12 @@ export const SHIPPED_SHIPS: ShipFile = JSON.parse(JSON.stringify(shipFile)) as S
 export const MOUNT_TYPES: string[] = [];
 /** The mount types each part fits. Changed in place by the hull designer. */
 export const PART_MOUNTS: Partial<Record<PartId, string[]>> = {};
+/** The parts flagged as decals: looks only, and only for decal mounts. Changed in place by the hull designer. */
+export const DECAL_PARTS: PartId[] = [];
 /** Each hull's mounts. The arrays are changed in place, so everything holding them sees it. */
-export const HULL_MOUNTS: Record<ShipModel, Mount[]> = { racer: [], floater: [] };
+export const HULL_MOUNTS = Object.fromEntries(SHIP_MODELS.map((model) => [model, [] as Mount[]])) as Record<ShipModel, Mount[]>;
+/** What else each hull has: its default programs and what it's used for. Changed in place by the hull designer. */
+export const HULL_INFO = Object.fromEntries(SHIP_MODELS.map((model) => [model, { programs: [], usedBy: [] } as HullInfo])) as Record<ShipModel, HullInfo>;
 
 /** Puts a ship file into play: mount types, which parts fit them, and every hull's mounts. */
 export function useShipFile(file: ShipFile): void {
@@ -101,16 +148,23 @@ export function useShipFile(file: ShipFile): void {
     if (part.kind === "program") continue;
     PART_MOUNTS[part.id] = strings(file.partMounts?.[part.id]);
   }
-  for (const model of Object.keys(HULL_MOUNTS) as ShipModel[]) {
+  DECAL_PARTS.splice(0, DECAL_PARTS.length, ...strings(file.decalParts).filter((id): id is PartId => PARTS.some((part) => part.id === id && part.kind !== "program")));
+  for (const model of SHIP_MODELS) {
     const mounts = (Array.isArray(file.hulls?.[model]) ? file.hulls[model] : []).map(readMount);
     HULL_MOUNTS[model].splice(0, HULL_MOUNTS[model].length, ...mounts);
+    Object.assign(HULL_INFO[model], readHullInfo(file.hullInfo?.[model]));
   }
 }
 useShipFile(SHIPPED_SHIPS);
 
 /** The ship file as it is now, to save. */
 export function shipFileNow(): ShipFile {
-  return JSON.parse(JSON.stringify({ mountTypes: MOUNT_TYPES, partMounts: PART_MOUNTS, hulls: HULL_MOUNTS })) as ShipFile;
+  return JSON.parse(JSON.stringify({ mountTypes: MOUNT_TYPES, partMounts: PART_MOUNTS, decalParts: DECAL_PARTS, hulls: HULL_MOUNTS, hullInfo: HULL_INFO })) as ShipFile;
+}
+
+/** Whether a part is a decal: it shows on decal mounts for looks only, and is never fitted for real. */
+export function isDecal(id: PartId): boolean {
+  return DECAL_PARTS.includes(id);
 }
 
 /** Kept for the hull designer's callers: nothing is cached any more. */
@@ -125,10 +179,24 @@ export function partMounts(id: PartId): string[] {
   return PART_MOUNTS[id] ?? [];
 }
 
-/** Whether a part can go on a mount: they share a mount type. */
+/** Whether a part can go on a mount: they share a mount type, and both are decals or neither is. */
 export function mountTakes(mount: Mount, id: PartId): boolean {
+  if ((mount.decal === true) !== isDecal(id)) return false;
   const fits = partMounts(id);
   return mount.types.some((type) => fits.includes(type));
+}
+
+/** The decal parts a decal mount can show on a hull. */
+export function decalChoices(model: ShipModel, mount: Mount): PartId[] {
+  if (!mount.decal) return [];
+  return PARTS.filter((part) => partFits(part, model) && mountTakes(mount, part.id)).map((part) => part.id);
+}
+
+/** The decal a ship shows on a mount: the one it was given, or else the first that fits. */
+export function decalOf(ship: { model: ShipModel; decals?: Partial<Record<MountId, PartId>> }, mount: Mount): PartId | null {
+  const choices = decalChoices(ship.model, mount);
+  const own = ship.decals?.[mount.id];
+  return own && choices.includes(own) ? own : choices[0] ?? null;
 }
 
 /** Which way a mount faces, in radians in the ship's frame. */
@@ -190,30 +258,34 @@ export function thrustOf(ship: Fitting & { model: ShipModel }): Thrust {
   return thrust;
 }
 
-/** What every hull of a model comes with from the yard. */
-export const HULL_DEFAULTS: Record<ShipModel, Partial<Record<MountId, PartId>>> = {
-  racer: {
-    thrusterMain: "racerMain",
-    thrusterRotateLeft: "turnThrusters",
-    thrusterRotateRight: "turnThrusters",
-    gun: "gun1",
-    computer: "basicComputer",
-  },
-  floater: {
-    thrusterMain: "floaterMain",
-    thrusterRotateLeft: "turnThrusters",
-    thrusterRotateRight: "turnThrusters",
-    gun: "gun2",
-    computer: "flightComputer",
-  },
-};
-
-export function newFitting(model: ShipModel): Fitting {
-  const fitting: Fitting = { fit: {}, software: new Set(), programs: [], parts: new Set(), hold: [] };
-  for (const [mount, part] of Object.entries(HULL_DEFAULTS[model]) as [MountId, PartId][]) {
-    if (mountOf(model, mount)) fitting.fit[mount] = { part, wear: 0 };
+/**
+ * What every hull of a model comes with from the yard: each mount's default part, where it
+ * still fits the mount. Set per mount in the hull designer.
+ */
+export function hullDefaults(model: ShipModel): Partial<Record<MountId, PartId>> {
+  const defaults: Partial<Record<MountId, PartId>> = {};
+  for (const mount of HULL_MOUNTS[model]) {
+    if (mount.default && mountTakes(mount, mount.default) && partFits(partOf(mount.default), model)) defaults[mount.id] = mount.default;
   }
+  return defaults;
+}
+
+/**
+ * A new ship of a hull: its default parts, its computer's default programs, and a decal on each
+ * decal mount, picked with `random` (0 up to 1).
+ */
+export function newFitting(model: ShipModel, random: () => number = Math.random): Fitting {
+  const fitting: Fitting = { fit: {}, software: new Set(), programs: [], parts: new Set(), hold: [], decals: {} };
+  for (const [mount, part] of Object.entries(hullDefaults(model)) as [MountId, PartId][]) fitting.fit[mount] = { part, wear: 0 };
   refresh(fitting);
+  for (const id of HULL_INFO[model].programs) {
+    fitting.software.add(id);
+    install(fitting, id);
+  }
+  for (const mount of HULL_MOUNTS[model]) {
+    const choices = decalChoices(model, mount);
+    if (choices.length > 0) fitting.decals![mount.id] = choices[Math.min(choices.length - 1, Math.floor(random() * choices.length))];
+  }
   return fitting;
 }
 
@@ -273,7 +345,8 @@ export function refresh(ship: Fitting): void {
  */
 export function mountsFor(ship: Fitting & { model: ShipModel }, id: PartId): MountId[] {
   const part = partOf(id);
-  if (part.kind === "program" || !partFits(part, ship.model)) return [];
+  // Decals and cockpit glass are looks only: never fitted for real.
+  if (part.kind === "program" || part.kind === "cockpit" || isDecal(id) || !partFits(part, ship.model)) return [];
   // A gun goes on the turret when there is one.
   if (part.kind === "gun" && turretMount(ship)) return ["turretGun"];
   const mounts = HULL_MOUNTS[ship.model].filter((mount) => mountTakes(mount, id));

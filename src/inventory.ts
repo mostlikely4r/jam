@@ -100,7 +100,7 @@ export class Inventory {
     this.heading(`Ship - bay ${ship.ore} ore + ${sim.holdSize(ship)} in modules, of ${sim.bayTotal(ship)}`);
     for (const mount of mountsOf(ship)) {
       const module = ship.fit[mount.id];
-      if (!module && mount.id === "turretGun") continue;
+      if (mount.decal || (!module && mount.id === "turretGun")) continue;
       const text = `${mount.name}: ${module ? partOf(module.part).label + condition(module) : "empty"}`;
       const place: ItemPlace = { at: "mount", mount: mount.id };
       const actions: [string, () => boolean][] =

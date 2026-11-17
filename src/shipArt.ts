@@ -4,7 +4,7 @@
  * dish), each drawn where its mount sits, turned the way it faces and at its size; what's inside
  * the hull (computer, bay) doesn't show. Damaged parts are handed back so the caller can spark them.
  */
-import { DAMAGED_AT, facing, HULL_MOUNTS, type Module, type MountId } from "./fitting";
+import { DAMAGED_AT, decalOf, facing, HULL_MOUNTS, type Module, type Mount, type MountId } from "./fitting";
 import { partOf, type PartId, type PartKind, type ShipModel } from "./parts";
 import { type Box } from "./cargoBin";
 
@@ -16,12 +16,20 @@ type Color = [number, number, number];
 export const HULL: Record<ShipModel, Point[]> = {
   racer: [[R * 1.25, 0], [-R, -R * 0.8], [-R * 0.55, 0], [-R, R * 0.8]],
   floater: [[R, -R * 0.7], [-R, -R], [-R, R], [R, R * 0.7]],
+  // A broad shield of a hull.
+  defender: [[R * 1.15, 0], [R * 0.35, -R * 0.95], [-R, -R * 0.8], [-R * 0.85, 0], [-R, R * 0.8], [R * 0.35, R * 0.95]],
+  // A small boxy work pod.
+  drone: [[R, 0], [R * 0.4, -R * 0.7], [-R * 0.9, -R * 0.7], [-R * 0.9, R * 0.7], [R * 0.4, R * 0.7]],
+  // Jagged, with a spike on each side.
+  pirate: [[R * 1.3, 0], [R * 0.1, -R * 0.4], [-R * 0.2, -R], [-R * 0.5, -R * 0.3], [-R, -R * 0.6], [-R * 0.8, 0], [-R, R * 0.6], [-R * 0.5, R * 0.3], [-R * 0.2, R], [R * 0.1, R * 0.4]],
 };
 
 /** What the art needs to know about a ship. */
 export interface ArtShip {
   model: ShipModel;
   fit: Partial<Record<MountId, Module>>;
+  /** The decal each decal mount shows. */
+  decals?: Partial<Record<MountId, PartId>>;
 }
 
 const METAL: Color = [111, 122, 140];
@@ -132,32 +140,83 @@ export function drawPart(ctx: CanvasRenderingContext2D, kind: PartKind, wear: nu
   }
 }
 
-/** The bare hull: plates, edge and cockpit. */
+/** A darker belly panel for depth: a shape of its own for the first two hulls, else the hull's shrunk and shifted down. */
+const BELLY: Partial<Record<ShipModel, Point[]>> = {
+  racer: [[2, 1.2], [-12, 9.6], [-6.6, 0.2]],
+  floater: [[12, 2], [-12, 4], [-12, 12], [12, 8.4]],
+};
+
+/** A decal part drawn at the origin facing +x. Cockpit glass has art of its own; any other part shows as it would fitted. */
+export function drawDecal(ctx: CanvasRenderingContext2D, id: PartId): void {
+  const glass = "#2b4a74";
+  const glint = "rgba(160,215,255,0.7)";
+  ctx.lineJoin = "round";
+  if (id === "cockpitKite") {
+    ctx.fillStyle = glass;
+    path(ctx, [[3, 0], [-1.5, -1.9], [-2.9, 0], [-1.5, 1.9]]);
+    ctx.fill();
+    ctx.fillStyle = glint;
+    path(ctx, [[1.5, -0.4], [-1.1, -1.3], [-1.5, -0.6]]);
+    ctx.fill();
+  } else if (id === "cockpitBar") {
+    ctx.fillStyle = glass;
+    path(ctx, [[1.1, -5.2], [-1.1, -5.6], [-1.1, 5.6], [1.1, 5.2]]);
+    ctx.fill();
+    ctx.fillStyle = glint;
+    ctx.fillRect(-0.5, -4.8, 0.8, 3);
+  } else if (id === "cockpitDome") {
+    ctx.fillStyle = glass;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 2.4, 1.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = glint;
+    ctx.beginPath();
+    ctx.ellipse(-0.5, -0.6, 0.9, 0.45, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (id === "cockpitVisor") {
+    ctx.fillStyle = glass;
+    path(ctx, [[2.6, -0.5], [1.8, -0.9], [-2.6, -0.9], [-2.6, 0.9], [1.8, 0.9], [2.6, 0.5]]);
+    ctx.fill();
+    ctx.fillStyle = glint;
+    ctx.fillRect(-1.8, -0.6, 2.6, 0.3);
+  } else {
+    const part = partOf(id);
+    drawPart(ctx, part.kind, 0, part.engine !== undefined);
+  }
+}
+
+/** The ship's decals, each on its mount: they're looks only. `pick` says which part a mount shows. */
+export function drawDecals(ctx: CanvasRenderingContext2D, model: ShipModel, pick: (mount: Mount) => PartId | null): void {
+  for (const mount of HULL_MOUNTS[model]) {
+    if (!mount.decal) continue;
+    const id = pick(mount);
+    if (!id) continue;
+    ctx.save();
+    ctx.translate(mount.x * R, mount.y * R);
+    ctx.rotate(facing(mount));
+    ctx.scale(mount.scale, mount.scale);
+    drawDecal(ctx, id);
+    ctx.restore();
+  }
+}
+
+/** The bare hull: plates and edge. Decals, such as the cockpit, go on top (`drawDecals`). */
 export function drawHull(ctx: CanvasRenderingContext2D, model: ShipModel, hull: Color): void {
   ctx.fillStyle = rgb(hull);
   path(ctx, HULL[model]);
   ctx.fill();
-  // A darker belly panel for depth, then a lit edge.
   ctx.save();
   path(ctx, HULL[model]);
   ctx.clip();
   ctx.fillStyle = rgb(mix(hull, [40, 50, 70], 0.22));
-  path(ctx, model === "racer" ? [[2, 1.2], [-12, 9.6], [-6.6, 0.2]] : [[12, 2], [-12, 4], [-12, 12], [12, 8.4]]);
+  path(ctx, BELLY[model] ?? HULL[model].map(([x, y]): Point => [x * 0.6 - 2, y * 0.6 + 2.5]));
   ctx.fill();
   ctx.restore();
+  // The lit edge.
   ctx.strokeStyle = "rgba(240,246,255,0.85)";
   ctx.lineWidth = 0.7;
   path(ctx, HULL[model]);
   ctx.stroke();
-  // Cockpit glass with a glint.
-  ctx.fillStyle = "#2b4a74";
-  path(ctx, model === "racer" ? [[9.5, 0], [5, -1.9], [3.6, 0], [5, 1.9]] : [[10.6, -5.2], [8.4, -5.6], [8.4, 5.6], [10.6, 5.2]]);
-  ctx.fill();
-  ctx.fillStyle = "rgba(160,215,255,0.7)";
-  if (model === "racer") {
-    path(ctx, [[8, -0.4], [5.4, -1.3], [5, -0.6]]);
-    ctx.fill();
-  } else ctx.fillRect(9, -4.8, 0.8, 3);
   if (model === "floater") {
     // The pale front edge that shows which way it faces.
     ctx.strokeStyle = "#f4f8ff";
@@ -224,6 +283,7 @@ export function drawBay(ctx: CanvasRenderingContext2D, box: Box & { part: PartId
 /** Draws a ship. Returns where broken-but-not-gone parts are, for sparks and smoke. */
 export function drawVectorShip(ctx: CanvasRenderingContext2D, ship: ArtShip, hull: Color): Point[] {
   drawHull(ctx, ship.model, hull);
+  drawDecals(ctx, ship.model, (mount) => decalOf(ship, mount));
   drawBay(ctx, bayBox(ship));
   const broken: Point[] = [];
   for (const { id, x, y, angle, scale, kind, wear } of outsideParts(ship)) {

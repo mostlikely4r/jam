@@ -1,21 +1,6 @@
-import { mountsOf, programSlots, computerSize, DAMAGED_AT, type Module, type MountId } from "./fitting";
+import { mountsOf, programSlots, computerSize, DAMAGED_AT, type Module } from "./fitting";
 import { partOf, PARTS } from "./parts";
 import type { ItemPlace, Sim } from "./sim";
-
-/** What each mount is called on the ship screen. */
-export const MOUNT_NAMES: Record<MountId, string> = {
-  thrusterMain: "Main thruster",
-  thrusterRotateLeft: "Turn left",
-  thrusterRotateRight: "Turn right",
-  thrusterReverse: "Reverse",
-  thrusterStrafeLeft: "Strafe left",
-  thrusterStrafeRight: "Strafe right",
-  gun: "Gun mount",
-  turretGun: "On the turret",
-  tractor: "Tractor mount",
-  computer: "Computer",
-  section: "Section",
-};
 
 function condition(module: Module): string {
   if (module.wear >= 1) return " (destroyed)";
@@ -116,7 +101,7 @@ export class Inventory {
     for (const mount of mountsOf(ship)) {
       const module = ship.fit[mount.id];
       if (!module && mount.id === "turretGun") continue;
-      const text = `${MOUNT_NAMES[mount.id]}: ${module ? partOf(module.part).label + condition(module) : "empty"}`;
+      const text = `${mount.name}: ${module ? partOf(module.part).label + condition(module) : "empty"}`;
       const place: ItemPlace = { at: "mount", mount: mount.id };
       const actions: [string, () => boolean][] =
         module && docked

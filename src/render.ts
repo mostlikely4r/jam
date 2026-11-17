@@ -1,8 +1,9 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
-import { DAMAGED_AT, facing, mountOf, type Module } from "./fitting";
+import { DAMAGED_AT, facing, HULL_MOUNTS, turretMount, works, type Module } from "./fitting";
+import { drawBin, newBin, stepBin, type Bin } from "./cargoBin";
 import { partOf } from "./parts";
-import { drawVectorShip } from "./shipArt";
+import { bayBox, drawVectorShip } from "./shipArt";
 import {
   BLACK_MARKET_LENGTH,
   BLACK_MARKET_WIDTH,
@@ -32,7 +33,6 @@ const PING_SECONDS = 1.4;
 const WRECK_WATCH_SECONDS = 2;
 const WRECK_FADE_SECONDS = 0.4;
 /** Cargo lumps drawn on a ship when its hold is full. */
-const CARGO_LUMPS = 9;
 /** A pointer to a place only shows within this many screen widths of it. */
 const POINTER_SCREENS = 2;
 /** A ping from off screen: how long it shows, how deep it reaches in and how much of the edge it covers, as shares of the screen, and how far off its direction may be. */
@@ -137,7 +137,8 @@ export class Renderer {
   /** The world being drawn, for details drawn deep inside. */
   private sim: Sim | null = null;
   /** Each ship's own scatter of cargo lumps. */
-  private cargoSeeds = new WeakMap<Ship, number>();
+  /** The ore loose in each ship's bay, as drawn. */
+  private bins = new WeakMap<Ship, Bin>();
 
   /** Whether the player is watching their wreck, and shouldn't be flying. */
   get watchingWreck(): boolean {
@@ -1152,22 +1153,19 @@ export class Renderer {
     const r = SHIP_RADIUS;
     // A flame's size shows its throttle. Even the faintest trim stays visible. Each comes out of
     // its thruster, the way it faces.
-    const flame = (thruster: ThrusterId, length: number, width: number, out: number) => {
-      const level = ship.firing.get(thruster);
-      if (level === undefined) return;
-      const mount = mountOf(ship.model, thruster);
+    for (const mount of HULL_MOUNTS[ship.model]) {
+      if (!mount.role || !works(ship.fit[mount.id])) continue;
+      const level = ship.firing.get(mount.role as ThrusterId);
+      if (level === undefined) continue;
+      const main = mount.role === "thrusterMain";
+      const turn = mount.role === "thrusterRotateLeft" || mount.role === "thrusterRotateRight";
+      const [length, width, out] = main ? [2, 4, 1.5] : turn ? [0.7, 2, 1] : [1, 3, 1];
       const direction = facing(mount);
       const size = mount.scale;
       const x = mount.x * r + Math.cos(direction) * out * size;
       const y = mount.y * r + Math.sin(direction) * out * size;
       this.drawFlame(x, y, direction, length * size * (0.2 + 0.8 * level), width * size * (0.5 + 0.5 * level));
-    };
-    flame("thrusterMain", 2, 4, 1.5);
-    flame("thrusterReverse", 1, 3, 1);
-    flame("thrusterStrafeLeft", 1, 3, 1);
-    flame("thrusterStrafeRight", 1, 3, 1);
-    flame("thrusterRotateRight", 0.7, 2, 1);
-    flame("thrusterRotateLeft", 0.7, 2, 1);
+    }
 
     const damage = 1 - Math.max(0, ship.hull) / 100;
     const tint = [red + damage * 55, green - damage * 120, blue - damage * 150].map((v) => Math.round(Math.max(0, Math.min(255, v)))) as [number, number, number];
@@ -1183,7 +1181,7 @@ export class Renderer {
         Math.sin(ship.turretAngle - ship.prevTurretAngle),
         Math.cos(ship.turretAngle - ship.prevTurretAngle),
       );
-      const base = mountOf(ship.model, "gun");
+      const base = turretMount(ship) ?? { x: 0, y: 0 };
       ctx.translate(base.x * r, base.y * r);
       ctx.rotate(ship.prevTurretAngle + turn * alpha);
       ctx.fillStyle = moduleColor(turret, "#c9d4e6");
@@ -1271,25 +1269,20 @@ export class Renderer {
   }
 
   /** Lumps of ore on the hull, more the fuller the hold, scattered the same way each time for this ship. */
+  /** The ore in the bay, loose and thrown about by how the ship moves; packed in when it's full. */
   private drawCargo(ship: Ship): void {
     const sim = this.sim;
-    if (!sim || ship.ore <= 0) return;
-    const { ctx } = this;
+    if (!sim) return;
+    const now = performance.now();
+    let bin = this.bins.get(ship);
+    if (!bin) {
+      bin = newBin(now);
+      this.bins.set(ship, bin);
+    }
     const share = Math.min(1, ship.ore / Math.max(1, sim.cargoSpace(ship)));
-    const lumps = Math.max(1, Math.round(share * CARGO_LUMPS));
-    let seed = this.cargoSeeds.get(ship);
-    if (seed === undefined) {
-      seed = Math.floor(Math.random() * 1e6);
-      this.cargoSeeds.set(ship, seed);
-    }
-    const r = SHIP_RADIUS;
-    for (let i = 0; i < lumps; i++) {
-      const a = hash(seed + i * 3);
-      const b = hash(seed + i * 3 + 1);
-      const size = 1.6 + hash(seed + i * 3 + 2) * 1.4;
-      ctx.fillStyle = ORE_COLORS[(seed + i) % ORE_COLORS.length];
-      ctx.fillRect(-r * 0.7 + a * r * 1.1 - size / 2, (b - 0.5) * r * 0.9 - size / 2, size, size);
-    }
+    const box = bayBox(ship);
+    stepBin(bin, box, share, ship, now);
+    if (bin.lumps.length > 0) drawBin(this.ctx, bin, box, ORE_COLORS, share >= 1);
   }
 
   /** A faint red ring while pirates have marked the ship, and a blinking light while it's wanted. */
@@ -1452,12 +1445,6 @@ export class Renderer {
     ctx.lineTo(x - 3 * dpr, 5 * dpr);
     ctx.closePath();
   }
-}
-
-/** A repeatable number from 0 to 1 for a whole number. */
-function hash(n: number): number {
-  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
-  return x - Math.floor(x);
 }
 
 /** A module's colour: its own while it works, orange once damaged, near black once destroyed. */

@@ -5,7 +5,8 @@
  * the hull (computer, bay) doesn't show. Damaged parts are handed back so the caller can spark them.
  */
 import { DAMAGED_AT, facing, HULL_MOUNTS, type Module, type MountId } from "./fitting";
-import { partOf, type PartKind, type ShipModel } from "./parts";
+import { partOf, type PartId, type PartKind, type ShipModel } from "./parts";
+import { type Box } from "./cargoBin";
 
 const R = 12;
 
@@ -46,6 +47,7 @@ function outsideParts(ship: ArtShip): { id: MountId; x: number; y: number; angle
     if (!module) continue;
     const kind = partOf(module.part).kind;
     if (kind === "computer" || kind === "section" || kind === "turret" || mount.id === "turretGun") continue;
+    // Destroyed, a bay is just the hull's own hold again: see `bayBox`.
     out.push({ id: mount.id, x: mount.x * R, y: mount.y * R, angle: facing(mount), scale: mount.scale, kind, wear: module.wear });
   }
   return out;
@@ -167,9 +169,62 @@ export function drawHull(ctx: CanvasRenderingContext2D, model: ShipModel, hull: 
   }
 }
 
+/**
+ * The box the ship's ore rides in, in the ship's frame: a fitted cargo bay, sized by how much it
+ * holds, or else the hull's own small hold, where the bay would go (the middle if there's no bay mount).
+ */
+export function bayBox(ship: ArtShip): Box & { part: PartId | null } {
+  const mounts = HULL_MOUNTS[ship.model];
+  let spot = mounts.find((mount) => mount.types.includes("cargo bay"));
+  let part: PartId | null = null;
+  for (const mount of mounts) {
+    const module = ship.fit[mount.id];
+    if (module && module.wear < 1 && partOf(module.part).kind === "section") {
+      spot = mount;
+      part = module.part;
+      break;
+    }
+  }
+  const cargo = part ? partOf(part).cargo ?? 0 : 0;
+  const scale = spot?.scale ?? 1;
+  return {
+    x: (spot?.x ?? 0) * R,
+    y: (spot?.y ?? 0) * R,
+    angle: spot ? facing(spot) : 0,
+    w: (4.6 + Math.min(4.6, cargo * 0.09)) * scale,
+    h: (3.2 + Math.min(2.6, cargo * 0.05)) * scale,
+    part,
+  };
+}
+
+/** The bay's box: a dark well in the hull with a rim, a stronger one for a fitted bay. */
+export function drawBay(ctx: CanvasRenderingContext2D, box: Box & { part: PartId | null }): void {
+  ctx.save();
+  ctx.translate(box.x, box.y);
+  ctx.rotate(box.angle);
+  ctx.fillStyle = "rgba(14, 18, 28, 0.85)";
+  ctx.fillRect(-box.w / 2, -box.h / 2, box.w, box.h);
+  ctx.strokeStyle = box.part ? "rgba(200, 212, 232, 0.9)" : "rgba(160, 172, 192, 0.5)";
+  ctx.lineWidth = box.part ? 0.6 : 0.4;
+  ctx.strokeRect(-box.w / 2, -box.h / 2, box.w, box.h);
+  if (box.part) {
+    // Ribs across a fitted bay.
+    ctx.strokeStyle = "rgba(200, 212, 232, 0.25)";
+    ctx.lineWidth = 0.3;
+    ctx.beginPath();
+    for (let x = -box.w / 2 + box.w / 3; x < box.w / 2 - 0.1; x += box.w / 3) {
+      ctx.moveTo(x, -box.h / 2);
+      ctx.lineTo(x, box.h / 2);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 /** Draws a ship. Returns where broken-but-not-gone parts are, for sparks and smoke. */
 export function drawVectorShip(ctx: CanvasRenderingContext2D, ship: ArtShip, hull: Color): Point[] {
   drawHull(ctx, ship.model, hull);
+  drawBay(ctx, bayBox(ship));
   const broken: Point[] = [];
   for (const { id, x, y, angle, scale, kind, wear } of outsideParts(ship)) {
     ctx.save();

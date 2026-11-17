@@ -1,6 +1,6 @@
 import { Chatter } from "./chatter";
 import { type BlueprintId, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
-import { computerSize, DAMAGED_AT, facing, fitPart, mountOf, thrustOf, type Fitting, HULL_DEFAULTS, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
+import { computerSize, DAMAGED_AT, facing, fitPart, mountsOf, mountWith, thrustOf, turretMount, type Fitting, HULL_DEFAULTS, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
 import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./pilot";
 export { FIRST_FIELD };
 import { pathAround } from "./route";
@@ -2070,7 +2070,10 @@ export class Sim {
   /** Acceleration per unit of thrust: the ship's engine power divided by its weight. */
   shipResponse(ship: Ship): number {
     // The main thruster sets the power of them all, working or not: it's what feeds them.
-    const main = ship.fit.thrusterMain;
+    const main = mountsOf(ship)
+      .filter((mount) => mount.role === "thrusterMain")
+      .map((mount) => ship.fit[mount.id])
+      .find((module) => module !== undefined);
     const engine = (main ? partOf(main.part).engine : ship.model) === "floater" ? this.tuning.floaterEngine : 1;
     return engine / this.shipWeight(ship);
   }
@@ -2424,8 +2427,7 @@ export class Sim {
   bayTotal(ship: Ship): number {
     const { playerCargo, droneCargo } = this.tuning;
     let space = ship === this.ship ? playerCargo : droneCargo;
-    const section = ship.fit.section;
-    if (section && section.wear < 1) space += partOf(section.part).cargo ?? 0;
+    for (const module of Object.values(ship.fit)) if (module && module.wear < 1) space += partOf(module.part).cargo ?? 0;
     return space;
   }
 
@@ -2645,7 +2647,7 @@ export class Sim {
 
   /** Puts the hull's own gear back on any mount left without it: from the player's locker, or bought. */
   private refitDefaults(ship: Ship, base: Base): void {
-    for (const id of new Set(Object.values(HULL_DEFAULTS[ship.model]))) {
+    for (const id of new Set(Object.values(HULL_DEFAULTS[ship.model]) as PartId[])) {
       const mounts = mountsFor(ship, id);
       if (mounts.length === 0 || mounts.some((mount) => ship.fit[mount])) continue;
       const locker = ship === this.ship ? this.lockerAt(base) : [];
@@ -2714,6 +2716,27 @@ export class Sim {
     if (partOf(item.part).kind === "computer") trimPrograms(ship);
     pile.push(...off);
     return true;
+  }
+
+  /**
+   * After the hull designer takes mounts away: whatever every ship had on a mount that's gone
+   * goes loose into its bay. (A turret's gun stays while the turret does.)
+   */
+  tidyMounts(): void {
+    for (const ship of [this.ship, ...this.pilots.map((pilot) => pilot.ship)]) {
+      const ids = new Set(mountsOf(ship).map((mount) => mount.id));
+      let moved = false;
+      for (const [mount, module] of Object.entries(ship.fit) as [MountId, Module | undefined][]) {
+        if (ids.has(mount) || !module) continue;
+        delete ship.fit[mount];
+        ship.hold.push(module);
+        moved = true;
+      }
+      if (moved) {
+        refresh(ship);
+        trimPrograms(ship);
+      }
+    }
   }
 
   /** Throws a module out of the bay, to drift beside the ship. */
@@ -4157,7 +4180,8 @@ export class Sim {
     const most = tractorPull * dt;
     const edge = Math.cos(((Math.min(this.tractorCone(ship), 360) / 2) * Math.PI) / 180);
     // The dish looks the way its mount faces.
-    const look = ship.angle + facing(mountOf(ship.model, "tractor"));
+    const dish = mountWith(ship, "tractor");
+    const look = ship.angle + (dish ? facing(dish.mount) : 0);
     const noseX = Math.cos(look);
     const noseY = Math.sin(look);
     for (const ore of this.ores) {
@@ -4223,7 +4247,7 @@ export class Sim {
     const spinAssist = retro || (ship.parts.has("spinStabilizer") && controls.stabilize);
 
     // Each thruster does what it does where it sits on the hull: see `thrustOf`.
-    const thrust = thrustOf(ship.model);
+    const thrust = thrustOf(ship);
     const spinChange = ((tuning.rotationThrust * Math.PI) / 180) * perTick;
     const { thrusterRotateRight: right, thrusterRotateLeft: left } = thrust.turn;
     const turned = this.fireAxis(
@@ -4294,7 +4318,7 @@ export class Sim {
       return;
     }
     const wrap = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
-    const want = ship.aim ? wrap(Math.atan2(ship.aim.y - ship.y, ship.aim.x - ship.x) - ship.angle) : wrap(facing(mountOf(ship.model, "gun")));
+    const want = ship.aim ? wrap(Math.atan2(ship.aim.y - ship.y, ship.aim.x - ship.x) - ship.angle) : wrap(facing(turretMount(ship) ?? { x: 0, y: 0, angle: 0, scale: 1 }));
     const step = ((this.tuning.turretTurnSpeed * Math.PI) / 180) * dt;
     const change = Math.max(-step, Math.min(step, wrap(want - ship.turretAngle)));
     ship.turretAngle = wrap(ship.turretAngle + change);
@@ -4357,10 +4381,15 @@ export class Sim {
     return { x: push.x * size, y: push.y * size };
   }
 
-  /** A thruster needs its part. The panel's switches can also turn off the player's. */
+  /** A control needs a working thruster on it. The panel's switches can also turn off the player's. */
   private canFire(ship: Ship, thruster: ThrusterId): boolean {
     if (ship === this.ship && !this.tuning[thruster]) return false;
-    return works(ship.fit[thruster]);
+    // Any working thruster on a mount it fires.
+    return mountsOf(ship).some((mount) => {
+      if (mount.role !== thruster) return false;
+      const module = ship.fit[mount.id];
+      return works(module) && partOf(module.part).kind === "thruster";
+    });
   }
 
   private moveShipWithCollision(ship: Ship, dt: number): void {
@@ -5287,32 +5316,39 @@ export class Sim {
   private fireShots(ship: Ship): void {
     const { tuning } = this;
     if (!ship.controls.fire || ship.cooldown > 0) return;
-    // No working gun, no shot.
-    if (!ship.parts.has("gun1") && !ship.parts.has("gun2")) return;
-    const precise = ship.parts.has("gun2");
-    const turret = ship.parts.has("turret");
-    ship.cooldown = 1 / (precise ? tuning.gun2ShotsPerSecond : tuning.shotsPerSecond);
-    // Fired the way the gun faces, from the line through its mount, just clear of the hull.
-    const mount = mountOf(ship.model, "gun");
-    const aim = turret ? ship.turretAngle : facing(mount);
-    const angle = ship.angle + aim;
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const aside = (-mount.x * Math.sin(aim) + mount.y * Math.cos(aim)) * SHIP_RADIUS;
-    const x = ship.x + cos * (SHIP_RADIUS + 4) - sin * aside;
-    const y = ship.y + sin * (SHIP_RADIUS + 4) + cos * aside;
-    this.shots.push({
-      x,
-      y,
-      px: x,
-      py: y,
-      vx: ship.vx + cos * tuning.shotSpeed,
-      vy: ship.vy + sin * tuning.shotSpeed,
-      life: tuning.shotLife * (turret ? tuning.turretRange : 1),
-      precise,
-      from: ship,
+    // Every working gun fires, each the way it faces, from the line through its mount, just
+    // clear of the hull. They wait on the slowest. No working gun, no shot.
+    const guns = mountsOf(ship).filter((mount) => {
+      const module = ship.fit[mount.id];
+      return works(module) && partOf(module.part).kind === "gun";
     });
-    this.events.push({ type: "shot", x, y });
+    if (guns.length === 0) return;
+    let wait = 0;
+    for (const mount of guns) {
+      const precise = ship.fit[mount.id]!.part === "gun2";
+      const turret = mount.id === "turretGun";
+      wait = Math.max(wait, 1 / (precise ? tuning.gun2ShotsPerSecond : tuning.shotsPerSecond));
+      const aim = turret ? ship.turretAngle : facing(mount);
+      const angle = ship.angle + aim;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const aside = (-mount.x * Math.sin(aim) + mount.y * Math.cos(aim)) * SHIP_RADIUS;
+      const x = ship.x + cos * (SHIP_RADIUS + 4) - sin * aside;
+      const y = ship.y + sin * (SHIP_RADIUS + 4) + cos * aside;
+      this.shots.push({
+        x,
+        y,
+        px: x,
+        py: y,
+        vx: ship.vx + cos * tuning.shotSpeed,
+        vy: ship.vy + sin * tuning.shotSpeed,
+        life: tuning.shotLife * (turret ? tuning.turretRange : 1),
+        precise,
+        from: ship,
+      });
+      this.events.push({ type: "shot", x, y });
+    }
+    ship.cooldown = wait;
   }
 
   /** A precision hit: ore comes loose where the shot landed and drifts on with the rock. */
@@ -5521,7 +5557,8 @@ export class Sim {
   /** How many hull points of hits a module takes before it's destroyed. A ship's core is built tougher. */
   moduleToughness(module: Module): number {
     const part = partOf(module.part);
-    const core = part.kind === "computer" || part.roles?.some((role) => role === "thrusterMain" || role === "thrusterRotateLeft");
+    // The computer, and the hull's own engine and turning thrusters.
+    const core = part.kind === "computer" || (part.kind === "thruster" && part.builtIn === true);
     return this.tuning.moduleToughness * (core ? this.tuning.coreToughness : 1);
   }
 

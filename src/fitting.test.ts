@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HULL_MOUNTS, hullPlaces, mountOf, mountsFor, mountsMoved, newFitting, placeMounts, refresh, thrustOf } from "./fitting";
+import { HULL_MOUNTS, mountOf, mountsFor, newFitting, refresh, shipFileNow, thrustOf, useShipFile } from "./fitting";
 import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
 import { DOCK_OFFSET, SHIP_RADIUS, Sim } from "./sim";
@@ -381,13 +381,12 @@ describe("critical, the pod and the yard", () => {
 describe("turned mounts", () => {
   /** Runs `body` with the racer's mounts changed, and puts them back after. */
   function withPlaces(change: () => void, body: () => void): void {
-    const was = hullPlaces();
+    const was = shipFileNow();
     try {
       change();
-      mountsMoved();
       body();
     } finally {
-      placeMounts(was);
+      useShipFile(was);
     }
   }
 
@@ -401,7 +400,12 @@ describe("turned mounts", () => {
 
   it("as shipped, the thrusters push and turn as they were tuned", () => {
     for (const model of ["racer", "floater"] as const) {
-      const thrust = thrustOf(model);
+      const thrust = thrustOf({ ...newFitting(model), model });
+      for (const role of ["thrusterReverse", "thrusterStrafeLeft", "thrusterStrafeRight"] as const) expect(thrust.has.has(role)).toBe(false);
+      // Every thruster on, to see what each mount would do.
+      const full = { ...newFitting(model), model };
+      for (const mount of HULL_MOUNTS[model]) if (mount.role && !full.fit[mount.id]) full.fit[mount.id] = { part: "reverse", wear: 0 };
+      Object.assign(thrust, thrustOf(full));
       expect(thrust.push.thrusterMain).toEqual({ x: 1, y: 0 });
       expect(thrust.push.thrusterReverse).toEqual({ x: -1, y: 0 });
       expect(thrust.push.thrusterStrafeRight!.x).toBeCloseTo(0, 12);
@@ -413,7 +417,7 @@ describe("turned mounts", () => {
 
   it("a main thruster turned to flame out to the left pushes the ship right", () => {
     withPlaces(
-      () => (mountOf("racer", "thrusterMain").angle = -90),
+      () => (mountOf("racer", "thrusterMain")!.angle = -90),
       () => {
         // Against one coasting, so whatever else pulls on it cancels out.
         const coasting = flying();
@@ -429,7 +433,7 @@ describe("turned mounts", () => {
 
   it("a turn thruster turned right round turns the ship the other way", () => {
     withPlaces(
-      () => (mountOf("racer", "thrusterRotateRight").angle = -90),
+      () => (mountOf("racer", "thrusterRotateRight")!.angle = -90),
       () => {
         const sim = flying();
         sim.controls.turn = 1;
@@ -445,7 +449,7 @@ describe("turned mounts", () => {
     sim.step();
     const full = sim.ship.spin;
     withPlaces(
-      () => (mountOf("racer", "thrusterRotateRight").x = -0.35),
+      () => (mountOf("racer", "thrusterRotateRight")!.x = -0.35),
       () => {
         const closer = flying();
         closer.controls.turn = 1;
@@ -457,7 +461,7 @@ describe("turned mounts", () => {
 
   it("a gun turned to the right fires to the right", () => {
     withPlaces(
-      () => (mountOf("racer", "gun").angle = 90),
+      () => (mountOf("racer", "gun")!.angle = 90),
       () => {
         const sim = flying();
         sim.controls.fire = true;
@@ -467,5 +471,69 @@ describe("turned mounts", () => {
         expect(shot.y).toBeGreaterThan(sim.ship.y + SHIP_RADIUS);
       },
     );
+  });
+
+  it("a second main thruster mount, fitted, pushes as hard again", () => {
+    const sim = flying();
+    sim.controls.thrust = 1;
+    sim.step();
+    const one = sim.ship.vx;
+    withPlaces(
+      () => HULL_MOUNTS.racer.push({ ...mountOf("racer", "thrusterMain")!, id: "mainTwo", name: "Second main", y: 0.3 }),
+      () => {
+        const twin = flying();
+        twin.ship.fit.mainTwo = { part: "racerMain", wear: 0 };
+        refresh(twin.ship);
+        twin.controls.thrust = 1;
+        twin.step();
+        expect(twin.ship.vx).toBeCloseTo(one * 2, 6);
+      },
+    );
+  });
+
+  it("a part goes on any mount that supports one of the mount types it fits", () => {
+    const racer = { ...newFitting("racer"), model: "racer" as const };
+    expect(mountsFor(racer, "bay")).toEqual(["section"]);
+    withPlaces(
+      () => {
+        mountOf("racer", "section")!.types = [];
+        mountOf("racer", "tractor")!.types.push("cargo bay");
+      },
+      () => expect(mountsFor(racer, "bay")).toEqual(["tractor"]),
+    );
+  });
+
+  it("two gun mounts with guns on both fire two shots", () => {
+    withPlaces(
+      () => HULL_MOUNTS.racer.push({ ...mountOf("racer", "gun")!, id: "gunTwo", name: "Second gun", y: 0.4 }),
+      () => {
+        const sim = flying();
+        sim.ship.fit.gunTwo = { part: "gun1", wear: 0 };
+        refresh(sim.ship);
+        sim.controls.fire = true;
+        sim.step();
+        expect(sim.shots.length).toBe(2);
+      },
+    );
+  });
+
+  it("taking a mount away puts what was on it into the ship's bay", () => {
+    const sim = docked("racer");
+    withPlaces(
+      () => HULL_MOUNTS.racer.splice(HULL_MOUNTS.racer.indexOf(mountOf("racer", "gun")!), 1),
+      () => {
+        sim.tidyMounts();
+        expect(sim.ship.fit.gun).toBeUndefined();
+        expect(sim.ship.hold.map((item) => item.part)).toContain("gun1");
+      },
+    );
+  });
+
+  it("a fitted cargo bay adds its room wherever it's mounted", () => {
+    const sim = docked("racer");
+    const before = sim.bayTotal(sim.ship);
+    sim.ship.fit.section = { part: "bay", wear: 0 };
+    refresh(sim.ship);
+    expect(sim.bayTotal(sim.ship)).toBe(before + 20);
   });
 });

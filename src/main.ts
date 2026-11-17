@@ -84,10 +84,13 @@ const gameLink: GameLink = {
 };
 /** Dev only: the hull designer, for moving, turning and sizing each hull's mounts. */
 const hullDesigner = dev
-  ? new HullDesigner(() => {
-      keys.clear();
-      if (paused) setPaused(true);
-    })
+  ? new HullDesigner(
+      () => {
+        keys.clear();
+        if (paused) setPaused(true);
+      },
+      () => sim.tidyMounts(),
+    )
   : null;
 
 function openHulls(): void {

@@ -53,14 +53,7 @@ export interface Part {
    */
   held?: boolean;
   kind: PartKind;
-  /**
-   * How demanding it is to fit: a mount takes parts of its own class or below. Racer
-   * thruster mounts are class 2, the floater's class 1, so the racer can fit the floater's
-   * thrusters but not the other way round. Without this, 1.
-   */
-  class?: number;
-  /** A thruster's jobs: the thrusters it can stand in for. */
-  roles?: ThrusterRole[];
+  // Which mounts it goes on is in src/hulls.json: the mount types it fits.
   /** Sold and fitted this many at a time, one per mount (a pair of strafe thrusters). Without this, 1. */
   set?: number;
   /** A main thruster sets the power of all a ship's thrusters: the racer's full, the floater's a fraction. */
@@ -75,7 +68,7 @@ export interface Part {
   explosive?: number;
 }
 
-/** The thrusters a ship can have, one mount each. */
+/** The controls a thruster can answer to: which one fires it is up to its mount. */
 export type ThrusterRole = "thrusterMain" | "thrusterReverse" | "thrusterStrafeLeft" | "thrusterStrafeRight" | "thrusterRotateLeft" | "thrusterRotateRight";
 
 export function partFits(part: Part, model: ShipModel): boolean {
@@ -97,7 +90,6 @@ export const PARTS: Part[] = [
   {
     id: "reverse",
     kind: "thruster",
-    roles: ["thrusterReverse"],
     size: 4,
     label: "Reverse thruster",
     short: "rev",
@@ -109,7 +101,6 @@ export const PARTS: Part[] = [
   {
     id: "strafe",
     kind: "thruster",
-    roles: ["thrusterStrafeLeft", "thrusterStrafeRight"],
     set: 2,
     size: 4,
     label: "Strafe thrusters",
@@ -307,8 +298,6 @@ export const PARTS: Part[] = [
   {
     id: "racerMain",
     kind: "thruster",
-    roles: ["thrusterMain"],
-    class: 2,
     engine: "racer",
     builtIn: true,
     size: 8,
@@ -322,7 +311,6 @@ export const PARTS: Part[] = [
   {
     id: "floaterMain",
     kind: "thruster",
-    roles: ["thrusterMain"],
     engine: "floater",
     builtIn: true,
     size: 8,
@@ -336,7 +324,6 @@ export const PARTS: Part[] = [
   {
     id: "turnThrusters",
     kind: "thruster",
-    roles: ["thrusterRotateLeft", "thrusterRotateRight"],
     set: 2,
     builtIn: true,
     size: 2,

@@ -6,7 +6,7 @@
  * The tuning is the one channel between them. The designer writes into the same values the
  * sliders use, and reads them back when it opens, so whichever was changed last wins.
  */
-import type { FieldSpec, Orbit, Poi, SolidBody, Spawn, StationSpec } from "../sim";
+import { TICK, type FieldSpec, type Orbit, type Poi, type Sim, type SolidBody, type Spawn, type StationSpec } from "../sim";
 import type { Tuning } from "../tuning";
 import { SHIP_CHOICES, copiesOf, isBody, parentOf, pathTo, walk, type Copy, type NodeKind, type World, type WorldNode } from "./world";
 
@@ -22,6 +22,40 @@ export interface GameLink {
   apply(phases: Phases, bodies: SolidBody[], spawns: Spawn[], fields: FieldSpec[], stations: StationSpec[], keep?: boolean): void;
   /** Where the player's ship and the field are now, in the game's own frame. */
   where(): { ship: { x: number; y: number }; field: { x: number; y: number } };
+  /** Every other ship in the world now, the player's left out, in the game's frame. */
+  ships(): ShipMark[];
+}
+
+export type ShipMarkKind = "traffic" | "pirate" | "defender" | "drone" | "hauler" | "black market";
+
+/** A ship as the designer marks it: where it is and how fast it moves, both in the game's frame. */
+export interface ShipMark {
+  kind: ShipMarkKind;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+}
+
+/**
+ * Every ship but the player's, cargo ships included. Speed comes from the last tick's move, so
+ * it counts the carrying a ship gets from its field, and works for trip records too.
+ */
+export function shipMarks(sim: Sim): ShipMark[] {
+  const mark = (kind: ShipMarkKind, body: { x: number; y: number; px: number; py: number }): ShipMark => ({
+    kind,
+    x: body.x,
+    y: body.y,
+    vx: (body.x - body.px) / TICK,
+    vy: (body.y - body.py) / TICK,
+  });
+  const marks: ShipMark[] = [];
+  for (const pilot of sim.traffic) marks.push(mark("traffic", pilot.ship));
+  for (const pilot of sim.fighters) marks.push(mark(pilot.ship.faction === "defender" ? "defender" : "pirate", pilot.ship));
+  for (const pilot of sim.drones) marks.push(mark("drone", pilot.ship));
+  for (const base of sim.bases) if (base.hauler) marks.push(mark("hauler", base.hauler));
+  if (sim.blackMarket) marks.push(mark("black market", sim.blackMarket));
+  return marks;
 }
 
 export interface Linked {

@@ -12,6 +12,7 @@ export function linkTo(sim: Sim): GameLink {
     clock: () => sim.now,
     phases: () => sim.orbitPhases(),
     where: () => ({ ship: sim.ship, field: sim.field }),
+    ships: () => [],
     apply(phases, bodies, spawns, fields, stations, keep = false) {
       sim.bodies = bodies;
       sim.spawns = spawns;

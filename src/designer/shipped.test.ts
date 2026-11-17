@@ -3,7 +3,7 @@ import { Sim, bodyAt } from "../sim";
 import { roundTrip } from "../save";
 import { DEFAULTS } from "../tuning";
 import file from "./world.json";
-import { useLayout, type GameLink } from "./link";
+import { shipMarks, useLayout, type GameLink } from "./link";
 import { shippedWorld } from "./shipped";
 import { parseWorld } from "./world";
 
@@ -14,6 +14,7 @@ function linkTo(sim: Sim): GameLink {
     clock: () => sim.now,
     phases: () => sim.orbitPhases(),
     where: () => ({ ship: sim.ship, field: sim.field }),
+    ships: () => [],
     apply(phases, bodies, spawns, fields, stations, keep = false) {
       sim.bodies = bodies;
       sim.spawns = spawns;
@@ -60,5 +61,17 @@ describe("the shipped world", () => {
     expect(sim.field.orbitRadius).toBe(sim.tuning.fieldOrbitRadius);
     expect(clearance(sim)).toBeGreaterThan(0);
     expect(Math.hypot(sim.ship.x - sim.field.x, sim.ship.y - sim.field.y)).toBeLessThan(sim.tuning.fieldRadius * 3);
+  });
+});
+
+describe("the designer's ship marks", () => {
+  it("lists every other ship with its speed, cargo ships included", () => {
+    const sim = new Sim(1, { ...DEFAULTS });
+    useLayout(shippedWorld(), linkTo(sim));
+    for (let i = 0; i < 240; i++) sim.step();
+    const marks = shipMarks(sim);
+    expect(marks.length).toBe(sim.traffic.length + sim.fighters.length + sim.drones.length + sim.bases.filter((base) => base.hauler).length + (sim.blackMarket ? 1 : 0));
+    expect(marks.some((mark) => mark.kind === "traffic")).toBe(true);
+    for (const mark of marks) expect(Number.isFinite(Math.hypot(mark.vx, mark.vy))).toBe(true);
   });
 });

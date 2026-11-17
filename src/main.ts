@@ -2,7 +2,7 @@ import { ShipDemo } from "./demo";
 import { Chart } from "./chart";
 import { HullDesigner } from "./designer/hulls";
 import { Designer } from "./designer/designer";
-import { useLayout, type GameLink } from "./designer/link";
+import { shipMarks, useLayout, type GameLink } from "./designer/link";
 import { shippedWorld } from "./designer/shipped";
 import { layoutKey, loadGame, loadStart, saveGame, saveInfo, type SaveSlot, type StartFile } from "./save";
 import { stringifyWorld } from "./designer/world";
@@ -73,6 +73,7 @@ const gameLink: GameLink = {
   clock: () => sim.now,
   phases: () => sim.orbitPhases(),
   where: () => ({ ship: { x: sim.ship.x, y: sim.ship.y }, field: { x: sim.field.x, y: sim.field.y } }),
+  ships: () => shipMarks(sim),
   apply(phases, bodies, spawns, fields, stations, keep = false) {
     sim.bodies = bodies;
     sim.spawns = spawns;

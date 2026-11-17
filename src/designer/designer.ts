@@ -21,7 +21,7 @@ import {
   type World,
   type WorldNode,
 } from "./world";
-import { linkSummary, linkedNodes, readGame, useLayout, type GameLink } from "./link";
+import { linkSummary, linkedNodes, readGame, useLayout, type GameLink, type ShipMarkKind } from "./link";
 import { shippedWorld } from "./shipped";
 import { type Route } from "../route";
 import { FLIGHTS, tripBetween } from "./trips";
@@ -35,6 +35,12 @@ const DRAFT_KEY = "jam-world-draft";
 const CARRY_LIMITED_KEY = "jam-designer-carry-limited";
 /** The settings groups the user has opened. All start closed. */
 const GROUPS_KEY = "jam-designer-open";
+/** Objects the user opened in the tree by hand. They stay open whatever is selected. */
+const TREE_KEY = "jam-designer-tree-open";
+/** Whether the other ships are shown on the map. */
+const SHIPS_KEY = "jam-designer-ships";
+/** Ships faster than this, units/s, get an arrow showing where they're going. */
+const ARROW_SPEED = 500;
 const SPEEDS = [1, 10, 60, 600, 3600, 36000];
 const CLICK_PIXELS = 5;
 /** Ships to time a route with, from the game's own numbers. */
@@ -48,6 +54,15 @@ const COLORS: Record<NodeKind, string> = {
   field: "#d8c37a",
   station: "#8fe3a1",
   "pirate base": "#ff7a6b",
+};
+
+const SHIP_COLORS: Record<ShipMarkKind, string> = {
+  traffic: "#a8adb8",
+  pirate: "#ff7a6b",
+  defender: "#7ab8ff",
+  drone: "#c99bff",
+  hauler: "#ffb35c",
+  "black market": "#e070c8",
 };
 
 const STYLE = `
@@ -70,6 +85,9 @@ const STYLE = `
 #designer .tree button { display: block; width: 100%; text-align: left; margin: 0 0 2px; border-color: transparent; background: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #designer .tree button.on { background: #26324a; border-color: #4a5b80; }
 #designer .tree .kind { color: #6a7486; }
+#designer .tree .fold { display: inline-block; width: 14px; color: #8fb4ff; }
+#designer .tree .fold:hover { color: #ffffff; }
+#designer .time label { display: inline; margin: 0; white-space: nowrap; }
 #designer label { display: block; margin: 8px 0 0; }
 #designer label input, #designer label select { width: 100%; box-sizing: border-box; margin-top: 2px; }
 #designer .hint { display: block; color: #ffd479; font-size: 12px; min-height: 1em; }
@@ -105,12 +123,20 @@ function climbing(accel: number): string {
   return `both ships climb out (Floater ${floater}, Racer ${racer})`;
 }
 
-function loadOpenGroups(): string[] {
+function loadStrings(key: string): string[] {
   try {
-    const saved = JSON.parse(localStorage.getItem(GROUPS_KEY) ?? "[]");
+    const saved = JSON.parse(localStorage.getItem(key) ?? "[]");
     return Array.isArray(saved) ? saved.filter((item): item is string => typeof item === "string") : [];
   } catch {
     return [];
+  }
+}
+
+function store(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage off: it's remembered until the page closes.
   }
 }
 
@@ -164,10 +190,15 @@ export class Designer {
   private readonly routeBox: HTMLDivElement;
   private readonly routeText: HTMLDivElement;
   private readonly linkText: HTMLDivElement;
-  private readonly openGroups = new Set<string>(loadOpenGroups());
+  private readonly openGroups = new Set<string>(loadStrings(GROUPS_KEY));
   /** The player's ship as of opening: its offset from the field, and the game's clock then. */
   private shipFix: { x: number; y: number; clock: number } | null = null;
   private followShip = false;
+  /** Tree objects opened by hand: they stay open. */
+  private readonly pinnedOpen = new Set<string>(loadStrings(TREE_KEY));
+  /** Objects on the way to the selection that were closed by hand, until the selection changes. */
+  private readonly closedOnPath = new Set<string>();
+  private showShips = loadStrings(SHIPS_KEY).length > 0;
 
   constructor(
     private readonly onClose: () => void,
@@ -232,7 +263,17 @@ export class Designer {
     for (const value of SPEEDS) speed.append(new Option(`${value}x`, String(value), false, value === this.speed));
     speed.addEventListener("change", () => (this.speed = Number(speed.value)));
     this.clock = document.createElement("span");
-    time.append(this.playButton, speed, this.button("Time 0", () => (this.t = 0)), this.button("Game time", () => (this.t = this.game.clock())), this.clock);
+    const ships = document.createElement("label");
+    const shipsBox = document.createElement("input");
+    shipsBox.type = "checkbox";
+    shipsBox.checked = this.showShips;
+    shipsBox.addEventListener("change", () => {
+      this.showShips = shipsBox.checked;
+      store(SHIPS_KEY, JSON.stringify(this.showShips ? ["on"] : []));
+    });
+    ships.title = `Other ships as the game has them now, cargo ships included. An arrow on any faster than ${ARROW_SPEED} units/s.`;
+    ships.append(shipsBox, " Ships");
+    time.append(this.playButton, speed, this.button("Time 0", () => (this.t = 0)), this.button("Game time", () => (this.t = this.game.clock())), ships, this.clock);
 
     this.element.append(side, this.canvas, time);
     document.body.append(this.element);
@@ -421,22 +462,60 @@ Layouts: ${layouts.join(", ")}`, "");
   // --- Side panel -------------------------------------------------------------------
 
   private rebuild(): void {
-    this.tree.replaceChildren(
-      ...walk(this.world).map(({ node, depth }) => {
-        const button = this.button("", () => this.select(node));
-        button.style.paddingLeft = `${6 + depth * 14}px`;
-        button.className = node === this.selected ? "on" : "";
-        const kind = document.createElement("span");
-        kind.className = "kind";
-        kind.textContent = `  ${node.kind}`;
-        button.append(node.name, kind);
-        return button;
-      }),
-    );
+    this.buildTree();
     this.buildEditor();
     this.buildRouteBox();
     this.linkText.textContent = linkSummary(this.world);
     this.passTimer = 0;
+  }
+
+  /**
+   * The objects as a tree that folds: the selection and everything above it are open, and so
+   * is whatever was opened by hand. The rest is closed.
+   */
+  private buildTree(): void {
+    const onPath = new Set<string>();
+    for (let at: WorldNode | null = this.selected; at; at = parentOf(this.world, at)) onPath.add(at.id);
+    const isOpen = (node: WorldNode) => this.pinnedOpen.has(node.id) || (onPath.has(node.id) && !this.closedOnPath.has(node.id));
+    const rows: HTMLButtonElement[] = [];
+    const add = (node: WorldNode, depth: number) => {
+      const button = this.button("", () => this.select(node));
+      button.style.paddingLeft = `${6 + depth * 14}px`;
+      button.className = node === this.selected ? "on" : "";
+      const open = isOpen(node);
+      const fold = document.createElement("span");
+      fold.className = "fold";
+      const kind = document.createElement("span");
+      kind.className = "kind";
+      kind.textContent = `  ${node.kind}`;
+      if (node.children.length > 0) {
+        fold.textContent = open ? "▾" : "▸";
+        fold.title = open ? "Close" : "Open";
+        if (!open) kind.textContent += ` (${node.children.length})`;
+        fold.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.toggleOpen(node, !open, onPath.has(node.id));
+        });
+      }
+      button.append(fold, node.name, kind);
+      rows.push(button);
+      if (open) for (const child of node.children) add(child, depth + 1);
+    };
+    add(this.world.root, 0);
+    this.tree.replaceChildren(...rows);
+  }
+
+  /** Opening by hand sticks. Closing one above the selection holds until the selection changes. */
+  private toggleOpen(node: WorldNode, open: boolean, onPath: boolean): void {
+    if (open) {
+      this.pinnedOpen.add(node.id);
+      this.closedOnPath.delete(node.id);
+    } else {
+      this.pinnedOpen.delete(node.id);
+      if (onPath) this.closedOnPath.add(node.id);
+    }
+    store(TREE_KEY, JSON.stringify([...this.pinnedOpen]));
+    this.buildTree();
   }
 
   private buildRouteBox(): void {
@@ -490,8 +569,11 @@ Layouts: ${layouts.join(", ")}`, "");
   }
 
   private select(node: WorldNode): void {
+    if (node !== this.selected) this.closedOnPath.clear();
     this.selected = node;
     this.rebuild();
+    // Picked on the map, it may be far down the tree.
+    this.tree.querySelector("button.on")?.scrollIntoView({ block: "nearest" });
   }
 
   /** How big a distance looks in the game, measured in screens. */
@@ -701,11 +783,7 @@ Layouts: ${layouts.join(", ")}`, "");
     heading.addEventListener("click", () => {
       if (this.openGroups.has(title)) this.openGroups.delete(title);
       else this.openGroups.add(title);
-      try {
-        localStorage.setItem(GROUPS_KEY, JSON.stringify([...this.openGroups]));
-      } catch {
-        // Storage off: it's remembered until the page closes.
-      }
+      store(GROUPS_KEY, JSON.stringify([...this.openGroups]));
       show();
     });
     show();
@@ -1119,9 +1197,45 @@ Layouts: ${layouts.join(", ")}`, "");
       ctx.fillText("You", p.x + 12, p.y - 10);
     }
 
+    if (this.showShips) this.drawShips(at);
     this.drawRoute(at);
     this.drawScreenBoxes();
     this.drawScaleBar();
+  }
+
+  /**
+   * The game's other ships, as they are in the game now. The game's frame is centred on what
+   * the field orbits, so they hang from that. A dot each, and an arrow on the fast ones.
+   */
+  private drawShips(at: Map<WorldNode, { x: number; y: number }>): void {
+    const { ctx } = this;
+    const { field } = linkedNodes(this.world);
+    const centre = at.get((field && parentOf(this.world, field)) ?? this.world.root);
+    if (!centre) return;
+    ctx.lineWidth = 1;
+    for (const ship of this.game.ships()) {
+      const p = this.toScreen(centre.x + ship.x, centre.y + ship.y);
+      if (p.x < -60 || p.y < -60 || p.x > this.width + 60 || p.y > this.height + 60) continue;
+      const color = SHIP_COLORS[ship.kind];
+      ctx.fillStyle = color;
+      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+      const speed = Math.hypot(ship.vx, ship.vy);
+      if (speed <= ARROW_SPEED) continue;
+      // Longer the faster, but slowly: each doubling of speed adds 8 px.
+      const length = 12 + 8 * Math.log2(speed / ARROW_SPEED);
+      const ux = ship.vx / speed;
+      const uy = ship.vy / speed;
+      const tx = p.x + ux * length;
+      const ty = p.y + uy * length;
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(tx, ty);
+      ctx.moveTo(tx - ux * 4 - uy * 3, ty - uy * 4 + ux * 3);
+      ctx.lineTo(tx, ty);
+      ctx.lineTo(tx - ux * 4 + uy * 3, ty - uy * 4 - ux * 3);
+      ctx.stroke();
+    }
   }
 
   /** The previewed route, from where the selected object is now to where the target will be. */

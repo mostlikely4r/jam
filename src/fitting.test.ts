@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HULL_MOUNTS, mountsFor, newFitting, refresh } from "./fitting";
+import { HULL_MOUNTS, hullPlaces, mountOf, mountsFor, mountsMoved, newFitting, placeMounts, refresh, thrustOf } from "./fitting";
 import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
 import { DOCK_OFFSET, SHIP_RADIUS, Sim } from "./sim";
@@ -375,5 +375,97 @@ describe("critical, the pod and the yard", () => {
     } finally {
       delete partOfForTest("bay").explosive;
     }
+  });
+});
+
+describe("turned mounts", () => {
+  /** Runs `body` with the racer's mounts changed, and puts them back after. */
+  function withPlaces(change: () => void, body: () => void): void {
+    const was = hullPlaces();
+    try {
+      change();
+      mountsMoved();
+      body();
+    } finally {
+      placeMounts(was);
+    }
+  }
+
+  function flying(): Sim {
+    const sim = docked("racer");
+    sim.ship.x += 2000;
+    sim.ship.angle = sim.ship.prevAngle = 0;
+    sim.ship.vx = sim.ship.vy = sim.ship.spin = 0;
+    return sim;
+  }
+
+  it("as shipped, the thrusters push and turn as they were tuned", () => {
+    for (const model of ["racer", "floater"] as const) {
+      const thrust = thrustOf(model);
+      expect(thrust.push.thrusterMain).toEqual({ x: 1, y: 0 });
+      expect(thrust.push.thrusterReverse).toEqual({ x: -1, y: 0 });
+      expect(thrust.push.thrusterStrafeRight!.x).toBeCloseTo(0, 12);
+      expect(thrust.push.thrusterStrafeRight!.y).toBe(1);
+      expect(thrust.turn.thrusterRotateLeft).toBeCloseTo(1, 9);
+      expect(thrust.turn.thrusterRotateRight).toBeCloseTo(1, 9);
+    }
+  });
+
+  it("a main thruster turned to flame out to the left pushes the ship right", () => {
+    withPlaces(
+      () => (mountOf("racer", "thrusterMain").angle = -90),
+      () => {
+        // Against one coasting, so whatever else pulls on it cancels out.
+        const coasting = flying();
+        coasting.step();
+        const sim = flying();
+        sim.controls.thrust = 1;
+        sim.step();
+        expect(sim.ship.vy - coasting.ship.vy).toBeGreaterThan(0.1);
+        expect(Math.abs(sim.ship.vx - coasting.ship.vx)).toBeLessThan((sim.ship.vy - coasting.ship.vy) * 0.01);
+      },
+    );
+  });
+
+  it("a turn thruster turned right round turns the ship the other way", () => {
+    withPlaces(
+      () => (mountOf("racer", "thrusterRotateRight").angle = -90),
+      () => {
+        const sim = flying();
+        sim.controls.turn = 1;
+        sim.step();
+        expect(sim.ship.spin).toBeLessThan(0);
+      },
+    );
+  });
+
+  it("a turn thruster moved in closer to the middle turns the ship slower", () => {
+    const sim = flying();
+    sim.controls.turn = 1;
+    sim.step();
+    const full = sim.ship.spin;
+    withPlaces(
+      () => (mountOf("racer", "thrusterRotateRight").x = -0.35),
+      () => {
+        const closer = flying();
+        closer.controls.turn = 1;
+        closer.step();
+        expect(closer.ship.spin).toBeCloseTo(full / 2, 9);
+      },
+    );
+  });
+
+  it("a gun turned to the right fires to the right", () => {
+    withPlaces(
+      () => (mountOf("racer", "gun").angle = 90),
+      () => {
+        const sim = flying();
+        sim.controls.fire = true;
+        sim.step();
+        const shot = sim.shots[0];
+        expect(shot.vy).toBeGreaterThan(Math.abs(shot.vx) * 10);
+        expect(shot.y).toBeGreaterThan(sim.ship.y + SHIP_RADIUS);
+      },
+    );
   });
 });

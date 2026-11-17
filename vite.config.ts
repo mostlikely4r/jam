@@ -5,6 +5,8 @@ import { execFile } from "node:child_process";
 
 /** Where the system designer keeps its layout, which the built game ships with. */
 const WORLD_FILE = fileURLToPath(new URL("./src/designer/world.json", import.meta.url));
+/** Where the hull designer keeps where each hull's mounts sit and face. */
+const HULLS_FILE = fileURLToPath(new URL("./src/hulls.json", import.meta.url));
 /** Layouts made by recipes (npm run layout), for trying out. Never shipped. */
 const LAYOUTS = fileURLToPath(new URL("./src/designer/layouts/", import.meta.url));
 
@@ -32,6 +34,24 @@ function worldFile(): Plugin {
           res.statusCode = error ? 500 : 200;
           res.end(error ? String(stderr || error) : stdout);
         });
+      });
+      // The hull designer's mount places.
+      server.middlewares.use("/__hulls", async (req, res) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end();
+          return;
+        }
+        try {
+          let body = "";
+          for await (const chunk of req) body += chunk;
+          JSON.parse(body);
+          await writeFile(HULLS_FILE, body);
+          res.end("saved");
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(String(error));
+        }
       });
       server.middlewares.use("/__world", async (req, res) => {
         try {
@@ -65,7 +85,7 @@ export default defineConfig({
   // Relative paths, so the built game works from any folder, such as a GitHub Pages project page.
   base: "./",
   plugins: [worldFile()],
-  // Saving the layout from the designer shouldn't reload the game under it: the designer's
-  // draft is already in play, and the next start or build picks the file up.
-  server: { watch: { ignored: ["**/src/designer/world.json", "**/src/designer/layouts/**", "**/src/start.json"] } },
+  // Saving the layout or the hulls from a designer shouldn't reload the game under it: the
+  // designer's draft is already in play, and the next start or build picks the file up.
+  server: { watch: { ignored: ["**/src/designer/world.json", "**/src/designer/layouts/**", "**/src/start.json", "**/src/hulls.json"] } },
 });

@@ -3,7 +3,7 @@ import { partOf, PARTS } from "./parts";
 import type { ItemPlace, Sim } from "./sim";
 
 /** What each mount is called on the ship screen. */
-const MOUNT_NAMES: Record<MountId, string> = {
+export const MOUNT_NAMES: Record<MountId, string> = {
   thrusterMain: "Main thruster",
   thrusterRotateLeft: "Turn left",
   thrusterRotateRight: "Turn right",

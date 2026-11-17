@@ -1,4 +1,5 @@
 import { isProgram, partFits, partOf, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "./parts";
+import hullFile from "./hulls.json";
 
 /**
  * Where things fit on a hull. Each ship has its six thrusters, a gun, a tractor, a computer
@@ -15,7 +16,18 @@ export interface Mount {
   /** Where it sits on the hull, in ship radii: x toward the nose, y to the right. */
   x: number;
   y: number;
+  /**
+   * Which way what's on it faces, in degrees from the nose, clockwise: where a thruster's
+   * flame goes (so it pushes the other way), where a gun fires, where a tractor's dish looks.
+   */
+  angle: number;
+  /** How big what's on it is drawn. Looks only. */
+  scale: number;
 }
+
+/** Where a mount sits and faces: what the hull designer changes, kept in src/hulls.json. */
+export type MountPlace = Pick<Mount, "x" | "y" | "angle" | "scale">;
+export type HullFile = Record<ShipModel, Partial<Record<MountId, MountPlace>>>;
 
 /** One fitted part: what it is and how worn. */
 export interface Module {
@@ -41,35 +53,137 @@ export const DAMAGED_AT = 0.5;
 
 const ANY = 9;
 
-function thrusters(cls: number, rear: number): Mount[] {
-  const thruster = (id: ThrusterRole, x: number, y: number): Mount => ({ id, accepts: ["thruster"], class: cls, x, y });
-  return [
-    thruster("thrusterMain", rear, 0),
-    thruster("thrusterRotateLeft", -0.7, -0.55),
-    thruster("thrusterRotateRight", -0.7, 0.55),
-    thruster("thrusterReverse", 0.9, 0),
-    thruster("thrusterStrafeLeft", 0, 0.45),
-    thruster("thrusterStrafeRight", 0, -0.45),
-  ];
+/**
+ * Which way each mount's part faces when nobody has turned it, as the game was tuned: thrusters
+ * flame outward from the way they push. The turn thrusters' lever, how far behind the middle they
+ * push sideways, is what their turning was tuned at.
+ */
+export const STANDARD_ANGLE: Record<MountId, number> = {
+  thrusterMain: 180,
+  thrusterReverse: 0,
+  thrusterStrafeLeft: 90,
+  thrusterStrafeRight: -90,
+  thrusterRotateLeft: -90,
+  thrusterRotateRight: 90,
+  gun: 0,
+  turretGun: 0,
+  tractor: 0,
+  computer: 0,
+  section: 0,
+};
+const STANDARD_TURN_LEVER = 0.7;
+
+type Slot = Omit<Mount, keyof MountPlace>;
+
+function thrusters(cls: number): Slot[] {
+  const roles: ThrusterRole[] = ["thrusterMain", "thrusterRotateLeft", "thrusterRotateRight", "thrusterReverse", "thrusterStrafeLeft", "thrusterStrafeRight"];
+  return roles.map((id) => ({ id, accepts: ["thruster"], class: cls }));
 }
 
-/** Each hull's mounts. The racer's thrusters take anything; the floater's only floater-class ones. */
-export const HULL_MOUNTS: Record<ShipModel, Mount[]> = {
+/** What each hull's mounts take. The racer's thrusters take anything; the floater's only floater-class ones. */
+const HULL_SLOTS: Record<ShipModel, Slot[]> = {
   racer: [
-    ...thrusters(2, -0.8),
-    { id: "gun", accepts: ["gun"], class: ANY, x: 1.05, y: 0 },
-    { id: "tractor", accepts: ["tractor"], class: ANY, x: 0.45, y: 0 },
-    { id: "computer", accepts: ["computer"], class: ANY, x: -0.25, y: 0 },
-    { id: "section", accepts: ["section"], class: ANY, x: -0.55, y: 0.35 },
+    ...thrusters(2),
+    { id: "gun", accepts: ["gun"], class: ANY },
+    { id: "tractor", accepts: ["tractor"], class: ANY },
+    { id: "computer", accepts: ["computer"], class: ANY },
+    { id: "section", accepts: ["section"], class: ANY },
   ],
   floater: [
-    ...thrusters(1, -1),
-    { id: "gun", accepts: ["gun", "turret"], class: ANY, x: 0.1, y: 0 },
-    { id: "tractor", accepts: ["tractor"], class: ANY, x: 0.8, y: 0 },
-    { id: "computer", accepts: ["computer"], class: ANY, x: -0.55, y: 0 },
-    { id: "section", accepts: ["section"], class: ANY, x: -0.2, y: 0.4 },
+    ...thrusters(1),
+    { id: "gun", accepts: ["gun", "turret"], class: ANY },
+    { id: "tractor", accepts: ["tractor"], class: ANY },
+    { id: "computer", accepts: ["computer"], class: ANY },
+    { id: "section", accepts: ["section"], class: ANY },
   ],
 };
+
+/** A mount's place from the hull file, or in the middle facing the standard way if it has none. */
+function placeOf(file: HullFile, model: ShipModel, id: MountId): MountPlace {
+  const place = file[model]?.[id];
+  const number = (value: unknown, fallback: number) => (typeof value === "number" && Number.isFinite(value) ? value : fallback);
+  return {
+    x: number(place?.x, 0),
+    y: number(place?.y, 0),
+    angle: number(place?.angle, STANDARD_ANGLE[id]),
+    scale: number(place?.scale, 1),
+  };
+}
+
+/** The hull file the game shipped with. */
+export const SHIPPED_HULLS = hullFile as HullFile;
+
+/** Each hull's mounts: what they take, from here, and where they sit and face, from src/hulls.json. */
+export const HULL_MOUNTS: Record<ShipModel, Mount[]> = {
+  racer: HULL_SLOTS.racer.map((slot) => ({ ...slot, ...placeOf(SHIPPED_HULLS, "racer", slot.id) })),
+  floater: HULL_SLOTS.floater.map((slot) => ({ ...slot, ...placeOf(SHIPPED_HULLS, "floater", slot.id) })),
+};
+
+/** Puts new places on the hulls, as the hull designer does. The mounts are changed in place, so everything holding them sees it. */
+export function placeMounts(file: HullFile): void {
+  for (const model of Object.keys(HULL_MOUNTS) as ShipModel[]) {
+    for (const mount of HULL_MOUNTS[model]) Object.assign(mount, placeOf(file, model, mount.id));
+  }
+  thrustCache.clear();
+}
+
+/** Call after changing a mount by hand, so what it does is worked out again. */
+export function mountsMoved(): void {
+  thrustCache.clear();
+}
+
+/** The hulls' places as they are now, to save. */
+export function hullPlaces(): HullFile {
+  const file = {} as HullFile;
+  for (const model of Object.keys(HULL_MOUNTS) as ShipModel[]) {
+    file[model] = {};
+    for (const { id, x, y, angle, scale } of HULL_MOUNTS[model]) file[model][id] = { x, y, angle, scale };
+  }
+  return file;
+}
+
+export function mountOf(model: ShipModel, id: MountId): Mount {
+  return HULL_MOUNTS[model].find((mount) => mount.id === id)!;
+}
+
+/** Which way a mount faces, in radians in the ship's frame. */
+export function facing(mount: MountPlace): number {
+  return (mount.angle * Math.PI) / 180;
+}
+
+/**
+ * What each thruster does where it sits. A pushing thruster pushes the way its flame doesn't
+ * go, at full strength whichever way that is. A turn thruster turns by its lever: how far from
+ * the middle it pushes across, against the lever it was tuned at, so one moved closer in or
+ * turned away turns less, and one turned right round turns the other way.
+ */
+export interface Thrust {
+  /** The push, in the ship's frame (x to the nose, y to the right), one long. */
+  push: Partial<Record<ThrusterRole, { x: number; y: number }>>;
+  /** How hard each turn thruster turns, against the tuned turn. Negative turns the other way. */
+  turn: { thrusterRotateLeft: number; thrusterRotateRight: number };
+}
+
+const thrustCache = new Map<ShipModel, Thrust>();
+
+export function thrustOf(model: ShipModel): Thrust {
+  let thrust = thrustCache.get(model);
+  if (thrust) return thrust;
+  thrust = { push: {}, turn: { thrusterRotateLeft: 1, thrusterRotateRight: 1 } };
+  for (const mount of HULL_MOUNTS[model]) {
+    if (!mount.accepts.includes("thruster")) continue;
+    const away = facing(mount) + Math.PI;
+    // Rounded, so a thruster facing straight back pushes straight ahead and nothing sideways.
+    const push = { x: Math.round(Math.cos(away) * 1e9) / 1e9 + 0, y: Math.round(Math.sin(away) * 1e9) / 1e9 + 0 };
+    if (mount.id === "thrusterRotateLeft" || mount.id === "thrusterRotateRight") {
+      // Turning right is clockwise: the lever's sign for a right turn is positive.
+      const lever = mount.x * push.y - mount.y * push.x;
+      thrust.turn[mount.id] = (mount.id === "thrusterRotateRight" ? lever : -lever) / STANDARD_TURN_LEVER;
+    } else thrust.push[mount.id as ThrusterRole] = push;
+  }
+  thrustCache.set(model, thrust);
+  return thrust;
+}
 
 /** What every hull of a model comes with from the yard. */
 export const HULL_DEFAULTS: Record<ShipModel, Partial<Record<MountId, PartId>>> = {
@@ -90,7 +204,7 @@ export const HULL_DEFAULTS: Record<ShipModel, Partial<Record<MountId, PartId>>> 
 };
 
 /** The mount a turret brings: where the gun goes once the turret is on. */
-const TURRET_GUN: Omit<Mount, "x" | "y"> = { id: "turretGun", accepts: ["gun"], class: ANY };
+const TURRET_GUN: Slot = { id: "turretGun", accepts: ["gun"], class: ANY };
 
 export function newFitting(model: ShipModel): Fitting {
   const fitting: Fitting = { fit: {}, software: new Set(), programs: [], parts: new Set(), hold: [] };
@@ -105,7 +219,7 @@ export function mountsOf(ship: Fitting & { model: ShipModel }): Mount[] {
   const gun = ship.fit.gun;
   if (!gun || partOf(gun.part).kind !== "turret") return mounts;
   const base = mounts.find((mount) => mount.id === "gun")!;
-  return [...mounts, { ...TURRET_GUN, x: base.x, y: base.y }];
+  return [...mounts, { ...TURRET_GUN, x: base.x, y: base.y, angle: base.angle, scale: base.scale }];
 }
 
 export function works(module: Module | undefined): module is Module {

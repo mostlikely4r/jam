@@ -1,8 +1,8 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
-import { DAMAGED_AT, HULL_MOUNTS, type Module } from "./fitting";
+import { DAMAGED_AT, facing, mountOf, type Module } from "./fitting";
 import { partOf } from "./parts";
-import { drawPixelShip, drawVectorShip, SHIP_ARTS, type ShipArt } from "./shipArt";
+import { drawVectorShip } from "./shipArt";
 import {
   BLACK_MARKET_LENGTH,
   BLACK_MARKET_WIDTH,
@@ -134,7 +134,6 @@ export class Renderer {
   /** Which way the escape pod points: the way it last moved. */
   private podAngle = 0;
   /** How ships and their parts are drawn: a player setting (V), while the look is being chosen. */
-  shipArt: ShipArt = "vector";
   /** The world being drawn, for details drawn deep inside. */
   private sim: Sim | null = null;
   /** Each ship's own scatter of cargo lumps. */
@@ -1151,56 +1150,29 @@ export class Renderer {
     ctx.rotate(angle);
 
     const r = SHIP_RADIUS;
-    const up = -Math.PI / 2;
-    const down = Math.PI / 2;
-    // A flame's size shows its throttle. Even the faintest trim stays visible.
-    const flame = (thruster: ThrusterId, x: number, y: number, direction: number, length: number, width: number) => {
+    // A flame's size shows its throttle. Even the faintest trim stays visible. Each comes out of
+    // its thruster, the way it faces.
+    const flame = (thruster: ThrusterId, length: number, width: number, out: number) => {
       const level = ship.firing.get(thruster);
       if (level === undefined) return;
-      this.drawFlame(x, y, direction, length * (0.2 + 0.8 * level), width * (0.5 + 0.5 * level));
+      const mount = mountOf(ship.model, thruster);
+      const direction = facing(mount);
+      const size = mount.scale;
+      const x = mount.x * r + Math.cos(direction) * out * size;
+      const y = mount.y * r + Math.sin(direction) * out * size;
+      this.drawFlame(x, y, direction, length * size * (0.2 + 0.8 * level), width * size * (0.5 + 0.5 * level));
     };
-    flame("thrusterMain", -r * 0.8, 0, Math.PI, 2, 4);
-    flame("thrusterReverse", r * 0.9, 0, 0, 1, 3);
-    flame("thrusterStrafeLeft", 0, r * 0.45, down, 1, 3);
-    flame("thrusterStrafeRight", 0, -r * 0.45, up, 1, 3);
-    flame("thrusterRotateRight", r * 0.6, -r * 0.2, up, 0.7, 2);
-    flame("thrusterRotateRight", -r * 0.7, r * 0.55, down, 0.7, 2);
-    flame("thrusterRotateLeft", r * 0.6, r * 0.2, down, 0.7, 2);
-    flame("thrusterRotateLeft", -r * 0.7, -r * 0.55, up, 0.7, 2);
+    flame("thrusterMain", 2, 4, 1.5);
+    flame("thrusterReverse", 1, 3, 1);
+    flame("thrusterStrafeLeft", 1, 3, 1);
+    flame("thrusterStrafeRight", 1, 3, 1);
+    flame("thrusterRotateRight", 0.7, 2, 1);
+    flame("thrusterRotateLeft", 0.7, 2, 1);
 
     const damage = 1 - Math.max(0, ship.hull) / 100;
-    const art = SHIP_ARTS.indexOf(this.shipArt);
-    if (art >= 1) {
-      const tint = [red + damage * 55, green - damage * 120, blue - damage * 150].map((v) => Math.round(Math.max(0, Math.min(255, v)))) as [number, number, number];
-      const broken = art >= 2 ? drawPixelShip(ctx, ship, tint) : drawVectorShip(ctx, ship, tint);
-      for (const [bx, by] of broken) this.drawSparks(bx, by);
-    } else {
-      ctx.fillStyle = `rgb(${red + damage * 55}, ${green - damage * 120}, ${blue - damage * 150})`;
-      ctx.beginPath();
-      if (ship.model === "floater") {
-        // Square, a little slimmer at the front. A pale front edge shows which way it faces.
-        ctx.moveTo(r, -r * 0.7);
-        ctx.lineTo(-r, -r);
-        ctx.lineTo(-r, r);
-        ctx.lineTo(r, r * 0.7);
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = "#f4f8ff";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(r, -r * 0.7);
-        ctx.lineTo(r, r * 0.7);
-        ctx.stroke();
-      } else {
-        ctx.moveTo(SHIP_RADIUS * 1.25, 0);
-        ctx.lineTo(-SHIP_RADIUS, -SHIP_RADIUS * 0.8);
-        ctx.lineTo(-SHIP_RADIUS * 0.55, 0);
-        ctx.lineTo(-SHIP_RADIUS, SHIP_RADIUS * 0.8);
-        ctx.closePath();
-        ctx.fill();
-      }
-      this.drawModules(ship);
-    }
+    const tint = [red + damage * 55, green - damage * 120, blue - damage * 150].map((v) => Math.round(Math.max(0, Math.min(255, v)))) as [number, number, number];
+    const broken = drawVectorShip(ctx, ship, tint);
+    for (const [bx, by] of broken) this.drawSparks(bx, by);
     this.drawCargo(ship);
     // Critical: it's coming apart.
     if (ship.critical > 0) for (let i = 0; i < 3; i++) this.drawSparks((Math.random() - 0.5) * r * 2, (Math.random() - 0.5) * r * 1.6);
@@ -1211,7 +1183,8 @@ export class Renderer {
         Math.sin(ship.turretAngle - ship.prevTurretAngle),
         Math.cos(ship.turretAngle - ship.prevTurretAngle),
       );
-      ctx.translate(HULL_MOUNTS[ship.model].find((mount) => mount.id === "gun")!.x * r, 0);
+      const base = mountOf(ship.model, "gun");
+      ctx.translate(base.x * r, base.y * r);
       ctx.rotate(ship.prevTurretAngle + turn * alpha);
       ctx.fillStyle = moduleColor(turret, "#c9d4e6");
       ctx.beginPath();
@@ -1228,54 +1201,6 @@ export class Renderer {
     }
     ctx.restore();
     this.drawStanding(ship, x, y);
-  }
-
-  /**
-   * What's fitted, where it's fitted: thruster nozzles, the gun, the tractor's dish, the
-   * computer. A cargo section sits inside the hull and isn't drawn. Damaged parts glow orange and
-   * spark; destroyed ones are dark stubs. Drawn in the ship's own frame.
-   */
-  private drawModules(ship: Ship): void {
-    const { ctx } = this;
-    const r = SHIP_RADIUS;
-    for (const mount of HULL_MOUNTS[ship.model]) {
-      const module = ship.fit[mount.id];
-      if (!module) continue;
-      const part = partOf(module.part);
-      if (part.kind === "turret") continue;
-      const x = mount.x * r;
-      const y = mount.y * r;
-      const color = moduleColor(module, "#a9b4c6");
-      ctx.fillStyle = color;
-      ctx.strokeStyle = color;
-      switch (part.kind) {
-        case "thruster": {
-          const size = mount.id === "thrusterMain" ? 3 : 1.6;
-          ctx.fillRect(x - size / 2, y - size / 2, size, size);
-          break;
-        }
-        case "gun":
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(x - r * 0.25, y);
-          ctx.lineTo(x + (module.wear >= 1 ? r * 0.05 : r * 0.3), y);
-          ctx.stroke();
-          break;
-        case "tractor":
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.arc(x, y, r * 0.22, -Math.PI / 2, Math.PI / 2);
-          ctx.stroke();
-          break;
-        case "computer":
-          ctx.fillRect(x - 2, y - 2, 4, 4);
-          break;
-        case "section":
-          // A bay sits inside the hull: nothing shows outside it.
-          break;
-      }
-      if (module.wear >= DAMAGED_AT && module.wear < 1) this.drawSparks(x, y);
-    }
   }
 
   /** The escape pod: a small capsule with a blinking light, flying itself to a shipyard. */

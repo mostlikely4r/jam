@@ -1,6 +1,6 @@
 import { Chatter } from "./chatter";
 import { type BlueprintId, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
-import { computerSize, DAMAGED_AT, fitPart, type Fitting, HULL_DEFAULTS, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
+import { computerSize, DAMAGED_AT, facing, fitPart, mountOf, thrustOf, type Fitting, HULL_DEFAULTS, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
 import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./pilot";
 export { FIRST_FIELD };
 import { pathAround } from "./route";
@@ -4156,8 +4156,10 @@ export class Sim {
     const { tractorRange, tractorPull, tractorSpeed } = this.tuning;
     const most = tractorPull * dt;
     const edge = Math.cos(((Math.min(this.tractorCone(ship), 360) / 2) * Math.PI) / 180);
-    const noseX = Math.cos(ship.angle);
-    const noseY = Math.sin(ship.angle);
+    // The dish looks the way its mount faces.
+    const look = ship.angle + facing(mountOf(ship.model, "tractor"));
+    const noseX = Math.cos(look);
+    const noseY = Math.sin(look);
     for (const ore of this.ores) {
       if (ore.caughtBy && ore.caughtBy !== ship) continue;
       const dx = ship.x - ore.x;
@@ -4220,17 +4222,24 @@ export class Sim {
     const retro = ship.parts.has("retro") && (usesSwitch ? tuning.retro : controls.retro);
     const spinAssist = retro || (ship.parts.has("spinStabilizer") && controls.stabilize);
 
+    // Each thruster does what it does where it sits on the hull: see `thrustOf`.
+    const thrust = thrustOf(ship.model);
     const spinChange = ((tuning.rotationThrust * Math.PI) / 180) * perTick;
-    ship.spin += this.fireAxis(
+    const { thrusterRotateRight: right, thrusterRotateLeft: left } = thrust.turn;
+    const turned = this.fireAxis(
       ship,
       controls.turn,
       ship.spin,
       "thrusterRotateRight",
       "thrusterRotateLeft",
-      spinChange,
-      spinChange,
+      spinChange * Math.abs(right),
+      spinChange * Math.abs(left),
       spinAssist,
     );
+    const turnedBy = turned > 0 ? right : left;
+    // One turned round turns the other way, so it's no help steadying the spin.
+    if (turnedBy < 0 && controls.turn === 0) ship.firing.delete(turned > 0 ? "thrusterRotateRight" : "thrusterRotateLeft");
+    else ship.spin += turned * Math.sign(turnedBy);
     ship.angle += ship.spin * dt;
 
     const cos = Math.cos(ship.angle);
@@ -4255,8 +4264,12 @@ export class Sim {
       tuning.sideThrust * perTick,
       retro,
     );
-    ship.vx += cos * forwardChange - sin * sideChange;
-    ship.vy += sin * forwardChange + cos * sideChange;
+    const forward = this.pushOf(ship, thrust, forwardChange, "thrusterMain", "thrusterReverse", 1, 0, controls.thrust);
+    const side = this.pushOf(ship, thrust, sideChange, "thrusterStrafeRight", "thrusterStrafeLeft", 0, 1, controls.strafe);
+    const along = forward.x + side.x;
+    const across = forward.y + side.y;
+    ship.vx += cos * along - sin * across;
+    ship.vy += sin * along + cos * across;
 
     if (this.isDocked(ship)) {
       const keep = Math.exp(-tuning.dockDrag * dt);
@@ -4281,7 +4294,7 @@ export class Sim {
       return;
     }
     const wrap = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
-    const want = ship.aim ? wrap(Math.atan2(ship.aim.y - ship.y, ship.aim.x - ship.x) - ship.angle) : 0;
+    const want = ship.aim ? wrap(Math.atan2(ship.aim.y - ship.y, ship.aim.x - ship.x) - ship.angle) : wrap(facing(mountOf(ship.model, "gun")));
     const step = ((this.tuning.turretTurnSpeed * Math.PI) / 180) * dt;
     const change = Math.max(-step, Math.min(step, wrap(want - ship.turretAngle)));
     ship.turretAngle = wrap(ship.turretAngle + change);
@@ -4317,6 +4330,31 @@ export class Sim {
     const change = Math.min(fullChange, limit);
     ship.firing.set(thruster, fullChange > 0 ? change / fullChange : 0);
     return direction * change;
+  }
+
+  /**
+   * The push, in the ship's frame, of the thruster that fired for `change` on an axis, which way
+   * it really points. Steadying with no command, one that pushes against the axis doesn't fire.
+   */
+  private pushOf(
+    ship: Ship,
+    thrust: ReturnType<typeof thrustOf>,
+    change: number,
+    positive: ThrusterId,
+    negative: ThrusterId,
+    axisX: number,
+    axisY: number,
+    command: number,
+  ): { x: number; y: number } {
+    if (change === 0) return { x: 0, y: 0 };
+    const role = change > 0 ? positive : negative;
+    const push = thrust.push[role] ?? { x: axisX * Math.sign(change), y: axisY * Math.sign(change) };
+    if (command === 0 && (push.x * axisX + push.y * axisY) * change <= 0) {
+      ship.firing.delete(role);
+      return { x: 0, y: 0 };
+    }
+    const size = Math.abs(change);
+    return { x: push.x * size, y: push.y * size };
   }
 
   /** A thruster needs its part. The panel's switches can also turn off the player's. */
@@ -5254,11 +5292,15 @@ export class Sim {
     const precise = ship.parts.has("gun2");
     const turret = ship.parts.has("turret");
     ship.cooldown = 1 / (precise ? tuning.gun2ShotsPerSecond : tuning.shotsPerSecond);
-    const angle = ship.angle + (turret ? ship.turretAngle : 0);
+    // Fired the way the gun faces, from the line through its mount, just clear of the hull.
+    const mount = mountOf(ship.model, "gun");
+    const aim = turret ? ship.turretAngle : facing(mount);
+    const angle = ship.angle + aim;
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);
-    const x = ship.x + cos * (SHIP_RADIUS + 4);
-    const y = ship.y + sin * (SHIP_RADIUS + 4);
+    const aside = (-mount.x * Math.sin(aim) + mount.y * Math.cos(aim)) * SHIP_RADIUS;
+    const x = ship.x + cos * (SHIP_RADIUS + 4) - sin * aside;
+    const y = ship.y + sin * (SHIP_RADIUS + 4) + cos * aside;
     this.shots.push({
       x,
       y,

@@ -1,5 +1,6 @@
 import { ShipDemo } from "./demo";
 import { Chart } from "./chart";
+import { HullDesigner } from "./designer/hulls";
 import { Designer } from "./designer/designer";
 import { useLayout, type GameLink } from "./designer/link";
 import { shippedWorld } from "./designer/shipped";
@@ -12,7 +13,6 @@ import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartId } from "./parts";
 import { computerSize, mountsFor, mountsHolding, owns } from "./fitting";
 import { Inventory } from "./inventory";
-import { SHIP_ART_NAMES, SHIP_ARTS, type ShipArt } from "./shipArt";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
 const STORAGE_KEY = "flight-test-tuning";
@@ -82,6 +82,20 @@ const gameLink: GameLink = {
     buildPanel();
   },
 };
+/** Dev only: the hull designer, for moving, turning and sizing each hull's mounts. */
+const hullDesigner = dev
+  ? new HullDesigner(() => {
+      keys.clear();
+      if (paused) setPaused(true);
+    })
+  : null;
+
+function openHulls(): void {
+  if (!hullDesigner) return;
+  keys.clear();
+  pauseOverlay.hidden = true;
+  hullDesigner.open();
+}
 /** Dev only: the system designer, a separate view for laying out stars, planets and places. */
 const designer = dev
   ? new Designer(() => {
@@ -235,31 +249,22 @@ const SETTINGS_KEY = "jam-settings";
 const settings = loadSettings();
 audio.volume = settings.volume;
 audio.muted = settings.muted;
-renderer.shipArt = settings.shipArt;
 
-function loadSettings(): { volume: number; muted: boolean; shipArt: ShipArt } {
+function loadSettings(): { volume: number; muted: boolean } {
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}");
     return {
       volume: typeof saved.volume === "number" ? saved.volume : 0.5,
       muted: saved.muted === true,
-      shipArt: SHIP_ARTS.includes(saved.shipArt) ? saved.shipArt : "vector",
     };
   } catch {
-    return { volume: 0.5, muted: false, shipArt: "vector" };
+    return { volume: 0.5, muted: false };
   }
-}
-
-/** Steps to the next ship look, and remembers it. */
-function nextShipArt(): void {
-  renderer.shipArt = SHIP_ARTS[(SHIP_ARTS.indexOf(renderer.shipArt) + 1) % SHIP_ARTS.length];
-  saveSettings();
 }
 
 function saveSettings(): void {
   settings.volume = audio.volume;
   settings.muted = audio.muted;
-  settings.shipArt = renderer.shipArt;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
@@ -267,7 +272,7 @@ const keys = new Set<string>();
 let paused = false;
 let timeScale = 1;
 /** The menu is up, or the designer covers the game. */
-const pausedNow = () => paused || (designer?.isOpen ?? false);
+const pausedNow = () => paused || (designer?.isOpen ?? false) || (hullDesigner?.isOpen ?? false);
 
 /**
  * The world new games start in, already running for a while (npm run warm makes it). Only
@@ -344,7 +349,6 @@ const HELP: [string, HelpLine[]][] = [
     [
       ["Esc or P", "Pause, and this menu"],
       ["M", "Mute"],
-      ["V", "Ship art: squares, vector shapes or pixel art (while we choose)"],
     ],
   ],
 ];
@@ -416,6 +420,7 @@ function showPage(page: "main" | "help" | "settings"): void {
       newGame,
     );
     if (designer) pauseBox.append(menuButton("System designer (dev, O)", openDesigner));
+    if (hullDesigner) pauseBox.append(menuButton("Hull designer (dev, H)", openHulls));
     return;
   }
   if (page === "help") {
@@ -458,11 +463,7 @@ function showPage(page: "main" | "help" | "settings"): void {
     saveSettings();
   });
   mute.append(muteBox, " Mute (M)");
-  const art = menuButton(`Ship art (V): ${SHIP_ART_NAMES[renderer.shipArt]}`, () => {
-    nextShipArt();
-    art.textContent = `Ship art (V): ${SHIP_ART_NAMES[renderer.shipArt]}`;
-  });
-  pauseBox.replaceChildren(title, sub, heading("Settings"), volumeLabel, volume, mute, art, back);
+  pauseBox.replaceChildren(title, sub, heading("Settings"), volumeLabel, volume, mute, back);
 }
 
 /** Buys a part, or sells it back if it's fitted. A program the pilot owns is loaded or unloaded instead. */
@@ -1010,7 +1011,11 @@ window.addEventListener("keydown", (event) => {
   // Picking a ship comes first.
   if (!startOverlay.hidden) return;
   // The designer has its own keys, and the game holds still behind it.
-  if (designer?.isOpen) return;
+  if (designer?.isOpen || hullDesigner?.isOpen) return;
+  if (hullDesigner && event.code === "KeyH" && !event.repeat) {
+    openHulls();
+    return;
+  }
   if (designer && event.code === "KeyO" && !event.repeat) {
     openDesigner();
     return;
@@ -1062,7 +1067,6 @@ window.addEventListener("keydown", (event) => {
   if (event.repeat) return;
   if (event.code === "KeyR" && dev) restart();
   if (event.code === "KeyX") setRetro(!tuning.retro);
-  if (event.code === "KeyV") nextShipArt();
   const deposit = sim.isDocked() ? null : sim.depositAt();
   if (deposit && event.code === "Digit1") sim.sellToDeposit(sim.ship, deposit);
   if (deposit && event.code === "Digit2") sim.buyFromDeposit(sim.ship, deposit);

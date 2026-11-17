@@ -1,0 +1,26 @@
+{
+  "racer": {
+    "thrusterMain": { "x": -0.8, "y": 0, "angle": 180, "scale": 1 },
+    "thrusterRotateLeft": { "x": -0.7, "y": -0.55, "angle": -90, "scale": 1 },
+    "thrusterRotateRight": { "x": -0.7, "y": 0.55, "angle": 90, "scale": 1 },
+    "thrusterReverse": { "x": 0.9, "y": 0, "angle": 0, "scale": 1 },
+    "thrusterStrafeLeft": { "x": 0, "y": 0.45, "angle": 90, "scale": 1 },
+    "thrusterStrafeRight": { "x": 0, "y": -0.45, "angle": -90, "scale": 1 },
+    "gun": { "x": 1.05, "y": 0, "angle": 0, "scale": 1 },
+    "tractor": { "x": 0.45, "y": 0, "angle": 0, "scale": 1 },
+    "computer": { "x": -0.25, "y": 0, "angle": 0, "scale": 1 },
+    "section": { "x": -0.55, "y": 0.35, "angle": 0, "scale": 1 }
+  },
+  "floater": {
+    "thrusterMain": { "x": -1, "y": 0, "angle": 180, "scale": 1 },
+    "thrusterRotateLeft": { "x": -0.7, "y": -0.55, "angle": -90, "scale": 1 },
+    "thrusterRotateRight": { "x": -0.7, "y": 0.55, "angle": 90, "scale": 1 },
+    "thrusterReverse": { "x": 0.9, "y": 0, "angle": 0, "scale": 1 },
+    "thrusterStrafeLeft": { "x": 0, "y": 0.45, "angle": 90, "scale": 1 },
+    "thrusterStrafeRight": { "x": 0, "y": -0.45, "angle": -90, "scale": 1 },
+    "gun": { "x": 0.1, "y": 0, "angle": 0, "scale": 1 },
+    "tractor": { "x": 0.8, "y": 0, "angle": 0, "scale": 1 },
+    "computer": { "x": -0.55, "y": 0, "angle": 0, "scale": 1 },
+    "section": { "x": -0.2, "y": 0.4, "angle": 0, "scale": 1 }
+  }
+}

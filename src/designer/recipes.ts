@@ -59,6 +59,30 @@ const FILLED = [
   "Pale", "Duo", "Duo minor", "Gloam", "Gloam reach",
 ];
 
+/**
+ * full-system's moons: two round each planet (one more round home and round Bulwark, which have
+ * one), and the gap each needs. Each moon carries two rings of plain rock fields, four inside
+ * going one way and six outside going the other: ten fields a moon.
+ */
+const MOON_SIZE = 2500;
+const RING_FIELD = 3500;
+const INNER_RING = { orbit: 12000, count: 4, period: -5200, rocks: 300 };
+const OUTER_RING = { orbit: 22000, count: 6, period: 9800, rocks: 260 };
+/** How far a moon's rings reach from its middle. */
+const MOON_REACH = OUTER_RING.orbit + RING_FIELD;
+const MOON_GAP = 5000;
+const NUMERALS = ["I", "II", "III"];
+
+/** How far a node and everything round it reaches from its middle, copies and all. */
+function reach(node: WorldNode): number {
+  let far = Math.max(node.radius, node.pull);
+  for (const child of node.children) {
+    const out = child.orbitRadius * (1 + Math.max(0, child.orbitVariance) / 100);
+    far = Math.max(far, out + reach(child));
+  }
+  return far;
+}
+
 /** The game's own station, by the first field. */
 function homeStation(world: World): WorldNode {
   const { station } = linkedNodes(world);
@@ -67,6 +91,111 @@ function homeStation(world: World): WorldNode {
 }
 
 export const RECIPES: Record<string, Recipe> = {
+  "full-system": {
+    about: "The home system at full count: filled-system, then two moons a planet with ten plain fields round each, planets spaced so their moons never meet.",
+    start: "shipped",
+    apply(world) {
+      const lines = RECIPES["filled-system"].apply(world);
+      const star = world.root;
+      const homePlanet = walk(world).find((entry) => entry.node.kind === "planet" && entry.parent === star)!.node;
+      const homeMoon = homePlanet.children.find((child) => child.kind === "moon")!;
+      const like = { radius: homePlanet.orbitRadius, period: homePlanet.orbitPeriod };
+      const moonLike = { radius: homeMoon.orbitRadius, period: homeMoon.orbitPeriod };
+      const period = (radius: number, of: { radius: number; period: number }) => Math.round(of.period * Math.pow(radius / of.radius, 1.5));
+      const planets = star.children.filter((child) => child.kind === "planet");
+      // What it adds is named after its planet with a numeral, so it can all come out again.
+      const ours = (name: string) => planets.some((planet) => NUMERALS.some((numeral) => name.startsWith(`${planet.name} ${numeral}`)));
+      for (const { node } of walk(world)) node.children = node.children.filter((child) => !ours(child.name));
+
+      const add = (parent: WorldNode, kind: NodeKind, name: string, settings: Partial<WorldNode>): WorldNode => {
+        const node = makeChild(world, parent, kind);
+        const radius = settings.radius ?? node.radius;
+        Object.assign(node, bodyDefaults(kind, radius), { name, radius }, settings);
+        parent.children.push(node);
+        return node;
+      };
+      const ring = (moon: WorldNode, name: string, spec: typeof INNER_RING, phase: number) =>
+        add(moon, "field", name, {
+          radius: RING_FIELD,
+          orbitRadius: spec.orbit,
+          orbitPeriod: spec.period,
+          orbitPhase: phase,
+          count: spec.count,
+          rocks: spec.rocks,
+        });
+
+      let moons = 0;
+      for (const planet of planets) {
+        const have = planet.children.filter((child) => child.kind === "moon").length;
+        // Home's moon is far out with its fields round an anchor; the new one goes in the gap inside it.
+        const inside = planet === homePlanet;
+        for (let i = have; i < 2; i++) {
+          const name = `${planet.name} ${NUMERALS[i]}`;
+          let orbit: number;
+          if (inside) {
+            const below = Math.max(...planet.children.filter((child) => child !== homeMoon).map((child) => child.orbitRadius + reach(child)));
+            const above = homeMoon.orbitRadius - reach(homeMoon);
+            // Halfway across the gap, which is a little narrower than the usual spacing.
+            orbit = Math.round((below + above) / 2);
+            if (orbit - MOON_REACH - 1000 < below) throw new Error(`No room for ${name} inside ${homeMoon.name}`);
+          } else orbit = Math.round(reach(planet) + MOON_GAP + MOON_REACH);
+          const moon = add(planet, "moon", name, {
+            radius: MOON_SIZE,
+            orbitRadius: orbit,
+            orbitPeriod: period(orbit, moonLike) * (i % 2 ? -1 : 1),
+            orbitPhase: (planet.orbitPhase * 7 + i * 150) % 360,
+          });
+          ring(moon, `${name} inner ring`, INNER_RING, (i * 45) % 360);
+          ring(moon, `${name} outer ring`, OUTER_RING, (i * 30 + 15) % 360);
+          moons++;
+        }
+      }
+      // The giant's two ring fields become rings of fields.
+      for (const [name, count] of [["Bulwark inner ring", 6], ["Bulwark outer ring", 8]] as const) {
+        const node = walk(world).find((entry) => entry.node.name === name)?.node;
+        if (node) node.count = count;
+      }
+
+      // Space the planets out so none's moons ever meet another's: home stays where it is, the
+      // rest go out from the star in their order, each clear of the one before.
+      const GAP = 40000;
+      // There's no room for Speck's moons between Mire and home: it goes out past home.
+      const speck = star.children.find((child) => child.name === "Speck");
+      if (speck && speck.orbitRadius < homePlanet.orbitRadius) speck.orbitRadius = homePlanet.orbitRadius + 1;
+      const order = [...star.children].sort((a, b) => a.orbitRadius - b.orbitRadius);
+      const home = order.indexOf(homePlanet);
+      const moved: string[] = [];
+      const place = (node: WorldNode, orbit: number) => {
+        if (node.orbitRadius === orbit) return;
+        moved.push(`${node.name} ${Math.round(node.orbitRadius / 1000)}k -> ${Math.round(orbit / 1000)}k`);
+        node.orbitRadius = orbit;
+        node.orbitPeriod = period(orbit, like);
+      };
+      // Inward of home: each as far out as it can be, inside the next.
+      for (let i = home - 1; i >= 0; i--) {
+        const next = order[i + 1];
+        const most = next.orbitRadius - reach(next) - GAP - reach(order[i]);
+        if (order[i].orbitRadius > most) place(order[i], Math.floor(most / 10000) * 10000);
+      }
+      // Outward: each where it is, unless that's too close to the one inside.
+      for (let i = home + 1; i < order.length; i++) {
+        const last = order[i - 1];
+        const least = last.orbitRadius + reach(last) + GAP + reach(order[i]);
+        if (order[i].orbitRadius < least) place(order[i], Math.ceil(least / 10000) * 10000);
+      }
+      const inner = order[0];
+      if (inner.orbitRadius - reach(inner) < Math.max(star.radius, star.pull)) throw new Error(`${inner.name}'s moons would reach the star's pull`);
+
+      const count = (kind: NodeKind) => walk(world).reduce((sum, entry) => sum + (entry.node.kind === kind ? Math.max(1, entry.node.count) : 0), 0);
+      lines.push(
+        `Full count: added ${moons} moons with two rings of fields each.`,
+        `Now ${count("planet")} planets, ${count("moon")} moons, ${count("field")} fields, ${count("station")} bases.`,
+        moved.length ? `Moved apart: ${moved.join(", ")}.` : "No planet needed moving.",
+      );
+      for (const planet of order) lines.push(`  ${planet.name} at ${Math.round(planet.orbitRadius / 1000)}k reaches ${Math.round(reach(planet) / 1000)}k round it.`);
+      return lines;
+    },
+  },
   "far-base": {
     about: "A field and base round the planet; the base holds the all-round tractor's blueprint: the shopping trip test.",
     start: "shipped",

@@ -136,6 +136,7 @@ export function fieldsFor(world: World): FieldSpec[] {
             rotationPeriod: node.spinPeriod,
             spinPhase: toRadians(node.spinPhase),
             orbits: place(node, copy),
+            rings: ringsOf(world, place, node, copy),
           };
         }),
     );
@@ -163,6 +164,7 @@ export function stationsFor(world: World): StationSpec[] {
             rotationPeriod: node.spinPeriod,
             spinPhase: toRadians(node.spinPhase),
             orbits: place(node, copy),
+            rings: ringsOf(world, place, node, copy),
             carryFull,
             carryNone,
             shipyard: node.shipyard,

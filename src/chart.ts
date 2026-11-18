@@ -290,12 +290,8 @@ export class Chart {
       if (!sim.chartSeenPoi(poi)) continue;
       ctx.strokeStyle = "rgba(160, 140, 120, 0.14)";
       if (poi.orbits) {
-        // The designer's places carry a chain of orbits, like bodies.
-        for (let i = 0; i < poi.orbits.length; i++) {
-          const center = orbitsAt(poi.orbits.slice(0, i), sim.now);
-          const angle = Math.atan2(poi.y - center.y, poi.x - center.x);
-          ring(center, poi.orbits[i].radius, angle, this.ringFound(sim, center));
-        }
+        // The designer's places: their one true orbit, as the designer draws it.
+        drawRings(poi.rings, poi);
         continue;
       }
       if (poi.orbitRadius <= 0) continue;

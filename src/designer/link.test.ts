@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bodyAt, orbitsAt } from "../sim";
 import { DEFAULTS } from "../tuning";
+import shipped from "./world.json";
 import { anchorsFor, bodiesFor, fieldsFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, stationsFor, writeGame } from "./link";
 import { limitCarrying, makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk } from "./world";
 
@@ -229,5 +230,24 @@ describe("the link between the designer and the game", () => {
     const read = parseWorld(JSON.stringify(old))!;
     const planet = linkedNodes(read).planet!;
     expect(planet).toMatchObject({ surface: "death", pull: 30000, pullFull: 15000, pullAccel: 150 });
+  });
+  it("gives every field and station one true orbit for the chart: round its parent, as the designer draws it", () => {
+    const world = parseWorld(JSON.stringify(shipped))!;
+    const bodies = bodiesFor(world);
+    for (const spec of [...fieldsFor(world), ...stationsFor(world)]) {
+      expect(spec.rings).toHaveLength(1);
+      const [{ center, radius }] = spec.rings!;
+      for (const time of [0, 5000]) {
+        const at = orbitsAt(spec.orbits, time);
+        const round = orbitsAt(center, time);
+        expect(Math.hypot(at.x - round.x, at.y - round.y)).toBeCloseTo(radius, 3);
+      }
+    }
+    // A ring field round a moon goes round that moon, so the chart can tell when it's been found.
+    const inner = fieldsFor(world).find((spec) => spec.name === "Planet II inner ring")!;
+    const moon = bodies.find((body) => body.name === "Planet II")!;
+    const centre = orbitsAt(inner.rings![0].center, 1234);
+    const there = bodyAt(moon, 1234);
+    expect(Math.hypot(centre.x - there.x, centre.y - there.y)).toBeLessThan(1e-6);
   });
 });

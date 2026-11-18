@@ -353,6 +353,8 @@ export interface Poi {
   turn: number;
   /** A field from the designer beyond the first: placed by its chain of orbits instead. */
   orbits?: Orbit[];
+  /** Its own true orbit for the chart, when `orbits` can't show it. */
+  rings?: OrbitRing[];
   /** Its own carrying ranges, instead of the tuning's. */
   carry?: { full: number; none: number };
 }
@@ -375,6 +377,8 @@ export interface FieldSpec {
   /** Its spin at clock 0, in radians. */
   spinPhase?: number;
   orbits: Orbit[];
+  /** Its own true orbit for the chart. */
+  rings?: OrbitRing[];
 }
 
 /** A field anyone can mine, as a pilot sees it. */
@@ -397,6 +401,8 @@ export interface StationSpec {
   /** Its spin at clock 0, in radians. */
   spinPhase?: number;
   orbits: Orbit[];
+  /** Its own true orbit for the chart. */
+  rings?: OrbitRing[];
   carryFull: number;
   carryNone: number;
   shipyard: boolean;
@@ -1267,6 +1273,7 @@ export class Sim {
     const { spec, poi } = extra;
     const at = orbitsAt(spec.orbits, this.clock);
     poi.orbits = spec.orbits;
+    poi.rings = spec.rings;
     poi.reach = spec.radius;
     poi.carry = { full: spec.carryFull, none: Math.max(spec.carryFull, spec.carryNone) };
     poi.x = poi.px = at.x;
@@ -1352,6 +1359,7 @@ export class Sim {
     if (!spec) return;
     const at = orbitsAt(spec.orbits, this.clock);
     poi.orbits = spec.orbits;
+    poi.rings = spec.rings;
     poi.carry = { full: spec.carryFull, none: Math.max(spec.carryFull, spec.carryNone) };
     poi.x = poi.px = at.x;
     poi.y = poi.py = at.y;

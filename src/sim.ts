@@ -5,7 +5,7 @@ import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./p
 export { FIRST_FIELD };
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
-import { autoPlace, canPlace, floatsAfterRemoval, footprint, reachableCells, sticks, usedCells, type Placed } from "./grid";
+import { autoPlace, canPlace, floatsAfterRemoval, footprint, reachableCells, sticks, usedCells, type GridSpec, type Placed } from "./grid";
 import { pilotKind, type StepProfile } from "./profile/step";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
@@ -396,6 +396,14 @@ export interface StationSpec {
   shipyard: boolean;
   /** Blueprints it starts with, held parts among them: the only way a held part is sold. */
   blueprints: BlueprintId[];
+  /** Cells of storage: the player's lockers and its store of whole modules come out of it. Without one, the tuning's. */
+  storage?: number;
+}
+
+/** The player's locker at a base: a grid as wide as the tuning says, with as many rows as are rented. */
+export interface Locker {
+  rows: number;
+  items: Placed[];
 }
 
 /** The first base's id: the game's own station, placed by the tuning rather than the designer. */
@@ -815,7 +823,7 @@ export class Sim {
   /** Every station with a dock: the game's own first, then the designer's. */
   bases: Base[] = [];
   /** The player's lockers, by base id: what was left at each base stays there. */
-  lockers = new Map<string, Module[]>();
+  lockers = new Map<string, Locker>();
   /** Saved bases the designer hasn't handed over yet: picked up when it does. */
   private savedBases = new Map<string, BaseState>();
   /** The first base's money. Defenders earn it, and it pays for defenders. */
@@ -2646,25 +2654,115 @@ export class Sim {
 
   /**
    * A base takes a module back and pays what it's worth. A working one goes into its store
-   * as it is; a damaged one is broken down into its parts.
+   * as it is, if its storage has room; a damaged one is broken down into its parts.
    */
   private takeBack(seller: { credits: number }, module: Module, base: Base): void {
     const value = this.moduleValue(module);
-    if (module.wear < DAMAGED_AT) {
+    // With no room in its storage, a whole one is broken down too.
+    if (module.wear < DAMAGED_AT && this.storageFree(base) >= cellCount(module)) {
       base.stock.set(module.part, this.stockOf(base, module.part) + 1);
       seller.credits += value;
       base.account.credits -= value;
     } else this.chargeForService(seller, -value, base);
   }
 
-  /** The player's locker at a base, made empty the first time it's needed. */
-  lockerAt(base: Base): Module[] {
+  /** The player's locker at a base, made empty at its free size the first time it's needed. */
+  lockerAt(base: Base): Locker {
     let locker = this.lockers.get(base.id);
     if (!locker) {
-      locker = [];
+      locker = { rows: this.tuning.lockerFreeRows, items: [] };
       this.lockers.set(base.id, locker);
     }
     return locker;
+  }
+
+  /** A locker's grid: plain, with no entry and no sticking. */
+  lockerGrid(locker: Locker): GridSpec {
+    return { w: this.tuning.lockerWidth, h: locker.rows };
+  }
+
+  /** How many cells of storage a base has. */
+  storageOf(base: Base): number {
+    return base.spec?.storage ?? this.tuning.stationStorage;
+  }
+
+  /** The cells of a base's storage in use: the player's locker (its free size, even unopened) and its store of whole modules. */
+  storageUsed(base: Base): number {
+    const rows = this.lockers.get(base.id)?.rows ?? this.tuning.lockerFreeRows;
+    let used = rows * this.tuning.lockerWidth;
+    for (const [id, count] of base.stock) used += cellCount({ part: id, wear: 0 }) * count;
+    return used;
+  }
+
+  /** The cells of a base's storage still free. */
+  storageFree(base: Base): number {
+    return this.storageOf(base) - this.storageUsed(base);
+  }
+
+  /** Rents one more row of the locker where the player is docked, for good. Refused when the base's storage has no room. */
+  buyLockerRow(ship: Ship = this.ship): boolean {
+    const base = this.baseAt(ship);
+    const price = this.tuning.lockerRowPrice;
+    if (ship !== this.ship || !base || ship.credits < price) return false;
+    if (this.storageFree(base) < this.tuning.lockerWidth) return false;
+    this.lockerAt(base).rows++;
+    ship.credits -= price;
+    base.account.credits += price;
+    this.events.push({ type: "sale", x: ship.x, y: ship.y });
+    return true;
+  }
+
+  /**
+   * Puts a module in the player's locker at a base: at a spot, or the first free one. When it
+   * doesn't fit, nothing changes and it's marked, so the change it's part of is undone.
+   */
+  putInLocker(base: Base, module: Module, at?: Spot): boolean {
+    const locker = this.lockerAt(base);
+    const grid = this.lockerGrid(locker);
+    const spot = at ? { module, ...at } : autoPlace(grid, locker.items, module);
+    if (!spot || !canPlace(grid, locker.items, spot)) {
+      this.lockerOverflow = true;
+      return false;
+    }
+    locker.items.push(spot);
+    return true;
+  }
+
+  /** Set when a module found no room in a locker: `attempt` undoes the change it was part of. */
+  private lockerOverflow = false;
+
+  /**
+   * Makes a change to a docked ship that may need room in the player's locker. If the locker
+   * runs out of room, or the change says it failed, everything goes back as it was.
+   */
+  private attempt(ship: Ship, base: Base, change: () => boolean): boolean {
+    const locker = ship === this.ship ? this.lockerAt(base) : null;
+    const account = this.accountOf(ship);
+    const saved = {
+      fit: { ...ship.fit },
+      hold: [...ship.hold],
+      programs: [...ship.programs],
+      items: locker ? [...locker.items] : [],
+      credits: account.credits,
+      baseCredits: base.account.credits,
+      parts: base.parts,
+      stock: new Map(base.stock),
+    };
+    this.lockerOverflow = false;
+    const done = change();
+    const overflowed = this.lockerOverflow;
+    this.lockerOverflow = false;
+    if (done && !overflowed) return true;
+    ship.fit = saved.fit;
+    ship.hold = saved.hold;
+    ship.programs = saved.programs;
+    if (locker) locker.items = saved.items;
+    account.credits = saved.credits;
+    base.account.credits = saved.baseCredits;
+    base.parts = saved.parts;
+    base.stock = saved.stock;
+    refresh(ship);
+    return false;
   }
 
   /**
@@ -2684,7 +2782,7 @@ export class Sim {
 
   /** Modules that came off a ship in a dock: into the player's locker, or sold to the base by anyone else. */
   private stow(ship: Ship, modules: Module[], base: Base): void {
-    if (ship === this.ship) this.lockerAt(base).push(...modules);
+    if (ship === this.ship) for (const module of modules) this.putInLocker(base, module);
     else for (const module of modules) this.takeBack(this.accountOf(ship), module, base);
   }
 
@@ -2715,14 +2813,15 @@ export class Sim {
     if (!this.canBuy(ship, id) || !this.unlocked(id, base)) return false;
     const account = this.accountOf(ship);
     if (!this.atShop(ship) || account.credits < price) return false;
-    if (isProgram(id)) {
-      if (!this.hasPartsFor(price, ship)) return false;
-      this.chargeForService(account, price, base);
-    } else {
-      if (!this.canSupply(base, id)) return false;
-      this.supply(account, id, base);
-    }
-    this.equip(ship, id, base);
+    if (isProgram(id) ? !this.hasPartsFor(price, ship) : !this.canSupply(base, id)) return false;
+    // What it replaces has to find room in the player's locker.
+    const bought = this.attempt(ship, base, () => {
+      if (isProgram(id)) this.chargeForService(account, price, base);
+      else this.supply(account, id, base);
+      this.equip(ship, id, base);
+      return true;
+    });
+    if (!bought) return false;
     if (id === "retro" && ship === this.ship) this.tuning.retro = true;
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     if (ship !== this.ship && this.tuning.chatter) this.chatter.bought(this, ship, part.label.toLowerCase());
@@ -2747,9 +2846,13 @@ export class Sim {
     } else {
       const mounts = mountsHolding(ship, id);
       if (mounts.length === 0 || partOf(id).builtIn) return false;
-      for (const mount of mounts) this.takeBack(account, unfit(ship, mount)!, base);
-      this.refitDefaults(ship, base);
-      this.settleHold(ship, base);
+      const sold = this.attempt(ship, base, () => {
+        for (const mount of mounts) this.takeBack(account, unfit(ship, mount)!, base);
+        this.refitDefaults(ship, base);
+        this.settleHold(ship, base);
+        return true;
+      });
+      if (!sold) return false;
     }
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     return true;
@@ -2760,13 +2863,13 @@ export class Sim {
     for (const id of new Set(Object.values(hullDefaults(ship.model)) as PartId[])) {
       const mounts = mountsFor(ship, id);
       if (mounts.length === 0 || mounts.some((mount) => ship.fit[mount])) continue;
-      const locker = ship === this.ship ? this.lockerAt(base) : [];
-      const kept = locker.filter((item) => item.part === id && item.wear < 1);
-      if (kept.length >= mounts.length) {
+      const locker = ship === this.ship ? this.lockerAt(base) : null;
+      const kept = (locker?.items ?? []).filter((item) => item.module.part === id && item.module.wear < 1);
+      if (locker && kept.length >= mounts.length) {
         for (const mount of mounts) {
           const item = kept.shift()!;
-          locker.splice(locker.indexOf(item), 1);
-          ship.fit[mount] = item;
+          locker.items.splice(locker.items.indexOf(item), 1);
+          ship.fit[mount] = item.module;
         }
         refresh(ship);
         continue;
@@ -2782,7 +2885,7 @@ export class Sim {
     if (from.at === "mount") return ship.fit[from.mount] ?? null;
     if (from.at === "hold") return ship.hold[from.index]?.module ?? null;
     const base = this.baseAt(ship);
-    return base ? this.lockerAt(base)[from.index] ?? null : null;
+    return base ? this.lockerAt(base).items[from.index]?.module ?? null : null;
   }
 
   /**
@@ -2800,20 +2903,28 @@ export class Sim {
     if (!item || !this.canTake(ship, from)) return null;
     if (from.at === "mount") unfit(ship, from.mount);
     else if (from.at === "hold") ship.hold.splice(from.index, 1);
-    else this.lockerAt(this.baseAt(ship)!).splice(from.index, 1);
+    else this.lockerAt(this.baseAt(ship)!).items.splice(from.index, 1);
     if (from.at === "mount" && partOf(item.part).kind === "computer") trimPrograms(ship);
     return item;
   }
 
-  /** Puts a module from the bay or the locker on the ship. Only in a dock. What comes off goes where it came from. */
+  /**
+   * Puts a module from the bay or the locker on the ship. Only in a dock. What comes off goes
+   * where it came from, or into the locker; if there's no room there either, nothing changes.
+   */
   fitItem(ship: Ship, from: ItemPlace): boolean {
     const base = this.baseAt(ship);
     const item = this.itemAt(ship, from);
     if (!base || !item || from.at === "mount" || item.wear >= 1) return false;
+    return this.attempt(ship, base, () => this.fitFrom(ship, from, item, base));
+  }
+
+  private fitFrom(ship: Ship, from: ItemPlace, item: Module, base: Base): boolean {
     if (mountsFor(ship, item.part).length === 0) return false;
     // A pair goes on as a pair: the other half has to be where this one is.
     const set = partOf(item.part).set ?? 1;
-    const pile = from.at === "hold" ? ship.hold.map((placed) => placed.module) : this.lockerAt(base);
+    const locker = this.lockerAt(base);
+    const pile = (from.at === "hold" ? ship.hold : locker.items).map((placed) => placed.module);
     const pair = [item, ...pile.filter((other) => other !== item && other.part === item.part && other.wear < 1)].slice(0, set);
     if (pair.length < set) return false;
     if (from.at === "hold") {
@@ -2822,7 +2933,7 @@ export class Sim {
       const rest = ship.hold.filter((placed) => !pair.includes(placed.module));
       if (grid && !rest.every((placed) => sticks(grid, rest, placed))) return false;
       ship.hold = rest;
-    } else for (const each of pair) pile.splice(pile.indexOf(each), 1);
+    } else locker.items = locker.items.filter((placed) => !pair.includes(placed.module));
     const mounts = mountsFor(ship, item.part);
     const off: Module[] = [];
     for (const [i, mount] of mounts.entries()) {
@@ -2844,7 +2955,7 @@ export class Sim {
     for (const module of off) {
       const spot = from.at === "hold" ? this.holdSpotFor(ship, module) : null;
       if (spot) ship.hold.push(spot);
-      else this.lockerAt(base).push(module);
+      else this.putInLocker(base, module);
     }
     return true;
   }
@@ -2891,13 +3002,29 @@ export class Sim {
     this.loot.push({ x, y, px: x, py: y, vx: ship.vx + Math.cos(dir) * kick, vy: ship.vy + Math.sin(dir) * kick, item });
   }
 
-  /** Moves an item into the locker where the ship is docked. */
-  toLocker(ship: Ship, from: ItemPlace): boolean {
+  /**
+   * Moves an item into the locker where the ship is docked, at a spot or the first free one.
+   * From the locker itself, it moves the item. Refused when there's no room.
+   */
+  toLocker(ship: Ship, from: ItemPlace, at?: Spot): boolean {
     const base = this.baseAt(ship);
-    if (!base || from.at === "locker" || !this.canTake(ship, from)) return false;
-    this.lockerAt(base).push(this.takeItem(ship, from)!);
-    if (from.at === "mount") this.settleHold(ship, base);
-    return true;
+    if (!base || !this.canTake(ship, from)) return false;
+    if (from.at === "locker") {
+      if (!at) return false;
+      const locker = this.lockerAt(base);
+      const item = locker.items[from.index];
+      const rest = locker.items.filter((each) => each !== item);
+      const spot = { module: item.module, ...at };
+      if (!canPlace(this.lockerGrid(locker), rest, spot)) return false;
+      locker.items = [...rest, spot];
+      return true;
+    }
+    return this.attempt(ship, base, () => {
+      const module = this.takeItem(ship, from)!;
+      if (!this.putInLocker(base, module, at)) return false;
+      if (from.at === "mount") this.settleHold(ship, base);
+      return true;
+    });
   }
 
   /**

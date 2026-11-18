@@ -59,10 +59,10 @@ describe("the shop fits what it sells", () => {
     expect(sim.buyPart(ship, "gun2")).toBe(true);
     expect(ship.fit.gun!.part).toBe("gun2");
     expect(ship.credits).toBe(10000 - sim.partPrice("gun2"));
-    expect(sim.lockerAt(base).map((item) => item.part)).toEqual(["gun1"]);
+    expect(sim.lockerAt(base).items.map((item) => item.module.part)).toEqual(["gun1"]);
     expect(sim.sellPart(ship, "gun2")).toBe(true);
     expect(ship.fit.gun!.part).toBe("gun1");
-    expect(sim.lockerAt(base)).toEqual([]);
+    expect(sim.lockerAt(base).items).toEqual([]);
     expect(ship.credits).toBe(10000);
   });
 
@@ -223,7 +223,7 @@ describe("items as counted things", () => {
     const base = sim.baseAt()!;
     sim.buyPart(ship, "strafe");
     expect(sim.toLocker(ship, { at: "mount", mount: "thrusterStrafeLeft" })).toBe(true);
-    expect(sim.lockerAt(base).length).toBe(1);
+    expect(sim.lockerAt(base).items.length).toBe(1);
     ship.x += 3000;
     expect(sim.toLocker(ship, { at: "mount", mount: "thrusterStrafeRight" })).toBe(false);
     expect(sim.itemAt(ship, { at: "locker", index: 0 })).toBeNull();
@@ -238,7 +238,7 @@ describe("items as counted things", () => {
     sim.toLocker(ship, { at: "mount", mount: "thrusterStrafeRight" });
     expect(sim.fitItem(ship, { at: "locker", index: 0 })).toBe(true);
     expect(ship.parts.has("strafe")).toBe(true);
-    expect(sim.lockerAt(sim.baseAt()!)).toEqual([]);
+    expect(sim.lockerAt(sim.baseAt()!).items).toEqual([]);
   });
 
   it("a dropped module drifts, and flying through it picks it up", () => {
@@ -843,7 +843,7 @@ describe("the bay's grid", () => {
   function withSpareGun(): Sim {
     const sim = docked("racer");
     sim.ship.ore = 0;
-    sim.lockerAt(sim.baseAt()!).push({ part: "gun2", wear: 0 }, { part: "gun2", wear: 0 });
+    for (let i = 0; i < 2; i++) sim.putInLocker(sim.baseAt()!, { part: "gun2", wear: 0 });
     return sim;
   }
 
@@ -867,7 +867,7 @@ describe("the bay's grid", () => {
     ship.ore = 0;
     sim.devSet(ship, "tractor", true);
     expect(sim.tractorOn(ship)).toBe(true);
-    sim.lockerAt(sim.baseAt()!).push({ part: "gun2", wear: 0 });
+    sim.putInLocker(sim.baseAt()!, { part: "gun2", wear: 0 });
     const entry = sim.bayGrid(ship)!.entry;
     expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: entry.x, y: entry.y, turned: false })).toBe(true);
     expect(sim.cargoSpace(ship)).toBe(0);
@@ -880,7 +880,8 @@ describe("the bay's grid", () => {
     ship.ore = 0;
     sim.devSet(ship, "bay", true);
     // The bay is 5 by 4: a single cell at 2,1 touches no wall.
-    sim.lockerAt(sim.baseAt()!).push({ part: "flightComputer", wear: 0 }, { part: "gun2", wear: 0 });
+    sim.putInLocker(sim.baseAt()!, { part: "flightComputer", wear: 0 });
+    sim.putInLocker(sim.baseAt()!, { part: "gun2", wear: 0 });
     expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 2, y: 1, turned: false })).toBe(false);
     expect(sim.toHold(ship, { at: "locker", index: 1 }, { x: 2, y: 2, turned: false })).toBe(true);
     expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 2, y: 1, turned: false })).toBe(true);
@@ -891,8 +892,8 @@ describe("the bay's grid", () => {
     const { ship } = sim;
     ship.ore = 0;
     sim.devSet(ship, "bay", true);
-    const locker = sim.lockerAt(sim.baseAt()!);
-    locker.push({ part: "gun2", wear: 0 }, { part: "flightComputer", wear: 0 });
+    sim.putInLocker(sim.baseAt()!, { part: "gun2", wear: 0 });
+    sim.putInLocker(sim.baseAt()!, { part: "flightComputer", wear: 0 });
     sim.toHold(ship, { at: "locker", index: 0 }, { x: 2, y: 2, turned: false });
     sim.toHold(ship, { at: "locker", index: 0 }, { x: 2, y: 1, turned: false });
     expect(sim.floatingWithout(ship, 0).map((item) => item.part)).toEqual(["flightComputer"]);
@@ -917,5 +918,69 @@ describe("the bay's grid", () => {
     sim.devSet(ship, "largeBay", true);
     expect(ship.hold.map((item) => item.module.part)).toEqual(["gun2"]);
     expect(sim.cargoSpace(ship)).toBe(48);
+  });
+});
+
+describe("lockers and station storage", () => {
+  it("every base gives a free locker of the tuned size", () => {
+    const sim = docked("racer");
+    const locker = sim.lockerAt(sim.baseAt()!);
+    expect(locker.rows).toBe(sim.tuning.lockerFreeRows);
+    expect(sim.lockerGrid(locker)).toEqual({ w: sim.tuning.lockerWidth, h: sim.tuning.lockerFreeRows });
+  });
+
+  it("a row costs credits and the station's storage", () => {
+    const sim = docked("racer");
+    const base = sim.baseAt()!;
+    const credits = sim.ship.credits;
+    const free = sim.storageFree(base);
+    expect(sim.buyLockerRow()).toBe(true);
+    expect(sim.lockerAt(base).rows).toBe(sim.tuning.lockerFreeRows + 1);
+    expect(sim.ship.credits).toBe(credits - sim.tuning.lockerRowPrice);
+    expect(sim.storageFree(base)).toBe(free - sim.tuning.lockerWidth);
+  });
+
+  it("a full station refuses a row", () => {
+    const sim = docked("racer");
+    const base = sim.baseAt()!;
+    sim.tuning.stationStorage = sim.storageUsed(base) + sim.tuning.lockerWidth - 1;
+    const credits = sim.ship.credits;
+    expect(sim.buyLockerRow()).toBe(false);
+    expect(sim.ship.credits).toBe(credits);
+    expect(sim.lockerAt(base).rows).toBe(sim.tuning.lockerFreeRows);
+  });
+
+  it("a whole module sold to a full station is broken down", () => {
+    const sim = docked("racer");
+    const base = sim.baseAt()!;
+    sim.putInLocker(base, { part: "gun2", wear: 0 });
+    sim.putInLocker(base, { part: "gun2", wear: 0 });
+    expect(sim.sellItem(sim.ship, { at: "locker", index: 0 })).toBe(true);
+    expect(sim.stockOf(base, "gun2")).toBe(1);
+    sim.tuning.stationStorage = sim.storageUsed(base);
+    const credits = sim.ship.credits;
+    expect(sim.sellItem(sim.ship, { at: "locker", index: 0 })).toBe(true);
+    expect(sim.stockOf(base, "gun2")).toBe(1);
+    expect(sim.ship.credits).toBeGreaterThan(credits);
+  });
+
+  it("a locker takes only what fits on its grid", () => {
+    const sim = docked("racer");
+    const base = sim.baseAt()!;
+    // 6 by 2: three large bays don't fit, three tractors do.
+    expect(sim.putInLocker(base, { part: "largeBay", wear: 0 })).toBe(false);
+    for (let i = 0; i < 3; i++) expect(sim.putInLocker(base, { part: "tractor", wear: 0 })).toBe(true);
+    expect(sim.putInLocker(base, { part: "turnThrusters", wear: 0 })).toBe(false);
+  });
+
+  it("a swap that would overfill the locker is refused, and nothing changes", () => {
+    const sim = docked("racer");
+    const base = sim.baseAt()!;
+    for (let i = 0; i < 3; i++) sim.putInLocker(base, { part: "tractor", wear: 0 });
+    const credits = sim.ship.credits;
+    expect(sim.buyPart(sim.ship, "gun2")).toBe(false);
+    expect(sim.ship.fit.gun!.part).toBe("gun1");
+    expect(sim.ship.credits).toBe(credits);
+    expect(sim.lockerAt(base).items.length).toBe(3);
   });
 });

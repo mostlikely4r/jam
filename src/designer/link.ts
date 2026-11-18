@@ -166,6 +166,7 @@ export function stationsFor(world: World): StationSpec[] {
             carryFull,
             carryNone,
             shipyard: node.shipyard,
+            storage: node.storage,
             blueprints: node.blueprints,
           };
         }),
@@ -248,6 +249,7 @@ export function writeGame(world: World, tuning: Tuning): void {
   if (station) {
     tuning.stationSpinPhase = toRadians(station.spinPhase);
     tuning.stationShipyard = station.shipyard;
+    tuning.stationStorage = station.storage;
     tuning.stationDistance = station.orbitRadius - field.radius;
     tuning.orbitPeriod = station.orbitPeriod;
     tuning.stationRotationPeriod = station.spinPeriod;

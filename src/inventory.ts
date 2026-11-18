@@ -1,5 +1,5 @@
 import { mountsOf, programSlots, computerSize, DAMAGED_AT, type Module } from "./fitting";
-import { partOf, PARTS } from "./parts";
+import { partOf, PARTS, shapeOf } from "./parts";
 import type { ItemPlace, Sim } from "./sim";
 
 function condition(module: Module): string {
@@ -143,17 +143,21 @@ export class Inventory {
     const { ship } = sim;
     const base = sim.baseAt();
     if (!base) {
-      const kept = [...sim.lockers].filter(([, items]) => items.length > 0).map(([id, items]) => `${sim.baseName(id)} (${items.length})`);
+      const kept = [...sim.lockers].filter(([, { items }]) => items.length > 0).map(([id, { items }]) => `${sim.baseName(id)} (${items.length})`);
       this.heading("Locker");
       this.note(kept.length > 0 ? `Not docked. You have things kept at ${kept.join(", ")}.` : "Not docked. Every base has a locker for you.");
       return;
     }
     const locker = sim.lockerAt(base);
-    this.heading(`Locker at ${sim.baseName(base.id)}`);
-    if (locker.length === 0) this.note("Empty. What you take off or leave here stays here.");
-    locker.forEach((item, index) => {
+    const cells = locker.rows * sim.tuning.lockerWidth;
+    const used = locker.items.reduce((sum, { module }) => sum + shapeOf(module.part).w * shapeOf(module.part).h, 0);
+    this.heading(`Locker at ${sim.baseName(base.id)} - ${used} of ${cells} cells taken`);
+    const roomy = sim.storageFree(base) >= sim.tuning.lockerWidth;
+    this.row(`${locker.rows} rows of ${sim.tuning.lockerWidth}. The station has ${Math.max(0, sim.storageFree(base))} cells of storage free.`, roomy ? [[`buy a row ${sim.tuning.lockerRowPrice}`, () => sim.buyLockerRow()]] : []);
+    if (locker.items.length === 0) this.note("Empty. What you take off or leave here stays here.");
+    locker.items.forEach(({ module: item, x, y }, index) => {
       const place: ItemPlace = { at: "locker", index };
-      this.row(`${partOf(item.part).label}${condition(item)}`, [
+      this.row(`${partOf(item.part).label}${condition(item)} at ${x + 1},${y + 1}`, [
         ["fit", () => sim.fitItem(ship, place)],
         ["to bay", () => sim.toHold(ship, place)],
         [`sell ${sim.moduleValue(item)}`, () => sim.sellItem(ship, place)],

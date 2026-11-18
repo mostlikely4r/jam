@@ -61,6 +61,14 @@ export const DEFAULTS = {
   stationRotationPeriod: 300,
   /** Whether the station rebuilds wrecked ships. A wreck goes to the nearest station that does. */
   stationShipyard: true,
+  /** Cells of storage at the first base. The player's lockers and its store of whole modules come out of it. */
+  stationStorage: 200,
+  /** How many cells across a locker is. */
+  lockerWidth: 6,
+  /** The rows of locker every base gives the player for free. */
+  lockerFreeRows: 2,
+  /** What one more row of locker costs, bought once and kept. */
+  lockerRowPrice: 500,
   dockDrag: 0.25,
   creditsPerOre: 10,
 

@@ -193,6 +193,31 @@ describe("the link between the designer and the game", () => {
     expect(tuning.stationShipyard).toBe(false);
   });
 
+  it("hands each station's storage to the game: the first's through the tuning", () => {
+    const world = seedWorld();
+    const { planet, station } = linkedNodes(world);
+    const outpost = makeChild(world, planet!, "station");
+    // A new station starts with the default storage.
+    expect(outpost.storage).toBe(200);
+    outpost.storage = 80;
+    planet!.children.push(outpost);
+    expect(stationsFor(world).map((each) => each.storage)).toEqual([80]);
+    station!.storage = 120;
+    const tuning = { ...DEFAULTS };
+    writeGame(world, tuning);
+    expect(tuning.stationStorage).toBe(120);
+    // A world saved before storage gets the default; a saved storage reads back.
+    const text = stringifyWorld(world);
+    expect(linkedNodes(parseWorld(text)!).station!.storage).toBe(120);
+    const old = JSON.parse(text);
+    const strip = (node: { storage?: number; children: unknown[] }): void => {
+      delete node.storage;
+      node.children.forEach((child) => strip(child as typeof node));
+    };
+    strip(old.root);
+    expect(linkedNodes(parseWorld(JSON.stringify(old))!).station!.storage).toBe(200);
+  });
+
   it("gives a world saved before ground and full pull its kind's defaults", () => {
     const world = seedWorld();
     const old = JSON.parse(stringifyWorld(world));

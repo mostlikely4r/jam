@@ -4,8 +4,8 @@ Written 2026-11-18. The fitting plan (`docs/fitting-plan.md`) made parts into co
 on mounts, in the bay and in lockers, but the screens still treat them as lists: a part is
 something you have or don't, and the bay is one number shared by ore and modules. This plan
 makes them real things in real places: storage you can see as grids, a blueprint of the ship to
-fit onto, and items with a shape that take up space. Step 1 is built (2026-11-18). Steps 2 to 4
-are not built yet.
+fit onto, and items with a shape that take up space. Steps 1 and 2 are built (2026-11-18).
+Steps 3 and 4 are not built yet.
 
 ## The picture
 
@@ -163,6 +163,22 @@ and h.
 
 *Tests:* the free locker size; buying a row costs credits and base storage; a full base refuses
 a row; selling a whole module to a full base breaks it down.
+
+**Built 2026-11-18.** Where it differs from the above, or settles what the plan left open:
+
+- Tuning: `stationStorage` 200 cells (the first base), `lockerWidth` 6, `lockerFreeRows` 2,
+  `lockerRowPrice` 500. Every other station's storage is set in the world designer, 200 by
+  default.
+- A base's free locker counts against its storage from the start, even before the player
+  opens it. A row can only be bought while docked there.
+- A module stored by a base takes its shape's cells.
+- When a change needs room in the locker and there isn't any, the whole change is undone and
+  refused: a buy that swaps (until step 3), fitting from the bay or locker, or moving or selling
+  something off a mount. This was step 1's "the swap is refused".
+- `toLocker` takes an optional spot too, and moves an item within the locker. The ship
+  screen's locker list shows each item's cell, the cells taken, the station's free storage and
+  a button to buy a row.
+- `SAVE_VERSION` is 5, and `src/start.json` was made again.
 
 ### 3. WoW-style buying and the shop key
 

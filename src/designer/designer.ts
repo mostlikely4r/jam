@@ -688,6 +688,10 @@ Layouts: ${layouts.join(", ")}`, "");
         this.changed();
       });
       toggle.append(box, " Shipyard");
+      const storage = this.number(node, "storage", "Storage (cells)", (v) => `${Math.max(0, Math.floor(v))} cells for lockers and spare modules`);
+      const storageInput = storage.querySelector("input")!;
+      storageInput.min = "0";
+      storageInput.step = "10";
       const held = HELD_PARTS.map((id) => {
         const label = document.createElement("label");
         const check = document.createElement("input");
@@ -704,6 +708,7 @@ Layouts: ${layouts.join(", ")}`, "");
         ...this.group("Station", [
           this.text("Every station is a base with its own shop. Wrecked ships are rebuilt at the nearest station with a shipyard. Nobody sells a held blueprint: only a station that holds one sells that part."),
           toggle,
+          storage,
           ...held,
         ]),
       );
@@ -847,7 +852,8 @@ Layouts: ${layouts.join(", ")}`, "");
       | "rockDrift"
       | "rockInflow"
       | "carryFull"
-      | "carryNone",
+      | "carryNone"
+      | "storage",
     text: string,
     hint: (value: number) => string,
   ): HTMLLabelElement {

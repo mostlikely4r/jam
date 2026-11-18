@@ -66,6 +66,8 @@ export interface WorldNode {
   spawns: ShipChoice[];
   /** Stations only: wrecked ships are rebuilt at the nearest station with a shipyard. */
   shipyard: boolean;
+  /** Stations only: cells of storage. The player's lockers and the station's store of whole modules come out of it. */
+  storage: number;
   /** Stations only: the held blueprints it starts with, the only way those parts are sold. */
   blueprints: PartId[];
   /** How many go round in this orbit, itself included. Copies are the same thing without children. */
@@ -158,11 +160,11 @@ export function bodyDefaults(
  * open space between them carries nothing: a spinning station carrying everything would
  * sweep a ship far out sideways faster than it can fly.
  */
-export function placeDefaults(kind: NodeKind): Pick<WorldNode, "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "blueprints"> {
-  if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, shipyard: false, blueprints: [] };
-  if (kind === "station") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true, blueprints: [] };
-  if (kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: false, blueprints: [] };
-  return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, shipyard: false, blueprints: [] };
+export function placeDefaults(kind: NodeKind): Pick<WorldNode, "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "blueprints"> {
+  if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, shipyard: false, storage: 0, blueprints: [] };
+  if (kind === "station") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true, storage: 200, blueprints: [] };
+  if (kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: false, storage: 0, blueprints: [] };
+  return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, shipyard: false, storage: 0, blueprints: [] };
 }
 
 /** Default carrying, from each place's edge: full out to the first, fading to nothing by the second. */
@@ -367,6 +369,7 @@ export function parseWorld(text: string): World | null {
         carryNone: num("carryNone"),
         spawns: Array.isArray(raw.spawns) ? SHIP_CHOICES.filter((ship) => (raw.spawns as unknown[]).includes(ship)) : [],
         shipyard: typeof raw.shipyard === "boolean" ? raw.shipyard : places.shipyard,
+        storage: num("storage", places.storage),
         blueprints: Array.isArray(raw.blueprints) ? HELD_PARTS.filter((id) => (raw.blueprints as unknown[]).includes(id)) : [],
         count: Math.max(1, Math.floor(num("count", 1))),
         angleVariance: num("angleVariance"),

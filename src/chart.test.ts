@@ -32,12 +32,20 @@ function run(sim: Sim, seconds: number, each?: () => void): void {
 }
 
 describe("chart", () => {
-  it("starts knowing only the field it works", () => {
+  it("starts knowing nothing, and finds the field by getting near it", () => {
     const sim = new Sim(1, { ...ALONE });
+    sim.ship.x = sim.field.x + sim.field.reach * 5;
+    sim.ship.y = sim.field.y;
+    sim.ship.px = sim.ship.x;
+    sim.ship.py = sim.ship.y;
+    run(sim, 1);
+    expect(sim.chartSeenPoi(sim.field)).toBe(false);
+    sim.ship.x = sim.field.x;
+    sim.ship.y = sim.field.y;
+    sim.ship.px = sim.ship.x;
+    sim.ship.py = sim.ship.y;
     run(sim, 1);
     expect(sim.chartSeenPoi(sim.field)).toBe(true);
-    expect(sim.chartSeenPoi(sim.station)).toBe(false);
-    expect(sim.pirateBase === null || !sim.chartSeenPoi(sim.pirateBase)).toBe(true);
   });
 
   it("a place visited later joins the chart", () => {
@@ -77,6 +85,26 @@ describe("chart", () => {
     sim.ship.py = at.y;
     run(sim, 1);
     expect(sim.chartSeenBody(body)).toBe(true);
+  });
+
+  it("an anchor is found when its size comes on screen, even a size of zero", () => {
+    const sim = new Sim(1, { ...ALONE });
+    const orbits = [{ radius: 50000, period: 0, phase: 0, sign: 1 as const }];
+    const point = { id: "a:0", name: "Point", radius: 0, orbits };
+    const wide = { id: "b:0", name: "Wide", radius: 3000, orbits: [{ radius: 90000, period: 0, phase: 0, sign: 1 as const }] };
+    sim.anchors = [point, wide];
+    sim.screen = { halfWidth: 1000, halfHeight: 500 };
+    const goTo = (x: number, y: number) => {
+      sim.ship.x = sim.ship.px = x;
+      sim.ship.y = sim.ship.py = y;
+      run(sim, 1);
+    };
+    goTo(50000 - 1100, 0);
+    expect(sim.chartSeenAnchor(point)).toBe(false);
+    goTo(50000 - 900, 400);
+    expect(sim.chartSeenAnchor(point)).toBe(true);
+    goTo(90000 - 3900, 0);
+    expect(sim.chartSeenAnchor(wide)).toBe(true);
   });
 
   it("lists every place: the game's own three, the designer's outposts and fields", () => {

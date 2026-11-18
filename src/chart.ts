@@ -1,4 +1,4 @@
-import { bodyAt, type Deposit, type Poi, type Sim, type SolidBody } from "./sim";
+import { bodyAt, orbitsAt, type Deposit, type OrbitRing, type Poi, type Sim, type SolidBody } from "./sim";
 
 /**
  * The system chart, the starmap part's view of the whole world at once. A top-down map of
@@ -69,6 +69,11 @@ export class Chart {
       if (!sim.chartSeenPoi(poi)) continue;
       extent = Math.max(extent, far(poi.x, poi.y, poi.reach));
     }
+    for (const anchor of sim.anchors) {
+      if (!sim.chartSeenAnchor(anchor)) continue;
+      const at = orbitsAt(anchor.orbits, sim.now);
+      extent = Math.max(extent, far(at.x, at.y, anchor.radius));
+    }
     const { width, height } = this.canvas!.getBoundingClientRect();
     this.fitScale = (Math.min(width, height) / 2 / extent) * 0.92;
     this.view = { cx: 0, cy: 0, scale: this.fitScale };
@@ -106,7 +111,15 @@ export class Chart {
       if (this.drag && !this.drag.moved) this.pickAt(event.clientX, event.clientY);
       this.drag = null;
     });
-    canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+    canvas.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      // Click to move: a straight line to the spot, with no avoiding anything on the way.
+      const { cx, cy, scale } = this.view;
+      this.sim.orderMoveStraight(
+        cx + (event.clientX - window.innerWidth / 2) / scale,
+        cy + (event.clientY - window.innerHeight / 2) / scale,
+      );
+    });
     window.addEventListener("resize", () => this.resize());
   }
 
@@ -162,7 +175,7 @@ export class Chart {
     return poi.name;
   }
 
-  /** Whether what a ring's centre belongs to has been found: a body there, or a place. */
+  /** Whether what a ring's centre belongs to has been found: a body, an anchor or a place there. */
   private ringFound(sim: Sim, center: { x: number; y: number }): boolean {
     for (const body of sim.bodies) {
       const at = bodyAt(body, sim.now);
@@ -171,8 +184,12 @@ export class Chart {
     for (const poi of sim.allPois()) {
       if (Math.hypot(poi.x - center.x, poi.y - center.y) < 1) return sim.chartSeenPoi(poi);
     }
-    // Empty space, or a system with nothing at the centre: nothing left to find out.
-    return true;
+    for (const anchor of sim.anchors) {
+      const at = orbitsAt(anchor.orbits, sim.now);
+      if (Math.hypot(at.x - center.x, at.y - center.y) < 1) return sim.chartSeenAnchor(anchor);
+    }
+    // Empty space: nothing there to have found, so no full ring.
+    return false;
   }
 
   private positionOf(pick: ChartPick): { x: number; y: number } {
@@ -224,11 +241,11 @@ export class Chart {
       labels.push({ x: spot.x, y: spot.y, text });
     };
 
-    // The orbits: each body's chain, drawn as rings round the body it orbits. Until that
-    // body has been found, only a short arc round the orbiting thing shows: a hint of
-    // something there, and which way it moves.
+    // The orbits of what has been found: a full ring round the body it orbits once that
+    // body is found too, otherwise only a short arc round the orbiting thing, which way it moves.
     ctx.lineWidth = 1;
-    const ARC = (20 * Math.PI) / 180;
+    // A partial orbit is 20 degrees of the full one, centred on the orbiting thing.
+    const ARC = (10 * Math.PI) / 180;
     const ring = (worldCenter: { x: number; y: number }, radius: number, angle: number, found: boolean): void => {
       // Nothing to see on a ring that's under a couple of screen pixels, or no ring at all.
       if (radius <= 0 || radius * view.scale < 2) return;
@@ -238,21 +255,52 @@ export class Chart {
       else ctx.arc(x, y, radius * view.scale * dpr, angle - ARC, angle + ARC);
       ctx.stroke();
     };
+    // True rings: round where each thing goes round, whatever the frame's centre is.
+    const drawRings = (rings: OrbitRing[] | undefined, at: { x: number; y: number }): void => {
+      for (const { center: chain, radius } of rings ?? []) {
+        const center = orbitsAt(chain, sim.now);
+        ring(center, radius, Math.atan2(at.y - center.y, at.x - center.x), this.ringFound(sim, center));
+      }
+    };
     for (const body of sim.bodies) {
+      // Only found bodies show an orbit at all.
+      if (!sim.chartSeenBody(body)) continue;
+      ctx.strokeStyle = "rgba(120, 140, 180, 0.16)";
+      if (body.rings) {
+        drawRings(body.rings, bodyAt(body, sim.now));
+        continue;
+      }
       for (let i = 0; i < body.orbits.length; i++) {
         const center = bodyAt({ ...body, orbits: body.orbits.slice(0, i) }, sim.now);
         const at = bodyAt(body, sim.now);
         const angle = Math.atan2(at.y - center.y, at.x - center.x);
-        ctx.strokeStyle = "rgba(120, 140, 180, 0.16)";
         ring(center, body.orbits[i].radius, angle, this.ringFound(sim, center));
       }
     }
+    // Anchors orbit like bodies do.
+    for (const anchor of sim.anchors) {
+      if (!sim.chartSeenAnchor(anchor)) continue;
+      const at = orbitsAt(anchor.orbits, sim.now);
+      ctx.strokeStyle = "rgba(127, 139, 160, 0.16)";
+      // Round what it orbits, wherever the frame's centre is.
+      drawRings(anchor.rings, at);
+    }
     // Places' own orbits round whatever carries them.
     for (const poi of sim.allPois()) {
-      if (!sim.chartSeenPoi(poi) || poi.orbitRadius <= 0) continue;
+      if (!sim.chartSeenPoi(poi)) continue;
+      ctx.strokeStyle = "rgba(160, 140, 120, 0.14)";
+      if (poi.orbits) {
+        // The designer's places carry a chain of orbits, like bodies.
+        for (let i = 0; i < poi.orbits.length; i++) {
+          const center = orbitsAt(poi.orbits.slice(0, i), sim.now);
+          const angle = Math.atan2(poi.y - center.y, poi.x - center.x);
+          ring(center, poi.orbits[i].radius, angle, this.ringFound(sim, center));
+        }
+        continue;
+      }
+      if (poi.orbitRadius <= 0) continue;
       const parent = poi.parent ? { x: poi.parent.x, y: poi.parent.y } : { x: 0, y: 0 };
       const angle = Math.atan2(poi.y - parent.y, poi.x - parent.x);
-      ctx.strokeStyle = "rgba(160, 140, 120, 0.14)";
       ring(parent, poi.orbitRadius, angle, this.ringFound(sim, parent));
     }
 
@@ -274,6 +322,23 @@ export class Chart {
         ctx.stroke();
       }
       if (pixels > 6 || view.scale > this.fitScale) label(at.x, at.y, body.name);
+    }
+
+    // The anchors: a small diamond and the name, with their size as a faint ring.
+    for (const anchor of sim.anchors) {
+      if (!sim.chartSeenAnchor(anchor)) continue;
+      const at = orbitsAt(anchor.orbits, sim.now);
+      const { x, y } = to(at.x, at.y);
+      ctx.strokeStyle = "rgba(127, 139, 160, 0.7)";
+      ctx.beginPath();
+      if (anchor.radius * view.scale * dpr > 4) ctx.arc(x, y, anchor.radius * view.scale * dpr, 0, Math.PI * 2);
+      ctx.moveTo(x, y - 5);
+      ctx.lineTo(x + 5, y);
+      ctx.lineTo(x, y + 5);
+      ctx.lineTo(x - 5, y);
+      ctx.closePath();
+      ctx.stroke();
+      label(at.x, at.y, anchor.name);
     }
 
     // The places. Fields show their reach, so a look tells you where the rocks are.
@@ -390,7 +455,7 @@ export class Chart {
     };
     const { innerHeight: height } = window;
     const left = 14;
-    line("System chart - wheel: zoom, drag: pan, click: pick, C or Esc: close", left, height - 14, "rgba(150, 158, 170, 0.9)");
+    line("System chart - wheel: zoom, drag: pan, click: pick, right click: fly there, C or Esc: close", left, height - 14, "rgba(150, 158, 170, 0.9)");
     const pick = this.pick;
     if (!pick) return;
     const at = this.positionOf(pick);

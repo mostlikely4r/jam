@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bodyAt, orbitsAt } from "../sim";
 import { DEFAULTS } from "../tuning";
-import { bodiesFor, fieldsFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, stationsFor, writeGame } from "./link";
+import { anchorsFor, bodiesFor, fieldsFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, stationsFor, writeGame } from "./link";
 import { limitCarrying, makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk } from "./world";
 
 describe("the link between the designer and the game", () => {
@@ -121,7 +121,8 @@ describe("the link between the designer and the game", () => {
     const expected = { x: at.get(planet!)!.x - at.get(anchor)!.x, y: at.get(planet!)!.y - at.get(anchor)!.y };
     expect(bodyAt(game, 777).x).toBeCloseTo(expected.x, 3);
     expect(bodyAt(game, 777).y).toBeCloseTo(expected.y, 3);
-    expect(linkSummary(world)).toContain("Map only: Anchor");
+    expect(linkSummary(world)).not.toContain("Map only");
+    expect(anchorsFor(world).map((each) => each.name)).toEqual(["Anchor"]);
   });
 
   it("links the first field, and makes other fields and their stations real, but not other pirate bases", () => {

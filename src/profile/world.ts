@@ -13,8 +13,9 @@ export function linkTo(sim: Sim): GameLink {
     phases: () => sim.orbitPhases(),
     where: () => ({ ship: sim.ship, field: sim.field }),
     ships: () => [],
-    apply(phases, bodies, spawns, fields, stations, keep = false) {
+    apply(phases, bodies, spawns, fields, stations, keep = false, anchors = []) {
       sim.bodies = bodies;
+      sim.anchors = anchors;
       sim.spawns = spawns;
       sim.startPhases = phases;
       sim.applyLayout(keep ? {} : phases, fields, stations);

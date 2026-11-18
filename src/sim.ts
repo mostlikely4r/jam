@@ -517,6 +517,8 @@ export interface SolidBody {
   /** Its spin at clock 0, in radians. */
   spinPhase?: number;
   orbits: Orbit[];
+  /** Its own true orbit for the chart, when `orbits` can't show it. */
+  rings?: OrbitRing[];
 }
 
 /** Routes keep this far from a body's centre: clear of its pull and air, or just its ground. */
@@ -546,6 +548,23 @@ export function pullAt(body: SolidBody, distance: number): number {
 /** Where a body is at a time on the clock, and how fast it's going. */
 export function bodyAt(body: SolidBody, time: number): { x: number; y: number; vx: number; vy: number } {
   return orbitsAt(body.orbits, time);
+}
+
+/** An invisible point other things orbit, from the designer. It's found when its size comes on screen. */
+export interface AnchorSpec {
+  id: string;
+  name: string;
+  /** How far out it reaches. Zero is fine: a point is found the moment it's on screen. */
+  radius: number;
+  orbits: Orbit[];
+  /** Its own true orbit for the chart, when `orbits` can't show it. */
+  rings?: OrbitRing[];
+}
+
+/** One true orbit for the chart: the chain to what it goes round, and how far out. A thing's own chain loses it when the thing is an ancestor of the frame's centre. */
+export interface OrbitRing {
+  center: Orbit[];
+  radius: number;
 }
 
 /** A new game's start for one ship, from the system designer. */
@@ -878,6 +897,10 @@ export class Sim {
   profile: StepProfile | null = null;
   /** Stars, planets, moons and asteroids, from the system designer. None without it. */
   bodies: SolidBody[] = [];
+  /** Anchors from the designer: invisible places for things to orbit, found by having them on screen. */
+  anchors: AnchorSpec[] = [];
+  /** Half the world the screen shows around the ship, in world units. The game sets it from the window. */
+  screen = { halfWidth: 1200, halfHeight: 675 };
   /** Where new games start, by ship. Several for one ship: one is picked at random. None: by the field. */
   spawns: Spawn[] = [];
   /** Each POI's angle at clock 0 for new games, from the designer. Missing: the game's own start. */
@@ -1131,8 +1154,6 @@ export class Sim {
    * so it also starts a player in a world that has already been running.
    */
   startPlayer(): void {
-    // The field the ship starts beside is where it works: the chart knows it from the start.
-    this.discovered.add(`chart:${this.chartKey(this.field)}`);
     this.stats = { bestOre: this.stats.bestOre, topSpeed: 0 };
     this.resetPlayerControls();
     const model = this.tuning.floaterStart ? "floater" : "racer";
@@ -1925,6 +1946,13 @@ export class Sim {
   orderMove(x: number, y: number, vx = 0, vy = 0): boolean {
     if (!this.ship.parts.has("clickMove")) return false;
     this.clickPilot.moveTo(this, x, y, vx, vy, this.tuning.dragAbsolute);
+    return true;
+  }
+
+  /** Flies the ship in a straight line to a world position and stops, ignoring anything in the way. */
+  orderMoveStraight(x: number, y: number): boolean {
+    if (!this.ship.parts.has("clickMove")) return false;
+    this.clickPilot.moveTo(this, x, y, 0, 0, false, true);
     return true;
   }
 
@@ -5096,6 +5124,19 @@ export class Sim {
       const sight = Math.max(body.radius * this.tuning.bodySight, body.atmosphere);
       if (Math.hypot(ship.x - x, ship.y - y) < sight) discovered.add(`chart:body:${body.name}`);
     }
+    // An anchor is found when its size comes within the screen, so a size of zero is found too.
+    const { halfWidth, halfHeight } = this.screen;
+    for (const anchor of this.anchors) {
+      const at = orbitsAt(anchor.orbits, this.clock);
+      if (Math.abs(ship.x - at.x) < halfWidth + anchor.radius && Math.abs(ship.y - at.y) < halfHeight + anchor.radius) {
+        discovered.add(`chart:anchor:${anchor.id}`);
+      }
+    }
+  }
+
+  /** Whether the chart draws an anchor: found once any of it has been on screen. */
+  chartSeenAnchor(anchor: AnchorSpec): boolean {
+    return this.discovered.has(`chart:anchor:${anchor.id}`);
   }
 
   /** The chart's own key for a place: what the discovered set holds for it. */

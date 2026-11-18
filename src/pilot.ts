@@ -997,7 +997,14 @@ interface ClickOrder {
   landed?: boolean;
   closest: number;
   stuck: number;
+  /** How far the move had to go when it was ordered, for scaling its top speed. */
+  trip?: number;
+  /** Flies the straight line whatever is in the way, even with the route planner. */
+  straight?: boolean;
 }
+
+/** A click move's speed ceiling, as a share of the peak it would reach burning full to the halfway point. */
+const TRIP_CEILING = 0.75;
 
 /**
  * Carries out the player's orders: fly to a spot (rotate, thrust, coast, rotate to stop,
@@ -1060,7 +1067,7 @@ export class ClickPilot extends ShipPilot {
    * or with `absolute`, against whatever carries things at the spot. A drawn facing
    * carries over from the order before.
    */
-  moveTo(_sim: Sim, x: number, y: number, vx = 0, vy = 0, absolute = false): void {
+  moveTo(_sim: Sim, x: number, y: number, vx = 0, vy = 0, absolute = false, straight = false): void {
     const { ship } = this;
     const drifts = vx !== 0 || vy !== 0;
     const base = drifts && !absolute ? ship : { vx: 0, vy: 0 };
@@ -1072,6 +1079,8 @@ export class ClickPilot extends ShipPilot {
       stage: "flying",
       closest: Infinity,
       stuck: 0,
+      trip: Math.hypot(x - ship.x, y - ship.y),
+      straight,
     };
     this.handsOff = 0;
   }
@@ -1346,7 +1355,12 @@ export class ClickPilot extends ShipPilot {
     // A course is in it for the distance: the burn out and brake in set the pace, and the
     // cap only keeps a crossing between stars sane.
     if (this.order?.follow) return sim.tuning.autopilotSpeed;
-    return sim.tuning.clickSpeed;
+    // A click move's ceiling comes from the trip: full thrust to the halfway point and brake
+    // for the rest peaks at sqrt(accel * distance), and it stays at 75% of that.
+    const accel = sim.tuning.thrust * sim.shipResponse(this.ship);
+    const peak = Math.sqrt(accel * (this.order?.trip ?? 0));
+    const scaled = peak * TRIP_CEILING;
+    return Math.min(sim.tuning.autopilotSpeed, scaled);
   }
 
   /** Straight at the spot, whatever is in the way, unless it has the route planner or a course. */
@@ -1356,7 +1370,7 @@ export class ClickPilot extends ShipPilot {
     exclude: object | null,
   ): { x: number; y: number } {
     const { ship } = this;
-    if (ship.parts.has("clickRoute") || this.order?.follow) return super.routeAround(sim, target, exclude);
+    if ((ship.parts.has("clickRoute") && !this.order?.straight) || this.order?.follow) return super.routeAround(sim, target, exclude);
     const dx = target.x - ship.x;
     const dy = target.y - ship.y;
     const distance = Math.hypot(dx, dy) || 1;

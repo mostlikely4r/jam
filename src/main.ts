@@ -74,8 +74,9 @@ const gameLink: GameLink = {
   phases: () => sim.orbitPhases(),
   where: () => ({ ship: { x: sim.ship.x, y: sim.ship.y }, field: { x: sim.field.x, y: sim.field.y } }),
   ships: () => shipMarks(sim),
-  apply(phases, bodies, spawns, fields, stations, keep = false) {
+  apply(phases, bodies, spawns, fields, stations, keep = false, anchors = []) {
     sim.bodies = bodies;
+    sim.anchors = anchors;
     sim.spawns = spawns;
     sim.startPhases = phases;
     sim.applyLayout(keep ? {} : phases, fields, stations);
@@ -344,6 +345,7 @@ const HELP: [string, HelpLine[]][] = [
     [
       ["C", "The chart: what you've found so far", has("starmap")],
       ["C: wheel / drag", "Zoom / pan the chart", has("starmap")],
+      ["C: right click", "Fly a straight line there", has("starmap") && has("clickMove")],
       ["C: pick a place, Enter", "Autopilot flies the course", has("autopilot")],
       ["Flight keys", "Take over from the autopilot; it resumes when you let go", has("autopilot")],
     ],
@@ -1238,6 +1240,7 @@ function frame(now: number): void {
     ...drag,
     dragged: Math.hypot(drag.toX - drag.fromX, drag.toY - drag.fromY) >= DRAG_PIXELS,
   };
+  sim.screen = { halfWidth: window.innerWidth / 2 / tuning.zoom, halfHeight: window.innerHeight / 2 / tuning.zoom };
   renderer.draw(sim, paused ? 1 : accumulator / TICK, paused ? 0 : seconds);
   chart.draw(sim);
 

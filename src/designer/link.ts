@@ -6,7 +6,7 @@
  * The tuning is the one channel between them. The designer writes into the same values the
  * sliders use, and reads them back when it opens, so whichever was changed last wins.
  */
-import { TICK, type FieldSpec, type Orbit, type Poi, type Sim, type SolidBody, type Spawn, type StationSpec } from "../sim";
+import { TICK, type AnchorSpec, type FieldSpec, type Orbit, type OrbitRing, type Poi, type Sim, type SolidBody, type Spawn, type StationSpec } from "../sim";
 import type { Tuning } from "../tuning";
 import { SHIP_CHOICES, copiesOf, isBody, parentOf, pathTo, walk, type Copy, type NodeKind, type World, type WorldNode } from "./world";
 
@@ -19,7 +19,7 @@ export interface GameLink {
   clock(): number;
   phases(): Phases;
   /** `keep`: the places carry on from where they are, as after loading a save, rather than jump to `phases`. */
-  apply(phases: Phases, bodies: SolidBody[], spawns: Spawn[], fields: FieldSpec[], stations: StationSpec[], keep?: boolean): void;
+  apply(phases: Phases, bodies: SolidBody[], spawns: Spawn[], fields: FieldSpec[], stations: StationSpec[], keep?: boolean, anchors?: AnchorSpec[]): void;
   /** Where the player's ship and the field are now, in the game's own frame. */
   where(): { ship: { x: number; y: number }; field: { x: number; y: number } };
   /** Every other ship in the world now, the player's left out, in the game's frame. */
@@ -103,6 +103,7 @@ export function bodiesFor(world: World): SolidBody[] {
         spinPeriod: node.spinPeriod,
         spinPhase: toRadians(node.spinPhase),
         orbits: place(node, copy),
+        rings: ringsOf(world, place, node, copy),
       }));
     });
 }
@@ -171,6 +172,23 @@ export function stationsFor(world: World): StationSpec[] {
     );
 }
 
+/** Every anchor in the tree and its copies, for the game to find and chart. */
+export function anchorsFor(world: World): AnchorSpec[] {
+  const place = placer(world);
+  return walk(world)
+    .map((entry) => entry.node)
+    .filter((node) => node.kind === "anchor" && node !== world.root)
+    .flatMap((node) =>
+      [null, ...copiesOf(node)].map((copy, index) => ({
+        id: `${node.id}:${index}`,
+        name: index === 0 ? node.name : `${node.name} ${index + 1}`,
+        radius: node.radius,
+        orbits: place(node, copy),
+        rings: ringsOf(world, place, node, copy),
+      })),
+    );
+}
+
 /** Every place a new game can start, copies included, by ship. */
 export function spawnsFor(world: World): Spawn[] {
   const place = placer(world);
@@ -178,6 +196,13 @@ export function spawnsFor(world: World): Spawn[] {
     .map((entry) => entry.node)
     .filter((node) => node !== world.root && !isBody(node.kind))
     .flatMap((node) => [null, ...copiesOf(node)].flatMap((copy) => node.spawns.map((ship) => ({ ship, orbits: place(node, copy) }))));
+}
+
+/** A node's own true orbit for the chart: round where its parent is in the game's frame, whatever the frame's centre is. */
+function ringsOf(world: World, place: (node: WorldNode, copy: Copy | null) => Orbit[], node: WorldNode, copy: Copy | null): OrbitRing[] {
+  const parent = parentOf(world, node);
+  if (!parent || node === world.root) return [];
+  return [{ center: place(parent, null), radius: copy?.orbitRadius ?? node.orbitRadius }];
 }
 
 /** Works out a node's or a copy's chain of orbits, in the game's frame. */
@@ -209,7 +234,7 @@ function placer(world: World): (node: WorldNode, copy: Copy | null) => Orbit[] {
 /** Hands the game a whole layout: the tuning it flies by, and every body, place and start. */
 export function useLayout(world: World, game: GameLink, keep = false): void {
   writeGame(world, game.tuning);
-  game.apply(phasesFromWorld(world), bodiesFor(world), spawnsFor(world), fieldsFor(world), stationsFor(world), keep);
+  game.apply(phasesFromWorld(world), bodiesFor(world), spawnsFor(world), fieldsFor(world), stationsFor(world), keep, anchorsFor(world));
 }
 
 export function writeGame(world: World, tuning: Tuning): void {
@@ -279,7 +304,7 @@ export function linkSummary(world: World): string {
   const linkedPlaces = [field, station, pirates];
   const nodes = walk(world).map((entry) => entry.node);
   // Every body and field is real. Of the other places, only the ones the game has.
-  const real = nodes.filter((node) => isBody(node.kind) || node.kind === "field" || node.kind === "station" || linkedPlaces.includes(node));
+  const real = nodes.filter((node) => isBody(node.kind) || node.kind === "field" || node.kind === "station" || node.kind === "anchor" || linkedPlaces.includes(node));
   const places = nodes.filter((node) => !real.includes(node));
   const lines: string[] = [];
   if (places.length > 0) lines.push(`Map only: ${places.map((node) => node.name).join(", ")}`);

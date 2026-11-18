@@ -1555,6 +1555,17 @@ describe("the new ship", () => {
     expect(top).toBeLessThan(GAME_DEFAULTS.clickSpeed * 1.25);
   }, 30000);
 
+  it("lets a long click move coast faster than the click speed", () => {
+    const sim = floater();
+    sim.orderMoveStraight(sim.ship.x + 40000, sim.ship.y);
+    let top = 0;
+    for (let i = 0; i < Math.round(120 / TICK); i++) {
+      sim.step();
+      top = Math.max(top, Math.hypot(sim.ship.vx, sim.ship.vy));
+    }
+    expect(top).toBeGreaterThan(GAME_DEFAULTS.clickSpeed * 1.5);
+  }, 30000);
+
   it("uses only the main thruster and rotation when that's all it has", () => {
     const sim = floater();
     sim.orderMove(sim.ship.x + 400, sim.ship.y - 300);
@@ -1625,7 +1636,7 @@ describe("the new ship", () => {
 
   it("turns to its next burn while coasting", () => {
     const sim = floater();
-    sim.orderMove(sim.ship.x + 2500, sim.ship.y);
+    sim.orderMove(sim.ship.x + 12000, sim.ship.y);
     let checked = 0;
     for (let i = 0; i < Math.round(30 / TICK); i++) {
       sim.step();

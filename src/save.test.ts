@@ -52,9 +52,8 @@ describe("save and load", () => {
     roundTrip(sim, into);
     expect(into.discovered.has("dock")).toBe(true);
     into.reset(3);
-    // A new game forgets what was found, but knows the one field it starts beside: that
-    // seed is the chart's, and it's the only entry.
-    expect(into.discovered.size).toBe(1);
+    // A new game forgets what was found: places are discovered by getting near them.
+    expect(into.discovered.size).toBe(0);
     expect(into.discovered.has("dock")).toBe(false);
   });
 

@@ -1,5 +1,6 @@
 import type { Module } from "./fitting";
-import type { PartId } from "./parts";
+import { partIcon } from "./icons";
+import { partOf, type PartId } from "./parts";
 import type { ItemPlace } from "./sim";
 
 /**
@@ -99,10 +100,16 @@ function pickUp(payload: DragPayload, label: string): void {
   handlers.start(payload);
 }
 
+/** What's held, as a part id: what the ghost's icon draws. */
+function partIdOf(payload: DragPayload): PartId {
+  return payload.from === "item" ? payload.module.part : payload.part;
+}
+
 function showGhost(): void {
   if (!held) return;
   const turns = held.payload.from !== "program";
-  held.ghost.textContent = turns ? `${held.label}${held.turned ? " (turned)" : ""} - R turns it` : held.label;
+  const label = turns ? `${held.label}${held.turned ? " (turned)" : ""} - R turns it` : held.label;
+  held.ghost.replaceChildren(partIcon(partOf(partIdOf(held.payload)), 20), document.createTextNode(label));
 }
 
 function moveGhost(x: number, y: number): void {

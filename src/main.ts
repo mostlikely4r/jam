@@ -10,8 +10,11 @@ import { Audio } from "./audio";
 import { Radio } from "./radio";
 import { type Base, type Deposit, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
-import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartId } from "./parts";
+import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartIcon, type PartId } from "./parts";
 import { computerSize, hullMax, mountsHolding, owns } from "./fitting";
+import { blueprintIcon, iconEl } from "./icons";
+import { partCategory, shopCellState, SHOP_CATEGORIES, type ShopBadge } from "./shop";
+import { setTip } from "./tooltip";
 import { Inventory } from "./inventory";
 import { dragging, makeDraggable, rotateDrag } from "./drag";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
@@ -503,35 +506,47 @@ function inventory(): Inventory {
   return inventoryScreen;
 }
 
-/** One line of the shop. The style names its color, and without one the line is greyed out. */
+/**
+ * One line of the shop. The style names its color, and without one the line is greyed out.
+ * In the dock shop a line is a cell: `label` is the tooltip's name line, `text` its detail
+ * lines and `icon` what the cell draws. The deposit, pirate and pod panels still show the
+ * text on a button, as they always have.
+ */
 interface ShopLine {
   tag: string;
   style?: "buy" | "sell" | "unlock" | "partial" | "pending" | "poor";
+  /** The tooltip's body lines, newlines and all; on the text buttons, the whole line. */
   text: string;
+  /** The tooltip's name line, and the drag label: the item's name. */
+  label?: string;
+  /** What the dock shop's cell draws. */
+  icon?: PartIcon;
   enabled: boolean;
 }
 
 /** An item the station can't sell yet: paid and on its way, or still to pay for. */
-function lockedLine(id: BlueprintId, label: string): ShopLine {
+function lockedLine(id: BlueprintId, label: string, icon?: PartIcon, note?: string): ShopLine {
   if (sim.shopBase().blueprintsOrdered.has(id)) {
     const coming = isProject(id) ? "being built from the station's parts" : "coming with the next hauler";
-    return { tag: "pending", style: "pending", text: `${label}: paid, ${coming}`, enabled: false };
+    return { tag: "pending", style: "pending", label, icon, text: `Paid, ${coming}`, enabled: false };
   }
   const left = sim.blueprintLeft(id);
   const price = sim.blueprintPrice(id);
-  const text = `${label}: ${left === price ? `${price} credits` : `${left} of ${price} credits left`}`;
+  const owed = left === price ? `${price} credits to unlock` : `${left} of ${price} credits left`;
+  const head = note ? `${note}\n${owed}` : owed;
   const { credits } = sim.ship;
-  if (credits <= 0) return { tag: "not enough money", style: "poor", text, enabled: false };
-  if (credits < left) return { tag: "unlock partial", style: "partial", text, enabled: true };
-  return { tag: "unlock", style: "unlock", text, enabled: true };
+  if (credits <= 0) return { tag: "not enough money", style: "poor", label, icon, text: `${head}\nNot enough credits`, enabled: false };
+  if (credits < left) return { tag: "unlock partial", style: "partial", label, icon, text: `${head}\nClick to fund what you can`, enabled: true };
+  return { tag: "unlock", style: "unlock", label, icon, text: `${head}\nClick to fund it`, enabled: true };
 }
 
 /** An item the station can sell, as far as it has the parts and the buyer has the credits. */
-function saleLine(price: number, label: string, text: string, part: PartId | null = null): ShopLine {
+function saleLine(price: number, label: string, text: string, part: PartId | null = null, icon?: PartIcon): ShopLine {
+  const drawn = icon ?? (part ? partOf(part).icon : undefined);
   const supplied = part && !isProgram(part) ? sim.canSupply(sim.shopBase(), part) : sim.hasPartsFor(price);
-  if (!supplied) return { tag: "out of parts", text: label, enabled: false };
-  if (sim.ship.credits < price) return { tag: "not enough money", style: "poor", text, enabled: false };
-  return { tag: "buy", style: "buy", text, enabled: true };
+  if (!supplied) return { tag: "out of parts", label, icon: drawn, text: `${text}\nThe station is out of parts`, enabled: false };
+  if (sim.ship.credits < price) return { tag: "not enough money", style: "poor", label, icon: drawn, text: `${text}\nNot enough credits`, enabled: false };
+  return { tag: "buy", style: "buy", label, icon: drawn, text, enabled: true };
 }
 
 function shopButton(key: string, line: ShopLine, onClick: () => void, drag?: PartId): HTMLButtonElement {
@@ -546,6 +561,70 @@ function shopButton(key: string, line: ShopLine, onClick: () => void, drag?: Par
     button.blur();
   });
   return button;
+}
+
+/** A cell's corner badge, drawn rather than typed: a lock, a clock or a tick. */
+function badgeSvg(kind: "lock" | "halfLock" | "clock" | "tick"): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 12 12");
+  svg.setAttribute("width", "11");
+  svg.setAttribute("height", "11");
+  svg.setAttribute("aria-hidden", "true");
+  const shape = (tag: string, attrs: Record<string, string | number>) => {
+    const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, String(value));
+    svg.append(el);
+    return el;
+  };
+  if (kind === "lock" || kind === "halfLock") {
+    const gold = "#f0d86a";
+    shape("path", { d: "M4 5.4 V4 a2 2 0 0 1 4 0 v1.4", fill: "none", stroke: gold, "stroke-width": 1.3 });
+    shape("rect", { x: 2.8, y: 5.4, width: 6.4, height: 4.6, rx: 1, fill: gold });
+  } else if (kind === "clock") {
+    shape("circle", { cx: 6, cy: 6, r: 4.4, fill: "none", stroke: "#c4a4f0", "stroke-width": 1.2 });
+    shape("path", { d: "M6 3.6 V6 L7.9 7.2", fill: "none", stroke: "#c4a4f0", "stroke-width": 1.2, "stroke-linecap": "round" });
+  } else {
+    shape("polyline", { points: "2.4,6.6 4.9,9 9.6,3.2", fill: "none", stroke: "#8fe3a1", "stroke-width": 1.6, "stroke-linecap": "round", "stroke-linejoin": "round" });
+  }
+  if (kind === "halfLock") svg.style.opacity = "0.45";
+  return svg;
+}
+
+/** A cell's corner badge: a character for the states that read as one, a drawing for the rest. */
+function badgeEl(badge: ShopBadge): HTMLElement | null {
+  if (badge === "none") return null;
+  const span = document.createElement("span");
+  span.className = `shop-badge badge-${badge}`;
+  if (badge === "sell") span.textContent = "$";
+  else if (badge === "load") span.textContent = "\u25b8";
+  else if (badge === "run") span.textContent = "\u25a0";
+  else span.append(badgeSvg(badge));
+  return span;
+}
+
+/**
+ * One cell of the dock shop's grid: the icon, the state's dimming and badge, and the full
+ * tooltip. A cell that can't be bought is `aria-disabled` rather than `disabled`, so its
+ * tooltip still shows; its click is ignored.
+ */
+function shopCell(line: ShopLine, onClick: () => void, drag?: PartId): HTMLButtonElement {
+  const cell = document.createElement("button");
+  cell.type = "button";
+  cell.className = "shop-cell";
+  const state = shopCellState(line);
+  if (state.dim) cell.classList.add("dim");
+  if (line.enabled && drag) makeDraggable(cell, () => ({ from: "shop", part: drag }), line.label ?? partOf(drag).label);
+  if (line.icon) cell.append(iconEl(line.icon, 26));
+  const badge = badgeEl(state.badge);
+  if (badge) cell.append(badge);
+  if (!line.enabled) cell.setAttribute("aria-disabled", "true");
+  if (line.label) setTip(cell, () => [line.label, line.text].filter(Boolean).join("\n"));
+  cell.addEventListener("click", () => {
+    if (!line.enabled) return;
+    onClick();
+    cell.blur();
+  });
+  return cell;
 }
 
 /** The hauler's arrival, in words for the shop's heading. */
@@ -682,7 +761,7 @@ function updateShop(): void {
   }
   if (!docked) shopOpen = false;
   const locker = base ? sim.lockerAt(base) : null;
-  const state = `${shopOpen} ${sim.buyRefused} ${ship.ore} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()}`;
+  const state = `${shopOpen} ${sim.buyRefused} ${ship.ore} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked || !shopOpen;
@@ -704,49 +783,62 @@ function updateShop(): void {
     open.blur();
   });
   shop.append(open);
-  for (const part of PARTS) {
-    if (isProgram(part.id) || !isGear(part)) continue;
-    const line = partLine(part);
-    if (line) shop.append(shopButton("", line, () => tradePart(part), line.tag === "buy" ? part.id : undefined));
-  }
-  const programs = document.createElement("h2");
-  programs.className = "news";
-  programs.textContent = `Programs - computer runs ${ship.programs.length} of ${computerSize(ship)}`;
-  shop.append(programs);
-  for (const part of PARTS) {
-    if (!isProgram(part.id)) continue;
-    const line = partLine(part);
-    if (line) shop.append(shopButton("", line, () => tradePart(part)));
-  }
 
+  // The grid: one cell per item, no text, under category headers in the plan's order.
+  const grid = document.createElement("div");
+  grid.className = "shop-grid";
+  for (const category of SHOP_CATEGORIES) {
+    const cells =
+      category === "Station"
+        ? stationCells()
+        : PARTS.filter((part) => isGear(part) && partCategory(part) === category).flatMap((part) => {
+            const line = partLine(part);
+            return line ? [shopCell(line, () => tradePart(part), line.tag === "buy" ? part.id : undefined)] : [];
+          });
+    if (cells.length === 0) continue;
+    const head = document.createElement("h2");
+    head.textContent = category;
+    grid.append(head, ...cells);
+  }
+  shop.append(grid);
+  appendNews();
+}
+
+/** The Station category: the things that aren't parts, with icons set in code from the same glyph set. */
+function stationCells(): HTMLButtonElement[] {
+  const { ship } = sim;
   const full = sim.drones.length >= tuning.droneLimit;
   const droneLine: ShopLine = full
-    ? { tag: "at limit", text: `New drone: ${tuning.droneLimit} of ${tuning.droneLimit}`, enabled: false }
+    ? { tag: "at limit", label: "New drone", icon: blueprintIcon("drone"), text: `You're at your drone limit (${tuning.droneLimit})`, enabled: false }
     : !sim.unlocked("drone")
-      ? lockedLine("drone", "New drone")
+      ? lockedLine("drone", "New drone", blueprintIcon("drone"))
       : saleLine(
           tuning.dronePrice,
           "New drone",
-          `New drone: ${tuning.dronePrice} credits. Earns for you (${sim.drones.length}/${tuning.droneLimit})`,
+          `${tuning.dronePrice} credits\nEarns for you (${sim.drones.length}/${tuning.droneLimit})`,
+          null,
+          blueprintIcon("drone"),
         );
-  shop.append(shopButton("", droneLine, tradeDrone));
 
   const depositLine: ShopLine = sim.unlocked("deposit")
-    ? { tag: "built", text: "Field deposit: open at the field's edge", enabled: false }
-    : lockedLine("deposit", `Field deposit (${tuning.depositParts} parts)`);
-  shop.append(shopButton("", depositLine, () => sim.fundBlueprint(ship, "deposit")));
+    ? { tag: "built", label: "Field deposit", icon: blueprintIcon("deposit"), text: "Built: open at the field's edge", enabled: false }
+    : lockedLine("deposit", "Field deposit", blueprintIcon("deposit"), `${tuning.depositParts} station parts to build`);
 
   const stationGuardLine: ShopLine = sim.unlocked("stationGuards")
-    ? { tag: "built", text: "Station turrets: on guard", enabled: false }
-    : lockedLine("stationGuards", `Station turrets (${tuning.stationGuardParts} parts)`);
-  shop.append(shopButton("", stationGuardLine, () => sim.fundBlueprint(ship, "stationGuards")));
+    ? { tag: "built", label: "Station turrets", icon: blueprintIcon("stationGuards"), text: "Built: on guard", enabled: false }
+    : lockedLine("stationGuards", "Station turrets", blueprintIcon("stationGuards"), `${tuning.stationGuardParts} station parts to build`);
 
   let depositGuardLine: ShopLine;
-  if (sim.unlocked("depositGuards")) depositGuardLine = { tag: "built", text: "Deposit turrets: on guard", enabled: false };
-  else if (!sim.unlocked("deposit")) depositGuardLine = { tag: "needs a deposit", text: "Deposit turrets", enabled: false };
-  else depositGuardLine = lockedLine("depositGuards", `Deposit turrets (${tuning.depositGuardParts} parts)`);
-  shop.append(shopButton("", depositGuardLine, () => sim.fundBlueprint(ship, "depositGuards")));
-  appendNews();
+  if (sim.unlocked("depositGuards")) depositGuardLine = { tag: "built", label: "Deposit turrets", icon: blueprintIcon("depositGuards"), text: "Built: on guard", enabled: false };
+  else if (!sim.unlocked("deposit")) depositGuardLine = { tag: "needs a deposit", label: "Deposit turrets", icon: blueprintIcon("depositGuards"), text: "Needs a field deposit first", enabled: false };
+  else depositGuardLine = lockedLine("depositGuards", "Deposit turrets", blueprintIcon("depositGuards"), `${tuning.depositGuardParts} station parts to build`);
+
+  return [
+    shopCell(droneLine, tradeDrone),
+    shopCell(depositLine, () => sim.fundBlueprint(ship, "deposit")),
+    shopCell(stationGuardLine, () => sim.fundBlueprint(ship, "stationGuards")),
+    shopCell(depositGuardLine, () => sim.fundBlueprint(ship, "depositGuards")),
+  ];
 }
 
 /** The dock's news board, newest first: what's sold where, at what price, and how long ago it was seen. */
@@ -792,7 +884,7 @@ function appendNews(): void {
 
 /**
  * One part's line in the shop, or null when it has no place there: a held part not sold
- * here, or a hull's own gear while its mount is filled.
+ * here, or a hull's own gear while its mount is filled. The text is the tooltip's detail.
  */
 function partLine(part: Part): ShopLine | null {
   const { ship } = sim;
@@ -800,36 +892,38 @@ function partLine(part: Part): ShopLine | null {
   if (isProgram(part.id)) {
     if (ship.software.has(part.id)) {
       const loaded = ship.programs.includes(part.id);
-      if (loaded) return { tag: "loaded", style: "sell", text: `${part.label}: running. Unload to free a slot`, enabled: true };
+      if (loaded) return { tag: "loaded", style: "sell", label: part.label, icon: part.icon, text: "Running. Click to unload it and free a slot", enabled: true };
       const room = ship.programs.length < computerSize(ship);
       return room
-        ? { tag: "load", style: "buy", text: `${part.label}: yours, not running`, enabled: true }
-        : { tag: "no free slot", text: `${part.label}: yours, not running`, enabled: false };
+        ? { tag: "load", style: "buy", label: part.label, icon: part.icon, text: "Yours, not running. Click to load it", enabled: true }
+        : { tag: "no free slot", label: part.label, icon: part.icon, text: "Yours, not running\nNo free slot in the computer", enabled: false };
     }
   } else if (owns(ship, part.id)) {
     if (part.builtIn) return null;
     const value = mountsHolding(ship, part.id).reduce((sum, mount) => sum + sim.moduleValue(ship.fit[mount]!), 0);
-    return { tag: "sell", style: "sell", text: `${part.label} for ${value}, -${(part.weight * tuning.partWeightScale).toFixed(2)} weight`, enabled: true };
+    return { tag: "sell", style: "sell", label: part.label, icon: part.icon, text: `Sell for ${value} credits, -${(part.weight * tuning.partWeightScale).toFixed(2)} weight`, enabled: true };
   }
   if (part.held && !sim.unlocked(part.id)) return null;
   if (part.builtIn && !sim.canBuy(ship, part.id)) return null;
-  if (!sim.canBuy(ship, part.id)) return { tag: "doesn't fit", text: part.label, enabled: false };
-  if (!sim.unlocked(part.id)) return lockedLine(part.id, part.label);
-  const weight = isProgram(part.id) ? "" : `, +${(part.weight * tuning.partWeightScale).toFixed(2)} weight`;
-  const replaces = replacedBy(part);
+  if (!sim.canBuy(ship, part.id)) return { tag: "doesn't fit", label: part.label, icon: part.icon, text: `${part.description}\nNo mount on your ship takes it`, enabled: false };
+  if (!sim.unlocked(part.id)) return lockedLine(part.id, part.label, part.icon);
+  const detail = [`${price} credits${isProgram(part.id) ? "" : `, +${(part.weight * tuning.partWeightScale).toFixed(2)} weight`}`];
+  detail.push(part.description);
   const stocked = isProgram(part.id) ? 0 : sim.stockOf(sim.shopBase(), part.id);
-  const store = stocked > 0 ? ` (${stocked} in the store)` : "";
-  return saleLine(price, part.label, `${part.label}: ${price} credits${weight}${store}. ${part.description}${replaces}`, part.id);
+  if (stocked > 0) detail.push(`${stocked} in the store`);
+  const goes = replacedBy(part);
+  if (goes) detail.push(goes);
+  return saleLine(price, part.label, detail.join("\n"), part.id, part.icon);
 }
 
-/** Where buying a part would put it, in words. A buy never takes anything off. */
+/** Where buying a part would put it, in words, or nothing when it goes on a mount. A buy never takes anything off. */
 function replacedBy(part: Part): string {
   if (isProgram(part.id)) return "";
   const goes = sim.whereBuyGoes(sim.ship, part.id);
   if (goes === "mount") return "";
-  if (goes === "hold") return " Goes in your bay";
-  if (goes === "locker") return " Goes in your locker here";
-  return " No room on the ship or in your locker here";
+  if (goes === "hold") return "Goes in your bay";
+  if (goes === "locker") return "Goes in your locker here";
+  return "No room on the ship or in your locker here";
 }
 
 function saveTuning(): void {

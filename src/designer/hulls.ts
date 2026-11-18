@@ -13,7 +13,8 @@
  *   the hull. A decal mount's preview picks the decal it shows (the cockpit glass, say), for
  *   looks only.
  * - Parts: pick a part from the list. Which mount types it fits: it goes on a mount that supports
- *   one of them. Its stats can be edited, kept in the ship file over the code's. A decal part is
+ *   one of them. Its stats can be edited, kept in the ship file over the code's. Its icon is
+ *   picked from the glyph set, with three colours and a mark, kept the same way. A decal part is
  *   looks only, and only for decal mounts. "Show on hull" can be none, to show just the part.
  * - Mount types: the list both pick from.
  * Changes are in the game at once; Save writes them all to src/hulls.json, which the game ships with.
@@ -43,7 +44,9 @@ import {
   type MountId,
   type ShipFile,
 } from "../fitting";
-import { partFits, partOf, PARTS, SHIP_MODELS, type PartId, type ShipModel, type ThrusterRole } from "../parts";
+import { partFits, partOf, PARTS, SHIP_MODELS, type Part, type PartId, type ShipModel, type ThrusterRole } from "../parts";
+import type { GlyphId } from "../glyphs";
+import { EVERY_GLYPH, glyphIcon, partIcon } from "../icons";
 import { DEFAULTS } from "../tuning";
 import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPart } from "../shipArt";
 
@@ -106,6 +109,12 @@ const STYLE = `
 #hulls details > summary { font-size: 12px; margin: 6px 0; color: #8fe3a1; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; user-select: none; }
 #hulls details > summary:hover { color: #c0f4cf; }
 #hulls label input[type=range] { width: 100%; box-sizing: border-box; margin-top: 2px; }
+#hulls .glyphs { display: grid; grid-template-columns: repeat(6, 28px); gap: 3px; margin: 6px 0; }
+#hulls button.glyph { padding: 1px; border-color: #33405a; }
+#hulls button.glyph.on { border-color: #8fb4ff; background: #26324a; }
+#hulls .icon-previews { display: flex; gap: 16px; align-items: flex-end; margin: 6px 0; }
+#hulls .icon-colours { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 6px 0; }
+#hulls .icon-colours input[type=color] { width: 100%; box-sizing: border-box; padding: 1px 2px; }
 `;
 
 const round = (value: number, step: number) => Math.round(value / step) * step;
@@ -774,9 +783,75 @@ export class HullDesigner {
       intro,
       this.section("part", "Part", list, decal),
       stats,
+      this.section(`icon:${part.id}`, "Icon", ...this.iconPicker(part)),
       this.section(`fits:${part.id}`, `${part.label} fits`, fits, set),
       this.section("goes", "Goes on", where, models),
     ];
+  }
+
+  /**
+   * The part's icon: a glyph from the whole set, three colours and a mark, with live previews
+   * at shop size and at a 2×2 bay tile size. Colour changes redraw in place, so the picker's
+   * own popup stays open; everything else goes through `changed()` like the other stats.
+   */
+  private iconPicker(part: Part): HTMLElement[] {
+    const redraws: (() => void)[] = [];
+    const glyphs = document.createElement("div");
+    glyphs.className = "glyphs";
+    for (const id of EVERY_GLYPH) {
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.title = id;
+      cell.addEventListener("click", () => {
+        part.icon = { ...part.icon, glyph: id as GlyphId };
+        this.changed();
+      });
+      const draw = () => {
+        cell.className = `glyph${part.icon.glyph === id ? " on" : ""}`;
+        cell.replaceChildren(glyphIcon(id, part.icon.primary, part.icon.secondary, 22));
+      };
+      draw();
+      redraws.push(draw);
+      glyphs.append(cell);
+    }
+    const colours = document.createElement("div");
+    colours.className = "icon-colours";
+    for (const key of ["primary", "secondary", "border"] as const) {
+      const input = document.createElement("input");
+      input.type = "color";
+      input.value = part.icon[key];
+      input.addEventListener("input", () => {
+        part.icon[key] = input.value;
+        for (const redraw of redraws) redraw();
+        this.changed(false);
+      });
+      colours.append(this.labelled(key, input));
+    }
+    const mark = document.createElement("input");
+    mark.type = "text";
+    mark.value = part.icon.mark ?? "";
+    mark.placeholder = "such as *, +, !, 2 or 360";
+    mark.addEventListener("change", () => {
+      part.icon = { ...part.icon, ...(mark.value.trim() ? { mark: mark.value } : {}) };
+      this.changed();
+    });
+    const markNote = document.createElement("p");
+    markNote.textContent = "Free text in the corner. The icon shows at most its first 3 characters.";
+    const previews = document.createElement("div");
+    previews.className = "icon-previews";
+    for (const [size, label] of [
+      [28, "shop"],
+      [48, "2×2 tile"],
+    ] as [number, string][]) {
+      const wrap = document.createElement("div");
+      const draw = () => wrap.replaceChildren(partIcon(part, size));
+      draw();
+      redraws.push(draw);
+      previews.append(this.labelled(label, wrap));
+    }
+    const note = document.createElement("p");
+    note.textContent = "Kept in src/hulls.json over the part's own icon in parts.ts, and in the game at once.";
+    return [glyphs, colours, this.labelled("Mark", mark), markNote, previews, note];
   }
 
   private typesPage(): HTMLElement[] {

@@ -1,3 +1,19 @@
+import type { GlyphId } from "./glyphs";
+
+/**
+ * A part's icon: a glyph drawn in its two colours, in a border-coloured frame, with the mark
+ * in the bottom-right corner (at most its first 3 characters). Chosen in the part designer
+ * over the code's default.
+ */
+export interface PartIcon {
+  glyph: GlyphId;
+  primary: string;
+  secondary: string;
+  border: string;
+  /** Free text drawn in the corner, such as `*`, `+`, `!`, `2` or `360`. */
+  mark?: string;
+}
+
 export type PartId =
   | "spinStabilizer"
   | "reverse"
@@ -95,6 +111,8 @@ export interface Part {
   shape?: Shape;
   /** When the ship it's on explodes, it goes up too, wearing every other module by this many hull points. */
   explosive?: number;
+  /** How it shows in the shop, on the blueprint and in the bay: glyph, colours and mark. */
+  icon: PartIcon;
 }
 
 /** The controls a thruster can answer to: which one fires it is up to its mount. */
@@ -103,6 +121,18 @@ export type ThrusterRole = "thrusterMain" | "thrusterReverse" | "thrusterStrafeL
 export function partFits(part: Part, model: ShipModel): boolean {
   return part.fits === undefined || part.fits.includes(model);
 }
+
+/**
+ * The icon colour families, one per kind of part, so a shop grid reads by category at a glance:
+ * the frame (border) carries the family, the glyph colours the ship art's own tones.
+ */
+const ENGINE_COLORS: PartIcon = { glyph: "engineLarge", primary: "#8c9bb2", secondary: "#bec8d8", border: "#f0a868" };
+const GUN_COLORS: PartIcon = { glyph: "gun", primary: "#5a6272", secondary: "#bec8d8", border: "#e88a8a" };
+const TRACTOR_COLORS: PartIcon = { glyph: "coneBeam", primary: "#467870", secondary: "#96e6d2", border: "#7fdfe6" };
+const COMPUTER_COLORS: PartIcon = { glyph: "chip", primary: "#2e3d59", secondary: "#8fb4ff", border: "#8fb4ff" };
+const BAY_COLORS: PartIcon = { glyph: "crate", primary: "#566274", secondary: "#c8d4e8", border: "#f0d86a" };
+const COCKPIT_COLORS: PartIcon = { glyph: "kite", primary: "#2b4a74", secondary: "#a0d7ff", border: "#a0d7ff" };
+const PROGRAM_COLORS: PartIcon = { glyph: "gyro", primary: "#2f6e74", secondary: "#7fdfe6", border: "#c4a4f0" };
 
 export const PARTS: Part[] = [
   {
@@ -114,6 +144,7 @@ export const PARTS: Part[] = [
     weight: 0.05,
     description: "Stops your rotation when you let go",
     tier: 0,
+    icon: { ...PROGRAM_COLORS, glyph: "gyro" },
   },
   {
     id: "reverse",
@@ -125,6 +156,7 @@ export const PARTS: Part[] = [
     weight: 0.15,
     description: "Brake without flipping",
     tier: 1,
+    icon: { ...ENGINE_COLORS, glyph: "reverse" },
   },
   {
     id: "strafe",
@@ -137,6 +169,7 @@ export const PARTS: Part[] = [
     weight: 0.25,
     description: "Move sideways",
     tier: 1,
+    icon: { ...ENGINE_COLORS, glyph: "strafe" },
   },
   {
     id: "retro",
@@ -147,6 +180,7 @@ export const PARTS: Part[] = [
     weight: 0.1,
     description: "Cancels drift, using the thrusters you own (X)",
     tier: 2,
+    icon: { ...PROGRAM_COLORS, glyph: "retro" },
   },
   {
     id: "meters",
@@ -157,6 +191,7 @@ export const PARTS: Part[] = [
     weight: 0.02,
     description: "Adds readouts to the arrows",
     tier: 0,
+    icon: { ...PROGRAM_COLORS, glyph: "gauge" },
   },
   {
     id: "gun2",
@@ -168,6 +203,7 @@ export const PARTS: Part[] = [
     weight: 0.05,
     description: "A slower gun that hits free ore that stays with the rock. No flung ore",
     tier: 0,
+    icon: { ...GUN_COLORS, glyph: "gun", mark: "2" },
   },
   {
     id: "clickMove",
@@ -178,6 +214,7 @@ export const PARTS: Part[] = [
     weight: 0.02,
     description: "Right click shifts you there, double click stops there. Drag to leave with a drift",
     tier: 2,
+    icon: { ...PROGRAM_COLORS, glyph: "cursor" },
   },
   {
     id: "clickRoute",
@@ -188,6 +225,7 @@ export const PARTS: Part[] = [
     weight: 0.02,
     description: "Click to move steers around what's in the way",
     tier: 2,
+    icon: { ...PROGRAM_COLORS, glyph: "route" },
   },
   {
     id: "tractor",
@@ -200,6 +238,7 @@ export const PARTS: Part[] = [
     description: "Catches loose ore ahead and pulls it in",
     fits: ["floater"],
     tier: 2,
+    icon: { ...TRACTOR_COLORS, glyph: "coneBeam" },
   },
   {
     id: "tractorAll",
@@ -212,6 +251,7 @@ export const PARTS: Part[] = [
     description: "Catches loose ore all round, not just ahead",
     tier: 2,
     held: true,
+    icon: { ...TRACTOR_COLORS, glyph: "ringBeam", mark: "360" },
   },
   {
     id: "clickTurn",
@@ -222,6 +262,7 @@ export const PARTS: Part[] = [
     weight: 0.02,
     description: "Drag from your ship to set a facing to hold",
     tier: 2,
+    icon: { ...PROGRAM_COLORS, glyph: "turnCursor" },
   },
   {
     id: "starmap",
@@ -232,6 +273,7 @@ export const PARTS: Part[] = [
     weight: 0.02,
     description: "Map. Press C to open it",
     tier: 2,
+    icon: { ...PROGRAM_COLORS, glyph: "chart" },
   },
   {
     id: "autopilot",
@@ -242,6 +284,7 @@ export const PARTS: Part[] = [
     weight: 0.05,
     description: "From the chart, sets a course and flies it: out, coast, brake, round bodies",
     tier: 2,
+    icon: { ...PROGRAM_COLORS, glyph: "autopilot" },
   },
   {
     id: "turret",
@@ -254,6 +297,7 @@ export const PARTS: Part[] = [
     description: "Your gun turns to follow the mouse, with a third of its range",
     fits: ["floater"],
     tier: 1,
+    icon: { ...GUN_COLORS, glyph: "turret" },
   },
   {
     id: "bay",
@@ -266,6 +310,7 @@ export const PARTS: Part[] = [
     bay: { w: 4, h: 5, entry: { x: 1, y: 0, size: 2 } },
     description: "Room for 20 more ore, for a little more weight",
     tier: 1,
+    icon: { ...BAY_COLORS, glyph: "crate" },
   },
   {
     id: "largeBay",
@@ -278,6 +323,7 @@ export const PARTS: Part[] = [
     bay: { w: 5, h: 10, entry: { x: 1, y: 0, size: 3 } },
     description: "Room for 50 more ore, and you'll feel the weight",
     tier: 2,
+    icon: { ...BAY_COLORS, glyph: "openCrate", mark: "+" },
   },
   // The bay every bare hull comes with: with none of these, a ship carries no ore at all. It
   // weighs nothing: the hull's own base weight was tuned with its hold already in it.
@@ -293,6 +339,7 @@ export const PARTS: Part[] = [
     bay: { w: 2, h: 5, entry: { x: 0, y: 0, size: 2 } },
     description: "The bay a bare hull comes with. Room for 10 ore",
     tier: 0,
+    icon: { ...BAY_COLORS, glyph: "crate", mark: "-" },
   },
   {
     id: "flightComputer",
@@ -305,6 +352,7 @@ export const PARTS: Part[] = [
     weight: 0.03,
     description: "Runs 4 programs at once",
     tier: 1,
+    icon: { ...COMPUTER_COLORS, glyph: "chip", mark: "4" },
   },
   {
     id: "navComputer",
@@ -317,6 +365,7 @@ export const PARTS: Part[] = [
     weight: 0.04,
     description: "Runs 6 programs at once",
     tier: 2,
+    icon: { ...COMPUTER_COLORS, glyph: "chip", mark: "6" },
   },
   // A hull's own gear, as it comes from the yard.
   {
@@ -330,6 +379,7 @@ export const PARTS: Part[] = [
     weight: 0,
     description: "A quick gun. Breaks rocks and sometimes flings ore off, worth more",
     tier: 0,
+    icon: { ...GUN_COLORS, glyph: "gun", mark: "1" },
   },
   {
     id: "racerMain",
@@ -343,6 +393,7 @@ export const PARTS: Part[] = [
     weight: 0,
     description: "Full power for every thruster on the ship",
     tier: 0,
+    icon: { ...ENGINE_COLORS, glyph: "engineLarge" },
   },
   {
     id: "floaterMain",
@@ -356,6 +407,7 @@ export const PARTS: Part[] = [
     weight: 0,
     description: "Gentle power for every thruster on the ship",
     tier: 0,
+    icon: { ...ENGINE_COLORS, glyph: "engineSmall" },
   },
   {
     id: "turnThrusters",
@@ -369,6 +421,7 @@ export const PARTS: Part[] = [
     weight: 0,
     description: "Turn the ship",
     tier: 0,
+    icon: { ...ENGINE_COLORS, glyph: "turn" },
   },
   {
     id: "basicComputer",
@@ -382,6 +435,7 @@ export const PARTS: Part[] = [
     weight: 0,
     description: "Runs 2 programs at once",
     tier: 0,
+    icon: { ...COMPUTER_COLORS, glyph: "chip", mark: "2" },
   },
   // Cockpit glass: looks only. In the hull designer these are flagged as decals, which only go
   // on decal mounts and are never sold or fitted for real.
@@ -394,6 +448,7 @@ export const PARTS: Part[] = [
     weight: 0,
     description: "A pointed glass canopy. Looks only",
     tier: 0,
+    icon: { ...COCKPIT_COLORS, glyph: "kite" },
   },
   {
     id: "cockpitBar",
@@ -404,6 +459,7 @@ export const PARTS: Part[] = [
     weight: 0,
     description: "A wide glass strip across the front. Looks only",
     tier: 0,
+    icon: { ...COCKPIT_COLORS, glyph: "bar" },
   },
   {
     id: "cockpitDome",
@@ -414,6 +470,7 @@ export const PARTS: Part[] = [
     weight: 0,
     description: "A round glass bubble. Looks only",
     tier: 0,
+    icon: { ...COCKPIT_COLORS, glyph: "dome" },
   },
   {
     id: "cockpitVisor",
@@ -424,6 +481,7 @@ export const PARTS: Part[] = [
     weight: 0,
     description: "A narrow slit of glass. Looks only",
     tier: 0,
+    icon: { ...COCKPIT_COLORS, glyph: "visor" },
   },
 ];
 

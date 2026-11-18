@@ -5,7 +5,8 @@ slots, in the bay and in lockers, but each one still shows as a short text label
 `tractor 360`). The dock shop is one long list of text buttons like `[buy] Gun 2: 120 credits,
 +0.40 weight. …`. That's about as far as text can go, and the planned ×10 upgrades would bury it.
 This plan swaps the text for **icons with tooltips** everywhere a part is shown, and turns the
-shop into a compact grid under category headers. Not built yet.
+shop into a compact grid under category headers. All four steps are built (2026-11-18). The
+question below is still open: it's answered by playing.
 
 ## The picture
 
@@ -168,3 +169,26 @@ Four steps. Each leaves the game playable and passing `npm test` and `npm run bu
 - **The designer picker.** Keep it to a glyph grid, three colour inputs and a mark field. No
   glyph editor and no per-part custom drawings.
 - **Tooltip richness.** Text lines only. No stat bars or comparisons with what's fitted yet.
+
+## Built 2026-11-18
+
+Where it differs from the above, or settles what the plan left open:
+
+- 33 glyphs shipped (`src/glyphs.ts`): the plan's rough set plus a fourth cockpit glyph,
+  `visor`, so every cockpit decal has one. The drag ghost shows the icon beside the
+  "R turns it" label.
+- The shop's cell state lives in `src/shop.ts`: `shopCellState` maps a `ShopLine`'s tag to
+  dim and badge, and `partCategory` puts every part under a header. The lock, clock and tick
+  badges are drawn as tiny SVGs rather than characters or emoji; `$`, `▸` and `■` are text.
+- The Programs header dropped the old "computer runs X of Y" count line: the header is just
+  "Programs", and the slots themselves carry the count.
+- Cockpits never show in the shop today (cockpit glass is decals, filtered as before), so the
+  Cockpits header is left out with nothing under it, as the plan allowed.
+- Program icons are code-only defaults: the designer's parts page never listed programs, so
+  its icon picker (like its stats) doesn't edit them.
+- The tooltip shows the "Click to load/unload" hint on programs only while docked, where the
+  click does something. Hovering out in space still shows what things are.
+- The deposit, pirate and pod panels keep their text buttons, as the plan's "Not changed" said.
+- The shop and inventory rebuilds watch a signature of every part's glyph and mark, so a
+  designer change reaches screens that are already open.
+

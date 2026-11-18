@@ -1,6 +1,8 @@
 import { computerSize, DAMAGED_AT, mountsOf, programSlots, type Module, type Mount, type MountId } from "./fitting";
 import { canPlace, entryCells, fits, footprint, reachable, sticks, type GridSpec, type Placed } from "./grid";
 import { ORE_BLOCK, partOf, PARTS, type PartId } from "./parts";
+import { partIcon } from "./icons";
+import { setTip } from "./tooltip";
 import { bayBox, drawVectorShip } from "./shipArt";
 import { lumpOnGrid } from "./cargoBin";
 import { dragging, makeDraggable, setDragHandlers, type DragAt, type DragPayload } from "./drag";
@@ -20,6 +22,11 @@ function condition(module: Module): string {
   if (module.wear >= DAMAGED_AT) return " (damaged, not working)";
   if (module.wear > 0) return ` (${Math.round(module.wear * 100)}% worn)`;
   return "";
+}
+
+/** The icon an item shows on a grid tile: a larger one the larger the item, up to its shorter side. */
+function tileIconSize(w: number, h: number): number {
+  return Math.max(14, Math.min(w, h) * CELL - 8);
 }
 
 /** A module's look on screen: its class for damaged and destroyed. */
@@ -107,6 +114,8 @@ export class Inventory {
           ship.credits,
           base ? sim.lockerAt(base) : null,
           base ? sim.storageFree(base) : null,
+          // The designer can change a part's icon in place: it reaches a screen already open.
+          PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join(),
         ])
       : "closed";
     if (state === this.state) return;
@@ -285,8 +294,14 @@ export class Inventory {
     port.className = `port${module ? wearClass(module) : " empty"}`;
     port.style.left = `${x}px`;
     port.style.top = `${y}px`;
-    port.textContent = module ? partOf(module.part).short : "+";
-    port.title = `${mount.name}: ${module ? partOf(module.part).label + condition(module) : "empty"}`;
+    if (module) {
+      const part = partOf(module.part);
+      port.append(partIcon(part, 18));
+      setTip(port, () => `${mount.name}: ${part.label}${condition(module)}`);
+    } else {
+      port.textContent = "+";
+      setTip(port, () => `${mount.name}: empty. Takes ${mount.types.join(", ")}`);
+    }
     if (this.docked) port.dataset.drop = `mount:${mount.id}`;
     this.ports.set(mount.id, port);
     if (!module) return port;
@@ -310,9 +325,11 @@ export class Inventory {
       const id = ship.programs[i];
       const slot = document.createElement("div");
       slot.className = `slot${id ? "" : " empty"}${id && !ship.parts.has(id) ? " damaged" : ""}`;
-      slot.textContent = id ? partOf(id).short : "";
       if (id) {
-        slot.title = `${partOf(id).label}: ${ship.parts.has(id) ? "running" : "loaded, computer down"}. Click to unload`;
+        const part = partOf(id);
+        slot.append(partIcon(part, 20));
+        const click = this.docked ? ". Click to unload" : "";
+        setTip(slot, () => `${part.label}: ${ship.parts.has(id) ? "running" : "loaded, computer down"}${click}`);
         this.programHandle(slot, id, true);
       }
       slots.append(slot);
@@ -324,8 +341,8 @@ export class Inventory {
     for (const part of spare) {
       const chip = document.createElement("div");
       chip.className = "chip";
-      chip.textContent = part.short;
-      chip.title = `${part.label}: yours, not loaded. Click to load`;
+      chip.append(partIcon(part, 20));
+      setTip(chip, () => `${part.label}: yours, not loaded${this.docked ? ". Click to load" : ""}`);
       this.programHandle(chip, part.id, false);
       owned.append(chip);
     }
@@ -410,14 +427,14 @@ export class Inventory {
       }
       for (const cell of entryCells(spec)) {
         const entry = this.block("entry", cell.x, cell.y, 1, 1);
-        entry.title = "The entry: everything comes in through here";
+        setTip(entry, () => "The entry: everything comes in through here");
         view.append(entry);
       }
     }
     if (bay) {
       this.sim.ship.oreBlocks.forEach((cell, index) => {
         const block = this.block("ore", cell.x, cell.y, 1, 1);
-        block.title = "Locked ore. Click to let it loose";
+        setTip(block, () => "Locked ore. Click to let it loose");
         block.addEventListener("click", () => {
           this.message = this.sim.unlockOre(this.sim.ship, index) ? "" : "It holds something up, or the loose ore wouldn't fit";
           this.redraw();
@@ -444,8 +461,13 @@ export class Inventory {
       const place: ItemPlace = { at: kind, index };
       const { w, h } = footprint(item);
       const tile = this.block(`item${wearClass(item.module)}`, item.x, item.y, w, h);
-      tile.textContent = partOf(item.module.part).short;
-      tile.title = partOf(item.module.part).label + condition(item.module);
+      const part = partOf(item.module.part);
+      tile.append(partIcon(part, tileIconSize(w, h)));
+      setTip(tile, () => {
+        const lines = [`${part.label}${condition(item.module)}`];
+        if (this.docked) lines.push(`Sell value ${this.sim.moduleValue(item.module)} credits`);
+        return lines.join("\n");
+      });
       if (this.isSelected(place)) tile.classList.add("selected");
       tile.addEventListener("click", () => this.select(place));
       if (this.docked) {
@@ -455,7 +477,7 @@ export class Inventory {
           const rect = tile.getBoundingClientRect();
           grab = { x: Math.floor((event.clientX - rect.left) / CELL), y: Math.floor((event.clientY - rect.top) / CELL) };
         });
-        makeDraggable(tile, () => ({ from: "item", place, module: item.module, turned: item.turned, grab }), partOf(item.module.part).label);
+        makeDraggable(tile, () => ({ from: "item", place, module: item.module, turned: item.turned, grab }), part.label);
       }
       view.append(tile);
     });

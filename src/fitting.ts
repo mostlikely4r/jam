@@ -1,5 +1,6 @@
-import { isProgram, partFits, partOf, PARTS, SHIP_MODELS, type Part, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "./parts";
+import { isProgram, partFits, partOf, PARTS, SHIP_MODELS, type Part, type PartIcon, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "./parts";
 import shipFile from "./hulls.json";
+import { hasGlyph } from "./glyphs";
 import type { Placed } from "./grid";
 
 /**
@@ -76,7 +77,7 @@ export interface HullInfo {
  * The stats of a part the parts page can edit, kept in the ship file over the code's own in
  * `parts.ts`. Only the ones that differ from the code's are kept.
  */
-export type PartStats = Partial<Pick<Part, "price" | "weight" | "shape" | "tier" | "bay" | "slots" | "set" | "explosive">>;
+export type PartStats = Partial<Pick<Part, "price" | "weight" | "shape" | "tier" | "bay" | "slots" | "set" | "explosive" | "icon">>;
 
 /**
  * What src/hulls.json holds: the mount types, which each part fits, which parts are decals,
@@ -177,6 +178,7 @@ const BASE_STATS = new Map(
       ...(part.slots !== undefined ? { slots: part.slots } : {}),
       ...(part.set !== undefined ? { set: part.set } : {}),
       ...(part.explosive !== undefined ? { explosive: part.explosive } : {}),
+      ...(part.icon !== undefined ? { icon: { ...part.icon } } : {}),
     },
   ]),
 );
@@ -194,6 +196,7 @@ export function resetPartStats(id: PartId): void {
   else delete part.shape;
   if (base.bay) part.bay = { ...base.bay, entry: { ...base.bay.entry } };
   else delete part.bay;
+  part.icon = { ...base.icon! };
   part.price = base.price!;
   part.weight = base.weight!;
   part.tier = base.tier!;
@@ -227,6 +230,16 @@ function applyPartStats(id: PartId, stats: PartStats): void {
   }
   if (stats.tier === 0 || stats.tier === 1 || stats.tier === 2) part.tier = stats.tier;
   if (stats.set !== undefined && Number.isFinite(stats.set) && stats.set >= 1) part.set = Math.round(stats.set);
+  applyIcon(part, stats.icon);
+}
+
+/** Sits a designed icon over the code's own, skipping anything invalid. */
+function applyIcon(part: Part, icon: PartIcon | undefined): void {
+  if (!icon || typeof icon !== "object" || !hasGlyph(String(icon.glyph))) return;
+  const colour = (value: unknown): value is string => typeof value === "string" && value !== "";
+  if (!colour(icon.primary) || !colour(icon.secondary) || !colour(icon.border)) return;
+  const mark = typeof icon.mark === "string" ? icon.mark : "";
+  part.icon = { glyph: icon.glyph, primary: icon.primary, secondary: icon.secondary, border: icon.border, ...(mark ? { mark } : {}) };
 }
 
 /** The part stats that differ from the code's own, to keep in the ship file. */
@@ -241,6 +254,7 @@ function partStatsNow(): NonNullable<ShipFile["partStats"]> {
     }
     if (part.shape && JSON.stringify(part.shape) !== JSON.stringify(base.shape)) diff.shape = { ...part.shape };
     if (part.bay && JSON.stringify(part.bay) !== JSON.stringify(base.bay)) diff.bay = { ...part.bay, entry: { ...part.bay.entry } };
+    if (part.icon && JSON.stringify(part.icon) !== JSON.stringify(base.icon)) diff.icon = { ...part.icon };
     if (part.tier !== base.tier) diff.tier = part.tier;
     if (Object.keys(diff).length > 0) out[part.id] = diff;
   }

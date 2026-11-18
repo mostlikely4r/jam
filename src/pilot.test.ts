@@ -5,8 +5,11 @@ import { DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, MAX_HULL, Sim, TICK } from "./sim";
 import { partOf as partInfo } from "./parts";
 
+/** How much ore an empty bay of this part holds, at one ore per cell. */
+const bayCells = (id: "smallBay" | "bay" | "largeBay") => partInfo(id).bay!.w * partInfo(id).bay!.h;
+
 /** A full load for a drone or a traffic ship: the small bay its hull comes with. */
-const LOAD = partInfo("smallBay").cargo!;
+const LOAD = bayCells("smallBay");
 
 // Written for wrecks that happen at once, with a bare hull straight away: critical, the pod
 // and the choice at the yard have their own tests in fitting.test.ts.
@@ -394,7 +397,7 @@ describe("drone", () => {
     ["reverse", ["reverse"]],
     ["strafe", ["strafe"]],
     ["reverse and strafe", ["reverse", "strafe"]],
-    ["everything", PARTS.filter((part) => !part.cargo).map((part) => part.id)],
+    ["everything", PARTS.filter((part) => !part.bay).map((part) => part.id)],
   ] as const)("still completes trips with %s", (_name, parts) => {
     const sim = new Sim(1, { ...SOLO });
     const { ship } = sim.drones[0];
@@ -1469,11 +1472,11 @@ describe("pirate and defender", () => {
       const { ship } = sim;
       const light = sim.shipWeight(ship);
       // The small bay a bare hull comes with, then the bay, then the large one in its place.
-      expect(sim.cargoSpace(ship)).toBe(partInfo("smallBay").cargo);
+      expect(sim.cargoSpace(ship)).toBe(bayCells("smallBay"));
       sim.devSet(ship, "bay", true);
-      expect(sim.cargoSpace(ship)).toBe(partInfo("bay").cargo);
+      expect(sim.cargoSpace(ship)).toBe(bayCells("bay"));
       sim.devSet(ship, "largeBay", true);
-      expect(sim.cargoSpace(ship)).toBe(partInfo("largeBay").cargo);
+      expect(sim.cargoSpace(ship)).toBe(bayCells("largeBay"));
       expect(sim.shipWeight(ship)).toBeGreaterThan(light);
     });
 

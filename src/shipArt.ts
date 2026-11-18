@@ -250,7 +250,9 @@ export function bayBox(ship: ArtShip): Box & { part: PartId | null; alpha: numbe
       break;
     }
   }
-  const cargo = part ? partOf(part).cargo ?? 0 : 0;
+  const bay = part ? partOf(part).bay : undefined;
+  // Drawn bigger the more cells it has.
+  const cargo = bay ? bay.w * bay.h : 0;
   const scale = spot?.scale ?? 1;
   return {
     x: (spot?.x ?? 0) * R,

@@ -30,6 +30,7 @@ import {
   MOUNT_TYPES,
   mountTakes,
   mountThrust,
+  onEdge,
   PART_MOUNTS,
   resetPartStats,
   SHIPPED_SHIPS,
@@ -695,7 +696,7 @@ export class HullDesigner {
     );
 
     // The part's stats, editable: kept in src/hulls.json over the code's own values in parts.ts.
-    const stat = (key: "price" | "weight" | "size" | "cargo" | "slots" | "set" | "explosive", label: string, step: number) => {
+    const stat = (key: "price" | "weight" | "slots" | "set" | "explosive", label: string, step: number) => {
       const input = document.createElement("input");
       input.type = "number";
       input.step = String(step);
@@ -706,6 +707,22 @@ export class HullDesigner {
         if (!Number.isFinite(value) || value < 0) return;
         part[key] = value;
         this.changed();
+      });
+      return this.labelled(label, input);
+    };
+    // A whole number of cells. A bay's entry is kept on the grid's edge.
+    const cells = (label: string, now: number, min: number, set: (value: number) => void) => {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = "1";
+      input.min = String(min);
+      input.value = String(now);
+      input.addEventListener("change", () => {
+        const value = Number(input.value);
+        if (!Number.isInteger(value) || value < min) return;
+        set(value);
+        if (part.bay) part.bay.entry = onEdge(part.bay.w, part.bay.h, part.bay.entry);
+        this.changed(true);
       });
       return this.labelled(label, input);
     };
@@ -731,8 +748,17 @@ export class HullDesigner {
       "Stats",
       stat("price", "Price", 10),
       stat("weight", "Weight", 0.01),
-      stat("size", "Room it takes in a bay (ore)", 1),
-      ...(part.cargo !== undefined ? [stat("cargo", "Cargo room it adds", 5)] : []),
+      ...(part.shape !== undefined
+        ? [cells("Cells it takes across", part.shape.w, 1, (value) => (part.shape!.w = value)), cells("Cells it takes down", part.shape.h, 1, (value) => (part.shape!.h = value))]
+        : []),
+      ...(part.bay !== undefined
+        ? [
+            cells("Bay grid across", part.bay.w, 1, (value) => (part.bay!.w = value)),
+            cells("Bay grid down", part.bay.h, 1, (value) => (part.bay!.h = value)),
+            cells("Bay entry cell across (from 0)", part.bay.entry.x, 0, (value) => (part.bay!.entry.x = value)),
+            cells("Bay entry cell down (from 0)", part.bay.entry.y, 0, (value) => (part.bay!.entry.y = value)),
+          ]
+        : []),
       ...(part.slots !== undefined ? [stat("slots", "Programs it runs at once", 1)] : []),
       ...(part.set !== undefined ? [stat("set", "Comes as a set of", 1)] : []),
       ...(part.explosive !== undefined ? [stat("explosive", "Explosive (hull points)", 5)] : []),

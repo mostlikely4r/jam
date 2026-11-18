@@ -97,7 +97,7 @@ export class Inventory {
     const { sim } = this;
     const { ship } = sim;
     const docked = sim.baseAt() !== null;
-    this.heading(`Ship - bay ${ship.ore} ore + ${sim.holdSize(ship)} in modules, of ${sim.bayTotal(ship)}`);
+    this.heading(`Ship - bay ${ship.ore} ore of ${sim.cargoSpace(ship)} room, ${sim.holdSize(ship)} of ${sim.bayTotal(ship)} taken by modules`);
     for (const mount of mountsOf(ship)) {
       const module = ship.fit[mount.id];
       if (mount.decal || (!module && mount.id === "turretGun")) continue;
@@ -114,7 +114,7 @@ export class Inventory {
     }
     if (ship.hold.length > 0) {
       this.heading("In the bay");
-      ship.hold.forEach((item, index) => {
+      ship.hold.forEach(({ module: item, x, y }, index) => {
         const place: ItemPlace = { at: "hold", index };
         const actions: [string, () => boolean][] = docked
           ? [
@@ -123,7 +123,7 @@ export class Inventory {
               [`sell ${sim.moduleValue(item)}`, () => sim.sellItem(ship, place)],
             ]
           : [["drop", () => sim.dropItem(ship, index)]];
-        this.row(`${partOf(item.part).label}${condition(item)}`, actions);
+        this.row(`${partOf(item.part).label}${condition(item)} at ${x + 1},${y + 1}`, actions);
       });
     }
     this.heading(`Programs - ${programSlots(ship)} running of ${computerSize(ship)} slots`);

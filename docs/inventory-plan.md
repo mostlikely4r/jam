@@ -4,7 +4,8 @@ Written 2026-11-18. The fitting plan (`docs/fitting-plan.md`) made parts into co
 on mounts, in the bay and in lockers, but the screens still treat them as lists: a part is
 something you have or don't, and the bay is one number shared by ore and modules. This plan
 makes them real things in real places: storage you can see as grids, a blueprint of the ship to
-fit onto, and items with a shape that take up space. Nothing here is built yet.
+fit onto, and items with a shape that take up space. Step 1 is built (2026-11-18). Steps 2 to 4
+are not built yet.
 
 ## The picture
 
@@ -123,6 +124,30 @@ green.
 the entry; a blocked entry gives zero room and the tractor lets go; an item that doesn't touch
 a wall or a chain to one is refused; removing a supporting item is refused; rotation swaps w
 and h.
+
+**Built 2026-11-18.** Where it differs from the above, or settles what the plan left open:
+
+- `orePerCell` is 1, and the bay grids keep today's room exactly: small bay 5×2, bay 5×4,
+  large bay 10×5, each with its entry at the top middle. So AI ships carry what they did.
+- Shapes as shipped: turning thrusters and computers 1×1; guns, reverse and strafe 1×2;
+  tractors, turret and main thrusters 2×2; bays as items 2×2, 2×3 and 3×4.
+- Auto-place in a bay picks the spot that leaves the most room reachable from the entry, then
+  the one farthest from the entry. In a locker it takes the first free spot from the top left.
+  `src/grid.ts`, tested in `src/grid.test.ts`.
+- Placing by hand doesn't use a cell on `ItemPlace`. `toHold` takes an optional `Spot`
+  (cell and turn) instead, and moves an item within the bay when it comes from the bay. The
+  locker is still a plain list until step 2.
+- A bay can't take an item where the ore already aboard would no longer fit.
+- When a bay changes, its contents stay put if they still fit and stick. Otherwise they're packed
+  again, biggest first, and what won't go in goes to the locker, which has no limit until step 2.
+  A bay destroyed in flight lets its items drift out. Removing an item that would leave
+  another floating is refused, and `floatingWithout` names the item that would float.
+- The save format changed in this step, not in step 2: `SAVE_VERSION` is 4, and `src/start.json`
+  was made again.
+- The ship screen is still a list. It shows each bay item's cell, and the ore room as
+  reachable room. The grid screens are step 4.
+- The hull designer edits a part's cells across and down, and a bay's grid and entry cell. An
+  entry that isn't on an edge is moved to the nearest edge.
 
 ### 2. Lockers with a size, station storage
 

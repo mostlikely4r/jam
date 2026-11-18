@@ -41,6 +41,23 @@ export type PartKind = "thruster" | "gun" | "turret" | "tractor" | "computer" | 
 export const SHIP_MODELS = ["racer", "floater", "defender", "drone", "pirate"] as const;
 export type ShipModel = (typeof SHIP_MODELS)[number];
 
+/** How many cells something takes on a grid, unturned: `w` across, `h` down. */
+export interface Shape {
+  w: number;
+  h: number;
+}
+
+/** A cell on a grid: x across from the left, y down from the top. */
+export interface Cell {
+  x: number;
+  y: number;
+}
+
+/** A cargo bay's grid: its size in cells and its entry cell, which sits on an edge. */
+export interface BayGrid extends Shape {
+  entry: Cell;
+}
+
 export interface Part {
   id: PartId;
   label: string;
@@ -49,8 +66,8 @@ export interface Part {
   price: number;
   /** Added to the ship's weight, which divides all of its thrust. */
   weight: number;
-  /** Added to how much cargo the ship has room for. */
-  cargo?: number;
+  /** A cargo bay: the grid it holds, in cells, with the one cell on its edge everything comes in through. */
+  bay?: BayGrid;
   description: string;
   /** The ships it can be fitted to. Without this, any ship. */
   fits?: ShipModel[];
@@ -71,8 +88,8 @@ export interface Part {
   slots?: number;
   /** Part of a hull as it comes from the yard. Only sold to fill a mount that has none. */
   builtIn?: boolean;
-  /** How much room it takes in a cargo bay, in ore. */
-  size: number;
+  /** The cells it takes in a bay or locker, unturned. Programs and cockpit glass have none. */
+  shape?: Shape;
   /** When the ship it's on explodes, it goes up too, wearing every other module by this many hull points. */
   explosive?: number;
 }
@@ -88,7 +105,6 @@ export const PARTS: Part[] = [
   {
     id: "spinStabilizer",
     kind: "program",
-    size: 0,
     label: "Spin stabilizer",
     short: "spin",
     price: 100,
@@ -99,7 +115,7 @@ export const PARTS: Part[] = [
   {
     id: "reverse",
     kind: "thruster",
-    size: 4,
+    shape: { w: 1, h: 2 },
     label: "Reverse thruster",
     short: "rev",
     price: 200,
@@ -111,7 +127,7 @@ export const PARTS: Part[] = [
     id: "strafe",
     kind: "thruster",
     set: 2,
-    size: 4,
+    shape: { w: 1, h: 2 },
     label: "Strafe thrusters",
     short: "strafe",
     price: 300,
@@ -122,7 +138,6 @@ export const PARTS: Part[] = [
   {
     id: "retro",
     kind: "program",
-    size: 0,
     label: "Retro",
     short: "retro",
     price: 300,
@@ -133,7 +148,6 @@ export const PARTS: Part[] = [
   {
     id: "meters",
     kind: "program",
-    size: 0,
     label: "Speed and distance meters",
     short: "meters",
     price: 50,
@@ -144,7 +158,7 @@ export const PARTS: Part[] = [
   {
     id: "gun2",
     kind: "gun",
-    size: 6,
+    shape: { w: 1, h: 2 },
     label: "Gun 2",
     short: "gun2",
     price: 250,
@@ -155,7 +169,6 @@ export const PARTS: Part[] = [
   {
     id: "clickMove",
     kind: "program",
-    size: 0,
     label: "Click to move",
     short: "click",
     price: 400,
@@ -166,7 +179,6 @@ export const PARTS: Part[] = [
   {
     id: "clickRoute",
     kind: "program",
-    size: 0,
     label: "Route planner",
     short: "route",
     price: 200,
@@ -177,7 +189,7 @@ export const PARTS: Part[] = [
   {
     id: "tractor",
     kind: "tractor",
-    size: 6,
+    shape: { w: 2, h: 2 },
     label: "Tractor beam",
     short: "tractor",
     price: 300,
@@ -189,7 +201,7 @@ export const PARTS: Part[] = [
   {
     id: "tractorAll",
     kind: "tractor",
-    size: 6,
+    shape: { w: 2, h: 2 },
     label: "All-round tractor",
     short: "tractor 360",
     price: 600,
@@ -201,7 +213,6 @@ export const PARTS: Part[] = [
   {
     id: "clickTurn",
     kind: "program",
-    size: 0,
     label: "Click to turn",
     short: "turn",
     price: 150,
@@ -212,7 +223,6 @@ export const PARTS: Part[] = [
   {
     id: "starmap",
     kind: "program",
-    size: 0,
     label: "System chart",
     short: "chart",
     price: 350,
@@ -223,7 +233,6 @@ export const PARTS: Part[] = [
   {
     id: "autopilot",
     kind: "program",
-    size: 0,
     label: "Autopilot",
     short: "auto",
     price: 800,
@@ -234,7 +243,7 @@ export const PARTS: Part[] = [
   {
     id: "turret",
     kind: "turret",
-    size: 8,
+    shape: { w: 2, h: 2 },
     label: "Turret mount",
     short: "turret",
     price: 300,
@@ -246,24 +255,24 @@ export const PARTS: Part[] = [
   {
     id: "bay",
     kind: "section",
-    size: 10,
+    shape: { w: 2, h: 3 },
     label: "Cargo bay",
     short: "bay",
     price: 250,
     weight: 0.1,
-    cargo: 20,
+    bay: { w: 5, h: 4, entry: { x: 2, y: 0 } },
     description: "Room for 20 more ore, for a little more weight",
     tier: 1,
   },
   {
     id: "largeBay",
     kind: "section",
-    size: 20,
+    shape: { w: 3, h: 4 },
     label: "Large cargo bay",
     short: "bay+",
     price: 600,
     weight: 0.25,
-    cargo: 50,
+    bay: { w: 10, h: 5, entry: { x: 4, y: 0 } },
     description: "Room for 50 more ore, and you'll feel the weight",
     tier: 2,
   },
@@ -273,12 +282,12 @@ export const PARTS: Part[] = [
     id: "smallBay",
     kind: "section",
     builtIn: true,
-    size: 5,
+    shape: { w: 2, h: 2 },
     label: "Small cargo bay",
     short: "bay-",
     price: 100,
     weight: 0,
-    cargo: 10,
+    bay: { w: 5, h: 2, entry: { x: 2, y: 0 } },
     description: "The bay a bare hull comes with. Room for 10 ore",
     tier: 0,
   },
@@ -286,7 +295,7 @@ export const PARTS: Part[] = [
     id: "flightComputer",
     kind: "computer",
     slots: 4,
-    size: 3,
+    shape: { w: 1, h: 1 },
     label: "Flight computer",
     short: "comp4",
     price: 500,
@@ -298,7 +307,7 @@ export const PARTS: Part[] = [
     id: "navComputer",
     kind: "computer",
     slots: 6,
-    size: 3,
+    shape: { w: 1, h: 1 },
     label: "Navigation computer",
     short: "comp6",
     price: 1200,
@@ -311,7 +320,7 @@ export const PARTS: Part[] = [
     id: "gun1",
     kind: "gun",
     builtIn: true,
-    size: 6,
+    shape: { w: 1, h: 2 },
     label: "Gun 1",
     short: "gun1",
     price: 100,
@@ -324,7 +333,7 @@ export const PARTS: Part[] = [
     kind: "thruster",
     engine: "racer",
     builtIn: true,
-    size: 8,
+    shape: { w: 2, h: 2 },
     label: "Racer main thruster",
     short: "main",
     price: 300,
@@ -337,7 +346,7 @@ export const PARTS: Part[] = [
     kind: "thruster",
     engine: "floater",
     builtIn: true,
-    size: 8,
+    shape: { w: 2, h: 2 },
     label: "Floater main thruster",
     short: "main",
     price: 200,
@@ -350,7 +359,7 @@ export const PARTS: Part[] = [
     kind: "thruster",
     set: 2,
     builtIn: true,
-    size: 2,
+    shape: { w: 1, h: 1 },
     label: "Turning thrusters",
     short: "turn",
     price: 100,
@@ -363,7 +372,7 @@ export const PARTS: Part[] = [
     kind: "computer",
     slots: 2,
     builtIn: true,
-    size: 3,
+    shape: { w: 1, h: 1 },
     label: "Basic computer",
     short: "comp2",
     price: 150,
@@ -376,7 +385,6 @@ export const PARTS: Part[] = [
   {
     id: "cockpitKite",
     kind: "cockpit",
-    size: 0,
     label: "Kite cockpit",
     short: "kite",
     price: 0,
@@ -387,7 +395,6 @@ export const PARTS: Part[] = [
   {
     id: "cockpitBar",
     kind: "cockpit",
-    size: 0,
     label: "Bar cockpit",
     short: "bar",
     price: 0,
@@ -398,7 +405,6 @@ export const PARTS: Part[] = [
   {
     id: "cockpitDome",
     kind: "cockpit",
-    size: 0,
     label: "Dome cockpit",
     short: "dome",
     price: 0,
@@ -409,7 +415,6 @@ export const PARTS: Part[] = [
   {
     id: "cockpitVisor",
     kind: "cockpit",
-    size: 0,
     label: "Visor cockpit",
     short: "visor",
     price: 0,
@@ -422,6 +427,11 @@ export const PARTS: Part[] = [
 /** Whether a part is for fitting and selling: cockpit glass is looks only. */
 export function isGear(part: Part): boolean {
   return part.kind !== "cockpit";
+}
+
+/** The cells a part takes, unturned: its own shape, or one cell for anything without one. */
+export function shapeOf(id: PartId): Shape {
+  return partOf(id).shape ?? { w: 1, h: 1 };
 }
 
 /** A part by its id. */

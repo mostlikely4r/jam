@@ -1,5 +1,6 @@
 import { isProgram, partFits, partOf, PARTS, SHIP_MODELS, type Part, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "./parts";
 import shipFile from "./hulls.json";
+import type { Placed } from "./grid";
 
 /**
  * Where things fit on a hull. Each hull has a list of mounts, kept in src/hulls.json and changed
@@ -75,7 +76,7 @@ export interface HullInfo {
  * The stats of a part the parts page can edit, kept in the ship file over the code's own in
  * `parts.ts`. Only the ones that differ from the code's are kept.
  */
-export type PartStats = Partial<Pick<Part, "price" | "weight" | "size" | "tier" | "cargo" | "slots" | "set" | "explosive">>;
+export type PartStats = Partial<Pick<Part, "price" | "weight" | "shape" | "tier" | "bay" | "slots" | "set" | "explosive">>;
 
 /**
  * What src/hulls.json holds: the mount types, which each part fits, which parts are decals,
@@ -108,8 +109,8 @@ export interface Fitting {
   programs: PartId[];
   /** What works right now: every working module's part and every running program. Kept up by `refresh`. */
   parts: Set<PartId>;
-  /** Modules carried loose in the cargo bay, taking room from the ore. */
-  hold: Module[];
+  /** Modules placed on the cargo bay's grid, taking room from the ore. */
+  hold: Placed[];
   /** The decal part each decal mount shows. Looks only. A ship without one shows the first that fits. */
   decals?: Partial<Record<MountId, PartId>>;
 }
@@ -168,9 +169,9 @@ const BASE_STATS = new Map(
     {
       price: part.price,
       weight: part.weight,
-      size: part.size,
       tier: part.tier,
-      ...(part.cargo !== undefined ? { cargo: part.cargo } : {}),
+      ...(part.shape !== undefined ? { shape: { ...part.shape } } : {}),
+      ...(part.bay !== undefined ? { bay: { ...part.bay, entry: { ...part.bay.entry } } } : {}),
       ...(part.slots !== undefined ? { slots: part.slots } : {}),
       ...(part.set !== undefined ? { set: part.set } : {}),
       ...(part.explosive !== undefined ? { explosive: part.explosive } : {}),
@@ -183,23 +184,43 @@ export function resetPartStats(id: PartId): void {
   const part = PARTS.find((each) => each.id === id);
   const base = BASE_STATS.get(id);
   if (!part || !base || part.kind === "program") return;
-  for (const key of ["cargo", "slots", "set", "explosive"] as const) {
+  for (const key of ["slots", "set", "explosive"] as const) {
     if (base[key] === undefined) delete part[key];
     else part[key] = base[key];
   }
+  if (base.shape) part.shape = { ...base.shape };
+  else delete part.shape;
+  if (base.bay) part.bay = { ...base.bay, entry: { ...base.bay.entry } };
+  else delete part.bay;
   part.price = base.price!;
   part.weight = base.weight!;
-  part.size = base.size!;
   part.tier = base.tier!;
+}
+
+/** The cell on a grid's edge nearest to this one: where a bay's entry has to be. */
+export function onEdge(w: number, h: number, cell: { x: number; y: number }): { x: number; y: number } {
+  const x = Math.max(0, Math.min(w - 1, Math.round(cell.x)));
+  const y = Math.max(0, Math.min(h - 1, Math.round(cell.y)));
+  if (x === 0 || y === 0 || x === w - 1 || y === h - 1) return { x, y };
+  const gaps = [x, w - 1 - x, y, h - 1 - y];
+  const side = gaps.indexOf(Math.min(...gaps));
+  return side === 0 ? { x: 0, y } : side === 1 ? { x: w - 1, y } : side === 2 ? { x, y: 0 } : { x, y: h - 1 };
 }
 
 /** Sits a file's stats for a part over the code's own, skipping anything invalid. */
 function applyPartStats(id: PartId, stats: PartStats): void {
   const part = PARTS.find((each) => each.id === id);
   if (!part || part.kind === "program") return;
-  for (const key of ["price", "weight", "size", "cargo", "slots", "explosive"] as const) {
+  for (const key of ["price", "weight", "slots", "explosive"] as const) {
     const value = stats[key];
     if (value !== undefined && Number.isFinite(value) && value >= 0) part[key] = value;
+  }
+  const cells = (value: unknown, min: number) => typeof value === "number" && Number.isInteger(value) && value >= min;
+  const shape = stats.shape;
+  if (shape && cells(shape.w, 1) && cells(shape.h, 1)) part.shape = { w: shape.w, h: shape.h };
+  const bay = stats.bay;
+  if (bay && cells(bay.w, 1) && cells(bay.h, 1) && bay.entry && cells(bay.entry.x, 0) && cells(bay.entry.y, 0)) {
+    part.bay = { w: bay.w, h: bay.h, entry: onEdge(bay.w, bay.h, bay.entry) };
   }
   if (stats.tier === 0 || stats.tier === 1 || stats.tier === 2) part.tier = stats.tier;
   if (stats.set !== undefined && Number.isFinite(stats.set) && stats.set >= 1) part.set = Math.round(stats.set);
@@ -212,9 +233,11 @@ function partStatsNow(): NonNullable<ShipFile["partStats"]> {
     if (part.kind === "program") continue;
     const base = BASE_STATS.get(part.id)!;
     const diff: PartStats = {};
-    for (const key of ["price", "weight", "size", "cargo", "slots", "set", "explosive"] as const) {
+    for (const key of ["price", "weight", "slots", "set", "explosive"] as const) {
       if (part[key] !== base[key]) diff[key] = part[key];
     }
+    if (part.shape && JSON.stringify(part.shape) !== JSON.stringify(base.shape)) diff.shape = { ...part.shape };
+    if (part.bay && JSON.stringify(part.bay) !== JSON.stringify(base.bay)) diff.bay = { ...part.bay, entry: { ...part.bay.entry } };
     if (part.tier !== base.tier) diff.tier = part.tier;
     if (Object.keys(diff).length > 0) out[part.id] = diff;
   }

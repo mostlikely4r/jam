@@ -6,6 +6,9 @@ import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
 import { DOCK_OFFSET, SHIP_RADIUS, Sim } from "./sim";
 
+/** How much ore an empty bay of this part holds, at one ore per cell. */
+const bayCells = (id: "smallBay" | "bay" | "largeBay") => partOfForTest(id).bay!.w * partOfForTest(id).bay!.h;
+
 const WORLD = {
   ...DEFAULTS,
   trafficRacers: 0,
@@ -210,8 +213,8 @@ describe("items as counted things", () => {
     const room = sim.cargoSpace(ship);
     sim.buyPart(ship, "gun2");
     expect(sim.toHold(ship, { at: "locker", index: 0 })).toBe(true);
-    expect(ship.hold.map((item) => item.part)).toEqual(["gun1"]);
-    expect(sim.cargoSpace(ship)).toBe(room - 6);
+    expect(ship.hold.map((item) => item.module.part)).toEqual(["gun1"]);
+    expect(sim.cargoSpace(ship)).toBe(room - 2);
   });
 
   it("what's left at a base stays there; other bases have their own lockers", () => {
@@ -254,7 +257,7 @@ describe("items as counted things", () => {
     loot.vy = ship.vy;
     sim.step();
     expect(sim.loot.length).toBe(0);
-    expect(ship.hold.map((item) => item.part)).toEqual(["gun1"]);
+    expect(ship.hold.map((item) => item.module.part)).toEqual(["gun1"]);
   });
 });
 
@@ -527,17 +530,17 @@ describe("turned mounts", () => {
       () => {
         sim.tidyMounts();
         expect(sim.ship.fit.gun).toBeUndefined();
-        expect(sim.ship.hold.map((item) => item.part)).toContain("gun1");
+        expect(sim.ship.hold.map((item) => item.module.part)).toContain("gun1");
       },
     );
   });
 
   it("a fitted cargo bay replaces the small one a hull comes with", () => {
     const sim = docked("racer");
-    expect(sim.bayTotal(sim.ship)).toBe(partOfForTest("smallBay").cargo);
+    expect(sim.bayTotal(sim.ship)).toBe(bayCells("smallBay"));
     sim.ship.fit.section = { part: "bay", wear: 0 };
     refresh(sim.ship);
-    expect(sim.bayTotal(sim.ship)).toBe(partOfForTest("bay").cargo);
+    expect(sim.bayTotal(sim.ship)).toBe(bayCells("bay"));
   });
 
   it("a hull without a bay carries nothing at all", () => {
@@ -832,5 +835,87 @@ describe("the stats of hulls and parts", () => {
         expect(shipFileNow().partStats).toEqual({});
       },
     );
+  });
+});
+
+describe("the bay's grid", () => {
+  /** A docked racer with its small bay (5 by 2, entry at the top middle) and a spare gun in its locker. */
+  function withSpareGun(): Sim {
+    const sim = docked("racer");
+    sim.ship.ore = 0;
+    sim.lockerAt(sim.baseAt()!).push({ part: "gun2", wear: 0 }, { part: "gun2", wear: 0 });
+    return sim;
+  }
+
+  it("an item takes exactly its cells from the ore's room, and a sealed pocket takes its own too", () => {
+    const sim = withSpareGun();
+    const { ship } = sim;
+    expect(sim.cargoSpace(ship)).toBe(10);
+    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 0, y: 0, turned: false })).toBe(true);
+    expect(sim.cargoSpace(ship)).toBe(8);
+    // At the far wall, the second gun seals nothing off.
+    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 4, y: 0, turned: false })).toBe(true);
+    expect(sim.cargoSpace(ship)).toBe(6);
+    // Moved to x 1, the first gun leaves column 0 a pocket the ore can't reach.
+    expect(sim.toHold(ship, { at: "hold", index: 0 }, { x: 1, y: 0, turned: false })).toBe(true);
+    expect(sim.cargoSpace(ship)).toBe(4);
+  });
+
+  it("a blocked entry leaves no room for ore, and the tractor lets go", () => {
+    const sim = docked("floater");
+    const { ship } = sim;
+    ship.ore = 0;
+    sim.devSet(ship, "tractor", true);
+    expect(sim.tractorOn(ship)).toBe(true);
+    sim.lockerAt(sim.baseAt()!).push({ part: "gun2", wear: 0 });
+    const entry = sim.bayGrid(ship)!.entry;
+    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: entry.x, y: entry.y, turned: false })).toBe(true);
+    expect(sim.cargoSpace(ship)).toBe(0);
+    expect(sim.tractorOn(ship)).toBe(false);
+  });
+
+  it("refuses an item that touches no wall and no chain of items that does", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    ship.ore = 0;
+    sim.devSet(ship, "bay", true);
+    // The bay is 5 by 4: a single cell at 2,1 touches no wall.
+    sim.lockerAt(sim.baseAt()!).push({ part: "flightComputer", wear: 0 }, { part: "gun2", wear: 0 });
+    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 2, y: 1, turned: false })).toBe(false);
+    expect(sim.toHold(ship, { at: "locker", index: 1 }, { x: 2, y: 2, turned: false })).toBe(true);
+    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 2, y: 1, turned: false })).toBe(true);
+  });
+
+  it("refuses to take out an item that holds another up, and says which", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    ship.ore = 0;
+    sim.devSet(ship, "bay", true);
+    const locker = sim.lockerAt(sim.baseAt()!);
+    locker.push({ part: "gun2", wear: 0 }, { part: "flightComputer", wear: 0 });
+    sim.toHold(ship, { at: "locker", index: 0 }, { x: 2, y: 2, turned: false });
+    sim.toHold(ship, { at: "locker", index: 0 }, { x: 2, y: 1, turned: false });
+    expect(sim.floatingWithout(ship, 0).map((item) => item.part)).toEqual(["flightComputer"]);
+    expect(sim.toLocker(ship, { at: "hold", index: 0 })).toBe(false);
+    expect(sim.sellItem(ship, { at: "hold", index: 0 })).toBe(false);
+    expect(sim.toLocker(ship, { at: "hold", index: 1 })).toBe(true);
+    expect(sim.toLocker(ship, { at: "hold", index: 0 })).toBe(true);
+  });
+
+  it("refuses an item where the ore aboard would no longer fit", () => {
+    const sim = withSpareGun();
+    sim.ship.ore = 9;
+    expect(sim.toHold(sim.ship, { at: "locker", index: 0 })).toBe(false);
+    sim.ship.ore = 8;
+    expect(sim.toHold(sim.ship, { at: "locker", index: 0 })).toBe(true);
+  });
+
+  it("a bigger bay carries what the old one held", () => {
+    const sim = withSpareGun();
+    const { ship } = sim;
+    sim.toHold(ship, { at: "locker", index: 0 });
+    sim.devSet(ship, "largeBay", true);
+    expect(ship.hold.map((item) => item.module.part)).toEqual(["gun2"]);
+    expect(sim.cargoSpace(ship)).toBe(48);
   });
 });

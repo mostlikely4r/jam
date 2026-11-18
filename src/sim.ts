@@ -1,10 +1,11 @@
 import { Chatter } from "./chatter";
-import { type BlueprintId, isGear, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
+import { type BayGrid, type BlueprintId, isGear, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
 import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountsOf, mountWith, thrustOf, turretMount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
 import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./pilot";
 export { FIRST_FIELD };
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
+import { autoPlace, canPlace, floatsAfterRemoval, footprint, reachableCells, sticks, usedCells, type Placed } from "./grid";
 import { pilotKind, type StepProfile } from "./profile/step";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
@@ -151,6 +152,13 @@ export interface Ship extends Body, Fitting {
 
 /** Where an item sits, for moving it: a mount, a place in the bay, or a place in the locker of the base the ship is at. */
 export type ItemPlace = { at: "mount"; mount: MountId } | { at: "hold"; index: number } | { at: "locker"; index: number };
+
+/** A spot on the bay's grid to put an item: its top-left cell, and whether it's turned 90 degrees. */
+export interface Spot {
+  x: number;
+  y: number;
+  turned: boolean;
+}
 
 export interface Rock extends Body {
   /** Still on its way in from outside the field. */
@@ -2472,26 +2480,73 @@ export class Sim {
     return Math.max(0, Math.min(ship.ore, this.tuning.depositCapacity - deposit.ore));
   }
 
-  /** How much ore a ship has room for: its bay, less what modules take up there. */
+  /** How much ore a ship has room for: the free cells of its bay that ore can reach from the entry. */
   cargoSpace(ship: Ship): number {
-    return this.bayTotal(ship) - this.holdSize(ship);
+    const grid = this.bayGrid(ship);
+    return grid ? reachableCells(grid, ship.hold) * this.tuning.orePerCell : 0;
   }
 
-  /** All the room in a ship's bay, for ore and modules together: fitted bays only, so a ship without one carries nothing. */
+  /** The grid of the ship's fitted bay, unless it's destroyed: a ship without one carries nothing. */
+  bayGrid(ship: Ship): BayGrid | null {
+    for (const module of Object.values(ship.fit)) {
+      const bay = module && module.wear < 1 ? partOf(module.part).bay : undefined;
+      if (bay) return bay;
+    }
+    return null;
+  }
+
+  /** All the room in a ship's bay, as ore, with no modules in it. */
   bayTotal(ship: Ship): number {
-    let space = 0;
-    for (const module of Object.values(ship.fit)) if (module && module.wear < 1) space += partOf(module.part).cargo ?? 0;
-    return space;
+    const grid = this.bayGrid(ship);
+    return grid ? grid.w * grid.h * this.tuning.orePerCell : 0;
   }
 
-  /** How much room the modules loose in the bay take. */
+  /** How much room the modules in the bay take, as ore. */
   holdSize(ship: Ship): number {
-    return ship.hold.reduce((sum, item) => sum + partOf(item.part).size, 0);
+    return usedCells(ship.hold) * this.tuning.orePerCell;
+  }
+
+  /**
+   * Where a module would go in the bay beside what's there now, or null if nowhere: a spot that
+   * sticks, keeps the entry open, and leaves room for the ore already aboard.
+   */
+  holdSpotFor(ship: Ship, item: Module): Placed | null {
+    const grid = this.bayGrid(ship);
+    const spot = grid ? autoPlace(grid, ship.hold, item) : null;
+    if (!spot || reachableCells(grid!, [...ship.hold, spot]) * this.tuning.orePerCell < ship.ore) return null;
+    return spot;
   }
 
   /** Whether a module would fit in the bay beside what's there now. */
   hasRoomFor(ship: Ship, item: Module): boolean {
-    return this.bayTotal(ship) - this.holdSize(ship) - ship.ore >= partOf(item.part).size;
+    return this.holdSpotFor(ship, item) !== null;
+  }
+
+  /** The modules in the bay that would be left floating if the one at this index came out. */
+  floatingWithout(ship: Ship, index: number): Module[] {
+    const grid = this.bayGrid(ship);
+    const item = ship.hold[index];
+    if (!grid || !item) return [];
+    return floatsAfterRemoval(grid, ship.hold, item).map((each) => each.module);
+  }
+
+  /**
+   * After the bay or its contents change: keeps every module where it is if it all still fits
+   * and sticks, or else packs them in again, biggest first. What won't go in goes into the
+   * player's locker at the base, is sold there by anyone else, or out in space drifts off.
+   */
+  private settleHold(ship: Ship, base: Base | null): void {
+    const grid = this.bayGrid(ship);
+    if (grid && ship.hold.every((item) => canPlace(grid, ship.hold, item))) return;
+    if (!grid && ship.hold.length === 0) return;
+    const items = ship.hold.map((item) => item.module).sort((a, b) => cellCount(b) - cellCount(a));
+    ship.hold = [];
+    for (const module of items) {
+      const spot = grid ? autoPlace(grid, ship.hold, module) : null;
+      if (spot) ship.hold.push(spot);
+      else if (base) this.stow(ship, [module], base);
+      else this.setAdrift(ship, module, 25);
+    }
   }
 
   /** The load an AI ship waits for before heading in to deliver. */
@@ -2624,6 +2679,7 @@ export class Sim {
     const off = fitPart(ship, id, wear);
     if (base) this.stow(ship, off, base);
     if (partOf(id).kind === "computer") trimPrograms(ship);
+    this.settleHold(ship, base);
   }
 
   /** Modules that came off a ship in a dock: into the player's locker, or sold to the base by anyone else. */
@@ -2693,6 +2749,7 @@ export class Sim {
       if (mounts.length === 0 || partOf(id).builtIn) return false;
       for (const mount of mounts) this.takeBack(account, unfit(ship, mount)!, base);
       this.refitDefaults(ship, base);
+      this.settleHold(ship, base);
     }
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     return true;
@@ -2723,15 +2780,24 @@ export class Sim {
   /** Where an item is, for moving it about: on a mount, loose in the bay, or in the locker where the ship is docked. */
   itemAt(ship: Ship, from: ItemPlace): Module | null {
     if (from.at === "mount") return ship.fit[from.mount] ?? null;
-    if (from.at === "hold") return ship.hold[from.index] ?? null;
+    if (from.at === "hold") return ship.hold[from.index]?.module ?? null;
     const base = this.baseAt(ship);
     return base ? this.lockerAt(base)[from.index] ?? null : null;
+  }
+
+  /**
+   * Whether an item can be taken out of where it is: not from the bay if that would leave
+   * another module there floating.
+   */
+  canTake(ship: Ship, from: ItemPlace): boolean {
+    if (!this.itemAt(ship, from)) return false;
+    return from.at !== "hold" || this.floatingWithout(ship, from.index).length === 0;
   }
 
   /** Takes an item out of where it is. */
   private takeItem(ship: Ship, from: ItemPlace): Module | null {
     const item = this.itemAt(ship, from);
-    if (!item) return null;
+    if (!item || !this.canTake(ship, from)) return null;
     if (from.at === "mount") unfit(ship, from.mount);
     else if (from.at === "hold") ship.hold.splice(from.index, 1);
     else this.lockerAt(this.baseAt(ship)!).splice(from.index, 1);
@@ -2747,10 +2813,16 @@ export class Sim {
     if (mountsFor(ship, item.part).length === 0) return false;
     // A pair goes on as a pair: the other half has to be where this one is.
     const set = partOf(item.part).set ?? 1;
-    const pile = from.at === "hold" ? ship.hold : this.lockerAt(base);
-    const pair = pile.filter((other) => other.part === item.part && other.wear < 1).slice(0, set);
+    const pile = from.at === "hold" ? ship.hold.map((placed) => placed.module) : this.lockerAt(base);
+    const pair = [item, ...pile.filter((other) => other !== item && other.part === item.part && other.wear < 1)].slice(0, set);
     if (pair.length < set) return false;
-    for (const each of pair) pile.splice(pile.indexOf(each), 1);
+    if (from.at === "hold") {
+      // Taking them out must leave nothing else in the bay floating.
+      const grid = this.bayGrid(ship);
+      const rest = ship.hold.filter((placed) => !pair.includes(placed.module));
+      if (grid && !rest.every((placed) => sticks(grid, rest, placed))) return false;
+      ship.hold = rest;
+    } else for (const each of pair) pile.splice(pile.indexOf(each), 1);
     const mounts = mountsFor(ship, item.part);
     const off: Module[] = [];
     for (const [i, mount] of mounts.entries()) {
@@ -2767,7 +2839,13 @@ export class Sim {
     }
     refresh(ship);
     if (partOf(item.part).kind === "computer") trimPrograms(ship);
-    pile.push(...off);
+    this.settleHold(ship, base);
+    // What came off goes where this came from: the bay if it has a spot, or else the locker.
+    for (const module of off) {
+      const spot = from.at === "hold" ? this.holdSpotFor(ship, module) : null;
+      if (spot) ship.hold.push(spot);
+      else this.lockerAt(base).push(module);
+    }
     return true;
   }
 
@@ -2782,12 +2860,15 @@ export class Sim {
       for (const [mount, module] of Object.entries(ship.fit) as [MountId, Module | undefined][]) {
         if (ids.has(mount) || !module) continue;
         delete ship.fit[mount];
-        ship.hold.push(module);
+        const spot = this.holdSpotFor(ship, module);
+        if (spot) ship.hold.push(spot);
+        else this.setAdrift(ship, module, 25);
         moved = true;
       }
       if (moved) {
         refresh(ship);
         trimPrograms(ship);
+        this.settleHold(ship, null);
       }
     }
   }
@@ -2795,9 +2876,9 @@ export class Sim {
   /** Throws a module out of the bay, to drift beside the ship. */
   dropItem(ship: Ship, index: number): boolean {
     const item = ship.hold[index];
-    if (!item || this.isDocked(ship)) return false;
+    if (!item || this.isDocked(ship) || !this.canTake(ship, { at: "hold", index })) return false;
     ship.hold.splice(index, 1);
-    this.setAdrift(ship, item, 25);
+    this.setAdrift(ship, item.module, 25);
     return true;
   }
 
@@ -2813,26 +2894,45 @@ export class Sim {
   /** Moves an item into the locker where the ship is docked. */
   toLocker(ship: Ship, from: ItemPlace): boolean {
     const base = this.baseAt(ship);
-    if (!base || from.at === "locker" || !this.itemAt(ship, from)) return false;
+    if (!base || from.at === "locker" || !this.canTake(ship, from)) return false;
     this.lockerAt(base).push(this.takeItem(ship, from)!);
+    if (from.at === "mount") this.settleHold(ship, base);
     return true;
   }
 
-  /** Moves an item into the bay, if there's room for it beside the ore. Off a mount or out of a locker: only in a dock. */
-  toHold(ship: Ship, from: ItemPlace): boolean {
+  /**
+   * Moves an item into the bay, at a spot or wherever it goes best, if it sticks there and
+   * leaves room for the ore aboard. Only in a dock. From the bay itself, it moves the item.
+   */
+  toHold(ship: Ship, from: ItemPlace, at?: Spot): boolean {
     const item = this.itemAt(ship, from);
-    if (!item || from.at === "hold" || !this.baseAt(ship)) return false;
-    // A section can't carry itself.
-    if (from.at === "mount" && from.mount === "section") return false;
-    if (!this.hasRoomFor(ship, item)) return false;
-    ship.hold.push(this.takeItem(ship, from)!);
+    const base = this.baseAt(ship);
+    const grid = this.bayGrid(ship);
+    if (!item || !base || !grid || !this.canTake(ship, from)) return false;
+    // A bay can't carry itself.
+    if (from.at === "mount" && partOf(item.part).bay) return false;
+    const rest = from.at === "hold" ? ship.hold.filter((_, index) => index !== from.index) : ship.hold;
+    let spot: Placed | null;
+    if (at) {
+      spot = { module: item, ...at };
+      const after = [...rest, spot];
+      if (!canPlace(grid, rest, spot) || !after.every((placed) => sticks(grid, after, placed))) return false;
+      if (reachableCells(grid, after) * this.tuning.orePerCell < ship.ore) return false;
+    } else {
+      if (from.at === "hold") return false;
+      spot = this.holdSpotFor(ship, item);
+      if (!spot) return false;
+    }
+    if (from.at === "hold") ship.hold = rest;
+    else this.takeItem(ship, from);
+    ship.hold.push(spot);
     return true;
   }
 
   /** Sells an item from the bay or the locker to the base the ship is docked at. */
   sellItem(ship: Ship, from: ItemPlace): boolean {
     const base = this.baseAt(ship);
-    if (!base || from.at === "mount" || !this.itemAt(ship, from)) return false;
+    if (!base || from.at === "mount" || !this.canTake(ship, from)) return false;
     this.takeBack(this.accountOf(ship), this.takeItem(ship, from)!, base);
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     return true;
@@ -2855,6 +2955,7 @@ export class Sim {
       fitPart(ship, id);
       trimPrograms(ship);
     } else for (const mount of mountsHolding(ship, id)) unfit(ship, mount);
+    this.settleHold(ship, this.baseAt(ship));
   }
 
   /** Any ship in the dock can pay for a new drone, which starts there and earns for itself. */
@@ -4723,7 +4824,7 @@ export class Sim {
       bomb.wear = 1;
       for (const other of modules) if (other !== bomb) other.wear = Math.min(1, other.wear + blast / this.moduleToughness(other));
     }
-    for (const module of [...modules, ...ship.hold]) if (module.wear < 1) this.setAdrift(ship, module, WRECK_ORE_SPEED * 2);
+    for (const module of [...modules, ...ship.hold.map((item) => item.module)]) if (module.wear < 1) this.setAdrift(ship, module, WRECK_ORE_SPEED * 2);
     ship.fit = {};
     ship.hold = [];
     refresh(ship);
@@ -5648,7 +5749,10 @@ export class Sim {
     if (before < DAMAGED_AT === module.wear < DAMAGED_AT && before < 1 === module.wear < 1) return;
     refresh(ship);
     // A destroyed bay loses what it held beyond the room that's left.
-    if (module.wear >= 1) this.dropOre(ship, ship.ore - this.cargoSpace(ship));
+    if (module.wear >= 1) {
+      if (partOf(module.part).bay) this.settleHold(ship, null);
+      this.dropOre(ship, ship.ore - this.cargoSpace(ship));
+    }
   }
 
   /** Whether a ship can't do its work out there, whatever its hull: it has no working gun. */
@@ -5661,10 +5765,11 @@ export class Sim {
     // Only the player picks up modules for now: nobody else has a use for them yet.
     if (ship === this.ship && this.loot.length > 0) {
       this.loot = this.loot.filter((loot) => {
-        if (!this.hasRoomFor(ship, loot.item)) return true;
+        const spot = this.holdSpotFor(ship, loot.item);
+        if (!spot) return true;
         const touch = sweepCircle(loot.px - ship.px, loot.py - ship.py, loot.x - loot.px - (ship.x - ship.px), loot.y - loot.py - (ship.y - ship.py), reach);
         if (touch === null) return true;
-        ship.hold.push(loot.item);
+        ship.hold.push(spot);
         this.events.push({ type: "pickup", x: loot.x, y: loot.y, kind: 0 });
         return false;
       });
@@ -5718,4 +5823,10 @@ function alongPath(path: { x: number; y: number }[], share: number): { x: number
     left -= piece;
   }
   return path[path.length - 1];
+}
+
+/** How many cells a module takes on a grid. */
+function cellCount(module: Module): number {
+  const { w, h } = footprint({ module, turned: false });
+  return w * h;
 }

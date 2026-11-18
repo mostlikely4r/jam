@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "id": "oreB",
+      "name": "Ore B",
+      "description": "A heavy ore that only drops in far fields. Haulers carry it off to be made into parts",
+      "shape": { "w": 1, "h": 2 },
+      "price": 30,
+      "icon": { "glyph": "diamond", "primary": "#6aa0d8", "secondary": "#d8ecff", "border": "#7fdfe6", "mark": "B", "glow": "#7fdfe6" }
+    },
+    {
+      "id": "partB",
+      "name": "Part B",
+      "description": "Made from ore B off-screen. The 360 tractor is built from one",
+      "shape": { "w": 1, "h": 1 },
+      "price": 90,
+      "icon": { "glyph": "board", "primary": "#4a6a8a", "secondary": "#bfe0ff", "border": "#f0d86a", "mark": "B", "glow": "#f0d86a" }
+    }
+  ],
+  "recipes": [
+    { "makes": "partB", "from": [{ "item": "oreB", "n": 2 }] },
+    { "makes": "tractorAll", "from": [{ "item": "partB", "n": 1 }] }
+  ]
+}

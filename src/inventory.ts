@@ -1,6 +1,6 @@
 import { computerSize, DAMAGED_AT, mountsOf, programSlots, type Module, type Mount, type MountId } from "./fitting";
 import { canPlace, entryCells, fits, footprint, reachable, sticks, type GridSpec, type Placed } from "./grid";
-import { ORE_BLOCK, partOf, PARTS, type PartId } from "./parts";
+import { isItem, ORE_BLOCK, partOf, PARTS, type PartId } from "./parts";
 import { partIcon } from "./icons";
 import { setTip } from "./tooltip";
 import { bayBox, drawVectorShip } from "./shipArt";
@@ -198,7 +198,8 @@ export class Inventory {
       });
     if (!this.docked) return place.at === "hold" ? [act("Drop", () => sim.dropItem(ship, place.index))] : [];
     const out: HTMLButtonElement[] = [];
-    if (place.at !== "mount") out.push(act("Fit", () => sim.fitItem(ship, place)));
+    // An item isn't a module: nothing to fit.
+    if (place.at !== "mount" && !isItem(item.part)) out.push(act("Fit", () => sim.fitItem(ship, place)));
     if (place.at !== "hold") out.push(act("To bay", () => sim.toHold(ship, place)));
     if (place.at !== "locker") out.push(act("To locker", () => sim.toLocker(ship, place)));
     if (place.at !== "mount") {
@@ -654,7 +655,10 @@ export class Inventory {
     }
     if (drop === "locker") return "It doesn't fit there";
     if (drop?.startsWith("mount:")) return "That mount won't take it, or what's on it has nowhere to go";
-    if (drop === "shop") return partOf(module.part).builtIn ? "The hull's own gear isn't sold back from its mount" : "The shop won't take it";
+    if (drop === "shop") {
+      if (isItem(module.part) && sim.sellRefused) return sim.sellRefused;
+      return partOf(module.part).builtIn ? "The hull's own gear isn't sold back from its mount" : "The shop won't take it";
+    }
     return "No room for it there";
   }
 }

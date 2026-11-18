@@ -219,6 +219,12 @@ export const DEFAULTS = {
   haulerPartsLoad: 100,
   haulerPartPrice: 16,
   haulerLoadRate: 2,
+  /** Room a hauler has for items, in volume (an item's volume starts as the area of its shape). */
+  haulerVolume: 40,
+  /** The most items a hauler brings a station from the hub on one visit. */
+  haulerItemLoad: 6,
+  /** A base asks for an item some recipe it can run needs while it holds fewer than this. */
+  itemTarget: 4,
   chatterRange: 1500,
 
   pirates: 1,
@@ -523,6 +529,9 @@ export const GROUPS: Group[] = [
       { key: "haulerPartsLoad", label: "Parts a hauler brings", min: 0, max: 1000, step: 10 },
       { key: "haulerPartPrice", label: "Credits the station pays per part", min: 0, max: 100, step: 1 },
       { key: "haulerLoadRate", label: "Ore and parts moved per second", min: 0.5, max: 20, step: 0.5 },
+      { key: "haulerVolume", label: "Room a hauler has for items (volume)", min: 0, max: 400, step: 5 },
+      { key: "haulerItemLoad", label: "Items a hauler brings from the hub", min: 0, max: 50, step: 1 },
+      { key: "itemTarget", label: "Items a base holds before it stops asking", min: 0, max: 50, step: 1 },
       { key: "blueprintScale", label: "Blueprint price, share of the part's price", min: 0, max: 5, step: 0.05 },
       { key: "stationCashBuffer", label: "Credits the station holds back from blueprints", min: 0, max: 5000, step: 50 },
       { key: "trafficBuffer", label: "Credits traffic keeps before buying parts", min: 0, max: 3000, step: 50 },

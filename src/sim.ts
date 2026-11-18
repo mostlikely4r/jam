@@ -1,5 +1,6 @@
 import { Chatter } from "./chatter";
-import { type BayGrid, type BlueprintId, ORE_BLOCK, partFits, isGear, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
+import { type BayGrid, type BlueprintId, ORE_BLOCK, partFits, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
+import { hubInputs, hubRecipes, itemDef, saleRecipes } from "./items";
 import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
 import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./pilot";
 export { FIRST_FIELD };
@@ -203,6 +204,8 @@ export interface Hauler {
   cargo: number;
   /** Parts still aboard, for sale to the station. */
   parts: number;
+  /** Items aboard: what it brought for the station, and what it loaded to carry off to the hub. */
+  items: Map<PartId, number>;
   /** Credits paid for ore this visit and not yet spent on parts. */
   earned: number;
   /** Seconds at the berth with nothing to load. */
@@ -385,6 +388,14 @@ export interface FieldSpec {
   orbits: Orbit[];
   /** Its own true orbit for the chart. */
   rings?: OrbitRing[];
+  /** Items its rocks drop as well as plain ore: each is rolled once per ore roll. Without any, nothing extra. */
+  drops?: FieldDrop[];
+}
+
+/** An item a field's rocks drop, and the chance of it on each roll. */
+export interface FieldDrop {
+  item: string;
+  chance: number;
 }
 
 /** A field anyone can mine, as a pilot sees it. */
@@ -416,6 +427,8 @@ export interface StationSpec {
   blueprints: BlueprintId[];
   /** Cells of storage: the player's lockers and its store of whole modules come out of it. Without one, the tuning's. */
   storage?: number;
+  /** Items in its store when the game starts. These come from nowhere: the plan's listed holes (docs/items-plan.md). */
+  items?: { item: string; n: number }[];
 }
 
 /** The player's locker at a base: a grid as wide as the tuning says, with as many rows as are rented. */
@@ -956,6 +969,17 @@ export class Sim {
   shots: Shot[] = [];
   ores: Ore[] = [];
   loot: Loot[] = [];
+  /**
+   * Where the items haulers carry off go: the world's one pool, off-screen. A recipe that
+   * makes an item runs here the moment its inputs arrive (`feedHub`). Saved.
+   */
+  hub = new Map<PartId, number>();
+  /**
+   * Every item made or lost since the world began, by id: drops and recipe yields count up,
+   * recipe inputs spent and loot forgotten count down. What a station starts with is not in
+   * it (those come from nowhere), so the items there are in all equal the first count plus this.
+   */
+  itemFlow = new Map<PartId, number>();
   /** Set while the player has lost their ship and not yet got a new one. */
   down: Down | null = null;
   field!: Poi;
@@ -1021,6 +1045,8 @@ export class Sim {
       shots: this.shots,
       ores: this.ores,
       loot: this.loot,
+      hub: this.hub,
+      itemFlow: this.itemFlow,
       down: this.down,
       field: this.field,
       station: this.station,
@@ -1092,6 +1118,8 @@ export class Sim {
     this.bases[0].poi = this.station;
     this.savedBases = new Map(bases.map((state) => [state.id, state]));
     for (const base of this.bases) this.takeSaved(base);
+    this.hub = data.hub ?? new Map();
+    this.itemFlow = data.itemFlow ?? new Map();
     this.discovered = data.discovered ?? new Set();
     this.lockers = data.lockers ?? new Map();
     // A save from before fields slept has every rock awake: far fields fall asleep next tick.
@@ -1112,6 +1140,8 @@ export class Sim {
     this.shots = [];
     this.ores = [];
     this.loot = [];
+    this.hub = new Map();
+    this.itemFlow = new Map();
     this.down = null;
     this.events = [];
     this.stats = { bestOre: this.stats.bestOre, topSpeed: 0 };
@@ -1305,7 +1335,8 @@ export class Sim {
       account: { credits: tuning.stationStartCredits },
       ore: tuning.stationStartOre,
       parts: tuning.stationStartParts,
-      stock: new Map(),
+      // The items a station starts with come from nowhere: a listed hole in the item ledger.
+      stock: new Map((spec?.items ?? []).filter((each) => each.n > 0 && itemDef(each.item) !== undefined).map((each) => [each.item as PartId, Math.floor(each.n)])),
       hauler: null,
       haulerTimer: tuning.haulerFirst,
       lostTraffic: [],
@@ -1800,6 +1831,7 @@ export class Sim {
         thrust: { forward: 0, side: 0, turn: 0 },
         cargo: 0,
         parts: tuning.haulerPartsLoad,
+        items: this.loadFromHub(base),
         earned: 0,
         idle: 0,
         loadTimer: 0,
@@ -1885,12 +1917,15 @@ export class Sim {
           hauler.parts >= 1 &&
           tuning.stationPartsTarget - base.parts >= 1 &&
           (account.credits >= tuning.haulerPartPrice || hauler.earned >= tuning.haulerPartPrice);
-        if (!canLoad() && !canUnload()) {
+        // Items: it takes what the hub can use, and sets down what the station asks for, paid the same way.
+        const itemToLoad = () => this.haulerLoads(base, hauler);
+        const itemToUnload = () => this.haulerUnloads(base, hauler);
+        if (!canLoad() && !canUnload() && itemToLoad() === null && itemToUnload() === null) {
           hauler.idle += dt;
         } else {
           hauler.idle = 0;
           hauler.loadTimer += dt * tuning.haulerLoadRate;
-          while (hauler.loadTimer >= 1 && (canLoad() || canUnload())) {
+          while (hauler.loadTimer >= 1 && (canLoad() || canUnload() || itemToLoad() !== null || itemToUnload() !== null)) {
             hauler.loadTimer -= 1;
             if (canLoad()) {
               hauler.cargo++;
@@ -1904,11 +1939,32 @@ export class Sim {
               account.credits -= tuning.haulerPartPrice;
               hauler.earned = Math.max(0, hauler.earned - tuning.haulerPartPrice);
             }
+            const load = itemToLoad();
+            if (load !== null) {
+              const price = partOf(load).price;
+              this.addTo(base.stock, load, -1);
+              this.addTo(hauler.items, load, 1);
+              account.credits += price;
+              hauler.earned += price;
+            }
+            const unload = itemToUnload();
+            if (unload !== null) {
+              const price = partOf(unload).price;
+              this.addTo(hauler.items, unload, -1);
+              this.addTo(base.stock, unload, 1);
+              account.credits -= price;
+              hauler.earned = Math.max(0, hauler.earned - price);
+            }
           }
         }
-        if ((hauler.cargo >= tuning.haulerCapacity && !canUnload()) || hauler.idle >= HAULER_WAIT_SECONDS) {
+        if (
+          (hauler.cargo >= tuning.haulerCapacity && !canUnload() && itemToLoad() === null && itemToUnload() === null) ||
+          hauler.idle >= HAULER_WAIT_SECONDS
+        ) {
           hauler.stage = "undocking";
           hauler.time = 0;
+          // Whatever it carries off goes to the hub, where recipes run.
+          this.unloadToHub(hauler);
           if (tuning.chatter) this.chatter.haulerLeaving(this, base, hauler.cargo);
         }
         return;
@@ -1952,6 +2008,106 @@ export class Sim {
           base.hauler = null;
         }
         return;
+      }
+    }
+  }
+
+  /**
+   * Puts items in a base's store out of nothing: how a designer's starting items arrive, and what
+   * tests use. It is a hole in the item ledger (`itemFlow`) on purpose: nothing counts it.
+   */
+  stockItem(base: Base, id: PartId, n: number): void {
+    this.addTo(base.stock, id, n);
+  }
+
+  /** Adds to (or takes from) a count in a map of counts, dropping the entry at zero. */
+  private addTo(counts: Map<PartId, number>, id: PartId, by: number): void {
+    const next = (counts.get(id) ?? 0) + by;
+    if (next > 0) counts.set(id, next);
+    else counts.delete(id);
+  }
+
+  /** Counts an item made or lost in the world's ledger (`itemFlow`). */
+  private flow(id: PartId, by: number): void {
+    const next = (this.itemFlow.get(id) ?? 0) + by;
+    if (next === 0) this.itemFlow.delete(id);
+    else this.itemFlow.set(id, next);
+  }
+
+  /** The room items aboard a hauler take, in volume. */
+  private haulerVolumeUsed(hauler: Hauler): number {
+    let used = 0;
+    for (const [id, count] of hauler.items) used += volumeOf(id) * count;
+    return used;
+  }
+
+  /**
+   * Whether a base asks for an item: some part it can sell is made from it (a recipe that
+   * makes a part runs at the station), and its store holds fewer than the target.
+   */
+  needsItem(base: Base, id: PartId): boolean {
+    if (this.stockOf(base, id) >= this.tuning.itemTarget) return false;
+    return saleRecipes().some((recipe) => recipe.from.some((each) => each.item === id) && this.unlocked(recipe.makes as PartId, base));
+  }
+
+  /** What a hauler setting out takes from the hub: the items the base asks for, up to what a visit brings and its room. */
+  private loadFromHub(base: Base): Map<PartId, number> {
+    const { tuning } = this;
+    const items = new Map<PartId, number>();
+    const hauler = { items } as Hauler;
+    let room = tuning.haulerItemLoad;
+    for (const [id, count] of [...this.hub]) {
+      if (room <= 0) break;
+      if (!this.needsItem(base, id)) continue;
+      const fits = Math.floor((tuning.haulerVolume - this.haulerVolumeUsed(hauler)) / Math.max(volumeOf(id), 1e-9));
+      const take = Math.min(count, room, tuning.itemTarget - this.stockOf(base, id), fits);
+      if (take <= 0) continue;
+      this.addTo(this.hub, id, -take);
+      this.addTo(items, id, take);
+      room -= take;
+    }
+    return items;
+  }
+
+  /** The item a hauler at the berth would load now: one the hub runs a recipe on, that the base holds and it has room for. */
+  private haulerLoads(base: Base, hauler: Hauler): PartId | null {
+    for (const id of hubInputs() as PartId[]) {
+      if (this.stockOf(base, id) < 1) continue;
+      if (this.haulerVolumeUsed(hauler) + volumeOf(id) > this.tuning.haulerVolume + 1e-9) continue;
+      return id;
+    }
+    return null;
+  }
+
+  /** The item a hauler at the berth would set down now: one the base asks for, paid for as parts are. */
+  private haulerUnloads(base: Base, hauler: Hauler): PartId | null {
+    for (const [id, count] of hauler.items) {
+      if (count < 1 || !this.needsItem(base, id)) continue;
+      const price = partOf(id).price;
+      if (base.account.credits >= price || hauler.earned >= price) return id;
+    }
+    return null;
+  }
+
+  /** A hauler leaving puts everything it carries into the hub, then the hub runs what it can. */
+  private unloadToHub(hauler: Hauler): void {
+    for (const [id, count] of hauler.items) this.addTo(this.hub, id, count);
+    hauler.items.clear();
+    this.feedHub();
+  }
+
+  /** Runs every hub recipe as long as the hub holds its inputs: n of one item becomes m of another. */
+  feedHub(): void {
+    for (const recipe of hubRecipes()) {
+      const makes = recipe.makes as PartId;
+      const yields = recipe.yields ?? 1;
+      while (recipe.from.every((each) => (this.hub.get(each.item as PartId) ?? 0) >= each.n)) {
+        for (const each of recipe.from) {
+          this.addTo(this.hub, each.item as PartId, -each.n);
+          this.flow(each.item as PartId, -each.n);
+        }
+        this.addTo(this.hub, makes, yields);
+        this.flow(makes, yields);
       }
     }
   }
@@ -2192,7 +2348,9 @@ export class Sim {
   }
 
   partPrice(id: PartId): number {
-    const part = PARTS.find((candidate) => candidate.id === id)!;
+    const part = partOf(id);
+    // An item pays what it says: the price scale is for parts.
+    if (part.kind === "item") return part.price;
     return Math.round(part.price * this.tuning.partPriceScale);
   }
 
@@ -2765,6 +2923,7 @@ export class Sim {
   /** Whether an AI ship would buy it: something it can use that it lacks, with a free slot for a program. */
   wouldUse(ship: Ship, id: PartId): boolean {
     if (!this.canBuy(ship, id) || owns(ship, id)) return false;
+    if (!isProgram(id) && !this.hasInputsFor(this.serviceBase(ship), id)) return false;
     return !isProgram(id) || ship.programs.length < computerSize(ship);
   }
 
@@ -2785,7 +2944,27 @@ export class Sim {
    * Either way the buyer pays the same.
    */
   canSupply(base: Base, id: PartId): boolean {
-    return this.stockOf(base, id) >= (partOf(id).set ?? 1) || this.hasStockFor(this.partPrice(id), base);
+    return this.stockOf(base, id) >= (partOf(id).set ?? 1) || (this.hasStockFor(this.partPrice(id), base) && this.hasInputsFor(base, id));
+  }
+
+  /** The recipe a station runs to make a part when it sells one that isn't in its store as a whole module. */
+  private saleRecipe(id: PartId) {
+    return saleRecipes().find((recipe) => recipe.makes === id);
+  }
+
+  /** Whether a base holds what the recipe for a part needs: it has none, or the part itself in store, or every input. */
+  hasInputsFor(base: Base, id: PartId, count = partOf(id).set ?? 1): boolean {
+    const recipe = this.saleRecipe(id);
+    if (!recipe || this.stockOf(base, id) >= count) return true;
+    const runs = Math.ceil(count / (recipe.yields ?? 1));
+    return recipe.from.every((each) => this.stockOf(base, each.item as PartId) >= each.n * runs);
+  }
+
+  /** What a base lacks to make a part, in words for the shop's tooltip: nothing when it lacks nothing. */
+  missingFor(base: Base, id: PartId): string[] {
+    const recipe = this.saleRecipe(id);
+    if (!recipe || this.hasInputsFor(base, id)) return [];
+    return recipe.from.filter((each) => this.stockOf(base, each.item as PartId) < each.n).map((each) => `${each.n} ${partOf(each.item as PartId).label}`);
   }
 
   /** The buyer pays for a part: out of the base's store if it has a set's worth, or made from its parts. */
@@ -2796,7 +2975,18 @@ export class Sim {
       base.stock.set(id, stocked - count);
       buyer.credits -= price;
       base.account.credits += price;
-    } else this.chargeForService(buyer, price, base);
+    } else {
+      this.chargeForService(buyer, price, base);
+      // Made at the moment of sale: what the recipe takes in is used up.
+      const recipe = this.saleRecipe(id);
+      if (recipe) {
+        const runs = Math.ceil(count / (recipe.yields ?? 1));
+        for (const each of recipe.from) {
+          this.addTo(base.stock, each.item as PartId, -each.n * runs);
+          this.flow(each.item as PartId, -each.n * runs);
+        }
+      }
+    }
   }
 
   /**
@@ -2806,7 +2996,7 @@ export class Sim {
   private takeBack(seller: { credits: number }, module: Module, base: Base): void {
     const value = this.moduleValue(module);
     // With no room in its storage, a whole one is broken down too.
-    if (module.wear < DAMAGED_AT && this.storageFree(base) >= cellCount(module)) {
+    if (module.wear < DAMAGED_AT && this.storageFree(base) >= volumeOf(module.part)) {
       base.stock.set(module.part, this.stockOf(base, module.part) + 1);
       seller.credits += value;
       base.account.credits -= value;
@@ -2833,11 +3023,11 @@ export class Sim {
     return base.spec?.storage ?? this.tuning.stationStorage;
   }
 
-  /** The cells of a base's storage in use: the player's locker (its free size, even unopened) and its store of whole modules. */
+  /** The room a base's storage has taken, in volume (a part's is the area of its shape): the player's locker (its free size, even unopened) and its store of whole modules. */
   storageUsed(base: Base): number {
     const rows = this.lockers.get(base.id)?.rows ?? this.tuning.lockerFreeRows;
     let used = rows * this.tuning.lockerWidth;
-    for (const [id, count] of base.stock) used += cellCount({ part: id, wear: 0 }) * count;
+    for (const [id, count] of base.stock) used += volumeOf(id) * count;
     return used;
   }
 
@@ -2979,6 +3169,8 @@ export class Sim {
 
   /** Why the player's last buy was refused, in words for the shop; null once one goes through. */
   buyRefused: string | null = null;
+  /** Why the player's last sale of an item was refused (the station's store is full); null once one goes through. */
+  sellRefused: string | null = null;
 
   /**
    * Works out where gear the player buys would go, and changes nothing: on the mounts it
@@ -3054,6 +3246,7 @@ export class Sim {
     if (!this.canBuy(ship, id) || !this.unlocked(id, base)) return refuse("Not sold here");
     const account = this.accountOf(ship);
     if (account.credits < price) return refuse("Not enough credits");
+    if (!isProgram(id) && !this.hasInputsFor(base, id)) return refuse(`The station needs ${this.missingFor(base, id).join(" and ")} to make it`);
     if (isProgram(id) ? !this.hasPartsFor(price, ship) : !this.canSupply(base, id)) return refuse("The station is out of parts");
     if (player && !isProgram(id)) {
       const plan = this.planBuy(ship, id, into);
@@ -3400,6 +3593,13 @@ export class Sim {
   sellItem(ship: Ship, from: ItemPlace): boolean {
     const base = this.baseAt(ship);
     if (!base || from.at === "mount" || !this.canTake(ship, from)) return false;
+    const item = this.itemAt(ship, from);
+    if (item && isItem(item.part) && this.storageFree(base) < volumeOf(item.part)) {
+      // An item isn't broken down for parts when the store is full: the sale is turned down.
+      this.sellRefused = `The station has no room for ${partOf(item.part).label}`;
+      return false;
+    }
+    this.sellRefused = null;
     this.takeBack(this.accountOf(ship), this.takeItem(ship, from)!, base);
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     return true;
@@ -4857,7 +5057,16 @@ export class Sim {
       this.pois.some((poi) => this.edgeDistance(poi, thing.x, thing.y) < forget) ||
       ships.some((ship) => Math.hypot(ship.x - thing.x, ship.y - thing.y) < forget);
     this.ores = this.ores.filter(kept);
-    this.loot = this.loot.filter(kept);
+    this.dropLoot((loot) => !kept(loot));
+  }
+
+  /** Removes the loot a test picks out. Whatever items go that way are counted out of the ledger. */
+  private dropLoot(gone: (loot: Loot) => boolean): void {
+    this.loot = this.loot.filter((loot) => {
+      if (!gone(loot)) return true;
+      if (isItem(loot.item.part)) this.flow(loot.item.part, -1);
+      return false;
+    });
   }
 
   /** Gentle pull so drifting rocks stay in the field during long sessions. */
@@ -5208,7 +5417,7 @@ export class Sim {
     if (solid.length === 0) return;
     const clear = (thing: Body) => solid.every(({ body, x, y }) => Math.hypot(thing.x - x, thing.y - y) >= body.radius);
     this.ores = this.ores.filter(clear);
-    this.loot = this.loot.filter(clear);
+    this.dropLoot((loot) => !clear(loot));
   }
 
   /**
@@ -6071,6 +6280,28 @@ export class Sim {
         from: by,
       });
     }
+
+    // A field with drops lets go of items too, one roll per drop for each ore roll, loose at the rock's spot.
+    // Nothing is drawn from the random stream for a field without drops, so seeded games run as they did.
+    const drops = this.dropsAt(rock.x, rock.y);
+    if (drops) {
+      for (let i = 0; i < rolls; i++) {
+        for (const drop of drops) {
+          if (this.random() >= drop.chance) continue;
+          const id = drop.item as PartId;
+          this.loot.push({ x: rock.x, y: rock.y, px: rock.x, py: rock.y, vx: rock.vx, vy: rock.vy, item: { part: id, wear: 0 } });
+          this.flow(id, 1);
+        }
+      }
+    }
+  }
+
+  /** The items the rocks of the field at a spot drop, if it has any that exist. */
+  private dropsAt(x: number, y: number): FieldDrop[] | undefined {
+    if (!this.extraFields.some((extra) => extra.spec.drops !== undefined && extra.spec.drops.length > 0)) return undefined;
+    const id = this.miningFieldAt(x, y).id;
+    const drops = this.extraFields.find((extra) => extra.spec.id === id)?.spec.drops?.filter((drop) => itemDef(drop.item) !== undefined && drop.chance > 0);
+    return drops && drops.length > 0 ? drops : undefined;
   }
 
   /** A base's name, as news and shops show it. */

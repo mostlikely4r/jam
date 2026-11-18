@@ -12,6 +12,8 @@ export interface PartIcon {
   border: string;
   /** Free text drawn in the corner, such as `*`, `+`, `!`, `2` or `360`. */
   mark?: string;
+  /** Items only: the colour an item glows when it floats loose in the world. */
+  glow?: string;
 }
 
 export type PartId =
@@ -48,7 +50,7 @@ export type PartId =
  * Where a part goes: on a mount of that kind, or (a program) into a computer's slots.
  * Programs are software: they belong to the pilot, not the ship.
  */
-export type PartKind = "thruster" | "gun" | "turret" | "tractor" | "computer" | "section" | "program" | "cockpit";
+export type PartKind = "thruster" | "gun" | "turret" | "tractor" | "computer" | "section" | "program" | "cockpit" | "item";
 
 /**
  * The hulls there are. The racer is the quick ship with an arrow shape. The floater is slow and
@@ -109,6 +111,8 @@ export interface Part {
   builtIn?: boolean;
   /** The cells it takes in a bay or locker, unturned. Programs and cockpit glass have none. */
   shape?: Shape;
+  /** Items only: how much room it takes where it is stored. Without one, its shape's area. */
+  volume?: number;
   /** When the ship it's on explodes, it goes up too, wearing every other module by this many hull points. */
   explosive?: number;
   /** How it shows in the shop, on the blueprint and in the bay: glyph, colours and mark. */
@@ -512,6 +516,33 @@ export function isProgram(id: PartId): boolean {
 }
 
 const PARTS_BY_ID = new Map(PARTS.map((part) => [part.id, part]));
+
+/**
+ * Lets `partOf` answer for an item as well, so everything that holds a module (the bay, the
+ * locker, a base's store, loot) takes items without knowing the difference. Items are not in
+ * `PARTS`, so nothing that lists the parts lists them. See src/items.ts.
+ */
+export function registerThing(part: Part): void {
+  PARTS_BY_ID.set(part.id, part);
+}
+
+/** Takes an item out of what `partOf` answers for. */
+export function forgetThing(id: PartId): void {
+  if (!PARTS.some((part) => part.id === id)) PARTS_BY_ID.delete(id);
+}
+
+/** Whether an id is an item rather than a part. */
+export function isItem(id: PartId): boolean {
+  return PARTS_BY_ID.get(id)?.kind === "item";
+}
+
+/** How much room a part or item takes where it is stored: its volume, or else the area of its shape. */
+export function volumeOf(id: PartId): number {
+  const part = PARTS_BY_ID.get(id);
+  if (part?.volume !== undefined) return part.volume;
+  const { w, h } = shapeOf(id);
+  return w * h;
+}
 
 /** The order a drone buys in: its gun and engine work first, its comfort comes last. */
 export const DRONE_BUY_ORDER: PartId[] = ["spinStabilizer", "reverse", "strafe", "retro", "meters"];

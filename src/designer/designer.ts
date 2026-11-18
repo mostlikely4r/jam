@@ -25,6 +25,7 @@ import {
   type WorldNode,
 } from "./world";
 import { clampEccentricity, orbitEllipse, phaseToward } from "../kepler";
+import { ITEMS } from "../items";
 import { linkSummary, linkedNodes, readGame, useLayout, type GameLink, type ShipMarkKind } from "./link";
 import { shippedWorld } from "./shipped";
 import { type Route } from "../route";
@@ -687,6 +688,7 @@ Layouts: ${layouts.join(", ")}`, "");
           this.number(node, "rockDrift", "Rock drift at the start, units/s", (v) => (v > 0 ? `up to ${v} units/s each` : "they start still")),
           this.number(node, "rockInflow", "Big rocks drifting in, per minute", (v) => (v > 0 ? `about one every ${readableTime(60 / v)}` : "none")),
         ]),
+        ...this.group("Drops", this.itemRows(node.drops, "chance", (item) => ({ item, chance: 0.2 }), (next) => (node.drops = next), "Items this field's rocks drop as well as plain ore. Each is rolled once for every ore roll of a broken rock, loose in space for the player to fly through.")),
       );
     }
     if (node.kind === "field" || node.kind === "station" || node.kind === "pirate base") {
@@ -731,6 +733,7 @@ Layouts: ${layouts.join(", ")}`, "");
           storage,
           ...held,
         ]),
+        ...this.group("Starting items", this.itemRows(node.items, "n", (item) => ({ item, n: 1 }), (next) => (node.items = next), "Items in this station's store when a new game begins. They come from nowhere.")),
       );
     }
     if (!isRoot && !body) {
@@ -807,6 +810,54 @@ Layouts: ${layouts.join(", ")}`, "");
   }
 
   /** A heading that opens and closes its settings, like the game's own panel. Remembered. */
+  /**
+   * A list of an item and a number per row, to add to and take from: a field's drops (the number
+   * is a chance on each ore roll, 0 to 1) or a station's starting items (the number is how many).
+   * The items are the ones in src/items.json.
+   */
+  private itemRows<T extends { item: string }>(
+    list: T[],
+    number: "chance" | "n",
+    make: (item: string) => T,
+    set: (next: T[]) => void,
+    hint: string,
+  ): HTMLElement[] {
+    const rows: HTMLElement[] = [this.text(hint)];
+    if (ITEMS.length === 0) return [...rows, this.text("No items yet: add some on the hull designer's Items page (H).")];
+    list.forEach((entry, index) => {
+      const row = document.createElement("div");
+      const pick = document.createElement("select");
+      for (const item of ITEMS) {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.name;
+        pick.append(option);
+      }
+      pick.value = entry.item;
+      pick.addEventListener("change", () => {
+        set(list.map((each, at) => (at === index ? { ...each, item: pick.value } : each)));
+        this.changed();
+      });
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = number === "chance" ? "0.05" : "1";
+      input.min = number === "chance" ? "0" : "1";
+      if (number === "chance") input.max = "1";
+      input.value = String((entry as unknown as Record<string, number>)[number]);
+      input.addEventListener("input", () => {
+        const value = Number(input.value);
+        if (input.value === "" || !Number.isFinite(value)) return;
+        const clamped = number === "chance" ? Math.max(0, Math.min(1, value)) : Math.max(1, Math.floor(value));
+        set(list.map((each, at) => (at === index ? { ...each, [number]: clamped } : each)));
+        this.changed();
+      });
+      row.append(pick, input, this.button("×", () => (set(list.filter((_, at) => at !== index)), this.changed(), this.rebuild()), "danger"));
+      rows.push(row);
+    });
+    rows.push(this.button("+ item", () => (set([...list, make(ITEMS[0].id)]), this.changed(), this.rebuild())));
+    return rows;
+  }
+
   private group(title: string, fields: HTMLElement[]): HTMLElement[] {
     const heading = document.createElement("h3");
     const body = document.createElement("div");

@@ -544,6 +544,11 @@ function lockedLine(id: BlueprintId, label: string, icon?: PartIcon, note?: stri
 function saleLine(price: number, label: string, text: string, part: PartId | null = null, icon?: PartIcon): ShopLine {
   const drawn = icon ?? (part ? partOf(part).icon : undefined);
   const supplied = part && !isProgram(part) ? sim.canSupply(sim.shopBase(), part) : sim.hasPartsFor(price);
+  // The recipe for a part takes items in: without them in store it is locked, and the tooltip says which.
+  if (part && !isProgram(part) && !sim.hasInputsFor(sim.shopBase(), part)) {
+    return { tag: "lacks", label, icon: drawn, text: `${text}
+The station needs ${sim.missingFor(sim.shopBase(), part).join(" and ")} to make it`, enabled: false };
+  }
   if (!supplied) return { tag: "out of parts", label, icon: drawn, text: `${text}\nThe station is out of parts`, enabled: false };
   if (sim.ship.credits < price) return { tag: "not enough money", style: "poor", label, icon: drawn, text: `${text}\nNot enough credits`, enabled: false };
   return { tag: "buy", style: "buy", label, icon: drawn, text, enabled: true };
@@ -761,7 +766,7 @@ function updateShop(): void {
   }
   if (!docked) shopOpen = false;
   const locker = base ? sim.lockerAt(base) : null;
-  const state = `${shopOpen} ${sim.buyRefused} ${ship.ore} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()}`;
+  const state = `${shopOpen} ${sim.buyRefused} ${ship.ore} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${sim.hub.size} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked || !shopOpen;

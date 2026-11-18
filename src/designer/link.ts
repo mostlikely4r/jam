@@ -131,6 +131,8 @@ export function fieldsFor(world: World): FieldSpec[] {
             rocks: node.rocks,
             rockDrift: node.rockDrift,
             rockInflow: node.rockInflow,
+            // Left out with none, so a field without drops is the spec it always was.
+            ...(node.drops.length > 0 ? { drops: node.drops.map((drop) => ({ ...drop })) } : {}),
             carryFull,
             carryNone,
             rotationPeriod: node.spinPeriod,
@@ -170,6 +172,7 @@ export function stationsFor(world: World): StationSpec[] {
             shipyard: node.shipyard,
             storage: node.storage,
             blueprints: node.blueprints,
+            ...(node.items.length > 0 ? { items: node.items.map((each) => ({ ...each })) } : {}),
           };
         }),
     );

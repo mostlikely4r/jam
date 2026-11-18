@@ -227,6 +227,8 @@ export const RECIPES: Record<string, Recipe> = {
         shipyard: true,
         spawns: [],
         blueprints: ["tractorAll"],
+        // The all-round tractor is made from a part B (docs/items-plan.md): a few to begin with, which come from nowhere.
+        items: [{ item: "partB", n: 3 }],
       });
       field.children.push(base);
       const span = tripSpan(world, home, base);
@@ -275,7 +277,8 @@ export const RECIPES: Record<string, Recipe> = {
       add(kettle, "field", "Kettle belt", { radius: 6500, orbitRadius: 10500, orbitPeriod: -4200, orbitPhase: 0, rocks: 640 });
       // The giant: a wall forty thousand across that traps a Floater, two ring fields, and a moon with a base.
       const bulwark = add(star, "planet", "Bulwark", { radius: 40000, orbitRadius: 3600000, orbitPhase: 250, pull: 100000, pullFull: 52000, pullAccel: 150, atmosphere: 46000, burnSpeed: 260 });
-      add(bulwark, "field", "Bulwark inner ring", { orbitRadius: 112000, orbitPeriod: 9000, orbitPhase: 10, rocks: 600 });
+      // Its rocks drop ore B as well as plain ore: the one far field of the items plan.
+      add(bulwark, "field", "Bulwark inner ring", { orbitRadius: 112000, orbitPeriod: 9000, orbitPhase: 10, rocks: 600, drops: [{ item: "oreB", chance: 0.2 }] });
       add(bulwark, "field", "Bulwark outer ring", { orbitRadius: 128000, orbitPeriod: 11000, orbitPhase: 190, rocks: 600 });
       const ferrum = add(bulwark, "moon", "Ferrum", { radius: 3500, orbitRadius: 300000, orbitPeriod: 21000, orbitPhase: 120 });
       const shoals = add(ferrum, "field", "Ferrum shoals", { orbitRadius: 22000, orbitPeriod: 5600, orbitPhase: 0 });

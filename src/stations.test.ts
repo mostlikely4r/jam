@@ -274,7 +274,8 @@ describe("a second base's own defence", () => {
 
 describe("blueprints per base", () => {
   it("sells a held part only where its blueprint is held, even when shops need no blueprints", () => {
-    const { sim, outpost } = world({}, { blueprints: ["tractorAll"] });
+    // The all-round tractor is made from one part B (src/items.json): the outpost starts with it.
+    const { sim, outpost } = world({}, { blueprints: ["tractorAll"], items: [{ item: "partB", n: 1 }] });
     const { ship } = sim;
     ship.credits = 100000;
     expect(sim.buyPart(ship, "tractorAll")).toBe(false);

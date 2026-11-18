@@ -7,6 +7,8 @@ import { execFile } from "node:child_process";
 const WORLD_FILE = fileURLToPath(new URL("./src/designer/world.json", import.meta.url));
 /** Where the hull designer keeps where each hull's mounts sit and face. */
 const HULLS_FILE = fileURLToPath(new URL("./src/hulls.json", import.meta.url));
+/** Where the hull designer's Items page keeps the items and recipes. */
+const ITEMS_FILE = fileURLToPath(new URL("./src/items.json", import.meta.url));
 /** Layouts made by recipes (npm run layout), for trying out. Never shipped. */
 const LAYOUTS = fileURLToPath(new URL("./src/designer/layouts/", import.meta.url));
 
@@ -53,6 +55,24 @@ function worldFile(): Plugin {
           res.end(String(error));
         }
       });
+      // The item designer's items and recipes.
+      server.middlewares.use("/__items", async (req, res) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end();
+          return;
+        }
+        try {
+          let body = "";
+          for await (const chunk of req) body += chunk;
+          JSON.parse(body);
+          await writeFile(ITEMS_FILE, body);
+          res.end("saved");
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(String(error));
+        }
+      });
       server.middlewares.use("/__world", async (req, res) => {
         try {
           if (req.method === "GET") {
@@ -87,5 +107,5 @@ export default defineConfig({
   plugins: [worldFile()],
   // Saving the layout or the hulls from a designer shouldn't reload the game under it: the
   // designer's draft is already in play, and the next start or build picks the file up.
-  server: { watch: { ignored: ["**/src/designer/world.json", "**/src/designer/layouts/**", "**/src/start.json", "**/src/hulls.json"] } },
+  server: { watch: { ignored: ["**/src/designer/world.json", "**/src/designer/layouts/**", "**/src/start.json", "**/src/hulls.json", "**/src/items.json"] } },
 });

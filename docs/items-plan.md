@@ -3,7 +3,8 @@
 Written 2026-11-18, after the 183 fields were laid out and the user asked for variety. The fields
 all give the same plain ore, and the game has only "ore" and "parts" as goods. This plan starts
 the move to one kind of thing, the **item**, with the smallest chain that tests it: one new ore,
-one new part, and the 360 tractor that needs it. Nothing here is built yet.
+one new part, and the 360 tractor that needs it. **Built 2026-11-18**, all four steps; what
+changed from the plan is under *Built* at the end.
 
 ## Why
 
@@ -225,3 +226,67 @@ items do, not how they're stored.
 - **No tree editor, logistics planner or hull recipes.** The recipe list is a plain list, and
   its output is an item or a part, not a hull yet.
 - **No new item beyond the two.** More types are content, added in the designer afterwards.
+
+## Built
+
+Built 2026-11-18 in the order above. `npm test` and `npm run build` pass. The designer pages and
+the look of the glow have not been played: the question this slice asks is still open.
+
+What is there, and where it differs from the plan:
+
+- **Items ride on `PartId`.** Nothing was widened. `src/items.ts` reads `src/items.json` and
+  registers each item with `partOf` as a part-shaped record of `kind: "item"` (not in `PARTS`, so
+  no list of parts shows it). So `Module.part`, `Base.stock`, `Loot`, the bay and locker grids and
+  `src/inventory.ts` take items as they are. `thingOf(id)` answers for a part or an item alike;
+  `volumeOf(id)` is the volume (the shape's area unless an item sets one, so every part keeps what
+  it took; a test checks all of them).
+- **The items as shipped** are placeholders, to be renamed in the item designer: *Ore B* (1x2,
+  price 30) and *Part B* (1x1, price 90); two ore B make one part B; the 360 tractor takes one
+  part B. An item sells for its price, unscaled by `partPriceScale`.
+- **Two kinds of recipe**, told apart by what they make: one that makes an *item* runs in the hub,
+  one that makes a *part* runs at a station at the moment of sale. A hauler only carries off the
+  inputs of hub recipes, so it never takes part B (an input of the tractor's recipe) from the
+  station that needs it.
+- **Hauler:** `items` map, loaded at the berth from the store (ore B, up to `haulerVolume`, 40),
+  paid the item's price into the station's credits as ore is; it sets down part B the station
+  *needs* (a part it can sell has a recipe using it, and it holds under `itemTarget`, 4), paid for
+  the way parts are (the station's credits, or this visit's earnings). It brings up to
+  `haulerItemLoad` (6) from the hub when it sets out. Whatever it still carries when it undocks,
+  bought or not, goes into the hub and the hub runs its recipes then. Three tuning values with
+  lines in the Haulers tab.
+- **Item ledger.** `sim.itemFlow` counts items made or lost (drops, recipe yields up; recipe
+  inputs spent, the tractor's part B and loot forgotten far from everything down). Stations' starting
+  items are the listed hole: they are not in it (`sim.stockItem` is the same hole, for tests).
+  The conservation test checks "items anywhere = start + `itemFlow`" every 5 minutes over 2 game
+  hours and 4 seeds.
+- **Shop:** `canSupply` also needs a part's recipe inputs in store unless a whole one is stocked;
+  `supply` spends them. A part that lacks them shows in the shop dimmed with a lock badge (new tag
+  "lacks") and the tooltip says what is missing; a refused buy says the same. `wouldUse` asks the
+  same, so traffic and drones don't try. Selling an item to a full station is refused with
+  `sim.sellRefused`, shown by the inventory's drop message; an item never gets "broken down for
+  parts" the way a damaged module does.
+- **Drops:** `FieldSpec.drops` and `WorldNode.drops` (a list of item and chance; chance 0 counts as
+  none). Loose items are drawn as a glowing bead (glow colour, else the border colour). Items
+  dropped by any rock break, not only the player's, as planned. A drop is placed exactly at the
+  rock's spot.
+- **Item designer:** an Items page in the hull designer (`src/designer/hulls.ts`), a section for
+  items (name, description, shape, volume, price, icon with glow) and one for recipes, with its own
+  button saving `src/items.json` (dev server route `/__items` in `vite.config.ts`). The system
+  designer has a "Drops" group on a field and a "Starting items" group on a station. The page is
+  DOM only and has no test (the suite has no DOM); the round trip it relies on, through the file
+  reader and including the glow colour, is tested.
+- **Shipped world:** `Bulwark inner ring` drops ore B at chance 0.2 per roll. In `full-system` that
+  node is six copies, so it is six fields, not one (the plan said one). `Planet base`, which holds the
+  360 tractor, starts with 3 part B. `world.json` was regenerated with `npm run layout -- full-system
+  --ship` and `start.json` with `npm run warm -- 60 1 --ship`; `SAVE_VERSION` is 7. The regenerated
+  `world.json` also now writes `storage` on every node, which the older file had left to defaults.
+- **A field that falls asleep:** loot is not kept with a sleeping field's rocks. It stays in the
+  world's own list, carried or forgotten far from every place like loose ore, and the ledger sees it
+  either way (a test checks this).
+- **One existing test changed:** the "sells a held part only where its blueprint is held" test in
+  `src/stations.test.ts` now gives its outpost one part B, because the 360 tractor can no longer be
+  made without it. No other existing test was touched.
+- **Test timing:** the conservation test takes about 28 s a seed. Under the full suite's load
+  `sim.test.ts`'s 30 s test "puts each POI where the formula says, hours in" (about 20 s alone)
+  timed out in two full runs in a row and passed in a third, and passes alone: if it flakes again,
+  that test's limit is the thing to look at.

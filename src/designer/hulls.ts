@@ -17,6 +17,9 @@
  *   picked from the glyph set, with three colours and a mark, kept the same way. A decal part is
  *   looks only, and only for decal mounts. "Show on hull" can be none, to show just the part.
  * - Mount types: the list both pick from.
+ * - Items: goods that aren't parts (ore, and parts made from it): name, shape, volume, price,
+ *   an icon with a glow for when it floats loose, and the recipes that make an item or a part
+ *   from items. Kept in src/items.json, saved with its own button.
  * Changes are in the game at once; Save writes them all to src/hulls.json, which the game ships with.
  */
 import {
@@ -44,14 +47,16 @@ import {
   type MountId,
   type ShipFile,
 } from "../fitting";
-import { partFits, partOf, PARTS, SHIP_MODELS, type Part, type PartId, type ShipModel, type ThrusterRole } from "../parts";
+import { partFits, partOf, PARTS, SHIP_MODELS, type PartIcon, type PartId, type ShipModel, type ThrusterRole } from "../parts";
+import { itemDef, ITEM_RECIPES, ITEMS, itemsFileNow, SHIPPED_ITEMS, useItemsFile, type ItemDef } from "../items";
 import type { GlyphId } from "../glyphs";
-import { EVERY_GLYPH, glyphIcon, partIcon } from "../icons";
+import { EVERY_GLYPH, glyphIcon, iconEl } from "../icons";
 import { DEFAULTS } from "../tuning";
 import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPart } from "../shipArt";
 
 const R = 12;
 const DRAFT_KEY = "jam-ships-draft";
+const ITEMS_DRAFT_KEY = "jam-items-draft";
 const MODEL_NAMES: Record<ShipModel, string> = { racer: "Racer", floater: "Floater", defender: "Defender", drone: "Drone", pirate: "Pirate" };
 const byName = (a: string, b: string) => a.localeCompare(b);
 /** Every hull, alphabetically by name: the order of the drop down lists. */
@@ -76,7 +81,7 @@ const FITTED = PARTS.filter((part) => part.kind !== "program").sort((a, b) => by
 /** The programs a hull's computer can come with, alphabetically. */
 const PROGRAMS = PARTS.filter((part) => part.kind === "program").sort((a, b) => byName(a.label, b.label));
 
-type Page = "hulls" | "parts" | "types";
+type Page = "hulls" | "parts" | "types" | "items";
 
 const STYLE = `
 #hulls { position: fixed; inset: 0; z-index: 50; background: #05070d; display: flex; font: 13px system-ui, sans-serif; color: #cfd8e6; }
@@ -177,6 +182,8 @@ export class HullDesigner {
     try {
       const draft = localStorage.getItem(DRAFT_KEY);
       if (draft) useShipFile(JSON.parse(draft) as ShipFile);
+      const items = localStorage.getItem(ITEMS_DRAFT_KEY);
+      if (items) useItemsFile(JSON.parse(items));
     } catch {
       /* no draft */
     }
@@ -312,18 +319,21 @@ export class HullDesigner {
     const title = document.createElement("h1");
     title.textContent = "HULL DESIGNER";
     const pages = document.createElement("div");
-    for (const [page, name] of [["hulls", "Hulls"], ["parts", "Parts"], ["types", "Mount types"]] as [Page, string][]) {
+    for (const [page, name] of [["hulls", "Hulls"], ["parts", "Parts"], ["types", "Mount types"], ["items", "Items"]] as [Page, string][]) {
       pages.append(this.button(name, () => ((this.page = page), this.rebuild()), page === this.page ? "on" : ""));
     }
-    const body = this.page === "hulls" ? this.hullsPage() : this.page === "parts" ? this.partsPage() : this.typesPage();
+    const body = this.page === "hulls" ? this.hullsPage() : this.page === "parts" ? this.partsPage() : this.page === "items" ? this.itemsPage() : this.typesPage();
 
     const file = this.section(
       "file",
       "File",
       this.button("Save to src/hulls.json", () => void this.save()),
+      this.button("Save items to src/items.json", () => void this.saveItems()),
       this.button("Throw away changes", () => {
         useShipFile(SHIPPED_SHIPS);
+        useItemsFile(SHIPPED_ITEMS);
         try {
+          localStorage.removeItem(ITEMS_DRAFT_KEY);
           localStorage.removeItem(DRAFT_KEY);
         } catch {
           /* nothing kept */
@@ -794,7 +804,7 @@ export class HullDesigner {
    * at shop size and at a 2×2 bay tile size. Colour changes redraw in place, so the picker's
    * own popup stays open; everything else goes through `changed()` like the other stats.
    */
-  private iconPicker(part: Part): HTMLElement[] {
+  private iconPicker(part: { icon: PartIcon }, onChange: (rebuild?: boolean) => void = (rebuild = true) => this.changed(rebuild), glow = false): HTMLElement[] {
     const redraws: (() => void)[] = [];
     const glyphs = document.createElement("div");
     glyphs.className = "glyphs";
@@ -804,7 +814,7 @@ export class HullDesigner {
       cell.title = id;
       cell.addEventListener("click", () => {
         part.icon = { ...part.icon, glyph: id as GlyphId };
-        this.changed();
+        onChange();
       });
       const draw = () => {
         cell.className = `glyph${part.icon.glyph === id ? " on" : ""}`;
@@ -823,17 +833,29 @@ export class HullDesigner {
       input.addEventListener("input", () => {
         part.icon[key] = input.value;
         for (const redraw of redraws) redraw();
-        this.changed(false);
+        onChange(false);
       });
       colours.append(this.labelled(key, input));
+    }
+    if (glow) {
+      // Items only: the colour it glows when it floats loose. Without one it glows in its border colour.
+      const input = document.createElement("input");
+      input.type = "color";
+      input.value = part.icon.glow ?? part.icon.border;
+      input.addEventListener("input", () => {
+        part.icon.glow = input.value;
+        onChange(false);
+      });
+      colours.append(this.labelled("glow", input));
     }
     const mark = document.createElement("input");
     mark.type = "text";
     mark.value = part.icon.mark ?? "";
     mark.placeholder = "such as *, +, !, 2 or 360";
     mark.addEventListener("change", () => {
-      part.icon = { ...part.icon, ...(mark.value.trim() ? { mark: mark.value } : {}) };
-      this.changed();
+      const { mark: _old, ...rest } = part.icon;
+      part.icon = { ...rest, ...(mark.value.trim() ? { mark: mark.value } : {}) };
+      onChange();
     });
     const markNote = document.createElement("p");
     markNote.textContent = "Free text in the corner. The icon shows at most its first 3 characters.";
@@ -844,14 +866,258 @@ export class HullDesigner {
       [48, "2×2 tile"],
     ] as [number, string][]) {
       const wrap = document.createElement("div");
-      const draw = () => wrap.replaceChildren(partIcon(part, size));
+      const draw = () => wrap.replaceChildren(iconEl(part.icon, size));
       draw();
       redraws.push(draw);
       previews.append(this.labelled(label, wrap));
     }
     const note = document.createElement("p");
-    note.textContent = "Kept in src/hulls.json over the part's own icon in parts.ts, and in the game at once.";
+    note.textContent = glow ? "Kept in src/items.json, and in the game at once." : "Kept in src/hulls.json over the part's own icon in parts.ts, and in the game at once.";
     return [glyphs, colours, this.labelled("Mark", mark), markNote, previews, note];
+  }
+
+  // ---------- items ----------
+
+  /** The item the Items page is on. */
+  private itemId: string | null = null;
+
+  /** An item or recipe edit is in: puts it back through the file reader (which tidies it) so the game plays with it, then keeps the draft. */
+  private itemsChanged(rebuild = true): void {
+    useItemsFile(itemsFileNow());
+    try {
+      localStorage.setItem(ITEMS_DRAFT_KEY, JSON.stringify(itemsFileNow()));
+    } catch {
+      /* storage blocked: the change still holds until reload */
+    }
+    this.status = "Not saved";
+    this.changed(rebuild);
+  }
+
+  /** The live record of an item, by id: it changes whenever the file is read back, so nothing keeps hold of one. */
+  private liveItem(id: string): ItemDef {
+    return ITEMS.find((item) => item.id === id)!;
+  }
+
+  /**
+   * The Items page: goods that aren't parts. An item has a name, a shape on the grid, a volume
+   * for everywhere else, a price and an icon with a glow for when it floats loose; recipes
+   * make an item or a part from items. Kept in src/items.json, in the game at once.
+   */
+  private itemsPage(): HTMLElement[] {
+    const intro = document.createElement("p");
+    intro.textContent = "Items: ore and parts as the game now sees them. Name them, give them a shape, volume, price and icon, and say what they're made into.";
+    if (this.itemId === null || !itemDef(this.itemId)) this.itemId = ITEMS[0]?.id ?? null;
+    const id = this.itemId;
+    const list = this.labelled(
+      "Item",
+      this.dropdown(
+        ITEMS.map((each): [string, string] => [each.id, each.name]),
+        id ?? "",
+        (value) => {
+          this.itemId = value;
+          this.rebuild();
+        },
+      ),
+    );
+    const newRow = document.createElement("div");
+    newRow.className = "row";
+    const newBox = document.createElement("input");
+    newBox.type = "text";
+    newBox.placeholder = "id of a new item";
+    const addItem = () => {
+      const name = newBox.value.trim();
+      if (!name || ITEMS.some((each) => each.id === name) || PARTS.some((part) => part.id === name)) {
+        this.status = "An item's id must be new, and not a part's";
+        this.rebuild();
+        return;
+      }
+      ITEMS.push({ id: name, name, description: "", shape: { w: 1, h: 1 }, price: 10, icon: { glyph: "crate", primary: "#566274", secondary: "#c8d4e8", border: "#f0d86a" } });
+      this.itemId = name;
+      this.itemsChanged();
+    };
+    newBox.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") addItem();
+    });
+    newRow.append(newBox, this.button("Add", addItem));
+
+    const body: HTMLElement[] = [intro, this.section("itemlist", "Items", list, newRow)];
+    if (id !== null) {
+      const item = this.liveItem(id);
+      const text = (label: string, value: string, set: (def: ItemDef, value: string) => void, area = false) => {
+        const input = area ? document.createElement("textarea") : document.createElement("input");
+        if (input instanceof HTMLInputElement) input.type = "text";
+        input.value = value;
+        input.addEventListener("change", () => {
+          set(this.liveItem(id), input.value);
+          this.itemsChanged();
+        });
+        return this.labelled(label, input);
+      };
+      const number = (label: string, value: number | undefined, min: number, step: number, set: (def: ItemDef, value: number | undefined) => void, blank = "") => {
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = String(min);
+        input.step = String(step);
+        input.value = value === undefined ? "" : String(value);
+        input.placeholder = blank;
+        input.addEventListener("change", () => {
+          const read = Number(input.value);
+          if (input.value === "") set(this.liveItem(id), undefined);
+          else if (Number.isFinite(read) && read >= min) set(this.liveItem(id), read);
+          else return;
+          this.itemsChanged();
+        });
+        return this.labelled(label, input);
+      };
+      const area = item.shape.w * item.shape.h;
+      body.push(
+        this.section(
+          `item:${id}`,
+          "Item",
+          text("Name", item.name, (def, value) => (def.name = value.trim() || def.id)),
+          text("Description", item.description, (def, value) => (def.description = value), true),
+          number("Price", item.price, 0, 5, (def, value) => (def.price = value ?? 0)),
+          number("Cells across", item.shape.w, 1, 1, (def, value) => (def.shape = { ...def.shape, w: Math.max(1, Math.round(value ?? 1)) })),
+          number("Cells down", item.shape.h, 1, 1, (def, value) => (def.shape = { ...def.shape, h: Math.max(1, Math.round(value ?? 1)) })),
+          number("Volume (blank: the shape's area, " + area + ")", item.volume, 0.1, 0.5, (def, value) => {
+            if (value === undefined || value <= 0) delete def.volume;
+            else def.volume = value;
+          }, String(area)),
+          this.button("Delete this item", () => {
+            ITEMS.splice(ITEMS.findIndex((each) => each.id === id), 1);
+            this.itemId = null;
+            this.itemsChanged();
+          }, "danger"),
+        ),
+      );
+      const owner = {
+        get icon(): PartIcon {
+          return ITEMS.find((each) => each.id === id)!.icon;
+        },
+        set icon(value: PartIcon) {
+          ITEMS.find((each) => each.id === id)!.icon = value;
+        },
+      };
+      body.push(this.section(`itemicon:${id}`, "Icon and glow", ...this.iconPicker(owner, (rebuild = true) => this.itemsChanged(rebuild), true)));
+    }
+    body.push(this.section("recipes", "Recipes", ...this.recipeRows()));
+    return body;
+  }
+
+  /** The recipe list: what each makes, how many, and from which items. */
+  private recipeRows(): HTMLElement[] {
+    const makers: [string, string][] = [
+      ...ITEMS.map((each): [string, string] => [each.id, `${each.name} (item)`]),
+      ...FITTED.filter((part) => !isDecal(part.id)).map((part): [string, string] => [part.id, part.label]),
+    ];
+    const itemOptions = ITEMS.map((each): [string, string] => [each.id, each.name]);
+    const number = (value: number, min: number, set: (value: number) => void) => {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = String(min);
+      input.step = "1";
+      input.value = String(value);
+      input.style.width = "56px";
+      input.addEventListener("change", () => {
+        const read = Number(input.value);
+        if (!Number.isInteger(read) || read < min) return;
+        set(read);
+        this.itemsChanged();
+      });
+      return input;
+    };
+    const rows: HTMLElement[] = [];
+    const note = document.createElement("p");
+    note.textContent = "A recipe that makes an item runs in the hub, off-screen, when haulers bring its inputs. One that makes a part runs at a station that sells it, at the moment of sale.";
+    rows.push(note);
+    ITEM_RECIPES.forEach((recipe, index) => {
+      const box = document.createElement("div");
+      box.className = "recipe";
+      box.style.cssText = "border-top:1px solid #222a3a;padding-top:6px;margin-top:6px";
+      const head = document.createElement("div");
+      head.className = "row";
+      const makes = this.dropdown(makers, recipe.makes, (value) => {
+        ITEM_RECIPES[index].makes = value;
+        this.itemsChanged();
+      });
+      head.append(makes, document.createTextNode("×"), number(recipe.yields ?? 1, 1, (value) => (ITEM_RECIPES[index].yields = value)));
+      head.append(this.button("×", () => (ITEM_RECIPES.splice(index, 1), this.itemsChanged()), "danger"));
+      box.append(head);
+      recipe.from.forEach((ingredient, at) => {
+        const row = document.createElement("div");
+        row.className = "row";
+        row.append(
+          document.createTextNode("from"),
+          number(ingredient.n, 1, (value) => (ITEM_RECIPES[index].from[at].n = value)),
+          this.dropdown(itemOptions, ingredient.item, (value) => {
+            ITEM_RECIPES[index].from[at].item = value;
+            this.itemsChanged();
+          }),
+          this.button("×", () => {
+            ITEM_RECIPES[index].from.splice(at, 1);
+            // A recipe with nothing to take in is no recipe.
+            if (ITEM_RECIPES[index].from.length === 0) ITEM_RECIPES.splice(index, 1);
+            this.itemsChanged();
+          }, "danger"),
+        );
+        box.append(row);
+      });
+      box.append(
+        this.button("+ input", () => {
+          if (ITEMS.length === 0) return;
+          ITEM_RECIPES[index].from.push({ item: ITEMS[0].id, n: 1 });
+          this.itemsChanged();
+        }),
+      );
+      rows.push(box);
+    });
+    rows.push(
+      this.button("+ recipe", () => {
+        if (ITEMS.length < 1) return;
+        ITEM_RECIPES.push({ makes: ITEMS[0].id, from: [{ item: ITEMS[0].id, n: 1 }] });
+        this.itemsChanged();
+      }),
+    );
+    return rows;
+  }
+
+  /** What the canvas shows for an item: its shape as cells on the grid, in its colours, with the glow it has loose in the world. */
+  private drawItem(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    const item = this.itemId ? ITEMS.find((each) => each.id === this.itemId) : undefined;
+    ctx.fillStyle = "#7f8ba0";
+    ctx.font = "12px system-ui, sans-serif";
+    if (!item) {
+      ctx.fillText("No item yet: add one in the side panel", 14, height - 14);
+      return;
+    }
+    const cell = Math.min(width, height) / 10;
+    const left = this.cx - (item.shape.w * cell) / 2;
+    const top = this.cy - (item.shape.h * cell) / 2 - cell * 1.2;
+    for (let y = 0; y < item.shape.h; y++) {
+      for (let x = 0; x < item.shape.w; x++) {
+        ctx.fillStyle = item.icon.primary;
+        ctx.fillRect(left + x * cell + 1, top + y * cell + 1, cell - 2, cell - 2);
+        ctx.strokeStyle = item.icon.border;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(left + x * cell + 1, top + y * cell + 1, cell - 2, cell - 2);
+      }
+    }
+    // Loose in the world: a small glowing bead, as the game draws it.
+    ctx.save();
+    ctx.shadowColor = item.icon.glow ?? item.icon.border;
+    ctx.shadowBlur = 28;
+    ctx.fillStyle = item.icon.primary;
+    ctx.beginPath();
+    ctx.arc(this.cx, this.cy + cell * 2, cell * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = item.icon.border;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(this.cx, this.cy + cell * 2, cell * 0.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "#7f8ba0";
+    ctx.fillText(`${item.name}: on the grid (above) and loose in space (below). Volume ${item.volume ?? item.shape.w * item.shape.h}.`, 14, height - 14);
   }
 
   private typesPage(): HTMLElement[] {
@@ -1000,6 +1266,21 @@ export class HullDesigner {
     if (kind === "thruster" && !mount.role) lines.push("No control fires it: a thruster here does nothing.");
     lines.push("Hits land on whatever is mounted nearest them.");
     return lines.join("\n");
+  }
+
+  private async saveItems(): Promise<void> {
+    try {
+      const file = itemsFileNow();
+      const response = await fetch("/__items", { method: "POST", body: JSON.stringify(file, null, 2) + "\n" });
+      this.status = response.ok ? "Saved to src/items.json" : `Couldn't save (${response.status})`;
+      if (response.ok) {
+        Object.assign(SHIPPED_ITEMS, file);
+        localStorage.removeItem(ITEMS_DRAFT_KEY);
+      }
+    } catch (error) {
+      this.status = `Couldn't save: ${String(error)}`;
+    }
+    this.rebuild();
   }
 
   private async save(): Promise<void> {
@@ -1212,6 +1493,11 @@ export class HullDesigner {
     ctx.arc(this.cx, this.cy, unit, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
+
+    if (this.page === "items") {
+      this.drawItem(ctx, width, height);
+      return;
+    }
 
     // The parts page with no hull to show: just the selected part, drawn as in game.
     if (this.page === "parts" && this.showOn === null) {

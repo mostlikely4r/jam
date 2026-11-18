@@ -3,7 +3,7 @@ import type { ThrusterId } from "./tuning";
 import { DAMAGED_AT, facing, HULL_MOUNTS, turretMount, works, type Module } from "./fitting";
 import { drawBin, gridRect, newBin, stepBin, type Bin, type Rect } from "./cargoBin";
 import { cellsOf, footprint, reachable } from "./grid";
-import { partOf } from "./parts";
+import { isItem, partOf } from "./parts";
 import { bayBox, drawVectorShip } from "./shipArt";
 import {
   BLACK_MARKET_LENGTH,
@@ -817,7 +817,26 @@ export class Renderer {
     for (const loot of sim.loot) {
       const x = lerp(loot.px, loot.x, alpha);
       const y = lerp(loot.py, loot.y, alpha);
-      if (!visible(x, y, 8)) continue;
+      if (!visible(x, y, 12)) continue;
+      const icon = isItem(loot.item.part) ? partOf(loot.item.part).icon : null;
+      if (icon) {
+        // An item glows in the colour its designer gave it, so it reads from far off.
+        const glow = icon.glow ?? icon.border;
+        ctx.save();
+        ctx.shadowColor = glow;
+        ctx.shadowBlur = 14;
+        ctx.fillStyle = icon.primary;
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        ctx.strokeStyle = icon.border;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.stroke();
+        continue;
+      }
       ctx.fillStyle = loot.item.wear >= 0.5 ? "#8a5a3a" : "#8d99ad";
       ctx.fillRect(x - 5, y - 4, 10, 8);
       ctx.strokeStyle = "#e6f0ff";

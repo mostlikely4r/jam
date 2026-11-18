@@ -75,6 +75,10 @@ export interface WorldNode {
   storage: number;
   /** Stations only: the held blueprints it starts with, the only way those parts are sold. */
   blueprints: PartId[];
+  /** Fields only: the items its rocks drop as well as plain ore, each with its chance on every ore roll. */
+  drops: { item: string; chance: number }[];
+  /** Stations only: the items in its store when the game starts (they come from nowhere). */
+  items: { item: string; n: number }[];
   /** How many go round in this orbit, itself included. Copies are the same thing without children. */
   count: number;
   /** How far each copy may wander from even spacing, as a % of half the gap between them. */
@@ -177,11 +181,12 @@ export function bodyDefaults(
  * open space between them carries nothing: a spinning station carrying everything would
  * sweep a ship far out sideways faster than it can fly.
  */
-export function placeDefaults(kind: NodeKind): Pick<WorldNode, "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "blueprints"> {
-  if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, shipyard: false, storage: 0, blueprints: [] };
-  if (kind === "station") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true, storage: 200, blueprints: [] };
-  if (kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: false, storage: 0, blueprints: [] };
-  return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, shipyard: false, storage: 0, blueprints: [] };
+export function placeDefaults(kind: NodeKind): Pick<WorldNode, "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "blueprints" | "drops" | "items"> {
+  const none = { blueprints: [], drops: [], items: [] };
+  if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, shipyard: false, storage: 0, ...none };
+  if (kind === "station") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true, storage: 200, ...none };
+  if (kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: false, storage: 0, ...none };
+  return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, shipyard: false, storage: 0, ...none };
 }
 
 /** Default carrying, from each place's edge: full out to the first, fading to nothing by the second. */
@@ -356,6 +361,22 @@ export function seedWorld(): World {
   return { version: WORLD_VERSION, root: node({ id: "star", name: "Star", kind: "star", radius: 150000, ...bodyDefaults("star", 150000), children: [planet] }) };
 }
 
+/** A field's drops read from a file: each an item id with a chance from above 0 up to 1. */
+function readDrops(raw: unknown): { item: string; chance: number }[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((each): each is { item: string; chance: number } => !!each && typeof each.item === "string" && typeof each.chance === "number" && Number.isFinite(each.chance) && each.chance > 0)
+    .map((each) => ({ item: each.item, chance: Math.min(1, each.chance) }));
+}
+
+/** A station's starting items read from a file: each an item id and a whole number of at least 1. */
+function readItems(raw: unknown): { item: string; n: number }[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((each): each is { item: string; n: number } => !!each && typeof each.item === "string" && typeof each.n === "number" && Number.isFinite(each.n) && each.n >= 1)
+    .map((each) => ({ item: each.item, n: Math.floor(each.n) }));
+}
+
 /** Reads a saved world, or null when it doesn't look like one. Missing numbers become 0. */
 export function parseWorld(text: string): World | null {
   try {
@@ -392,6 +413,8 @@ export function parseWorld(text: string): World | null {
         shipyard: typeof raw.shipyard === "boolean" ? raw.shipyard : places.shipyard,
         storage: num("storage", places.storage),
         blueprints: Array.isArray(raw.blueprints) ? HELD_PARTS.filter((id) => (raw.blueprints as unknown[]).includes(id)) : [],
+        drops: readDrops(raw.drops),
+        items: readItems(raw.items),
         count: Math.max(1, Math.floor(num("count", 1))),
         angleVariance: num("angleVariance"),
         orbitVariance: num("orbitVariance"),
@@ -415,7 +438,9 @@ export function parseWorld(text: string): World | null {
 export function stringifyWorld(world: World): string {
   // A spin start angle of 0, and a circular orbit, are left out, so layouts from before they existed read and save the same.
   const left = ["spinPhase", "eccentricity", "periapsisAngle"];
-  return JSON.stringify(world, (key, value) => (left.includes(key) && value === 0 ? undefined : value), 2) + "\n";
+  // So are no drops and no starting items, for the same reason.
+  const lists = ["drops", "items"];
+  return JSON.stringify(world, (key, value) => ((left.includes(key) && value === 0) || (lists.includes(key) && Array.isArray(value) && value.length === 0) ? undefined : value), 2) + "\n";
 }
 
 /** The chain from the root down to a node, both included. */

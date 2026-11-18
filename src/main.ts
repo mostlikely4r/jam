@@ -8,10 +8,10 @@ import { layoutKey, loadGame, loadStart, saveGame, saveInfo, type SaveSlot, type
 import { stringifyWorld } from "./designer/world";
 import { Audio } from "./audio";
 import { Radio } from "./radio";
-import { type Base, type Deposit, MAX_HULL, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
+import { type Base, type Deposit, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartId } from "./parts";
-import { computerSize, mountsFor, mountsHolding, owns } from "./fitting";
+import { computerSize, hullMax, mountsFor, mountsHolding, owns } from "./fitting";
 import { Inventory } from "./inventory";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
@@ -628,14 +628,14 @@ function updatePodPanel(): void {
     return;
   }
   heading.textContent = `${where} shipyard - your pod is in. What do you fly next?`;
-  const bare: ShopLine = { tag: "bare hull", style: "buy", text: `A new ${sim.ship.model} with its own gear: ${tuning.rebuildCost} credits, ready now`, enabled: true };
+  const bare: ShopLine = { tag: "bare hull", style: "buy", text: `A new ${sim.ship.model} with its own gear: ${sim.hullPrice(sim.ship.model)} credits, ready now`, enabled: true };
   const extras = sim.rebuildExtras();
   const seconds = Math.ceil(offer!.seconds);
   const list = extras.length > 0 ? `, with ${[...new Set(extras)].map((id) => partOf(id).label.toLowerCase()).join(", ")}` : "";
   const rebuild: ShopLine =
     offer!.missing.length > 0
       ? { tag: "can't", text: `Rebuild as it was: the store can't supply ${offer!.missing.map((id) => partOf(id).label.toLowerCase()).join(", ")}`, enabled: false }
-      : sim.ship.credits < offer!.cost - tuning.rebuildCost
+      : sim.ship.credits < offer!.cost - sim.hullPrice(sim.ship.model)
         ? { tag: "not enough money", style: "poor", text: `Rebuild as it was${list}: ${offer!.cost} credits`, enabled: false }
         : { tag: "rebuild", style: "unlock", text: `Rebuild as it was${list}: ${offer!.cost} credits, ${seconds} s`, enabled: true };
   shop.replaceChildren(
@@ -1245,18 +1245,18 @@ function frame(now: number): void {
   if (dev && hudTimer <= 0) {
     hudTimer = 0.1;
     const speed = Math.hypot(sim.ship.vx, sim.ship.vy);
-    const hullBars = Math.max(0, Math.ceil((sim.ship.hull / MAX_HULL) * 10));
+    const hullBars = Math.max(0, Math.ceil((sim.ship.hull / hullMax(sim.ship.model)) * 10));
     hud.textContent = [
       `Speed ${Math.round(speed)}  (top ${Math.round(sim.stats.topSpeed)})`,
       `Spin  ${Math.round((sim.ship.spin * 180) / Math.PI)} deg/s  Retro ${sim.ship.parts.has("retro") ? (tuning.retro ? "ON" : "off") : "none"}`,
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
       `Ore   ${sim.ship.ore}/${cargoText(sim.ship)}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
       `Parts ${partList(sim.ship)}  Weight ${sim.shipWeight(sim.ship).toFixed(2)}`,
-      `${frameText()}${sim.isDocked() ? "  DOCKED" : ""}${sim.ship.marked ? "  MARKED by pirates" : ""}${sim.ship.wanted ? "  WANTED by the station" : ""}${sim.clickPilot.active ? `  ${sim.clickPilot.isCourse ? "Course" : "Click order"}: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < MAX_HULL && !sim.hasPartsFor(tuning.repairCost) ? "  No repairs: the station is out of parts" : ""}`,
+      `${frameText()}${sim.isDocked() ? "  DOCKED" : ""}${sim.ship.marked ? "  MARKED by pirates" : ""}${sim.ship.wanted ? "  WANTED by the station" : ""}${sim.clickPilot.active ? `  ${sim.clickPilot.isCourse ? "Course" : "Click order"}: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < hullMax(sim.ship.model) && !sim.hasPartsFor(tuning.repairCost) ? "  No repairs: the station is out of parts" : ""}`,
       `Rocks ${sim.rocks.length}  Wrecks ${sim.ship.wrecks}`,
       ...sim.drones.flatMap((drone, index) => {
         const { ship } = drone;
-        const hull = Math.round((ship.hull / MAX_HULL) * 100);
+        const hull = Math.round((ship.hull / hullMax(ship.model)) * 100);
         return [
           `${ship.owner ? "YOURS " : ""}Drone ${index + 1} ${drone.task} ${ship.ore}/${cargoText(ship)}  Hull ${hull}%  ${ship.owner ? `Earned ${ship.earned}` : `Credits ${ship.credits}`}  Trips ${ship.trips}  Wrecks ${ship.wrecks}  Upkeep ${ship.upkeep}`,
           `  Parts ${partList(ship)}  Weight ${sim.shipWeight(ship).toFixed(2)}`,
@@ -1265,13 +1265,13 @@ function frame(now: number): void {
       ...(tuning.showTraffic
         ? sim.traffic.map(
             ({ ship, task }, index) =>
-              `Traffic ${index + 1} ${ship.model} ${task} ${ship.ore}/${cargoText(ship)}  Hull ${Math.round((ship.hull / MAX_HULL) * 100)}%  Credits ${ship.credits}  Trips ${ship.trips}  Wrecks ${ship.wrecks}`,
+              `Traffic ${index + 1} ${ship.model} ${task} ${ship.ore}/${cargoText(ship)}  Hull ${Math.round((ship.hull / hullMax(ship.model)) * 100)}%  Credits ${ship.credits}  Trips ${ship.trips}  Wrecks ${ship.wrecks}`,
           )
         : []),
       ...(tuning.showTraffic
         ? sim.fighters.map(
             ({ ship, task }) =>
-              `${ship.faction === "pirate" ? "Pirate" : "Defender"} ${task}  Hull ${Math.round((ship.hull / MAX_HULL) * 100)}%  Ore ${ship.ore}  Wrecks ${ship.wrecks}`,
+              `${ship.faction === "pirate" ? "Pirate" : "Defender"} ${task}  Hull ${Math.round((ship.hull / hullMax(ship.model)) * 100)}%  Ore ${ship.ore}  Wrecks ${ship.wrecks}`,
           )
         : []),
       ...(tuning.showTraffic

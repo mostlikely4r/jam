@@ -1,4 +1,4 @@
-import { isProgram, partFits, partOf, PARTS, SHIP_MODELS, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "./parts";
+import { isProgram, partFits, partOf, PARTS, SHIP_MODELS, type Part, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "./parts";
 import shipFile from "./hulls.json";
 
 /**
@@ -29,6 +29,13 @@ export interface Mount {
   angle: number;
   /** How big what's on it is drawn. Looks only. */
   scale: number;
+  /** How transparent what's on it is drawn in game: 0 invisible, 1, the default, solid. */
+  alpha?: number;
+  /**
+   * Which layer what's on it is drawn on in game: 0, the default, at the hull level with the
+   * other parts; below 0, underneath the hull itself, so only what sticks out past its edge shows.
+   */
+  order?: number;
   /** What a bare hull comes from the yard with on this mount. Must be a part that fits it. */
   default?: PartId;
   /** A decal mount: shows a random decal part that fits it, for looks only. Nothing real goes on it. */
@@ -56,7 +63,21 @@ export interface HullInfo {
   programs: PartId[];
   /** What the hull is used for. */
   usedBy: HullUse[];
+  /** Credits a bare hull costs at a yard. Without one, the game's own rebuild cost. */
+  price?: number;
+  /** Ore the hull's own hold carries, bay or no bay. Without one, the game's own cargo space. */
+  cargo?: number;
+  /** The weight of the bare hull. Without one, the game's base weight. */
+  weight?: number;
+  /** How many hull points it has. Without one, `MAX_HULL`. */
+  hull?: number;
 }
+
+/**
+ * The stats of a part the parts page can edit, kept in the ship file over the code's own in
+ * `parts.ts`. Only the ones that differ from the code's are kept.
+ */
+export type PartStats = Partial<Pick<Part, "price" | "weight" | "size" | "tier" | "cargo" | "slots" | "set" | "explosive">>;
 
 /**
  * What src/hulls.json holds: the mount types, which each part fits, which parts are decals,
@@ -69,6 +90,8 @@ export interface ShipFile {
   decalParts?: PartId[];
   hulls: Record<ShipModel, Mount[]>;
   hullInfo?: Record<ShipModel, HullInfo>;
+  /** The part stats that differ from the code's own, changed on the parts page. */
+  partStats?: Partial<Record<PartId, PartStats>>;
 }
 
 /** One fitted part: what it is and how worn. */
@@ -116,6 +139,8 @@ function readMount(raw: Partial<Mount>, index: number): Mount {
   };
   if (raw.role && THRUSTER_ROLES.includes(raw.role)) mount.role = raw.role;
   if (typeof raw.default === "string" && PARTS.some((part) => part.id === raw.default)) mount.default = raw.default;
+  if (typeof raw.alpha === "number" && Number.isFinite(raw.alpha) && raw.alpha < 1) mount.alpha = Math.max(0, raw.alpha);
+  if (typeof raw.order === "number" && Number.isFinite(raw.order) && raw.order !== 0) mount.order = raw.order;
   if (raw.decal === true) mount.decal = true;
   return mount;
 }
@@ -124,11 +149,79 @@ function readMount(raw: Partial<Mount>, index: number): Mount {
 function readHullInfo(raw: Partial<HullInfo> | undefined): HullInfo {
   const programs = strings(raw?.programs).filter((id): id is PartId => PARTS.some((part) => part.id === id && part.kind === "program"));
   const usedBy = strings(raw?.usedBy).filter((use): use is HullUse => (HULL_USES as readonly string[]).includes(use));
-  return { programs: [...new Set(programs)], usedBy: [...new Set(usedBy)] };
+  // The stats are always present as keys, so a file without one clears a value read before.
+  const stat = (key: "price" | "cargo" | "weight" | "hull"): number | undefined => {
+    const value = raw?.[key];
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+  };
+  return { programs: [...new Set(programs)], usedBy, price: stat("price"), cargo: stat("cargo"), weight: stat("weight"), hull: stat("hull") };
 }
 
 /** The ship file the game shipped with, as read. */
 export const SHIPPED_SHIPS: ShipFile = JSON.parse(JSON.stringify(shipFile)) as ShipFile;
+
+/**
+ * Each part's editable stats as the code in `parts.ts` ships them. A ship file's `partStats`
+ * sit on top of these, so putting a file into play starts by putting them back.
+ */
+const BASE_STATS = new Map(
+  PARTS.map((part) => [
+    part.id,
+    {
+      price: part.price,
+      weight: part.weight,
+      size: part.size,
+      tier: part.tier,
+      ...(part.cargo !== undefined ? { cargo: part.cargo } : {}),
+      ...(part.slots !== undefined ? { slots: part.slots } : {}),
+      ...(part.set !== undefined ? { set: part.set } : {}),
+      ...(part.explosive !== undefined ? { explosive: part.explosive } : {}),
+    },
+  ]),
+);
+
+/** Puts a part's editable stats back as the code ships them. */
+export function resetPartStats(id: PartId): void {
+  const part = PARTS.find((each) => each.id === id);
+  const base = BASE_STATS.get(id);
+  if (!part || !base || part.kind === "program") return;
+  for (const key of ["cargo", "slots", "set", "explosive"] as const) {
+    if (base[key] === undefined) delete part[key];
+    else part[key] = base[key];
+  }
+  part.price = base.price!;
+  part.weight = base.weight!;
+  part.size = base.size!;
+  part.tier = base.tier!;
+}
+
+/** Sits a file's stats for a part over the code's own, skipping anything invalid. */
+function applyPartStats(id: PartId, stats: PartStats): void {
+  const part = PARTS.find((each) => each.id === id);
+  if (!part || part.kind === "program") return;
+  for (const key of ["price", "weight", "size", "cargo", "slots", "explosive"] as const) {
+    const value = stats[key];
+    if (value !== undefined && Number.isFinite(value) && value >= 0) part[key] = value;
+  }
+  if (stats.tier === 0 || stats.tier === 1 || stats.tier === 2) part.tier = stats.tier;
+  if (stats.set !== undefined && Number.isFinite(stats.set) && stats.set >= 1) part.set = Math.round(stats.set);
+}
+
+/** The part stats that differ from the code's own, to keep in the ship file. */
+function partStatsNow(): NonNullable<ShipFile["partStats"]> {
+  const out: NonNullable<ShipFile["partStats"]> = {};
+  for (const part of PARTS) {
+    if (part.kind === "program") continue;
+    const base = BASE_STATS.get(part.id)!;
+    const diff: PartStats = {};
+    for (const key of ["price", "weight", "size", "cargo", "slots", "set", "explosive"] as const) {
+      if (part[key] !== base[key]) diff[key] = part[key];
+    }
+    if (part.tier !== base.tier) diff.tier = part.tier;
+    if (Object.keys(diff).length > 0) out[part.id] = diff;
+  }
+  return out;
+}
 
 /** The mount types there are. Changed in place by the hull designer. */
 export const MOUNT_TYPES: string[] = [];
@@ -141,13 +234,24 @@ export const HULL_MOUNTS = Object.fromEntries(SHIP_MODELS.map((model) => [model,
 /** What else each hull has: its default programs and what it's used for. Changed in place by the hull designer. */
 export const HULL_INFO = Object.fromEntries(SHIP_MODELS.map((model) => [model, { programs: [], usedBy: [] } as HullInfo])) as Record<ShipModel, HullInfo>;
 
-/** Puts a ship file into play: mount types, which parts fit them, and every hull's mounts. */
+/** The hull points every hull has unless its own say otherwise. */
+export const MAX_HULL = 100;
+
+/** The hull points a ship of this model has: its own, or `MAX_HULL`. */
+export function hullMax(model: ShipModel): number {
+  return HULL_INFO[model].hull ?? MAX_HULL;
+}
+
+/** Puts a ship file into play: mount types, which parts fit them, every hull's mounts and stats. */
 export function useShipFile(file: ShipFile): void {
   MOUNT_TYPES.splice(0, MOUNT_TYPES.length, ...strings(file.mountTypes));
   for (const part of PARTS) {
     if (part.kind === "program") continue;
     PART_MOUNTS[part.id] = strings(file.partMounts?.[part.id]);
   }
+  // The parts' stats start as the code has them, then the file's sit on top.
+  for (const part of PARTS) resetPartStats(part.id);
+  for (const [id, stats] of Object.entries(file.partStats ?? {}) as [PartId, PartStats][]) applyPartStats(id, stats);
   DECAL_PARTS.splice(0, DECAL_PARTS.length, ...strings(file.decalParts).filter((id): id is PartId => PARTS.some((part) => part.id === id && part.kind !== "program")));
   for (const model of SHIP_MODELS) {
     const mounts = (Array.isArray(file.hulls?.[model]) ? file.hulls[model] : []).map(readMount);
@@ -159,7 +263,9 @@ useShipFile(SHIPPED_SHIPS);
 
 /** The ship file as it is now, to save. */
 export function shipFileNow(): ShipFile {
-  return JSON.parse(JSON.stringify({ mountTypes: MOUNT_TYPES, partMounts: PART_MOUNTS, decalParts: DECAL_PARTS, hulls: HULL_MOUNTS, hullInfo: HULL_INFO })) as ShipFile;
+  return JSON.parse(
+    JSON.stringify({ mountTypes: MOUNT_TYPES, partMounts: PART_MOUNTS, decalParts: DECAL_PARTS, hulls: HULL_MOUNTS, hullInfo: HULL_INFO, partStats: partStatsNow() }),
+  ) as ShipFile;
 }
 
 /** Whether a part is a decal: it shows on decal mounts for looks only, and is never fitted for real. */

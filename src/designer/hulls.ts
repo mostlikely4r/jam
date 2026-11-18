@@ -1,13 +1,20 @@
 /**
- * Dev only: the hull designer. Three pages:
- * - Hulls: pick a hull from the list. It has what it's used for and the programs its computer
- *   comes with, and its mounts drawn big, as a blueprint, to add, remove, move, turn and size. A
- *   mount has a name, the mount types it supports, the part a bare hull comes with there and, for
- *   a thruster, the control that fires it. What's on a mount goes with it and works the way it
- *   faces: a thruster pushes away from its flame, a gun fires and a tractor looks the way they point.
- *   A decal mount shows a random decal part that fits it (the cockpit glass, say), for looks only.
+ * Dev only: the hull designer. Three pages, each a designer of its own, every section of the
+ * side panel collapsible and collapsed until opened:
+ * - Hulls: pick a hull from the list. It has what it's used for, the programs its computer
+ *   comes with, its own stats and its mounts drawn big, as a blueprint, to add, remove, move,
+ *   turn and size. A mount has a name, the mount types it supports, the part a bare hull comes
+ *   with there and, for a thruster, the control that fires it. Below "Bare hull comes with",
+ *   a preview picks a part to overlay on the blueprint as it shows in game: it starts on the
+ *   part the bare hull comes with, none or any part that fits can be picked instead. What's on
+ *   a mount goes with it and works the way it faces: a thruster pushes away from its flame, a
+ *   gun fires and a tractor looks the way they point. Each mount also has a transparency and
+ *   a draw order for how it shows in game: 0 is the hull level and below 0 draws underneath
+ *   the hull. A decal mount's preview picks the decal it shows (the cockpit glass, say), for
+ *   looks only.
  * - Parts: pick a part from the list. Which mount types it fits: it goes on a mount that supports
- *   one of them. A decal part is looks only, and only for decal mounts.
+ *   one of them. Its stats can be edited, kept in the ship file over the code's. A decal part is
+ *   looks only, and only for decal mounts. "Show on hull" can be none, to show just the part.
  * - Mount types: the list both pick from.
  * Changes are in the game at once; Save writes them all to src/hulls.json, which the game ships with.
  */
@@ -24,6 +31,7 @@ import {
   mountTakes,
   mountThrust,
   PART_MOUNTS,
+  resetPartStats,
   SHIPPED_SHIPS,
   shipFileNow,
   THRUSTER_ROLES,
@@ -34,7 +42,8 @@ import {
   type ShipFile,
 } from "../fitting";
 import { partFits, partOf, PARTS, SHIP_MODELS, type PartId, type ShipModel, type ThrusterRole } from "../parts";
-import { drawDecals, drawHull, drawPart } from "../shipArt";
+import { DEFAULTS } from "../tuning";
+import { drawDecal, drawDecals, drawHull, drawPart } from "../shipArt";
 
 const R = 12;
 const DRAFT_KEY = "jam-ships-draft";
@@ -91,6 +100,10 @@ const STYLE = `
 #hulls .does { color: #9fd8ff; white-space: pre-line; margin: 8px 0; }
 #hulls .status { color: #8fb4ff; min-height: 1.2em; margin-top: 6px; }
 #hulls .keys { color: #6a7486; font-size: 12px; white-space: pre-line; }
+#hulls details { border: 1px solid #222a3a; border-radius: 4px; margin: 8px 0; padding: 0 8px 4px; background: #0e1420; }
+#hulls details > summary { font-size: 12px; margin: 6px 0; color: #8fe3a1; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; user-select: none; }
+#hulls details > summary:hover { color: #c0f4cf; }
+#hulls label input[type=range] { width: 100%; box-sizing: border-box; margin-top: 2px; }
 `;
 
 const round = (value: number, step: number) => Math.round(value / step) * step;
@@ -118,8 +131,12 @@ export class HullDesigner {
   private selected: MountId | null = "thrusterMain";
   private part: PartId = FITTED[0].id;
   private hover: MountId | null = null;
-  /** Which of its decals each decal mount shows in the blueprint: "Show another decal" steps it on. */
-  private look = 0;
+  /** The part each mount's preview overlays on the blueprint, keyed `model:mount`: "none", or a part. Unset, it starts on the part the bare hull comes with. */
+  private preview: Partial<Record<string, PartId | "none">> = {};
+  /** The parts page's blueprint hull: null shows just the part, no hull. */
+  private showOn: ShipModel | null = null;
+  /** The sections the user has opened: every section starts collapsed. */
+  private opened = new Set<string>();
   private drag: { kind: "move" | "turn"; moved: boolean } | null = null;
   private status = "";
   /** Screen pixels per world unit, and where the ship's middle is on screen. */
@@ -216,10 +233,21 @@ export class HullDesigner {
     return b;
   }
 
-  private heading(text: string): HTMLHeadingElement {
-    const h = document.createElement("h2");
-    h.textContent = text;
-    return h;
+  /**
+   * A collapsible section of the side panel: collapsed unless opened before, and what the user
+   * opened stays open across rebuilds. Every section starts collapsed.
+   */
+  private section(key: string, title: string, ...children: HTMLElement[]): HTMLDetailsElement {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = title;
+    details.append(summary, ...children);
+    if (this.opened.has(key)) details.open = true;
+    details.addEventListener("toggle", () => {
+      if (details.open) this.opened.add(key);
+      else this.opened.delete(key);
+    });
+    return details;
   }
 
   /** A drop down list: `options` are [value, text] in the order shown. */
@@ -278,8 +306,9 @@ export class HullDesigner {
     }
     const body = this.page === "hulls" ? this.hullsPage() : this.page === "parts" ? this.partsPage() : this.typesPage();
 
-    const file = document.createElement("div");
-    file.append(
+    const file = this.section(
+      "file",
+      "File",
       this.button("Save to src/hulls.json", () => void this.save()),
       this.button("Throw away changes", () => {
         useShipFile(SHIPPED_SHIPS);
@@ -298,8 +327,9 @@ export class HullDesigner {
     this.statusLine = document.createElement("div");
     this.statusLine.className = "status";
     this.statusLine.textContent = this.status;
+    file.append(this.statusLine);
 
-    this.side.replaceChildren(title, pages, ...body, this.heading("File"), file, this.statusLine);
+    this.side.replaceChildren(title, pages, ...body, file);
   }
 
   private hullsPage(): HTMLElement[] {
@@ -352,21 +382,42 @@ export class HullDesigner {
     }
     const add = this.button("Add a mount", () => this.addMount());
 
-    const decals = this.button("Show another decal", () => ((this.look += 1), this.rebuild()));
+    // The hull's own stats: what a bare hull costs, holds, weighs and can take. Left empty,
+    // the game's own values are used, so the shipped hulls change nothing.
+    const stat = (key: "price" | "cargo" | "weight" | "hull", label: string, fallback: string) => {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = "1";
+      input.min = "0";
+      input.value = info[key] === undefined ? "" : String(info[key]);
+      input.placeholder = fallback;
+      input.addEventListener("change", () => {
+        if (input.value.trim() === "") delete info[key];
+        else {
+          const value = Number(input.value);
+          if (Number.isFinite(value) && value >= 0) info[key] = value;
+        }
+        this.changed();
+      });
+      return this.labelled(label, input);
+    };
+    const statsNote = document.createElement("p");
+    statsNote.textContent = `Left empty, the game's own: ${DEFAULTS.rebuildCost} credits for a bare hull, ${DEFAULTS.playerCargo} ore of cargo space (${DEFAULTS.droneCargo} for ships that aren't yours), weight ${DEFAULTS.weight} and 100 hull points.`;
     const out: HTMLElement[] = [
       intro,
-      this.heading("Hull"),
-      models,
-      this.heading("Used by"),
-      usedBy,
-      usedNote,
-      this.heading("Default programs"),
-      programs,
-      programsNote,
-      this.heading("Mounts"),
-      list,
-      add,
-      decals,
+      this.section("hull", "Hull", models),
+      this.section("used", "Used by", usedBy, usedNote),
+      this.section("programs", "Default programs", programs, programsNote),
+      this.section(
+        `stats:${this.model}`,
+        "Hull stats",
+        stat("price", "Price of a bare hull", `${DEFAULTS.rebuildCost} credits`),
+        stat("cargo", "Cargo without a bay (ore)", `${DEFAULTS.playerCargo}, or ${DEFAULTS.droneCargo} for others`),
+        stat("weight", "Bare hull weight", String(DEFAULTS.weight)),
+        stat("hull", "Hull points", "100"),
+        statsNote,
+      ),
+      this.section("mounts", "Mounts", list, add),
     ];
     const mount = this.mount();
     if (!mount) return out;
@@ -445,6 +496,32 @@ export class HullDesigner {
       ),
     );
 
+    // A part to overlay on the blueprint as it shows in game, chosen per mount: it starts on
+    // the part the bare hull comes with (a decal mount, on its first fitting decal), and none
+    // or any part that fits can be picked instead.
+    const choices: [string, string][] = mount.decal
+      ? decalChoices(this.model, mount).map((id): [string, string] => [id, partOf(id).label])
+      : fitting.map((part): [string, string] => [part.id, part.label]);
+    const chosen = this.preview[`${this.model}:${mount.id}`];
+    const shown =
+      chosen === "none" || (chosen !== undefined && !choices.some(([id]) => id === chosen))
+        ? ""
+        : chosen !== undefined
+          ? chosen
+          : (this.previewOf(this.model, mount) ?? "");
+    const preview = this.labelled(
+      "Preview (overlaid on the blueprint)",
+      this.dropdown(
+        [["", "none"], ...choices],
+        shown,
+        (value) => {
+          const key = `${this.model}:${mount.id}`;
+          if (value) this.preview[key] = value as PartId;
+          else this.preview[key] = "none";
+        },
+      ),
+    );
+
     const grid = document.createElement("div");
     grid.className = "fields";
     const field = (key: "x" | "y" | "angle" | "scale", label: string, step: number) => {
@@ -466,6 +543,42 @@ export class HullDesigner {
     };
     grid.append(field("x", "x (to the nose, radii)", 0.05), field("y", "y (to the right, radii)", 0.05), field("angle", "faces (°, clockwise)", 15), field("scale", "size", 0.1));
 
+    // How what's on the mount shows in game: how transparent, and which layer it draws on.
+    const alpha = document.createElement("label");
+    alpha.textContent = "Transparency, as drawn in game";
+    const alphaBox = document.createElement("input");
+    alphaBox.type = "range";
+    alphaBox.min = "0";
+    alphaBox.max = "1";
+    alphaBox.step = "0.05";
+    alphaBox.value = String(mount.alpha ?? 1);
+    const alphaRead = document.createElement("span");
+    alphaRead.textContent = `  ${Math.round((mount.alpha ?? 1) * 100)}% solid`;
+    alphaBox.addEventListener("input", () => {
+      const value = Number(alphaBox.value);
+      if (value >= 0.999) delete mount.alpha;
+      else mount.alpha = clean(value);
+      alphaRead.textContent = `  ${Math.round((mount.alpha ?? 1) * 100)}% solid`;
+      this.changed(false);
+    });
+    alpha.append(alphaBox, alphaRead);
+
+    const order = document.createElement("label");
+    order.textContent = "Draw order in game";
+    const orderBox = document.createElement("input");
+    orderBox.type = "number";
+    orderBox.step = "1";
+    orderBox.value = String(mount.order ?? 0);
+    orderBox.addEventListener("change", () => {
+      const value = Number(orderBox.value);
+      if (!Number.isFinite(value) || value === 0) delete mount.order;
+      else mount.order = value;
+      this.changed();
+    });
+    order.append(orderBox);
+    const orderNote = document.createElement("p");
+    orderNote.textContent = "0, the default, draws at the hull level with the other parts; below 0 draws underneath the hull itself, so only what sticks out past its edge shows.";
+
     this.does = document.createElement("div");
     this.does.className = "does";
     this.does.textContent = this.describe(mount);
@@ -479,6 +592,8 @@ export class HullDesigner {
           if (!was.role) delete mount.role;
           if (!was.default) delete mount.default;
           if (!was.decal) delete mount.decal;
+          if (!was.alpha) delete mount.alpha;
+          if (!was.order) delete mount.order;
           this.onMountsChanged();
           this.changed();
         }),
@@ -501,18 +616,24 @@ export class HullDesigner {
 
     return [
       ...out,
-      this.heading(mount.name),
-      name,
-      decal,
-      ...(mount.decal ? [] : [role, bare]),
-      this.heading("Supports"),
-      supports,
-      takes,
-      grid,
-      this.does,
-      tools,
-      this.heading("Keys"),
-      keys,
+      this.section(
+        // One key for every mount, so a section opened for one stays open for the next.
+        "mount",
+        mount.name,
+        name,
+        decal,
+        ...(mount.decal ? [] : [role, bare]),
+        preview,
+        supports,
+        takes,
+        grid,
+        alpha,
+        order,
+        orderNote,
+        this.does,
+        tools,
+      ),
+      this.section("keys", "Keys", keys),
     ];
   }
 
@@ -564,15 +685,71 @@ export class HullDesigner {
     const models = this.labelled(
       "Show on hull",
       this.dropdown(
-        MODELS.map((model) => [model, MODEL_NAMES[model]]),
-        this.model,
+        [["", "none: just the part"], ...MODELS.map((model): [string, string] => [model, MODEL_NAMES[model]])],
+        this.showOn ?? "",
         (value) => {
-          this.model = value as ShipModel;
+          this.showOn = value ? (value as ShipModel) : null;
           this.rebuild();
         },
       ),
     );
-    return [intro, this.heading("Part"), list, decal, this.heading(`${part.label} fits`), fits, set, this.heading("Goes on"), where, models];
+
+    // The part's stats, editable: kept in src/hulls.json over the code's own values in parts.ts.
+    const stat = (key: "price" | "weight" | "size" | "cargo" | "slots" | "set" | "explosive", label: string, step: number) => {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = String(step);
+      input.min = "0";
+      input.value = String(part[key] ?? 0);
+      input.addEventListener("change", () => {
+        const value = Number(input.value);
+        if (!Number.isFinite(value) || value < 0) return;
+        part[key] = value;
+        this.changed();
+      });
+      return this.labelled(label, input);
+    };
+    const tier = this.labelled(
+      "Sold",
+      this.dropdown(
+        [
+          ["0", "from the start"],
+          ["1", "after a little ore is sold"],
+          ["2", "after much more ore is sold"],
+        ],
+        String(part.tier),
+        (value) => {
+          part.tier = value === "2" ? 2 : value === "1" ? 1 : 0;
+          this.changed();
+        },
+      ),
+    );
+    const statsNote = document.createElement("p");
+    statsNote.textContent = "Kept in src/hulls.json over the parts' own values in parts.ts, and in the game at once.";
+    const stats = this.section(
+      `stats:${part.id}`,
+      "Stats",
+      stat("price", "Price", 10),
+      stat("weight", "Weight", 0.01),
+      stat("size", "Room it takes in a bay (ore)", 1),
+      ...(part.cargo !== undefined ? [stat("cargo", "Cargo room it adds", 5)] : []),
+      ...(part.slots !== undefined ? [stat("slots", "Programs it runs at once", 1)] : []),
+      ...(part.set !== undefined ? [stat("set", "Comes as a set of", 1)] : []),
+      ...(part.explosive !== undefined ? [stat("explosive", "Explosive (hull points)", 5)] : []),
+      tier,
+      this.button("Back to coded stats", () => {
+        resetPartStats(part.id);
+        this.changed();
+      }),
+      statsNote,
+    );
+    return [
+      intro,
+      this.section("part", "Part", list, decal),
+      stats,
+      this.section(`fits:${part.id}`, `${part.label} fits`, fits, set),
+      this.section("goes", "Goes on", where, models),
+    ];
   }
 
   private typesPage(): HTMLElement[] {
@@ -615,7 +792,7 @@ export class HullDesigner {
       if (event.key === "Enter") add();
     });
     addRow.append(addBox, this.button("Add", add));
-    return [intro, this.heading("Mount types"), ...rows, addRow];
+    return [intro, this.section("types", "Mount types", ...rows, addRow)];
   }
 
   private renameType(from: string, to: string): void {
@@ -934,31 +1111,41 @@ export class HullDesigner {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // The ship, big, with something on every mount that takes anything.
+    // The parts page with no hull to show: just the selected part, drawn as in game.
+    if (this.page === "parts" && this.showOn === null) {
+      const part = partOf(this.part);
+      ctx.save();
+      ctx.translate(this.cx, this.cy);
+      ctx.scale(Math.min(width, height) / 40, Math.min(width, height) / 40);
+      if (isDecal(part.id) || part.kind === "cockpit") drawDecal(ctx, part.id);
+      else drawPart(ctx, part.kind, 0, part.engine !== undefined);
+      ctx.restore();
+      ctx.fillStyle = "#7f8ba0";
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.fillText(`${part.label}${isDecal(part.id) ? ", a decal" : ""}: drawn as in game, facing the nose`, 14, height - 14);
+      return;
+    }
+
+    // The hull, with each mount's preview on it, layered and ordered as in game.
+    const model = this.page === "parts" && this.showOn !== null ? this.showOn : this.model;
+    const mounts = model === this.model ? this.mounts() : HULL_MOUNTS[model];
+    const decal = (mount: Mount): PartId | null => this.previewOf(model, mount);
+    const byOrder = (a: Mount, b: Mount) => (a.order ?? 0) - (b.order ?? 0);
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.scale(this.zoom, this.zoom);
-    drawHull(ctx, this.model, [120, 150, 190]);
-    drawDecals(ctx, this.model, (mount) => {
-      const choices = decalChoices(this.model, mount);
-      return choices.length ? choices[this.look % choices.length] : null;
-    });
-    for (const mount of this.mounts()) {
-      const shown = shownPart(this.model, mount);
-      if (!shown) continue;
-      const part = partOf(shown);
-      ctx.save();
-      ctx.translate(mount.x * R, mount.y * R);
-      ctx.rotate(facing(mount));
-      ctx.scale(mount.scale, mount.scale);
-      drawPart(ctx, part.kind, 0, part.engine !== undefined);
-      ctx.restore();
-    }
+    // Below the hull first, so only what sticks out past its edge shows, then the hull and the rest,
+    // each layer in draw order, the way the game draws them.
+    drawDecals(ctx, model, decal, "below");
+    for (const mount of mounts.filter((each) => (each.order ?? 0) < 0).sort(byOrder)) this.drawPreview(ctx, model, mount);
+    drawHull(ctx, model, [120, 150, 190]);
+    drawDecals(ctx, model, decal, "above");
+    for (const mount of mounts.filter((each) => (each.order ?? 0) >= 0).sort(byOrder)) this.drawPreview(ctx, model, mount);
     ctx.restore();
 
     // What each does, then the handles on top.
     const onParts = this.page === "parts";
-    for (const mount of this.mounts()) {
+    for (const mount of mounts) {
       const [x, y] = this.toScreen(mount.x, mount.y);
       const on = mount.id === this.selected && !onParts;
       const green = on ? "#8fe3a1" : "rgba(143,227,161,0.55)";
@@ -967,7 +1154,7 @@ export class HullDesigner {
         const turning = mount.role === "thrusterRotateLeft" || mount.role === "thrusterRotateRight";
         this.arrow(x, y, push.x, push.y, (on ? 60 : 34) * (turning ? Math.min(2, Math.max(0.15, Math.abs(turn))) : 1), green);
       }
-      const shown = shownPart(this.model, mount);
+      const shown = shownPart(model, mount);
       const kind = shown ? partOf(shown).kind : null;
       const a = facing(mount);
       if (kind === "gun" || kind === "turret") {
@@ -989,11 +1176,11 @@ export class HullDesigner {
         ctx.fill();
       }
     }
-    for (const mount of this.mounts()) {
+    for (const mount of mounts) {
       const [x, y] = this.toScreen(mount.x, mount.y);
       const on = mount.id === this.selected && !onParts;
       const hover = mount.id === this.hover;
-      const lit = onParts && mountTakes(mount, this.part) && partFits(partOf(this.part), this.model);
+      const lit = onParts && mountTakes(mount, this.part) && partFits(partOf(this.part), model);
       ctx.strokeStyle = lit ? "#8fe3a1" : on ? "#ffd479" : hover ? "#ffffff" : "rgba(220,230,250,0.6)";
       ctx.lineWidth = on || lit ? 2 : 1.2;
       ctx.beginPath();
@@ -1024,7 +1211,36 @@ export class HullDesigner {
 
     ctx.fillStyle = "#7f8ba0";
     ctx.font = "12px system-ui, sans-serif";
-    ctx.fillText(`${MODEL_NAMES[this.model]}: nose to the right, one square a quarter of the ship's radius`, 14, height - 14);
+    ctx.fillText(`${MODEL_NAMES[model]}: nose to the right, one square a quarter of the ship's radius`, 14, height - 14);
+  }
+
+  /**
+   * The part a mount's preview overlays: the one picked below "Bare hull comes with", or,
+   * until one is, the part the bare hull comes with. A decal mount starts on the first decal
+   * that fits it. "none" shows nothing.
+   */
+  private previewOf(model: ShipModel, mount: Mount): PartId | null {
+    const chosen = this.preview[`${model}:${mount.id}`];
+    if (chosen === "none") return null;
+    if (chosen) return partFits(partOf(chosen), model) && mountTakes(mount, chosen) ? chosen : null;
+    if (mount.decal) return decalChoices(model, mount)[0] ?? null;
+    return mount.default && mountTakes(mount, mount.default) && partFits(partOf(mount.default), model) ? mount.default : null;
+  }
+
+  /** One mount's preview part, drawn on the blueprint as it shows in game, transparency and all. */
+  private drawPreview(ctx: CanvasRenderingContext2D, model: ShipModel, mount: Mount): void {
+    // A decal mount's preview is its decal, drawn with the hull's own decals.
+    if (mount.decal) return;
+    const id = this.previewOf(model, mount);
+    if (!id) return;
+    const part = partOf(id);
+    ctx.save();
+    ctx.translate(mount.x * R, mount.y * R);
+    ctx.rotate(facing(mount));
+    ctx.scale(mount.scale, mount.scale);
+    if ((mount.alpha ?? 1) < 1) ctx.globalAlpha = mount.alpha!;
+    drawPart(ctx, part.kind, 0, part.engine !== undefined);
+    ctx.restore();
   }
 
   private arrow(x: number, y: number, dx: number, dy: number, length: number, color: string): void {

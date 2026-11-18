@@ -48,15 +48,15 @@ function path(ctx: CanvasRenderingContext2D, points: Point[]): void {
 }
 
 /** The fitted modules worth drawing: everything on the outside, turret and its gun left to the caller. */
-function outsideParts(ship: ArtShip): { id: MountId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number }[] {
-  const out: { id: MountId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number }[] = [];
+function outsideParts(ship: ArtShip): { id: MountId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number }[] {
+  const out: { id: MountId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number }[] = [];
   for (const mount of HULL_MOUNTS[ship.model]) {
     const module = ship.fit[mount.id];
     if (!module) continue;
     const kind = partOf(module.part).kind;
     if (kind === "computer" || kind === "section" || kind === "turret" || mount.id === "turretGun") continue;
     // Destroyed, a bay is just the hull's own hold again: see `bayBox`.
-    out.push({ id: mount.id, x: mount.x * R, y: mount.y * R, angle: facing(mount), scale: mount.scale, kind, wear: module.wear });
+    out.push({ id: mount.id, x: mount.x * R, y: mount.y * R, angle: facing(mount), scale: mount.scale, kind, wear: module.wear, alpha: mount.alpha ?? 1, order: mount.order ?? 0 });
   }
   return out;
 }
@@ -185,16 +185,21 @@ export function drawDecal(ctx: CanvasRenderingContext2D, id: PartId): void {
   }
 }
 
-/** The ship's decals, each on its mount: they're looks only. `pick` says which part a mount shows. */
-export function drawDecals(ctx: CanvasRenderingContext2D, model: ShipModel, pick: (mount: Mount) => PartId | null): void {
+/**
+ * The ship's decals, each on its mount: they're looks only. `pick` says which part a mount shows.
+ * `layer` picks by the mount's draw order: "below" the hull's own shape, or "above" it.
+ */
+export function drawDecals(ctx: CanvasRenderingContext2D, model: ShipModel, pick: (mount: Mount) => PartId | null, layer: "below" | "above" = "above"): void {
   for (const mount of HULL_MOUNTS[model]) {
     if (!mount.decal) continue;
+    if (((mount.order ?? 0) < 0) !== (layer === "below")) continue;
     const id = pick(mount);
     if (!id) continue;
     ctx.save();
     ctx.translate(mount.x * R, mount.y * R);
     ctx.rotate(facing(mount));
     ctx.scale(mount.scale, mount.scale);
+    if ((mount.alpha ?? 1) < 1) ctx.globalAlpha = mount.alpha!;
     drawDecal(ctx, id);
     ctx.restore();
   }
@@ -232,7 +237,7 @@ export function drawHull(ctx: CanvasRenderingContext2D, model: ShipModel, hull: 
  * The box the ship's ore rides in, in the ship's frame: a fitted cargo bay, sized by how much it
  * holds, or else the hull's own small hold, where the bay would go (the middle if there's no bay mount).
  */
-export function bayBox(ship: ArtShip): Box & { part: PartId | null } {
+export function bayBox(ship: ArtShip): Box & { part: PartId | null; alpha: number } {
   const mounts = HULL_MOUNTS[ship.model];
   let spot = mounts.find((mount) => mount.types.includes("cargo bay"));
   let part: PartId | null = null;
@@ -253,12 +258,15 @@ export function bayBox(ship: ArtShip): Box & { part: PartId | null } {
     w: (4.6 + Math.min(4.6, cargo * 0.09)) * scale,
     h: (3.2 + Math.min(2.6, cargo * 0.05)) * scale,
     part,
+    // How transparent its mount draws it, as in game.
+    alpha: spot?.alpha ?? 1,
   };
 }
 
 /** The bay's box: a dark well in the hull with a rim, a stronger one for a fitted bay. */
-export function drawBay(ctx: CanvasRenderingContext2D, box: Box & { part: PartId | null }): void {
+export function drawBay(ctx: CanvasRenderingContext2D, box: Box & { part: PartId | null; alpha?: number }): void {
   ctx.save();
+  if ((box.alpha ?? 1) < 1) ctx.globalAlpha = box.alpha!;
   ctx.translate(box.x, box.y);
   ctx.rotate(box.angle);
   ctx.fillStyle = "rgba(14, 18, 28, 0.85)";
@@ -282,32 +290,25 @@ export function drawBay(ctx: CanvasRenderingContext2D, box: Box & { part: PartId
 
 /** Draws a ship. Returns where broken-but-not-gone parts are, for sparks and smoke. */
 export function drawVectorShip(ctx: CanvasRenderingContext2D, ship: ArtShip, hull: Color): Point[] {
+  const parts = outsideParts(ship);
+  const drawn: Point[] = [];
+  // What sits under the hull itself, then the hull, then everything at the hull level and above,
+  // in draw order, so what sticks out past the hull's edge is all that shows of the layers below.
+  drawDecals(ctx, ship.model, (mount) => decalOf(ship, mount), "below");
+  for (const part of parts.filter((each) => each.order < 0)) {
+    const spot = drawFitted(ctx, part);
+    if (spot) drawn.push(spot);
+  }
   drawHull(ctx, ship.model, hull);
-  drawDecals(ctx, ship.model, (mount) => decalOf(ship, mount));
+  drawDecals(ctx, ship.model, (mount) => decalOf(ship, mount), "above");
   drawBay(ctx, bayBox(ship));
-  const broken: Point[] = [];
-  for (const { id, x, y, angle, scale, kind, wear } of outsideParts(ship)) {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(angle);
-    ctx.scale(scale, scale);
-    drawPart(ctx, kind, wear, id === "thrusterMain");
-    ctx.restore();
-    if (wear >= 1) {
-      // Scorched round where it was.
-      const reach = 3.4 * scale;
-      const scorch = ctx.createRadialGradient(x, y, 0, x, y, reach);
-      scorch.addColorStop(0, "rgba(20,14,12,0.55)");
-      scorch.addColorStop(1, "rgba(20,14,12,0)");
-      ctx.fillStyle = scorch;
-      ctx.beginPath();
-      ctx.arc(x, y, reach, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (wear >= DAMAGED_AT) broken.push([x, y]);
+  for (const part of parts.filter((each) => each.order >= 0).sort((a, b) => a.order - b.order)) {
+    const spot = drawFitted(ctx, part);
+    if (spot) drawn.push(spot);
   }
   // Thin smoke from what's broken, drifting off behind.
   const t = performance.now() / 1000;
-  for (const [x, y] of broken) {
+  for (const [x, y] of drawn) {
     for (let i = 0; i < 3; i++) {
       const p = (t * 0.7 + i / 3) % 1;
       ctx.fillStyle = `rgba(150,150,160,${0.28 * (1 - p)})`;
@@ -316,5 +317,35 @@ export function drawVectorShip(ctx: CanvasRenderingContext2D, ship: ArtShip, hul
       ctx.fill();
     }
   }
-  return broken;
+  return drawn;
+}
+
+/** One fitted module at its mount, with its transparency, and where it sits if it's broken. */
+function drawFitted(ctx: CanvasRenderingContext2D, part: { id: MountId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number }): Point | null {
+  ctx.save();
+  ctx.translate(part.x, part.y);
+  ctx.rotate(part.angle);
+  ctx.scale(part.scale, part.scale);
+  if (part.alpha < 1) ctx.globalAlpha = part.alpha;
+  drawPart(ctx, part.kind, part.wear, part.id === "thrusterMain");
+  ctx.restore();
+  if (part.wear < DAMAGED_AT) return null;
+  const x = part.x;
+  const y = part.y;
+  if (part.wear >= 1) {
+    // Scorched round where it was.
+    const reach = 3.4 * part.scale;
+    ctx.save();
+    if (part.alpha < 1) ctx.globalAlpha = part.alpha;
+    const scorch = ctx.createRadialGradient(x, y, 0, x, y, reach);
+    scorch.addColorStop(0, "rgba(20,14,12,0.55)");
+    scorch.addColorStop(1, "rgba(20,14,12,0)");
+    ctx.fillStyle = scorch;
+    ctx.beginPath();
+    ctx.arc(x, y, reach, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return null;
+  }
+  return [x, y];
 }

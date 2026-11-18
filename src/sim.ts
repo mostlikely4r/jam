@@ -1,8 +1,9 @@
 import { Chatter } from "./chatter";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
-import { computerSize, DAMAGED_AT, facing, fitPart, mountsOf, mountWith, thrustOf, turretMount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
+import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountsOf, mountWith, thrustOf, turretMount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
 import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./pilot";
 export { FIRST_FIELD };
+export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
 import { pilotKind, type StepProfile } from "./profile/step";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
@@ -26,7 +27,6 @@ const FOREVER = 1e9;
 const WARM_UP_AWAY = 4e6;
 export const TRAFFIC_SLEEP_DISTANCE = 12000;
 export const SHIP_RADIUS = 12;
-export const MAX_HULL = 100;
 const ORE_RADIUS = 5;
 const PICKUP_MARGIN = 10;
 const TIER_RADIUS = [18, 34, 60];
@@ -2018,7 +2018,7 @@ export class Sim {
       angle: 0,
       prevAngle: 0,
       spin: 0,
-      hull: MAX_HULL,
+      hull: hullMax(model),
       cooldown: 0,
       turretAngle: 0,
       prevTurretAngle: 0,
@@ -2049,7 +2049,7 @@ export class Sim {
     ship.angle = 0;
     ship.prevAngle = 0;
     ship.spin = 0;
-    ship.hull = MAX_HULL;
+    ship.hull = hullMax(ship.model);
     ship.cooldown = 0;
     ship.ore = 0;
     ship.unloadTimer = 0;
@@ -2061,7 +2061,7 @@ export class Sim {
 
   /** Every part adds weight, which divides all of the ship's thrust. */
   shipWeight(ship: Ship): number {
-    let weight = this.tuning.weight;
+    let weight = HULL_INFO[ship.model].weight ?? this.tuning.weight;
     for (const module of Object.values(ship.fit)) {
       if (!module) continue;
       const part = partOf(module.part);
@@ -2084,6 +2084,11 @@ export class Sim {
   partPrice(id: PartId): number {
     const part = PARTS.find((candidate) => candidate.id === id)!;
     return Math.round(part.price * this.tuning.partPriceScale);
+  }
+
+  /** What a bare hull of this model costs: the hull's own price, or the tuning's rebuild cost. */
+  hullPrice(model: ShipModel): number {
+    return HULL_INFO[model].price ?? this.tuning.rebuildCost;
   }
 
   private blueprintTier(id: BlueprintId): number {
@@ -2429,7 +2434,7 @@ export class Sim {
   /** All the room in a ship's bay, for ore and modules together. */
   bayTotal(ship: Ship): number {
     const { playerCargo, droneCargo } = this.tuning;
-    let space = ship === this.ship ? playerCargo : droneCargo;
+    let space = HULL_INFO[ship.model].cargo ?? (ship === this.ship ? playerCargo : droneCargo);
     for (const module of Object.values(ship.fit)) if (module && module.wear < 1) space += partOf(module.part).cargo ?? 0;
     return space;
   }
@@ -4616,7 +4621,7 @@ export class Sim {
     ship.wrecks++;
     this.dropOre(ship);
     this.blowUp(ship);
-    const { rebuildCost } = this.tuning;
+    const cost = this.hullPrice(ship.model);
     const account = this.accountOf(ship);
     if (player) {
       const cleared = ship.marked || ship.wanted;
@@ -4629,17 +4634,17 @@ export class Sim {
       }
       // Nobody asked: a bare hull from the nearest yard, straight away.
       this.bareHull(ship);
-      this.finishRebuild(yard, rebuildCost, cleared);
+      this.finishRebuild(yard, cost, cleared);
       return;
     }
     // A pirate is rebuilt from its base's money, or it's gone for good.
     if (ship.faction === "pirate") {
-      if (this.pirateCredits < rebuildCost) {
+      if (this.pirateCredits < cost) {
         this.removeShip(ship);
         return;
       }
-      this.pirateCredits -= rebuildCost;
-      ship.upkeep += rebuildCost;
+      this.pirateCredits -= cost;
+      ship.upkeep += cost;
       this.bareHull(ship);
       this.respawn(ship);
       return;
@@ -4651,12 +4656,12 @@ export class Sim {
     }
     // Rebuilt at the nearest base with a shipyard, which takes the pay and spends its parts.
     const yard = this.baseOf(this.nearestDock(ship.x, ship.y, true)) ?? this.bases[0];
-    if (rebuildCost > 0 && (account.credits < rebuildCost || !this.hasStockFor(rebuildCost, yard))) {
+    if (cost > 0 && (account.credits < cost || !this.hasStockFor(cost, yard))) {
       this.removeShip(ship);
       return;
     }
-    this.chargeForService(account, rebuildCost, yard);
-    ship.upkeep += rebuildCost;
+    this.chargeForService(account, cost, yard);
+    ship.upkeep += cost;
     this.bareHull(ship);
     this.respawn(ship);
   }
@@ -4779,7 +4784,7 @@ export class Sim {
       for (const [mount, part] of Object.entries(down.lost) as [MountId, PartId][]) ship.fit[mount] = { part, wear: 0 };
       refresh(ship);
       trimPrograms(ship);
-      this.finishRebuild(base, this.tuning.rebuildCost, down.cleared);
+      this.finishRebuild(base, this.hullPrice(ship.model), down.cleared);
     }
   }
 
@@ -4797,7 +4802,7 @@ export class Sim {
     const down = this.down;
     const base = (down && this.bases.find((each) => each.id === down.base)) || this.bases[0];
     const extras = this.rebuildExtras();
-    let cost = this.tuning.rebuildCost;
+    let cost = this.hullPrice(this.ship.model);
     const needed = new Map<PartId, number>();
     for (const id of extras) {
       cost += Math.round(this.partPrice(id) / (partOf(id).set ?? 1));
@@ -4820,14 +4825,14 @@ export class Sim {
     const { ship } = this;
     if (!rebuild) {
       this.bareHull(ship);
-      this.finishRebuild(base, this.tuning.rebuildCost, down.cleared);
+      this.finishRebuild(base, this.hullPrice(ship.model), down.cleared);
       return true;
     }
     const offer = this.rebuildOffer();
-    if (offer.missing.length > 0 || ship.credits < offer.cost - this.tuning.rebuildCost) return false;
+    if (offer.missing.length > 0 || ship.credits < offer.cost - this.hullPrice(ship.model)) return false;
     // The hull itself is paid on the same terms as ever; the parts on top, from the store or made.
-    this.chargeForService(ship, this.tuning.rebuildCost, base);
-    ship.upkeep += this.tuning.rebuildCost;
+    this.chargeForService(ship, this.hullPrice(ship.model), base);
+    ship.upkeep += this.hullPrice(ship.model);
     for (const id of this.rebuildExtras()) this.supply(ship, id, base, 1);
     down.stage = "rebuilding";
     down.readyAt = this.clock + offer.seconds;
@@ -5137,8 +5142,9 @@ export class Sim {
       this.addFighter(dock.x, dock.y, "defender", base.id);
       if (this.tuning.chatter) this.chatter.defenderLaunched(this, base.poi);
     } else {
-      if (spare < this.stockFor(tuning.rebuildCost)) return;
-      this.chargeForService(base.account, tuning.rebuildCost, base);
+      const cost = this.hullPrice(base.lostTraffic[0]);
+      if (spare < this.stockFor(cost)) return;
+      this.chargeForService(base.account, cost, base);
       this.addTraffic(dock.x, dock.y, base.lostTraffic.shift()!, base === this.bases[0] ? null : base.id);
       if (this.tuning.chatter) this.chatter.trafficReplaced(this, this.traffic[this.traffic.length - 1].ship, base.poi);
     }
@@ -5515,7 +5521,7 @@ export class Sim {
    */
   private nextRepair(ship: Ship): { mount: MountId | null; cost: number; stocked?: boolean } | null {
     const { repairCost } = this.tuning;
-    if (ship.hull < MAX_HULL) return { mount: null, cost: repairCost };
+    if (ship.hull < hullMax(ship.model)) return { mount: null, cost: repairCost };
     let replace: { mount: MountId; cost: number; stocked: boolean } | null = null;
     const base = this.serviceBase(ship);
     for (const [mount, module] of Object.entries(ship.fit) as [MountId, Module | undefined][]) {
@@ -5546,7 +5552,7 @@ export class Sim {
     while (ship.repairTimer >= 1 && this.canRepair(ship)) {
       ship.repairTimer -= 1;
       const next = this.nextRepair(ship)!;
-      if (next.mount === null) ship.hull = Math.min(MAX_HULL, ship.hull + 1);
+      if (next.mount === null) ship.hull = Math.min(hullMax(ship.model), ship.hull + 1);
       else {
         const module = ship.fit[next.mount]!;
         module.wear = module.wear >= 1 ? 0 : Math.max(0, module.wear - 1 / this.moduleToughness(module));

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, isDecal, mountOf, mountsFor, mountTakes, newFitting, refresh, shipFileNow, thrustOf, useShipFile } from "./fitting";
+import { decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, refresh, resetPartStats, shipFileNow, thrustOf, useShipFile } from "./fitting";
 import { SHIP_MODELS } from "./parts";
-import { drawVectorShip } from "./shipArt";
+import { bayBox, drawVectorShip } from "./shipArt";
 import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
 import { DOCK_OFFSET, SHIP_RADIUS, Sim } from "./sim";
@@ -683,5 +683,146 @@ describe("hulls, defaults and decals", () => {
       expect(() => drawVectorShip(ctx, ship, [120, 150, 190])).not.toThrow();
     }
     expect(calls).toContain("ellipse");
+  });
+});
+
+describe("mounts as they draw in game", () => {
+  /** Runs `body` with the ship file changed, and puts it back after. */
+  function withFile(change: () => void, body: () => void): void {
+    const was = shipFileNow();
+    try {
+      change();
+      body();
+    } finally {
+      useShipFile(was);
+    }
+  }
+
+  it("a mount's transparency and draw order carry through a ship file round trip", () => {
+    withFile(
+      () => {
+        const gun = mountOf("racer", "gun")!;
+        gun.alpha = 0.5;
+        gun.order = -1;
+        // A mount at rest keeps neither: they're only kept when they say something.
+        delete mountOf("racer", "computer")!.alpha;
+        delete mountOf("racer", "computer")!.order;
+      },
+      () => {
+        const file = shipFileNow();
+        expect(file.hulls.racer.find((mount) => mount.id === "gun")).toMatchObject({ alpha: 0.5, order: -1 });
+        useShipFile(file);
+        expect(mountOf("racer", "gun")).toMatchObject({ alpha: 0.5, order: -1 });
+        expect(file.hulls.racer.find((mount) => mount.id === "computer")).not.toHaveProperty("alpha");
+        expect(file.hulls.racer.find((mount) => mount.id === "computer")).not.toHaveProperty("order");
+      },
+    );
+  });
+
+  it("draws a mount under the hull when its order is below zero, and see-through when it's faded", () => {
+    const calls: string[] = [];
+    let alpha = 1;
+    const ctx = new Proxy({} as CanvasRenderingContext2D, {
+      get: (_target, name: string) => {
+        if (name === "createRadialGradient") return () => ({ addColorStop() {} });
+        if (name === "globalAlpha") return alpha;
+        return () => void calls.push(name);
+      },
+      set: (_target, name: string, value) => {
+        if (name === "globalAlpha") alpha = value as number;
+        return true;
+      },
+    });
+    withFile(
+      () => {
+        mountOf("racer", "gun")!.order = -1;
+        mountOf("racer", "thrusterMain")!.alpha = 0.5;
+      },
+      () => {
+        const ship = { ...newFitting("racer"), model: "racer" as const };
+        drawVectorShip(ctx, ship, [120, 150, 190]);
+        // The gun went under the hull: it drew before the hull's own path.
+        expect(calls.indexOf("translate")).toBeLessThan(calls.indexOf("clip"));
+        // A faded part draws see-through.
+        expect(alpha).toBeCloseTo(0.5, 5);
+      },
+    );
+  });
+
+  it("a cargo bay takes its mount's transparency", () => {
+    const spot = HULL_MOUNTS.racer.find((mount) => mount.types.includes("cargo bay"))!;
+    withFile(
+      () => (spot.alpha = 0.4),
+      () => expect(bayBox({ ...newFitting("racer"), model: "racer" as const }).alpha).toBeCloseTo(0.4, 5),
+    );
+  });
+});
+
+describe("the stats of hulls and parts", () => {
+  /** Runs `body` with the ship file changed, and puts it back after. */
+  function withFile(change: () => void, body: () => void): void {
+    const was = shipFileNow();
+    try {
+      change();
+      body();
+    } finally {
+      useShipFile(was);
+    }
+  }
+
+  it("a hull falls back on the game's own stats until it has its own", () => {
+    expect(hullMax("racer")).toBe(MAX_HULL);
+    expect(hullMax("floater")).toBe(MAX_HULL);
+    withFile(
+      () => (HULL_INFO.racer.hull = 250),
+      () => {
+        expect(hullMax("racer")).toBe(250);
+        const file = shipFileNow();
+        expect(file.hullInfo!.racer.hull).toBe(250);
+        useShipFile(file);
+        expect(hullMax("racer")).toBe(250);
+        // A file without the stat clears it again.
+        useShipFile({ ...file, hullInfo: { ...file.hullInfo!, racer: { programs: [], usedBy: [] } } });
+        expect(hullMax("racer")).toBe(MAX_HULL);
+      },
+    );
+  });
+
+  it("a hull's price, cargo and weight are its own, over the game's tuning", () => {
+    const sim = docked("racer");
+    const weight = sim.shipWeight(sim.ship);
+    expect(sim.hullPrice("racer")).toBe(DEFAULTS.rebuildCost);
+    withFile(
+      () => {
+        HULL_INFO.racer.price = 999;
+        HULL_INFO.racer.cargo = 45;
+        HULL_INFO.racer.weight = 3;
+      },
+      () => {
+        expect(sim.hullPrice("racer")).toBe(999);
+        expect(sim.bayTotal(sim.ship)).toBe(45);
+        expect(sim.shipWeight(sim.ship)).toBeCloseTo(weight + 2, 5);
+      },
+    );
+  });
+
+  it("a part's edited stats carry in the ship file, and reset to the code's when it's thrown away", () => {
+    const coded = partOfForTest("bay").price;
+    withFile(
+      () => (partOfForTest("bay").price = coded + 50),
+      () => {
+        expect(partOfForTest("bay").price).toBe(coded + 50);
+        const file = shipFileNow();
+        expect(file.partStats!.bay).toEqual({ price: coded + 50 });
+        // Putting the file in play keeps the change; resetting the part puts the code's back.
+        useShipFile(file);
+        expect(partOfForTest("bay").price).toBe(coded + 50);
+        resetPartStats("bay");
+        expect(partOfForTest("bay").price).toBe(coded);
+        expect(shipFileNow().partStats!.bay).toBeUndefined();
+        // What the parts' code ships is left alone until a stat is changed.
+        expect(shipFileNow().partStats).toEqual({});
+      },
+    );
   });
 });

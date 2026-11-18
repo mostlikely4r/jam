@@ -1,11 +1,11 @@
 import { Chatter } from "./chatter";
-import { type BayGrid, type BlueprintId, partFits, isGear, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
+import { type BayGrid, type BlueprintId, ORE_BLOCK, partFits, isGear, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
 import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
 import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./pilot";
 export { FIRST_FIELD };
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
-import { autoPlace, canPlace, floatsAfterRemoval, footprint, reachableCells, sticks, usedCells, type GridSpec, type Placed } from "./grid";
+import { autoPlace, canPlace, floatsAfterRemoval, footprint, reachable, reachableCells, sticks, usedCells, type Cell, type GridSpec, type Placed } from "./grid";
 import { pilotKind, type StepProfile } from "./profile/step";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
@@ -2120,6 +2120,7 @@ export class Sim {
     ship.hull = hullMax(ship.model);
     ship.cooldown = 0;
     ship.ore = 0;
+    ship.oreBlocks = [];
     ship.unloadTimer = 0;
     ship.firing.clear();
     // A new ship starts with a clean name.
@@ -2491,13 +2492,107 @@ export class Sim {
   /** How much ore this ship could sell into the deposit right now. */
   depositSellable(ship: Ship, deposit: Deposit): number {
     if (this.depositAt(ship) !== deposit) return 0;
-    return Math.max(0, Math.min(ship.ore, this.tuning.depositCapacity - deposit.ore));
+    return Math.max(0, Math.min(ship.ore - this.pinnedOre(ship), this.tuning.depositCapacity - deposit.ore));
   }
 
-  /** How much ore a ship has room for: the free cells of its bay that ore can reach from the entry. */
+  /** How much ore a ship has room for: the free cells of its bay that ore can reach from the entry, and its locked ore. */
   cargoSpace(ship: Ship): number {
     const grid = this.bayGrid(ship);
-    return grid ? reachableCells(grid, ship.hold) * this.tuning.orePerCell : 0;
+    return grid ? this.oreRoom(ship, grid, this.packed(ship)) : 0;
+  }
+
+  /** The ore a bay holds with this packed in it: the free cells reachable from the entry, and the locked blocks. */
+  private oreRoom(ship: Ship, grid: GridSpec, packed: Placed[]): number {
+    return (reachableCells(grid, packed) + ship.oreBlocks.length) * this.tuning.orePerCell;
+  }
+
+  /** The ship's locked ore, as one-cell things on the bay's grid. */
+  private oreBlocksPlaced(ship: Ship): Placed[] {
+    return ship.oreBlocks.map(({ x, y }) => ({ module: { part: ORE_BLOCK, wear: 0 }, x, y, turned: false }));
+  }
+
+  /** Everything that takes cells in the bay, for its rules: modules (these, or the bay's own) and locked ore. */
+  packed(ship: Ship, hold: Placed[] = ship.hold): Placed[] {
+    return [...hold, ...this.oreBlocksPlaced(ship)];
+  }
+
+  /** How much of the ship's ore is locked in blocks. */
+  lockedOre(ship: Ship): number {
+    return ship.oreBlocks.length * this.tuning.orePerCell;
+  }
+
+  /**
+   * The locked ore that can't come out: blocks that hold something up, after every block that
+   * can come out has.
+   */
+  pinnedOre(ship: Ship): number {
+    const grid = this.bayGrid(ship);
+    if (!grid) return 0;
+    let blocks = this.oreBlocksPlaced(ship);
+    for (let freed = true; freed; ) {
+      freed = false;
+      for (const block of blocks) {
+        if (floatsAfterRemoval(grid, [...ship.hold, ...blocks], block).length > 0) continue;
+        blocks = blocks.filter((each) => each !== block);
+        freed = true;
+        break;
+      }
+    }
+    return blocks.length * this.tuning.orePerCell;
+  }
+
+  /**
+   * Locks a piece of loose ore in place, in a free cell the ore can reach. Like anything in the
+   * bay it has to touch a wall or something that does. Works in flight too.
+   */
+  lockOre(ship: Ship, cell: Cell): boolean {
+    const grid = this.bayGrid(ship);
+    const { orePerCell } = this.tuning;
+    if (!grid || ship.ore - this.lockedOre(ship) < orePerCell) return false;
+    const packed = this.packed(ship);
+    if (!reachable(grid, packed).has(cell.y * grid.w + cell.x)) return false;
+    const block: Placed = { module: { part: ORE_BLOCK, wear: 0 }, x: cell.x, y: cell.y, turned: false };
+    if (!sticks(grid, packed, block)) return false;
+    // What's still loose has to fit in what's left.
+    const after = [...packed, block];
+    if ((reachableCells(grid, after) + ship.oreBlocks.length + 1) * orePerCell < ship.ore) return false;
+    ship.oreBlocks.push({ x: cell.x, y: cell.y });
+    return true;
+  }
+
+  /** Lets locked ore loose again, unless it holds something up or the loose ore wouldn't fit. Works in flight too. */
+  unlockOre(ship: Ship, index: number): boolean {
+    const grid = this.bayGrid(ship);
+    const blocks = this.oreBlocksPlaced(ship);
+    const block = blocks[index];
+    if (!grid || !block) return false;
+    const packed = [...ship.hold, ...blocks];
+    if (floatsAfterRemoval(grid, packed, block).length > 0) return false;
+    const after = packed.filter((each) => each !== block);
+    if ((reachableCells(grid, after) + ship.oreBlocks.length - 1) * this.tuning.orePerCell < ship.ore) return false;
+    ship.oreBlocks.splice(index, 1);
+    return true;
+  }
+
+  /**
+   * After ore leaves the ship: locked blocks go with it as needed, newest first, but never one
+   * that holds something up, unless the ore was lost rather than sold.
+   */
+  private trimBlocks(ship: Ship, lost = false): void {
+    const grid = this.bayGrid(ship);
+    if (!grid) {
+      ship.oreBlocks = [];
+      return;
+    }
+    while (ship.oreBlocks.length > 0 && this.lockedOre(ship) > ship.ore) {
+      const blocks = this.oreBlocksPlaced(ship);
+      const packed = [...ship.hold, ...blocks];
+      let index = -1;
+      for (let i = blocks.length - 1; i >= 0 && index < 0; i--) if (floatsAfterRemoval(grid, packed, blocks[i]).length === 0) index = i;
+      if (index < 0 && !lost) return;
+      ship.oreBlocks.splice(index < 0 ? blocks.length - 1 : index, 1);
+    }
+    if (lost) this.settleHold(ship, this.baseAt(ship));
   }
 
   /** The grid of the ship's fitted bay, unless it's destroyed: a ship without one carries nothing. */
@@ -2526,8 +2621,9 @@ export class Sim {
    */
   holdSpotFor(ship: Ship, item: Module): Placed | null {
     const grid = this.bayGrid(ship);
-    const spot = grid ? autoPlace(grid, ship.hold, item) : null;
-    if (!spot || reachableCells(grid!, [...ship.hold, spot]) * this.tuning.orePerCell < ship.ore) return null;
+    const packed = this.packed(ship);
+    const spot = grid ? autoPlace(grid, packed, item) : null;
+    if (!spot || this.oreRoom(ship, grid!, [...packed, spot]) < ship.ore) return null;
     return spot;
   }
 
@@ -2541,7 +2637,7 @@ export class Sim {
     const grid = this.bayGrid(ship);
     const item = ship.hold[index];
     if (!grid || !item) return [];
-    return floatsAfterRemoval(grid, ship.hold, item).map((each) => each.module);
+    return floatsAfterRemoval(grid, this.packed(ship), item).map((each) => each.module);
   }
 
   /**
@@ -2551,12 +2647,15 @@ export class Sim {
    */
   private settleHold(ship: Ship, base: Base | null): void {
     const grid = this.bayGrid(ship);
-    if (grid && ship.hold.every((item) => canPlace(grid, ship.hold, item))) return;
+    // Locked ore stays only while it still fits and sticks in the bay as it is; else it comes loose.
+    const blocks = this.oreBlocksPlaced(ship);
+    if (!grid || !blocks.every((block) => canPlace(grid, this.packed(ship), block))) ship.oreBlocks = [];
+    if (grid && ship.hold.every((item) => canPlace(grid, this.packed(ship), item))) return;
     if (!grid && ship.hold.length === 0) return;
     const items = ship.hold.map((item) => item.module).sort((a, b) => cellCount(b) - cellCount(a));
     ship.hold = [];
     for (const module of items) {
-      const spot = grid ? autoPlace(grid, ship.hold, module) : null;
+      const spot = grid ? autoPlace(grid, this.packed(ship), module) : null;
       if (spot) ship.hold.push(spot);
       else if (base) this.stow(ship, [module], base);
       else this.setAdrift(ship, module, 25);
@@ -2582,6 +2681,7 @@ export class Sim {
     if (amount <= 0) return 0;
     const credits = amount * this.tuning.depositPays;
     ship.ore -= amount;
+    this.trimBlocks(ship);
     deposit.ore += amount;
     this.accountOf(ship).credits += credits;
     this.stationAccount.credits -= credits;
@@ -2747,6 +2847,7 @@ export class Sim {
     const saved = {
       fit: { ...ship.fit },
       hold: [...ship.hold],
+      oreBlocks: [...ship.oreBlocks],
       programs: [...ship.programs],
       software: new Set(ship.software),
       items: locker ? [...locker.items] : [],
@@ -2762,6 +2863,7 @@ export class Sim {
     if (done && !overflowed) return true;
     ship.fit = saved.fit;
     ship.hold = saved.hold;
+    ship.oreBlocks = saved.oreBlocks;
     ship.programs = saved.programs;
     ship.software = saved.software;
     if (locker) locker.items = saved.items;
@@ -2855,7 +2957,7 @@ export class Sim {
     const base = this.baseAt(ship);
     const bay = !into || into.at === "hold" ? this.bayGrid(ship) : null;
     if (bay) {
-      const spots = this.planSpots(bay, ship.hold, modules, into?.at === "hold" ? into.spot : undefined, true, ship.ore);
+      const spots = this.planSpots(bay, this.packed(ship), modules, into?.at === "hold" ? into.spot : undefined, true, ship.ore, ship.oreBlocks.length);
       if (spots) return { where: "hold", spots };
     }
     if (base && (!into || into.at === "locker")) {
@@ -2870,7 +2972,7 @@ export class Sim {
    * Places modules in a grid one after another, the first at a given spot if there is one.
    * All of them or null. In the bay each must stick and the ore aboard must keep its room.
    */
-  private planSpots(grid: GridSpec, there: Placed[], modules: Module[], at: Spot | undefined, bay: boolean, ore: number): Placed[] | null {
+  private planSpots(grid: GridSpec, there: Placed[], modules: Module[], at: Spot | undefined, bay: boolean, ore: number, blocks = 0): Placed[] | null {
     const placed: Placed[] = [];
     for (const module of modules) {
       const all = [...there, ...placed];
@@ -2881,7 +2983,7 @@ export class Sim {
     if (bay) {
       const after = [...there, ...placed];
       if (!after.every((each) => sticks(grid, after, each))) return null;
-      if (reachableCells(grid, after) * this.tuning.orePerCell < ore) return null;
+      if ((reachableCells(grid, after) + blocks) * this.tuning.orePerCell < ore) return null;
     }
     return placed;
   }
@@ -2979,7 +3081,7 @@ export class Sim {
         const locker = this.lockerAt(base);
         const grid = this.bayGrid(ship);
         const fromLocker = locker.items.filter((item) => item.module.part === id && item.module.wear < 1);
-        const fromHold = ship.hold.filter((item) => item.module.part === id && item.module.wear < 1 && (!grid || floatsAfterRemoval(grid, ship.hold, item).length === 0));
+        const fromHold = ship.hold.filter((item) => item.module.part === id && item.module.wear < 1 && (!grid || floatsAfterRemoval(grid, this.packed(ship), item).length === 0));
         const kept = [...fromLocker, ...fromHold];
         if (kept.length >= mounts.length) {
           for (const mount of mounts) {
@@ -3081,8 +3183,9 @@ export class Sim {
       if (!grid) return false;
       const tries = [false, true].map((turned) => ({ module: old, x: placed.x, y: placed.y, turned }));
       const spot = tries.find((each) => {
-        const after = [...ship.hold, each];
-        return canPlace(grid, ship.hold, each) && after.every((other) => sticks(grid, after, other)) && reachableCells(grid, after) * this.tuning.orePerCell >= ship.ore;
+        const packed = this.packed(ship);
+        const after = [...packed, each];
+        return canPlace(grid, packed, each) && after.every((other) => sticks(grid, after, other)) && this.oreRoom(ship, grid, after) >= ship.ore;
       });
       const found = spot ?? this.holdSpotFor(ship, old);
       if (!found) return false;
@@ -3125,7 +3228,8 @@ export class Sim {
       // Taking them out must leave nothing else in the bay floating.
       const grid = this.bayGrid(ship);
       const rest = ship.hold.filter((placed) => !pair.includes(placed.module));
-      if (grid && !rest.every((placed) => sticks(grid, rest, placed))) return false;
+      const left = this.packed(ship, rest);
+      if (grid && !left.every((placed) => sticks(grid, left, placed))) return false;
       ship.hold = rest;
     } else locker.items = locker.items.filter((placed) => !pair.includes(placed.module));
     const mounts = mountsFor(ship, item.part);
@@ -3236,9 +3340,10 @@ export class Sim {
     let spot: Placed | null;
     if (at) {
       spot = { module: item, ...at };
-      const after = [...rest, spot];
-      if (!canPlace(grid, rest, spot) || !after.every((placed) => sticks(grid, after, placed))) return false;
-      if (reachableCells(grid, after) * this.tuning.orePerCell < ship.ore) return false;
+      const packed = this.packed(ship, rest);
+      const after = [...packed, spot];
+      if (!canPlace(grid, packed, spot) || !after.every((placed) => sticks(grid, after, placed))) return false;
+      if (this.oreRoom(ship, grid, after) < ship.ore) return false;
     } else {
       if (from.at === "hold") return false;
       spot = this.holdSpotFor(ship, item);
@@ -5148,6 +5253,7 @@ export class Sim {
     for (const module of [...modules, ...ship.hold.map((item) => item.module)]) if (module.wear < 1) this.setAdrift(ship, module, WRECK_ORE_SPEED * 2);
     ship.fit = {};
     ship.hold = [];
+    ship.oreBlocks = [];
     refresh(ship);
   }
 
@@ -5343,6 +5449,7 @@ export class Sim {
       });
     }
     ship.ore -= amount;
+    if (ship.oreBlocks.length > 0) this.trimBlocks(ship, true);
   }
 
   private removeShip(ship: Ship): void {
@@ -5963,14 +6070,17 @@ export class Sim {
 
   /** Ore turns into credits one piece at a time while in the dock. */
   private unloadOre(ship: Ship, dt: number): void {
-    if (ship.ore <= 0 || !this.isHome(ship)) {
+    // Locked ore that holds something up stays aboard.
+    const keep = ship.oreBlocks.length > 0 ? this.pinnedOre(ship) : 0;
+    if (ship.ore <= keep || !this.isHome(ship)) {
       ship.unloadTimer = 0;
       return;
     }
     ship.unloadTimer += dt;
-    while (ship.unloadTimer >= UNLOAD_SECONDS && ship.ore > 0) {
+    while (ship.unloadTimer >= UNLOAD_SECONDS && ship.ore > keep) {
       ship.unloadTimer -= UNLOAD_SECONDS;
       ship.ore--;
+      if (ship.oreBlocks.length > 0) this.trimBlocks(ship);
       if (ship.faction === "pirate") {
         this.pirateOre++;
       } else {

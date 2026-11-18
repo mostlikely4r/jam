@@ -53,9 +53,12 @@ export interface Cell {
   y: number;
 }
 
-/** A cargo bay's grid: its size in cells and its entry cell, which sits on an edge. */
+/**
+ * A cargo bay's grid, front up: its size in cells and its entry, which sits on an edge, `size`
+ * cells long from its cell (across on the top or bottom edge, down a side).
+ */
 export interface BayGrid extends Shape {
-  entry: Cell;
+  entry: Cell & { size?: number };
 }
 
 export interface Part {
@@ -260,7 +263,7 @@ export const PARTS: Part[] = [
     short: "bay",
     price: 250,
     weight: 0.1,
-    bay: { w: 5, h: 4, entry: { x: 2, y: 0 } },
+    bay: { w: 4, h: 5, entry: { x: 1, y: 0, size: 2 } },
     description: "Room for 20 more ore, for a little more weight",
     tier: 1,
   },
@@ -272,7 +275,7 @@ export const PARTS: Part[] = [
     short: "bay+",
     price: 600,
     weight: 0.25,
-    bay: { w: 10, h: 5, entry: { x: 4, y: 0 } },
+    bay: { w: 5, h: 10, entry: { x: 1, y: 0, size: 3 } },
     description: "Room for 50 more ore, and you'll feel the weight",
     tier: 2,
   },
@@ -287,7 +290,7 @@ export const PARTS: Part[] = [
     short: "bay-",
     price: 100,
     weight: 0,
-    bay: { w: 5, h: 2, entry: { x: 2, y: 0 } },
+    bay: { w: 2, h: 5, entry: { x: 0, y: 0, size: 2 } },
     description: "The bay a bare hull comes with. Room for 10 ore",
     tier: 0,
   },
@@ -431,8 +434,14 @@ export function isGear(part: Part): boolean {
 
 /** The cells a part takes, unturned: its own shape, or one cell for anything without one. */
 export function shapeOf(id: PartId): Shape {
-  return partOf(id).shape ?? { w: 1, h: 1 };
+  return PARTS_BY_ID.get(id)?.shape ?? { w: 1, h: 1 };
 }
+
+/**
+ * Not a part: ore locked in a cell of the bay, standing in for one on the bay's grid so the
+ * grid's rules (taking room, holding things up) treat it like any other one-cell thing.
+ */
+export const ORE_BLOCK = "oreBlock" as PartId;
 
 /** A part by its id. */
 export function partOf(id: PartId): Part {

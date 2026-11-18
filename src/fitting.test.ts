@@ -280,6 +280,8 @@ describe("critical, the pod and the yard", () => {
     const { ship } = sim;
     sim.buyPart(ship, "strafe");
     buyAndFit(sim, "bay");
+    // The small bay that came off stays behind.
+    while (ship.hold.length > 0) sim.toLocker(ship, { at: "hold", index: 0 });
     sim.buyPart(ship, "spinStabilizer");
     ship.x = ship.px = ship.x + 2500;
     sim.step();
@@ -851,7 +853,7 @@ describe("the stats of hulls and parts", () => {
 });
 
 describe("the bay's grid", () => {
-  /** A docked racer with its small bay (5 by 2, entry at the top middle) and a spare gun in its locker. */
+  /** A docked racer with its small bay (2 across, 5 down, front up, the whole top row its entry) and spare guns in its locker. */
   function withSpareGun(): Sim {
     const sim = docked("racer");
     sim.ship.ore = 0;
@@ -863,13 +865,10 @@ describe("the bay's grid", () => {
     const sim = withSpareGun();
     const { ship } = sim;
     expect(sim.cargoSpace(ship)).toBe(10);
-    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 0, y: 0, turned: false })).toBe(true);
+    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 0, y: 3, turned: false })).toBe(true);
     expect(sim.cargoSpace(ship)).toBe(8);
-    // At the far wall, the second gun seals nothing off.
-    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 4, y: 0, turned: false })).toBe(true);
-    expect(sim.cargoSpace(ship)).toBe(6);
-    // Moved to x 1, the first gun leaves column 0 a pocket the ore can't reach.
-    expect(sim.toHold(ship, { at: "hold", index: 0 }, { x: 1, y: 0, turned: false })).toBe(true);
+    // Turned across the bay above the first, the second gun seals off the two cells beside it.
+    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 0, y: 2, turned: true })).toBe(true);
     expect(sim.cargoSpace(ship)).toBe(4);
   });
 
@@ -880,8 +879,8 @@ describe("the bay's grid", () => {
     sim.devSet(ship, "tractor", true);
     expect(sim.tractorOn(ship)).toBe(true);
     sim.putInLocker(sim.baseAt()!, { part: "gun2", wear: 0 });
-    const entry = sim.bayGrid(ship)!.entry;
-    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: entry.x, y: entry.y, turned: false })).toBe(true);
+    // Turned across the top row, it covers both cells of the entry.
+    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 0, y: 0, turned: true })).toBe(true);
     expect(sim.cargoSpace(ship)).toBe(0);
     expect(sim.tractorOn(ship)).toBe(false);
   });
@@ -891,12 +890,12 @@ describe("the bay's grid", () => {
     const { ship } = sim;
     ship.ore = 0;
     sim.devSet(ship, "bay", true);
-    // The bay is 5 by 4: a single cell at 2,1 touches no wall.
+    // The bay is 4 across, 5 down: a single cell at 1,2 touches no wall.
     sim.putInLocker(sim.baseAt()!, { part: "flightComputer", wear: 0 });
     sim.putInLocker(sim.baseAt()!, { part: "gun2", wear: 0 });
-    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 2, y: 1, turned: false })).toBe(false);
-    expect(sim.toHold(ship, { at: "locker", index: 1 }, { x: 2, y: 2, turned: false })).toBe(true);
-    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 2, y: 1, turned: false })).toBe(true);
+    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 1, y: 2, turned: false })).toBe(false);
+    expect(sim.toHold(ship, { at: "locker", index: 1 }, { x: 1, y: 3, turned: false })).toBe(true);
+    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 1, y: 2, turned: false })).toBe(true);
   });
 
   it("refuses to take out an item that holds another up, and says which", () => {
@@ -906,8 +905,8 @@ describe("the bay's grid", () => {
     sim.devSet(ship, "bay", true);
     sim.putInLocker(sim.baseAt()!, { part: "gun2", wear: 0 });
     sim.putInLocker(sim.baseAt()!, { part: "flightComputer", wear: 0 });
-    sim.toHold(ship, { at: "locker", index: 0 }, { x: 2, y: 2, turned: false });
-    sim.toHold(ship, { at: "locker", index: 0 }, { x: 2, y: 1, turned: false });
+    sim.toHold(ship, { at: "locker", index: 0 }, { x: 1, y: 3, turned: false });
+    sim.toHold(ship, { at: "locker", index: 0 }, { x: 1, y: 2, turned: false });
     expect(sim.floatingWithout(ship, 0).map((item) => item.part)).toEqual(["flightComputer"]);
     expect(sim.toLocker(ship, { at: "hold", index: 0 })).toBe(false);
     expect(sim.sellItem(ship, { at: "hold", index: 0 })).toBe(false);
@@ -1107,10 +1106,10 @@ describe("moving things on the blueprint", () => {
   it("dropped on a filled mount, a part swaps: the old one goes to the new one's spot", () => {
     const sim = docked("racer");
     const { ship } = sim;
-    sim.buyPart(ship, "gun2", { at: "hold", spot: { x: 4, y: 0, turned: false } });
+    sim.buyPart(ship, "gun2", { at: "hold", spot: { x: 1, y: 3, turned: false } });
     expect(sim.fitItem(ship, { at: "hold", index: 0 }, "gun")).toBe(true);
     expect(ship.fit.gun!.part).toBe("gun2");
-    expect(ship.hold).toMatchObject([{ module: { part: "gun1" }, x: 4, y: 0 }]);
+    expect(ship.hold).toMatchObject([{ module: { part: "gun1" }, x: 1, y: 3 }]);
     // A mount that doesn't take it refuses.
     expect(sim.fitItem(ship, { at: "hold", index: 0 }, "computer")).toBe(false);
   });
@@ -1139,5 +1138,72 @@ describe("moving things on the blueprint", () => {
     expect(sim.fitItem(ship, { at: "mount", mount: "thrusterStrafeLeft" }, "thrusterRotateLeft")).toBe(false);
     expect(sim.fitItem(ship, { at: "mount", mount: "gun" }, "tractor")).toBe(false);
     expect(ship.fit.gun!.part).toBe("gun1");
+  });
+});
+
+describe("locked ore", () => {
+  it("locks a piece of loose ore in a cell next to a wall, and it still counts as room", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    ship.ore = 4;
+    expect(sim.lockOre(ship, { x: 0, y: 4 })).toBe(true);
+    expect(ship.oreBlocks).toEqual([{ x: 0, y: 4 }]);
+    expect(sim.lockedOre(ship)).toBe(1);
+    expect(sim.cargoSpace(ship)).toBe(10);
+    // Not on a taken cell.
+    expect(sim.lockOre(ship, { x: 0, y: 4 })).toBe(false);
+  });
+
+  it("only next to a wall, an item or other locked ore, and only loose ore", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    sim.devSet(ship, "bay", true);
+    ship.ore = 2;
+    expect(sim.lockOre(ship, { x: 1, y: 2 })).toBe(false);
+    expect(sim.lockOre(ship, { x: 1, y: 4 })).toBe(true);
+    expect(sim.lockOre(ship, { x: 1, y: 3 })).toBe(true);
+    expect(sim.lockOre(ship, { x: 2, y: 4 })).toBe(false);
+  });
+
+  it("can seal off part of the bay, but not so the ore aboard no longer fits", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    ship.ore = 5;
+    expect(sim.lockOre(ship, { x: 0, y: 1 })).toBe(true);
+    // Across the bay it would leave 2 cells open by the entry, and 2 locked: no room for 5.
+    expect(sim.lockOre(ship, { x: 1, y: 1 })).toBe(false);
+    ship.ore = 4;
+    expect(sim.lockOre(ship, { x: 1, y: 1 })).toBe(true);
+    expect(sim.cargoSpace(ship)).toBe(4);
+  });
+
+  it("holds an item up like a wall, and then stays when the rest is sold", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    sim.devSet(ship, "bay", true);
+    ship.ore = 5;
+    expect(sim.lockOre(ship, { x: 1, y: 4 })).toBe(true);
+    sim.putInLocker(sim.baseAt()!, { part: "flightComputer", wear: 0 });
+    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 1, y: 3, turned: false })).toBe(true);
+    expect(sim.unlockOre(ship, 0)).toBe(false);
+    expect(sim.pinnedOre(ship)).toBe(1);
+    for (let i = 0; i < 120 * 20; i++) sim.step();
+    expect(ship.ore).toBe(1);
+    expect(ship.oreBlocks.length).toBe(1);
+    // With the computer gone, the last piece sells too.
+    expect(sim.toLocker(ship, { at: "hold", index: 0 })).toBe(true);
+    for (let i = 0; i < 120 * 5; i++) sim.step();
+    expect(ship.ore).toBe(0);
+    expect(ship.oreBlocks).toEqual([]);
+  });
+
+  it("unlocks again, back into the loose ore", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    ship.ore = 2;
+    sim.lockOre(ship, { x: 0, y: 4 });
+    expect(sim.unlockOre(ship, 0)).toBe(true);
+    expect(ship.oreBlocks).toEqual([]);
+    expect(ship.ore).toBe(2);
   });
 });

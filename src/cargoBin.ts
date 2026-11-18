@@ -197,3 +197,18 @@ export function drawBin(ctx: CanvasRenderingContext2D, bin: Bin, box: Box, color
   }
   ctx.restore();
 }
+
+/**
+ * Where an area of the bay's grid sits in its box. The grid is front up, as on the ship
+ * screen: across it is across the ship, and its top row is the end nearest the nose.
+ */
+export function gridRect(box: Box, grid: { w: number; h: number }, x: number, y: number, w: number, h: number): Rect {
+  const along = box.w / grid.h;
+  const across = box.h / grid.w;
+  return { x: box.w / 2 - (y + h) * along, y: -box.h / 2 + x * across, w: h * along, h: w * across };
+}
+
+/** Where a lump is on the bay's grid, in cells (not whole): the other way round from `gridRect`. */
+export function lumpOnGrid(box: Box, grid: { w: number; h: number }, lump: { x: number; y: number }): { x: number; y: number } {
+  return { x: (lump.y + box.h / 2) / (box.h / grid.w), y: (box.w / 2 - lump.x) / (box.w / grid.h) };
+}

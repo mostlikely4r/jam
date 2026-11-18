@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoPlace, canPlace, cellsOf, fits, floatsAfterRemoval, footprint, reachableCells, sticks, usedCells, type GridSpec, type Placed } from "./grid";
+import { autoPlace, canPlace, cellsOf, entryCells, fits, floatsAfterRemoval, footprint, reachableCells, sticks, usedCells, type GridSpec, type Placed } from "./grid";
 import type { PartId } from "./parts";
 
 // Shapes as shipped: turnThrusters 1x1, gun1 1x2, tractor 2x2.
@@ -71,6 +71,19 @@ describe("grid", () => {
     // The only spot would block the entry: no spot.
     expect(autoPlace({ w: 1, h: 1, entry: { x: 0, y: 0 } }, [], { part: "turnThrusters", wear: 0 })).toBeNull();
     expect(autoPlace(smallBay, [], { part: "largeBay", wear: 0 })).toBeNull();
+  });
+
+  it("an entry can be more than one cell, along its edge: ore gets in while any of it is open", () => {
+    const front: GridSpec = { w: 4, h: 5, entry: { x: 1, y: 0, size: 2 } };
+    expect(entryCells(front)).toEqual([
+      { x: 1, y: 0 },
+      { x: 2, y: 0 },
+    ]);
+    expect(reachableCells(front, [item("turnThrusters", 1, 0)])).toBe(19);
+    expect(reachableCells(front, [item("gun1", 1, 0, true)])).toBe(0);
+    // Auto-placing keeps every cell of it open.
+    const spot = autoPlace(front, [], { part: "tractor", wear: 0 })!;
+    expect(cellsOf(spot).some((cell) => cell.y === 0 && (cell.x === 1 || cell.x === 2))).toBe(false);
   });
 
   it("auto-places in a locker at the first free spot, top left first", () => {

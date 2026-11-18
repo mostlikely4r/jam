@@ -496,7 +496,10 @@ function tradeDrone(): void {
 /** The ship and locker screens, made for whatever world is loaded now. */
 let inventoryScreen: Inventory | null = null;
 function inventory(): Inventory {
-  if (!inventoryScreen || inventoryScreen.sim !== sim) inventoryScreen = new Inventory(inventoryBox, sim);
+  if (!inventoryScreen || inventoryScreen.sim !== sim) {
+    inventoryScreen = new Inventory(inventoryBox, sim);
+    inventoryScreen.lumps = () => renderer.lumpsOf(sim.ship);
+  }
   return inventoryScreen;
 }
 

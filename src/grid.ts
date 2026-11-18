@@ -3,8 +3,25 @@ import { shapeOf, type Cell, type Shape } from "./parts";
 
 export type { Cell, Shape };
 
-/** A grid: a bay has an entry cell on its edge (and the sticking rule); a locker has none. */
-export interface GridSpec { w: number; h: number; entry?: Cell }
+/**
+ * A grid: a bay has an entry on its edge (and the sticking rule); a locker has none. The entry
+ * is `size` cells (1 without one) from its cell along the edge it sits on: across on the top or
+ * bottom edge, down on a side.
+ */
+export interface GridSpec { w: number; h: number; entry?: Cell & { size?: number } }
+
+/** The cells of a grid's entry: none for a locker. */
+export function entryCells(grid: GridSpec): Cell[] {
+  const entry = grid.entry;
+  if (!entry) return [];
+  const across = entry.y === 0 || entry.y === grid.h - 1;
+  const cells: Cell[] = [];
+  for (let i = 0; i < Math.max(1, entry.size ?? 1); i++) {
+    const cell = across ? { x: entry.x + i, y: entry.y } : { x: entry.x, y: entry.y + i };
+    if (cell.x < grid.w && cell.y < grid.h) cells.push(cell);
+  }
+  return cells;
+}
 /** An item placed on a grid: its top-left cell, and whether it's turned 90°. */
 export interface Placed { module: Module; x: number; y: number; turned: boolean }
 
@@ -89,9 +106,9 @@ export function reachable(grid: GridSpec, items: Placed[]): Set<number> {
     for (let k = 0; k < grid.w * grid.h; k++) if (!taken.has(k)) free.add(k);
     return free;
   }
-  if (taken.has(key(grid.entry))) return new Set();
-  const seen = new Set([key(grid.entry)]);
-  const queue: Cell[] = [grid.entry];
+  const open = entryCells(grid).filter((cell) => !taken.has(key(cell)));
+  const seen = new Set(open.map(key));
+  const queue: Cell[] = [...open];
   for (let cur = queue.pop(); cur; cur = queue.pop()) {
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const n = { x: cur.x + dx, y: cur.y + dy };
@@ -107,7 +124,7 @@ export function reachable(grid: GridSpec, items: Placed[]): Set<number> {
 /** Finds a spot for a new item: in a bay the one that keeps the most room reachable, in a locker the first free one. */
 export function autoPlace(grid: GridSpec, items: Placed[], module: Module): Placed | null {
   const { w, h } = shapeOf(module.part);
-  const entry = grid.entry;
+  const entry = entryCells(grid);
   let best: Placed | null = null;
   let bestReach = -1;
   let bestFar = -1;
@@ -117,10 +134,10 @@ export function autoPlace(grid: GridSpec, items: Placed[], module: Module): Plac
         const spot: Placed = { module, x, y, turned };
         if (!canPlace(grid, items, spot)) continue;
         const cells = cellsOf(spot);
-        if (!entry) return spot;
-        if (cells.some((c) => c.x === entry.x && c.y === entry.y)) continue;
+        if (entry.length === 0) return spot;
+        if (cells.some((c) => entry.some((e) => c.x === e.x && c.y === e.y))) continue;
         const reach = reachableCells(grid, [...items, spot]);
-        const far = Math.min(...cells.map((c) => Math.abs(c.x - entry.x) + Math.abs(c.y - entry.y)));
+        const far = Math.min(...cells.flatMap((c) => entry.map((e) => Math.abs(c.x - e.x) + Math.abs(c.y - e.y))));
         // Scan order is already y, x, unturned first, so only a strict improvement replaces the best.
         if (reach > bestReach || (reach === bestReach && far > bestFar)) {
           best = spot;

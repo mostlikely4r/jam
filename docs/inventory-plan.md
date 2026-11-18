@@ -248,6 +248,27 @@ and see that no ore comes in. Seal off a pocket and see it stay empty.
 - In flight the bay box draws its items as blocks over the box's own grid. Ore lumps stay out
   of them and out of sealed pockets (`src/cargoBin.ts`, tested in `src/cargoBin.test.ts`).
 
+## After the first play (2026-11-18)
+
+- **Bays are front up** (*decided*), like the blueprint: across the grid is across the ship,
+  and its top row is the end nearest the nose. That matches the bay's box in flight, which is
+  long along the ship. The grids turn round: small bay 2 across by 5, bay 4 by 5, large bay 5
+  by 10. They hold the same ore as before.
+- **The entry is 2 or 3 cells, centred** (*decided*): the small bay's whole top row (2), the
+  bay's middle 2, the large bay's middle 3. Ore gets in while any of it is open. Auto-placing
+  keeps all of it open. The hull designer sets its width.
+- **The ship screen shows the loose ore** (*decided*): the lumps are drawn on the bay grid where
+  they are in flight, lit up, every frame.
+- **Locked ore** (*decided*): clicking a lump locks it into its cell as a block of ore, in
+  flight too. A block is still the ship's ore and sells with the rest. It takes its cell, holds
+  items up like a wall, keeps loose lumps out, and can seal a pocket or the entry. Like anything
+  in the bay it must touch a wall or something that does, and what's still loose must fit in
+  what's left. Clicking a block lets it loose again, unless it holds something up.
+- Unloading and selling take loose ore first, then blocks, newest first. A block that holds an
+  item up stays aboard until the item moves (mine). Ore lost in a wreck or a broken bay takes
+  its blocks with it. When the bay changes, blocks that no longer fit come loose.
+- Built the same day. Save version 6, `src/start.json` made again.
+
 ## Not doing
 
 - **Swapping on buy for the player.** It was today's behaviour. The buy order above replaces

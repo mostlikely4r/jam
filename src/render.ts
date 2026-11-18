@@ -1,7 +1,7 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
 import { DAMAGED_AT, facing, HULL_MOUNTS, turretMount, works, type Module } from "./fitting";
-import { drawBin, newBin, stepBin, type Bin, type Rect } from "./cargoBin";
+import { drawBin, gridRect, newBin, stepBin, type Bin, type Rect } from "./cargoBin";
 import { cellsOf, footprint, reachable } from "./grid";
 import { partOf } from "./parts";
 import { bayBox, drawVectorShip } from "./shipArt";
@@ -140,6 +140,11 @@ export class Renderer {
   /** Each ship's own scatter of cargo lumps. */
   /** The ore loose in each ship's bay, as drawn. */
   private bins = new WeakMap<Ship, Bin>();
+
+  /** The loose ore lumps in a ship's bay as last drawn, in its box's frame, for the ship screen. */
+  lumpsOf(ship: Ship): readonly { x: number; y: number }[] {
+    return this.bins.get(ship)?.lumps ?? [];
+  }
 
   /** Whether the player is watching their wreck, and shouldn't be flying. */
   get watchingWreck(): boolean {
@@ -1280,32 +1285,36 @@ export class Renderer {
       bin = newBin(now);
       this.bins.set(ship, bin);
     }
-    const share = Math.min(1, ship.ore / Math.max(1, sim.cargoSpace(ship)));
+    // Locked ore sits in its cells: only the loose ore bounces, in the room left to it.
+    const locked = sim.lockedOre(ship);
+    const share = Math.min(1, (ship.ore - locked) / Math.max(1, sim.cargoSpace(ship) - locked));
     const box = bayBox(ship);
     // The bay's grid laid over the box: items, and pockets sealed off from the entry, keep the ore out.
     const grid = sim.bayGrid(ship);
     const items: Rect[] = [];
+    const ore: Rect[] = [];
     const blocked: Rect[] = [];
     if (grid) {
-      const cellW = box.w / grid.w;
-      const cellH = box.h / grid.h;
-      const rect = (x: number, y: number, w: number, h: number): Rect => ({ x: -box.w / 2 + x * cellW, y: -box.h / 2 + y * cellH, w: w * cellW, h: h * cellH });
+      const rect = (x: number, y: number, w: number, h: number): Rect => gridRect(box, grid, x, y, w, h);
       for (const item of ship.hold) {
         const { w, h } = footprint(item);
         items.push(rect(item.x, item.y, w, h));
       }
-      blocked.push(...items);
-      const open = reachable(grid, ship.hold);
-      const taken = new Set(ship.hold.flatMap((item) => cellsOf(item).map((cell) => cell.y * grid.w + cell.x)));
+      for (const block of ship.oreBlocks) ore.push(rect(block.x, block.y, 1, 1));
+      blocked.push(...items, ...ore);
+      const packed = sim.packed(ship);
+      const open = reachable(grid, packed);
+      const taken = new Set(packed.flatMap((item) => cellsOf(item).map((cell) => cell.y * grid.w + cell.x)));
       for (let k = 0; k < grid.w * grid.h; k++) if (!open.has(k) && !taken.has(k)) blocked.push(rect(k % grid.w, Math.floor(k / grid.w), 1, 1));
     }
     stepBin(bin, box, share, ship, now, blocked);
-    if (bin.lumps.length === 0 && items.length === 0) return;
+    if (bin.lumps.length === 0 && items.length === 0 && ore.length === 0) return;
     // The bay's transparency covers the ore and items riding in it too.
     this.ctx.save();
     if ((box.alpha ?? 1) < 1) this.ctx.globalAlpha = box.alpha;
     if (items.length > 0) {
       const { ctx } = this;
+      // Drawn from the same grid as the ship screen.
       ctx.save();
       ctx.translate(box.x, box.y);
       ctx.rotate(box.angle);
@@ -1316,6 +1325,15 @@ export class Renderer {
         ctx.fillRect(item.x + 0.1, item.y + 0.1, item.w - 0.2, item.h - 0.2);
         ctx.strokeRect(item.x + 0.1, item.y + 0.1, item.w - 0.2, item.h - 0.2);
       }
+      ctx.restore();
+    }
+    if (ore.length > 0) {
+      const { ctx } = this;
+      ctx.save();
+      ctx.translate(box.x, box.y);
+      ctx.rotate(box.angle);
+      ctx.fillStyle = ORE_COLORS[0];
+      for (const block of ore) ctx.fillRect(block.x + 0.1, block.y + 0.1, block.w - 0.2, block.h - 0.2);
       ctx.restore();
     }
     drawBin(this.ctx, bin, box, ORE_COLORS, share >= 1);

@@ -721,7 +721,7 @@ export class HullDesigner {
         const value = Number(input.value);
         if (!Number.isInteger(value) || value < min) return;
         set(value);
-        if (part.bay) part.bay.entry = onEdge(part.bay.w, part.bay.h, part.bay.entry);
+        if (part.bay) part.bay.entry = { ...part.bay.entry, ...onEdge(part.bay.w, part.bay.h, part.bay.entry) };
         this.changed(true);
       });
       return this.labelled(label, input);
@@ -757,6 +757,7 @@ export class HullDesigner {
             cells("Bay grid down", part.bay.h, 1, (value) => (part.bay!.h = value)),
             cells("Bay entry cell across (from 0)", part.bay.entry.x, 0, (value) => (part.bay!.entry.x = value)),
             cells("Bay entry cell down (from 0)", part.bay.entry.y, 0, (value) => (part.bay!.entry.y = value)),
+            cells("Bay entry width in cells", part.bay.entry.size ?? 1, 1, (value) => (part.bay!.entry.size = value)),
           ]
         : []),
       ...(part.slots !== undefined ? [stat("slots", "Programs it runs at once", 1)] : []),

@@ -111,6 +111,8 @@ export interface Fitting {
   parts: Set<PartId>;
   /** Modules placed on the cargo bay's grid, taking room from the ore. */
   hold: Placed[];
+  /** Ore locked in place in the bay, one cell each: part of the ship's ore, but it stays put. */
+  oreBlocks: { x: number; y: number }[];
   /** The decal part each decal mount shows. Looks only. A ship without one shows the first that fits. */
   decals?: Partial<Record<MountId, PartId>>;
 }
@@ -220,7 +222,8 @@ function applyPartStats(id: PartId, stats: PartStats): void {
   if (shape && cells(shape.w, 1) && cells(shape.h, 1)) part.shape = { w: shape.w, h: shape.h };
   const bay = stats.bay;
   if (bay && cells(bay.w, 1) && cells(bay.h, 1) && bay.entry && cells(bay.entry.x, 0) && cells(bay.entry.y, 0)) {
-    part.bay = { w: bay.w, h: bay.h, entry: onEdge(bay.w, bay.h, bay.entry) };
+    const size = cells(bay.entry.size, 1) ? (bay.entry.size as number) : 1;
+    part.bay = { w: bay.w, h: bay.h, entry: { ...onEdge(bay.w, bay.h, bay.entry), ...(size > 1 ? { size } : {}) } };
   }
   if (stats.tier === 0 || stats.tier === 1 || stats.tier === 2) part.tier = stats.tier;
   if (stats.set !== undefined && Number.isFinite(stats.set) && stats.set >= 1) part.set = Math.round(stats.set);
@@ -402,7 +405,7 @@ export function hullDefaults(model: ShipModel): Partial<Record<MountId, PartId>>
  * decal mount, picked with `random` (0 up to 1).
  */
 export function newFitting(model: ShipModel, random: () => number = Math.random): Fitting {
-  const fitting: Fitting = { fit: {}, software: new Set(), programs: [], parts: new Set(), hold: [], decals: {} };
+  const fitting: Fitting = { fit: {}, software: new Set(), programs: [], parts: new Set(), hold: [], oreBlocks: [], decals: {} };
   for (const [mount, part] of Object.entries(hullDefaults(model)) as [MountId, PartId][]) fitting.fit[mount] = { part, wear: 0 };
   refresh(fitting);
   for (const id of HULL_INFO[model].programs) {

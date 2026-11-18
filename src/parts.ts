@@ -13,6 +13,7 @@ export type PartId =
   | "turret"
   | "bay"
   | "largeBay"
+  | "smallBay"
   | "starmap"
   | "autopilot"
   | "racerMain"
@@ -265,6 +266,21 @@ export const PARTS: Part[] = [
     cargo: 50,
     description: "Room for 50 more ore, and you'll feel the weight",
     tier: 2,
+  },
+  // The bay every bare hull comes with: with none of these, a ship carries no ore at all. It
+  // weighs nothing: the hull's own base weight was tuned with its hold already in it.
+  {
+    id: "smallBay",
+    kind: "section",
+    builtIn: true,
+    size: 5,
+    label: "Small cargo bay",
+    short: "bay-",
+    price: 100,
+    weight: 0,
+    cargo: 10,
+    description: "The bay a bare hull comes with. Room for 10 ore",
+    tier: 0,
   },
   {
     id: "flightComputer",

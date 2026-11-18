@@ -37,13 +37,14 @@ import {
   THRUSTER_ROLES,
   useShipFile,
   type HullUse,
+  type Module,
   type Mount,
   type MountId,
   type ShipFile,
 } from "../fitting";
 import { partFits, partOf, PARTS, SHIP_MODELS, type PartId, type ShipModel, type ThrusterRole } from "../parts";
 import { DEFAULTS } from "../tuning";
-import { drawDecal, drawDecals, drawHull, drawPart } from "../shipArt";
+import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPart } from "../shipArt";
 
 const R = 12;
 const DRAFT_KEY = "jam-ships-draft";
@@ -382,9 +383,9 @@ export class HullDesigner {
     }
     const add = this.button("Add a mount", () => this.addMount());
 
-    // The hull's own stats: what a bare hull costs, holds, weighs and can take. Left empty,
+    // The hull's own stats: what a bare hull costs, weighs and can take. Left empty,
     // the game's own values are used, so the shipped hulls change nothing.
-    const stat = (key: "price" | "cargo" | "weight" | "hull", label: string, fallback: string) => {
+    const stat = (key: "price" | "weight" | "hull", label: string, fallback: string) => {
       const input = document.createElement("input");
       input.type = "number";
       input.step = "1";
@@ -402,7 +403,7 @@ export class HullDesigner {
       return this.labelled(label, input);
     };
     const statsNote = document.createElement("p");
-    statsNote.textContent = `Left empty, the game's own: ${DEFAULTS.rebuildCost} credits for a bare hull, ${DEFAULTS.playerCargo} ore of cargo space (${DEFAULTS.droneCargo} for ships that aren't yours), weight ${DEFAULTS.weight} and 100 hull points.`;
+    statsNote.textContent = `Left empty, the game's own: ${DEFAULTS.rebuildCost} credits for a bare hull, weight ${DEFAULTS.weight} and 100 hull points. Cargo room comes only from fitted bays: each hull comes with the small one.`;
     const out: HTMLElement[] = [
       intro,
       this.section("hull", "Hull", models),
@@ -412,7 +413,6 @@ export class HullDesigner {
         `stats:${this.model}`,
         "Hull stats",
         stat("price", "Price of a bare hull", `${DEFAULTS.rebuildCost} credits`),
-        stat("cargo", "Cargo without a bay (ore)", `${DEFAULTS.playerCargo}, or ${DEFAULTS.droneCargo} for others`),
         stat("weight", "Bare hull weight", String(DEFAULTS.weight)),
         stat("hull", "Hull points", "100"),
         statsNote,
@@ -1140,6 +1140,14 @@ export class HullDesigner {
     for (const mount of mounts.filter((each) => (each.order ?? 0) < 0).sort(byOrder)) this.drawPreview(ctx, model, mount);
     drawHull(ctx, model, [120, 150, 190]);
     drawDecals(ctx, model, decal, "above");
+    // The bay's box, as in game: the bay the preview shows on its mount, or else the empty well.
+    const spot = mounts.find((each) => each.types.includes("cargo bay"));
+    if (spot) {
+      const shown = this.previewOf(model, spot);
+      const fit: Partial<Record<MountId, Module>> =
+        shown && partOf(shown).kind === "section" ? { [spot.id]: { part: shown, wear: 0 } } : {};
+      drawBay(ctx, bayBox({ model, fit }));
+    }
     for (const mount of mounts.filter((each) => (each.order ?? 0) >= 0).sort(byOrder)) this.drawPreview(ctx, model, mount);
     ctx.restore();
 
@@ -1229,11 +1237,13 @@ export class HullDesigner {
 
   /** One mount's preview part, drawn on the blueprint as it shows in game, transparency and all. */
   private drawPreview(ctx: CanvasRenderingContext2D, model: ShipModel, mount: Mount): void {
-    // A decal mount's preview is its decal, drawn with the hull's own decals.
+    // A decal mount's preview is its decal, drawn with the hull's own decals; a cargo bay's is
+    // its box, drawn with the bay. In game neither shows as a part of its own.
     if (mount.decal) return;
     const id = this.previewOf(model, mount);
     if (!id) return;
     const part = partOf(id);
+    if (part.kind === "section") return;
     ctx.save();
     ctx.translate(mount.x * R, mount.y * R);
     ctx.rotate(facing(mount));

@@ -65,8 +65,6 @@ export interface HullInfo {
   usedBy: HullUse[];
   /** Credits a bare hull costs at a yard. Without one, the game's own rebuild cost. */
   price?: number;
-  /** Ore the hull's own hold carries, bay or no bay. Without one, the game's own cargo space. */
-  cargo?: number;
   /** The weight of the bare hull. Without one, the game's base weight. */
   weight?: number;
   /** How many hull points it has. Without one, `MAX_HULL`. */
@@ -150,11 +148,11 @@ function readHullInfo(raw: Partial<HullInfo> | undefined): HullInfo {
   const programs = strings(raw?.programs).filter((id): id is PartId => PARTS.some((part) => part.id === id && part.kind === "program"));
   const usedBy = strings(raw?.usedBy).filter((use): use is HullUse => (HULL_USES as readonly string[]).includes(use));
   // The stats are always present as keys, so a file without one clears a value read before.
-  const stat = (key: "price" | "cargo" | "weight" | "hull"): number | undefined => {
+  const stat = (key: "price" | "weight" | "hull"): number | undefined => {
     const value = raw?.[key];
     return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
   };
-  return { programs: [...new Set(programs)], usedBy, price: stat("price"), cargo: stat("cargo"), weight: stat("weight"), hull: stat("hull") };
+  return { programs: [...new Set(programs)], usedBy, price: stat("price"), weight: stat("weight"), hull: stat("hull") };
 }
 
 /** The ship file the game shipped with, as read. */

@@ -55,7 +55,7 @@ function outsideParts(ship: ArtShip): { id: MountId; x: number; y: number; angle
     if (!module) continue;
     const kind = partOf(module.part).kind;
     if (kind === "computer" || kind === "section" || kind === "turret" || mount.id === "turretGun") continue;
-    // Destroyed, a bay is just the hull's own hold again: see `bayBox`.
+    // Destroyed, a bay carries nothing any more: see `bayBox`.
     out.push({ id: mount.id, x: mount.x * R, y: mount.y * R, angle: facing(mount), scale: mount.scale, kind, wear: module.wear, alpha: mount.alpha ?? 1, order: mount.order ?? 0 });
   }
   return out;
@@ -235,7 +235,8 @@ export function drawHull(ctx: CanvasRenderingContext2D, model: ShipModel, hull: 
 
 /**
  * The box the ship's ore rides in, in the ship's frame: a fitted cargo bay, sized by how much it
- * holds, or else the hull's own small hold, where the bay would go (the middle if there's no bay mount).
+ * holds, or else the empty well where a bay would go (the middle if there's no bay mount).
+ * A ship without a bay carries nothing at all.
  */
 export function bayBox(ship: ArtShip): Box & { part: PartId | null; alpha: number } {
   const mounts = HULL_MOUNTS[ship.model];

@@ -1282,7 +1282,12 @@ export class Renderer {
     const share = Math.min(1, ship.ore / Math.max(1, sim.cargoSpace(ship)));
     const box = bayBox(ship);
     stepBin(bin, box, share, ship, now);
-    if (bin.lumps.length > 0) drawBin(this.ctx, bin, box, ORE_COLORS, share >= 1);
+    if (bin.lumps.length === 0) return;
+    // The bay's transparency covers the ore riding in it too.
+    this.ctx.save();
+    if ((box.alpha ?? 1) < 1) this.ctx.globalAlpha = box.alpha;
+    drawBin(this.ctx, bin, box, ORE_COLORS, share >= 1);
+    this.ctx.restore();
   }
 
   /** A faint red ring while pirates have marked the ship, and a blinking light while it's wanted. */

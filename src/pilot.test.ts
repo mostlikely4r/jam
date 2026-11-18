@@ -5,6 +5,9 @@ import { DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, MAX_HULL, Sim, TICK } from "./sim";
 import { partOf as partInfo } from "./parts";
 
+/** A full load for a drone or a traffic ship: the small bay its hull comes with. */
+const LOAD = partInfo("smallBay").cargo!;
+
 // Written for wrecks that happen at once, with a bare hull straight away: critical, the pod
 // and the choice at the yard have their own tests in fitting.test.ts.
 Object.assign(DEFAULTS, { criticalSeconds: 0, askHull: false });
@@ -70,7 +73,7 @@ describe("drone", () => {
     });
     expect(ship.trips).toBeGreaterThanOrEqual(2);
     expect(ship.credits).toBe(ship.earned);
-    expect(ship.earned).toBeGreaterThanOrEqual(ship.trips * DEFAULTS.droneCargo * DEFAULTS.creditsPerOre);
+    expect(ship.earned).toBeGreaterThanOrEqual(ship.trips * LOAD * DEFAULTS.creditsPerOre);
     expect(sim.ship.credits).toBe(0);
     expect(breaks).toBeGreaterThan(0);
   }, 30000);
@@ -1147,7 +1150,7 @@ describe("pirate and defender", () => {
       const name = sim.chatter.nameOf(sim, pilot.ship);
       const dock = sim.dockPoint();
       pin(pilot.ship, dock.x + 2500, dock.y);
-      pilot.ship.ore = DEFAULTS.droneCargo;
+      pilot.ship.ore = LOAD;
       const far = listen(sim, 3, () => pin(pilot.ship, dock.x + 2500, dock.y));
       expect(far.some((line) => line.speaker === pilot.ship && HEADING_BACK.includes(line.text))).toBe(true);
       expect(far.some((line) => line.speaker === null && line.text.includes(name))).toBe(false);
@@ -1162,7 +1165,7 @@ describe("pirate and defender", () => {
       const name = sim.chatter.nameOf(sim, pilot.ship);
       const dock = sim.dockPoint();
       pin(pilot.ship, dock.x, dock.y);
-      pilot.ship.ore = DEFAULTS.droneCargo;
+      pilot.ship.ore = LOAD;
       const heard = listen(sim, 60);
       const out = heard.findIndex((line) => line.speaker === pilot.ship && OUTBOUND.includes(line.text));
       expect(out).toBeGreaterThanOrEqual(0);
@@ -1196,7 +1199,7 @@ describe("pirate and defender", () => {
       const sim = arena({ trafficRacers: 1, chatter: false });
       const pilot = sim.traffic[0];
       pin(pilot.ship, sim.station.x + 2500, sim.station.y);
-      pilot.ship.ore = DEFAULTS.droneCargo;
+      pilot.ship.ore = LOAD;
       expect(listen(sim, 3)).toEqual([]);
     });
   });
@@ -1438,7 +1441,7 @@ describe("pirate and defender", () => {
     const looseOre = (sim: Sim, x: number, y: number) => ({ x, y, px: x, py: y, vx: 0, vy: 0, kind: 0, amount: 1, from: sim.ship });
 
     function bayWorld(extra: Partial<typeof SOLO> = {}): Sim {
-      return arena({ playerCargo: 10, tractorRange: 500, ...extra });
+      return arena({ tractorRange: 500, ...extra });
     }
 
     it("a full ship leaves ore where it is", () => {
@@ -1465,11 +1468,12 @@ describe("pirate and defender", () => {
       const sim = bayWorld();
       const { ship } = sim;
       const light = sim.shipWeight(ship);
-      expect(sim.cargoSpace(ship)).toBe(10);
+      // The small bay a bare hull comes with, then the bay, then the large one in its place.
+      expect(sim.cargoSpace(ship)).toBe(partInfo("smallBay").cargo);
       sim.devSet(ship, "bay", true);
-      expect(sim.cargoSpace(ship)).toBe(30);
+      expect(sim.cargoSpace(ship)).toBe(partInfo("bay").cargo);
       sim.devSet(ship, "largeBay", true);
-      expect(sim.cargoSpace(ship)).toBe(60);
+      expect(sim.cargoSpace(ship)).toBe(partInfo("largeBay").cargo);
       expect(sim.shipWeight(ship)).toBeGreaterThan(light);
     });
 
@@ -1491,9 +1495,9 @@ describe("pirate and defender", () => {
       const pilot = sim.traffic[0];
       expect(sim.deliveryLoad(pilot.ship)).toBe(5);
       sim.devSet(pilot.ship, "bay", true);
-      expect(sim.deliveryLoad(pilot.ship)).toBe(15);
+      expect(sim.deliveryLoad(pilot.ship)).toBe(10);
       sim.tuning.deliverShare = 1;
-      expect(sim.deliveryLoad(pilot.ship)).toBe(30);
+      expect(sim.deliveryLoad(pilot.ship)).toBe(20);
     });
 
     it("buying at a deposit stops when the bay is full", () => {
@@ -1890,16 +1894,16 @@ describe("pirate and defender", () => {
 
     it("traffic that chooses to save the trip drops its load and goes back to work", () => {
       const sim = depositWorld({ trafficRacers: 1, depositDropChance: 1, chatter: false });
-      const pilot = loaded(sim, DEFAULTS.droneCargo);
+      const pilot = loaded(sim, LOAD);
       run(sim, 200, () => sim.deposits[0].ore > 0);
-      expect(sim.deposits[0].ore).toBe(DEFAULTS.droneCargo);
+      expect(sim.deposits[0].ore).toBe(LOAD);
       expect(pilot.ship.ore).toBe(0);
-      expect(pilot.ship.credits).toBeGreaterThanOrEqual(DEFAULTS.droneCargo * 3);
+      expect(pilot.ship.credits).toBeGreaterThanOrEqual(LOAD * 3);
     }, 30000);
 
     it("traffic flies a full load home if it doesn't choose the deposit", () => {
       const sim = depositWorld({ trafficRacers: 1, chatter: false });
-      const pilot = loaded(sim, DEFAULTS.droneCargo);
+      const pilot = loaded(sim, LOAD);
       run(sim, 300, () => pilot.ship.trips > 0);
       expect(pilot.ship.trips).toBe(1);
       expect(sim.deposits[0].ore).toBe(0);
@@ -1907,7 +1911,7 @@ describe("pirate and defender", () => {
 
     it("a badly damaged ship takes its load to the station it's going to for repairs", () => {
       const sim = depositWorld({ trafficRacers: 1, depositDropChance: 1, chatter: false });
-      const pilot = loaded(sim, DEFAULTS.droneCargo);
+      const pilot = loaded(sim, LOAD);
       pilot.ship.hull = 10;
       run(sim, 300, () => pilot.ship.trips > 0);
       expect(pilot.ship.trips).toBe(1);
@@ -1917,7 +1921,7 @@ describe("pirate and defender", () => {
     it("a full deposit sends the load on to the station", () => {
       const sim = depositWorld({ trafficRacers: 1, depositDropChance: 1, depositCapacity: 2, chatter: false });
       sim.deposits[0].ore = 2;
-      const pilot = loaded(sim, DEFAULTS.droneCargo);
+      const pilot = loaded(sim, LOAD);
       run(sim, 300, () => pilot.ship.trips > 0);
       expect(pilot.ship.trips).toBe(1);
       expect(sim.deposits[0].ore).toBe(2);
@@ -2234,7 +2238,6 @@ describe("pirate and defender", () => {
         pirates: 1,
         pirateLimit: 1,
         pirateStartOre: 0,
-        droneCargo: 2,
         visionAngle: 0,
         rockCount: 20,
         fieldRadius: 1200,

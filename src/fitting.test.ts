@@ -27,12 +27,13 @@ function docked(model: "racer" | "floater"): Sim {
 }
 
 describe("mounts", () => {
-  it("each hull comes with three of its six thrusters, a gun and a computer", () => {
+  it("each hull comes with three of its six thrusters, a gun, a computer and its small bay", () => {
     const racer = newFitting("racer");
     expect(Object.keys(racer.fit).sort()).toEqual(
-      ["computer", "gun", "thrusterMain", "thrusterRotateLeft", "thrusterRotateRight"].sort(),
+      ["computer", "gun", "section", "thrusterMain", "thrusterRotateLeft", "thrusterRotateRight"].sort(),
     );
     expect(racer.fit.computer!.part).toBe("basicComputer");
+    expect(racer.fit.section!.part).toBe("smallBay");
     expect(newFitting("floater").fit.computer!.part).toBe("flightComputer");
   });
 
@@ -531,12 +532,20 @@ describe("turned mounts", () => {
     );
   });
 
-  it("a fitted cargo bay adds its room wherever it's mounted", () => {
+  it("a fitted cargo bay replaces the small one a hull comes with", () => {
     const sim = docked("racer");
-    const before = sim.bayTotal(sim.ship);
+    expect(sim.bayTotal(sim.ship)).toBe(partOfForTest("smallBay").cargo);
     sim.ship.fit.section = { part: "bay", wear: 0 };
     refresh(sim.ship);
-    expect(sim.bayTotal(sim.ship)).toBe(before + 20);
+    expect(sim.bayTotal(sim.ship)).toBe(partOfForTest("bay").cargo);
+  });
+
+  it("a hull without a bay carries nothing at all", () => {
+    const sim = docked("racer");
+    delete sim.ship.fit.section;
+    refresh(sim.ship);
+    expect(sim.bayTotal(sim.ship)).toBe(0);
+    expect(sim.cargoSpace(sim.ship)).toBe(0);
   });
 });
 
@@ -568,6 +577,7 @@ describe("hulls, defaults and decals", () => {
       thrusterRotateRight: "turnThrusters",
       gun: "gun1",
       computer: "basicComputer",
+      section: "smallBay",
     });
     withFile(
       () => (mountOf("racer", "gun")!.default = "gun2"),
@@ -788,19 +798,17 @@ describe("the stats of hulls and parts", () => {
     );
   });
 
-  it("a hull's price, cargo and weight are its own, over the game's tuning", () => {
+  it("a hull's price and weight are its own, over the game's tuning", () => {
     const sim = docked("racer");
     const weight = sim.shipWeight(sim.ship);
     expect(sim.hullPrice("racer")).toBe(DEFAULTS.rebuildCost);
     withFile(
       () => {
         HULL_INFO.racer.price = 999;
-        HULL_INFO.racer.cargo = 45;
         HULL_INFO.racer.weight = 3;
       },
       () => {
         expect(sim.hullPrice("racer")).toBe(999);
-        expect(sim.bayTotal(sim.ship)).toBe(45);
         expect(sim.shipWeight(sim.ship)).toBeCloseTo(weight + 2, 5);
       },
     );

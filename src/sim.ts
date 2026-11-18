@@ -2431,10 +2431,9 @@ export class Sim {
     return this.bayTotal(ship) - this.holdSize(ship);
   }
 
-  /** All the room in a ship's bay, for ore and modules together. */
+  /** All the room in a ship's bay, for ore and modules together: fitted bays only, so a ship without one carries nothing. */
   bayTotal(ship: Ship): number {
-    const { playerCargo, droneCargo } = this.tuning;
-    let space = HULL_INFO[ship.model].cargo ?? (ship === this.ship ? playerCargo : droneCargo);
+    let space = 0;
     for (const module of Object.values(ship.fit)) if (module && module.wear < 1) space += partOf(module.part).cargo ?? 0;
     return space;
   }

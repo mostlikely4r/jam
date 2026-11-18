@@ -1040,11 +1040,12 @@ describe("parts", () => {
   it("adds weight, which divides all thrust", () => {
     const sim = bareSim();
     const part = PARTS.find((candidate) => candidate.id === "strafe")!;
+    const base = sim.shipWeight(sim.ship);
     sim.devSet(sim.ship, "strafe", true);
-    expect(sim.shipWeight(sim.ship)).toBeCloseTo(DEFAULTS.weight + part.weight, 5);
+    expect(sim.shipWeight(sim.ship)).toBeCloseTo(base + part.weight, 5);
     sim.controls.strafe = 1;
     sim.step();
-    const expected = (DEFAULTS.sideThrust * TICK) / (DEFAULTS.weight + part.weight);
+    const expected = (DEFAULTS.sideThrust * TICK) / (base + part.weight);
     expect(Math.abs(sim.ship.vy)).toBeCloseTo(expected, 1);
   });
 

@@ -16,6 +16,7 @@
     "navComputer": ["computer"],
     "bay": ["cargo bay"],
     "largeBay": ["cargo bay"],
+    "smallBay": ["cargo bay"],
     "cockpitKite": ["cockpit"],
     "cockpitBar": ["wide cockpit"],
     "cockpitDome": ["cockpit"],
@@ -33,7 +34,7 @@
       { "id": "gun", "name": "Gun", "types": ["gun"], "x": 1.05, "y": 0, "angle": 0, "scale": 1, "default": "gun1" },
       { "id": "tractor", "name": "Tractor", "types": ["tractor"], "x": 0.45, "y": 0, "angle": 0, "scale": 1 },
       { "id": "computer", "name": "Computer", "types": ["computer"], "x": -0.25, "y": 0, "angle": 0, "scale": 1, "default": "basicComputer" },
-      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.15, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.15, "y": 0, "angle": 0, "scale": 1, "default": "smallBay" },
       { "id": "cockpit", "name": "Cockpit", "types": ["cockpit"], "x": 0.54, "y": 0, "angle": 0, "scale": 1, "decal": true }
     ],
     "floater": [
@@ -46,7 +47,7 @@
       { "id": "gun", "name": "Gun", "types": ["gun", "turret"], "x": 0.1, "y": 0, "angle": 0, "scale": 1, "default": "gun2" },
       { "id": "tractor", "name": "Tractor", "types": ["tractor"], "x": 0.8, "y": 0, "angle": 0, "scale": 1 },
       { "id": "computer", "name": "Computer", "types": ["computer"], "x": -0.55, "y": 0, "angle": 0, "scale": 1, "default": "flightComputer" },
-      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.5, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.5, "y": 0, "angle": 0, "scale": 1, "default": "smallBay" },
       { "id": "cockpit", "name": "Cockpit", "types": ["cockpit", "wide cockpit"], "x": 0.79, "y": 0, "angle": 0, "scale": 1, "decal": true }
     ],
     "defender": [
@@ -60,7 +61,7 @@
       { "id": "gunRight", "name": "Gun right", "types": ["gun"], "x": 0.85, "y": 0.4, "angle": 0, "scale": 1, "default": "gun1" },
       { "id": "tractor", "name": "Tractor", "types": ["tractor"], "x": 0.55, "y": 0, "angle": 0, "scale": 1 },
       { "id": "computer", "name": "Computer", "types": ["computer"], "x": -0.25, "y": 0, "angle": 0, "scale": 1, "default": "basicComputer" },
-      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.15, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.15, "y": 0, "angle": 0, "scale": 1, "default": "smallBay" },
       { "id": "cockpit", "name": "Cockpit", "types": ["cockpit"], "x": 0.3, "y": 0, "angle": 0, "scale": 1, "decal": true }
     ],
     "drone": [
@@ -73,7 +74,7 @@
       { "id": "gun", "name": "Gun", "types": ["gun"], "x": 0.95, "y": 0, "angle": 0, "scale": 1, "default": "gun1" },
       { "id": "tractor", "name": "Tractor", "types": ["tractor"], "x": 0.55, "y": 0, "angle": 0, "scale": 1 },
       { "id": "computer", "name": "Computer", "types": ["computer"], "x": -0.25, "y": 0, "angle": 0, "scale": 1, "default": "basicComputer" },
-      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.15, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.15, "y": 0, "angle": 0, "scale": 1, "default": "smallBay" },
       { "id": "cockpit", "name": "Cockpit", "types": ["cockpit"], "x": 0.3, "y": 0, "angle": 0, "scale": 0.8, "decal": true }
     ],
     "pirate": [
@@ -88,7 +89,7 @@
       { "id": "gunRight", "name": "Wing gun right", "types": ["gun"], "x": -0.1, "y": 0.9, "angle": 0, "scale": 1 },
       { "id": "tractor", "name": "Tractor", "types": ["tractor"], "x": 0.5, "y": 0, "angle": 0, "scale": 1 },
       { "id": "computer", "name": "Computer", "types": ["computer"], "x": -0.2, "y": 0, "angle": 0, "scale": 1, "default": "basicComputer" },
-      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.3, "y": 0, "angle": 0, "scale": 1 },
+      { "id": "section", "name": "Cargo bay", "types": ["cargo bay"], "x": -0.3, "y": 0, "angle": 0, "scale": 1, "default": "smallBay" },
       { "id": "cockpit", "name": "Cockpit", "types": ["cockpit"], "x": 0.55, "y": 0, "angle": 0, "scale": 0.8, "decal": true }
     ]
   },

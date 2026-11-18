@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, refresh, resetPartStats, shipFileNow, thrustOf, useShipFile } from "./fitting";
-import { SHIP_MODELS } from "./parts";
+import { SHIP_MODELS, type PartId } from "./parts";
 import { bayBox, drawVectorShip } from "./shipArt";
 import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
@@ -20,6 +20,19 @@ const WORLD = {
   stationStartParts: 100000,
   stationUnlocks: false,
 };
+
+/**
+ * Buys a part and fits it, the way the player swaps one on now that a buy never swaps: buy,
+ * then fit it from the bay or locker it went to. What comes off goes where it came from.
+ */
+function buyAndFit(sim: Sim, id: PartId): boolean {
+  const { ship } = sim;
+  const goes = sim.whereBuyGoes(ship, id);
+  if (!sim.buyPart(ship, id)) return false;
+  if (goes === "mount") return true;
+  const index = goes === "hold" ? ship.hold.length - 1 : sim.lockerAt(sim.baseAt()!).items.length - 1;
+  return sim.fitItem(ship, { at: goes!, index });
+}
 
 function docked(model: "racer" | "floater"): Sim {
   const sim = new Sim(1, { ...WORLD, floaterStart: model === "floater" });
@@ -52,17 +65,16 @@ describe("mounts", () => {
 });
 
 describe("the shop fits what it sells", () => {
-  it("a new gun puts the old one in the locker, and selling it puts the old one back on", () => {
+  it("a new gun fitted from the bay leaves the old one there, and selling it puts the old one back on", () => {
     const sim = docked("racer");
     const { ship } = sim;
-    const base = sim.baseAt()!;
-    expect(sim.buyPart(ship, "gun2")).toBe(true);
+    expect(buyAndFit(sim, "gun2")).toBe(true);
     expect(ship.fit.gun!.part).toBe("gun2");
     expect(ship.credits).toBe(10000 - sim.partPrice("gun2"));
-    expect(sim.lockerAt(base).items.map((item) => item.module.part)).toEqual(["gun1"]);
+    expect(ship.hold.map((item) => item.module.part)).toEqual(["gun1"]);
     expect(sim.sellPart(ship, "gun2")).toBe(true);
     expect(ship.fit.gun!.part).toBe("gun1");
-    expect(sim.lockerAt(base).items).toEqual([]);
+    expect(ship.hold).toEqual([]);
     expect(ship.credits).toBe(10000);
   });
 
@@ -82,7 +94,7 @@ describe("the shop fits what it sells", () => {
   it("a turret takes the gun onto itself, and gives it back when it goes", () => {
     const sim = docked("floater");
     const { ship } = sim;
-    expect(sim.buyPart(ship, "turret")).toBe(true);
+    expect(buyAndFit(sim, "turret")).toBe(true);
     expect(ship.fit.gun!.part).toBe("turret");
     expect(ship.fit.turretGun!.part).toBe("gun2");
     expect(sim.sellPart(ship, "turret")).toBe(true);
@@ -115,7 +127,7 @@ describe("the computer", () => {
     const sim = docked("racer");
     const { ship } = sim;
     for (const id of ["spinStabilizer", "meters", "retro"] as const) sim.buyPart(ship, id);
-    sim.buyPart(ship, "flightComputer");
+    buyAndFit(sim, "flightComputer");
     sim.setProgram(ship, "retro", true);
     expect(ship.programs.length).toBe(3);
     sim.sellPart(ship, "flightComputer");
@@ -211,10 +223,11 @@ describe("items as counted things", () => {
     const sim = docked("racer");
     const { ship } = sim;
     const room = sim.cargoSpace(ship);
-    sim.buyPart(ship, "gun2");
-    expect(sim.toHold(ship, { at: "locker", index: 0 })).toBe(true);
-    expect(ship.hold.map((item) => item.module.part)).toEqual(["gun1"]);
+    expect(sim.buyPart(ship, "gun2")).toBe(true);
+    expect(ship.hold.map((item) => item.module.part)).toEqual(["gun2"]);
     expect(sim.cargoSpace(ship)).toBe(room - 2);
+    expect(sim.toLocker(ship, { at: "hold", index: 0 })).toBe(true);
+    expect(sim.cargoSpace(ship)).toBe(room);
   });
 
   it("what's left at a base stays there; other bases have their own lockers", () => {
@@ -245,7 +258,6 @@ describe("items as counted things", () => {
     const sim = docked("racer");
     const { ship } = sim;
     sim.buyPart(ship, "gun2");
-    sim.toHold(ship, { at: "locker", index: 0 });
     ship.x += 3000;
     ship.px = ship.x;
     expect(sim.dropItem(ship, 0)).toBe(true);
@@ -257,7 +269,7 @@ describe("items as counted things", () => {
     loot.vy = ship.vy;
     sim.step();
     expect(sim.loot.length).toBe(0);
-    expect(ship.hold.map((item) => item.module.part)).toEqual(["gun1"]);
+    expect(ship.hold.map((item) => item.module.part)).toEqual(["gun2"]);
   });
 });
 
@@ -267,7 +279,7 @@ describe("critical, the pod and the yard", () => {
     const sim = docked("racer");
     const { ship } = sim;
     sim.buyPart(ship, "strafe");
-    sim.buyPart(ship, "bay");
+    buyAndFit(sim, "bay");
     sim.buyPart(ship, "spinStabilizer");
     ship.x = ship.px = ship.x + 2500;
     sim.step();
@@ -973,14 +985,108 @@ describe("lockers and station storage", () => {
     expect(sim.putInLocker(base, { part: "turnThrusters", wear: 0 })).toBe(false);
   });
 
-  it("a swap that would overfill the locker is refused, and nothing changes", () => {
+  it("a move that would overfill the locker is refused, and nothing changes", () => {
     const sim = docked("racer");
     const base = sim.baseAt()!;
     for (let i = 0; i < 3; i++) sim.putInLocker(base, { part: "tractor", wear: 0 });
-    const credits = sim.ship.credits;
-    expect(sim.buyPart(sim.ship, "gun2")).toBe(false);
+    expect(sim.toLocker(sim.ship, { at: "mount", mount: "gun" })).toBe(false);
     expect(sim.ship.fit.gun!.part).toBe("gun1");
-    expect(sim.ship.credits).toBe(credits);
     expect(sim.lockerAt(base).items.length).toBe(3);
+  });
+});
+
+describe("buying, WoW style", () => {
+  it("goes on an empty mount it fits first", () => {
+    const sim = docked("racer");
+    expect(sim.buyPart(sim.ship, "strafe")).toBe(true);
+    expect(sim.ship.fit.thrusterStrafeLeft!.part).toBe("strafe");
+    expect(sim.ship.fit.thrusterStrafeRight!.part).toBe("strafe");
+    expect(sim.buyRefused).toBeNull();
+  });
+
+  it("never takes a fitted part off: with the mount filled, it goes in the bay", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    expect(sim.whereBuyGoes(ship, "gun2")).toBe("hold");
+    expect(sim.buyPart(ship, "gun2")).toBe(true);
+    expect(ship.fit.gun!.part).toBe("gun1");
+    expect(ship.hold.map((item) => item.module.part)).toEqual(["gun2"]);
+    expect(ship.credits).toBe(10000 - sim.partPrice("gun2"));
+    // Then a swap on the ship screen puts it on, and the old one goes where the new one was.
+    expect(sim.fitItem(ship, { at: "hold", index: 0 })).toBe(true);
+    expect(ship.fit.gun!.part).toBe("gun2");
+    expect(ship.hold.map((item) => item.module.part)).toEqual(["gun1"]);
+  });
+
+  it("with the bay full too, it goes in the locker here", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    ship.ore = 10;
+    expect(sim.whereBuyGoes(ship, "gun2")).toBe("locker");
+    expect(sim.buyPart(ship, "gun2")).toBe(true);
+    expect(ship.hold).toEqual([]);
+    expect(sim.lockerAt(sim.baseAt()!).items.map((item) => item.module.part)).toEqual(["gun2"]);
+  });
+
+  it("with no room anywhere, it's refused and says why", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    ship.ore = 10;
+    for (let i = 0; i < 3; i++) sim.putInLocker(sim.baseAt()!, { part: "tractor", wear: 0 });
+    const credits = ship.credits;
+    expect(sim.whereBuyGoes(ship, "gun2")).toBeNull();
+    expect(sim.buyPart(ship, "gun2")).toBe(false);
+    expect(sim.buyRefused).toBe("No room on the ship or in your locker here");
+    expect(ship.credits).toBe(credits);
+    expect(ship.fit.gun!.part).toBe("gun1");
+    // A later buy that goes through clears it.
+    expect(sim.buyPart(ship, "strafe")).toBe(true);
+    expect(sim.buyRefused).toBeNull();
+  });
+
+  it("a pair goes in the bay or the locker together", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    sim.buyPart(ship, "strafe");
+    expect(sim.buyPart(ship, "strafe")).toBe(false);
+    // Owned already: the shop sells it back instead. A spare pair comes from the store by
+    // taking one off, then buying again.
+    expect(sim.toLocker(ship, { at: "mount", mount: "thrusterStrafeLeft" })).toBe(true);
+    // One mount of the pair is free, but a pair goes on as a pair: both go in the bay.
+    expect(sim.buyPart(ship, "strafe")).toBe(true);
+    expect(ship.fit.thrusterStrafeLeft).toBeUndefined();
+    expect(ship.hold.map((item) => item.module.part)).toEqual(["strafe", "strafe"]);
+  });
+
+  it("a drag from the shop buys straight into the spot it's dropped on, if the spot takes it", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    const base = sim.baseAt()!;
+    // A filled mount: never a swap.
+    expect(sim.buyPart(ship, "gun2", { at: "mount", mount: "gun" })).toBe(false);
+    expect(sim.buyRefused).toBe("That spot won't take it");
+    // A spot in the bay that floats: refused.
+    sim.devSet(ship, "bay", true);
+    expect(sim.buyPart(ship, "flightComputer", { at: "hold", spot: { x: 2, y: 1, turned: false } })).toBe(false);
+    expect(sim.buyPart(ship, "gun2", { at: "hold", spot: { x: 0, y: 2, turned: true } })).toBe(true);
+    expect(ship.hold[0]).toMatchObject({ x: 0, y: 2, turned: true });
+    expect(sim.buyPart(ship, "gun2", { at: "locker", spot: { x: 3, y: 1, turned: false } })).toBe(false);
+    expect(sim.buyPart(ship, "gun2", { at: "locker", spot: { x: 3, y: 0, turned: false } })).toBe(true);
+    expect(sim.lockerAt(base).items[0]).toMatchObject({ x: 3, y: 0, turned: false });
+    sim.toLocker(ship, { at: "mount", mount: "thrusterRotateLeft" });
+    sim.toLocker(ship, { at: "mount", mount: "thrusterRotateRight" });
+    expect(sim.buyPart(ship, "turnThrusters", { at: "mount", mount: "thrusterRotateRight" })).toBe(true);
+    expect(ship.fit.thrusterRotateRight!.part).toBe("turnThrusters");
+  });
+
+  it("AI ships still swap, and sell the old part to the base", () => {
+    const sim = new Sim(1, { ...WORLD, floaterStart: false, trafficRacers: 1 });
+    const { ship } = sim.traffic[0];
+    ship.x = ship.px = sim.station.x + DOCK_OFFSET;
+    ship.y = ship.py = sim.station.y;
+    ship.credits = 1000;
+    expect(sim.buyPart(ship, "gun2")).toBe(true);
+    expect(ship.fit.gun!.part).toBe("gun2");
+    expect(ship.hold).toEqual([]);
   });
 });

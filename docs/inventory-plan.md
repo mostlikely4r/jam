@@ -4,8 +4,8 @@ Written 2026-11-18. The fitting plan (`docs/fitting-plan.md`) made parts into co
 on mounts, in the bay and in lockers, but the screens still treat them as lists: a part is
 something you have or don't, and the bay is one number shared by ore and modules. This plan
 makes them real things in real places: storage you can see as grids, a blueprint of the ship to
-fit onto, and items with a shape that take up space. Steps 1 and 2 are built (2026-11-18).
-Steps 3 and 4 are not built yet.
+fit onto, and items with a shape that take up space. Steps 1 to 3 are built (2026-11-18).
+Step 4 is not built yet.
 
 ## The picture
 
@@ -196,6 +196,24 @@ reason; the buy never removes a fitted part.
 
 *Try in game:* dock and see the hint, not the shop. Buy gun 2 with gun 1 fitted, and it lands
 in the bay. Fill the bay and buy again, and it lands in the locker.
+
+**Built 2026-11-18.** Where it differs from the above, or settles what the plan left open:
+
+- A set (the strafe pair) goes all on its mounts, all in the bay or all in the locker. With
+  only one of its two mounts free, it goes in the bay.
+- A turret no longer goes on over the gun when bought. It goes in the bay, and fitting it from
+  there moves the gun onto it as before.
+- The shop shows where each part would go ("Goes in your bay", "Goes in your locker here", or
+  "No room on the ship or in your locker here"), and the reason a buy was refused at its top.
+  Other reasons: "Only in a dock", "Not sold here", "Not enough credits", "The station is out of
+  parts", "That spot won't take it".
+- Selling a fitted part puts the hull's own gear back on from the locker or, new, the bay,
+  before it buys a new one.
+- Until step 4 draws the grids, the drop targets are the ship screen's mount lines, its "In the
+  bay" heading and the locker heading. A drop on a heading auto-places. R turns what's held,
+  which shows on the label but only matters once there are cells to drop on.
+- The drag is one pointer-based model in `src/drag.ts`, not the browser's own drag and drop,
+  because the browser sends no key presses during its own drags, so R couldn't turn anything.
 
 ### 4. The blueprint and grid screens
 

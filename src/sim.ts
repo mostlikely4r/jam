@@ -160,6 +160,12 @@ export interface Spot {
   turned: boolean;
 }
 
+/** Where a bought part is put: a mount, a spot in the bay, or a spot in the locker where the ship is docked. */
+export type BuyInto = { at: "mount"; mount: MountId } | { at: "hold"; spot: Spot } | { at: "locker"; spot: Spot };
+
+/** What a buy would do: the mounts it takes, or the spots it fills in the bay or locker, or why not. */
+type BuyPlan = { where: "mount"; mounts: MountId[] } | { where: "hold" | "locker"; spots: Placed[] } | { refused: string };
+
 export interface Rock extends Body {
   /** Still on its way in from outside the field. */
   arriving: boolean;
@@ -2805,23 +2811,105 @@ export class Sim {
     if (ship === this.ship && (id === "clickMove" || id === "clickTurn" || id === "autopilot")) this.clickPilot.cancel();
   }
 
-  /** Parts are only sold in the dock. Returns whether the sale went through. */
-  buyPart(ship: Ship, id: PartId): boolean {
+  /** Why the player's last buy was refused, in words for the shop; null once one goes through. */
+  buyRefused: string | null = null;
+
+  /**
+   * Works out where gear the player buys would go, and changes nothing: on the mounts it
+   * takes, or all in the bay, or all in the locker here. With `into`, only that spot.
+   */
+  private planBuy(ship: Ship, id: PartId, into?: BuyInto): BuyPlan {
+    const modules: Module[] = Array.from({ length: partOf(id).set ?? 1 }, () => ({ part: id, wear: 0 }));
+    const mounts = mountsFor(ship, id);
+    const wrong = "That spot won't take it";
+    const none = "No room on the ship or in your locker here";
+    if (!into || into.at === "mount") {
+      const free = mounts.length > 0 && mounts.every((mount) => !ship.fit[mount]);
+      if (into && !(mounts.includes(into.mount) && free)) return { refused: wrong };
+      if (free) return { where: "mount", mounts };
+      if (into) return { refused: wrong };
+    }
+    const base = this.baseAt(ship);
+    const bay = !into || into.at === "hold" ? this.bayGrid(ship) : null;
+    if (bay) {
+      const spots = this.planSpots(bay, ship.hold, modules, into?.at === "hold" ? into.spot : undefined, true, ship.ore);
+      if (spots) return { where: "hold", spots };
+    }
+    if (base && (!into || into.at === "locker")) {
+      const locker = this.lockerAt(base);
+      const spots = this.planSpots(this.lockerGrid(locker), locker.items, modules, into?.at === "locker" ? into.spot : undefined, false, 0);
+      if (spots) return { where: "locker", spots };
+    }
+    return { refused: into ? wrong : none };
+  }
+
+  /**
+   * Places modules in a grid one after another, the first at a given spot if there is one.
+   * All of them or null. In the bay each must stick and the ore aboard must keep its room.
+   */
+  private planSpots(grid: GridSpec, there: Placed[], modules: Module[], at: Spot | undefined, bay: boolean, ore: number): Placed[] | null {
+    const placed: Placed[] = [];
+    for (const module of modules) {
+      const all = [...there, ...placed];
+      const spot = at && placed.length === 0 ? { module, ...at } : autoPlace(grid, all, module);
+      if (!spot || !canPlace(grid, all, spot)) return null;
+      placed.push(spot);
+    }
+    if (bay) {
+      const after = [...there, ...placed];
+      if (!after.every((each) => sticks(grid, after, each))) return null;
+      if (reachableCells(grid, after) * this.tuning.orePerCell < ore) return null;
+    }
+    return placed;
+  }
+
+  /** Where a part the player buys would go now, without an `into`: "mount", "hold", "locker", or null for nowhere. */
+  whereBuyGoes(ship: Ship, id: PartId): "mount" | "hold" | "locker" | null {
+    if (isProgram(id)) return null;
+    const plan = this.planBuy(ship, id);
+    return "where" in plan ? plan.where : null;
+  }
+
+  /**
+   * Parts are only sold in the dock. Returns whether the sale went through. The player's gear
+   * goes onto a free mount, the bay or the locker here, never swapped for what's fitted; give
+   * `into` to say where. A pilot's programs and every other ship's parts swap on as before.
+   */
+  buyPart(ship: Ship, id: PartId, into?: BuyInto): boolean {
+    const player = ship === this.ship;
+    const refuse = (why: string): false => {
+      if (player) this.buyRefused = why;
+      return false;
+    };
     const price = this.partPrice(id);
     const part = partOf(id);
     const base = this.serviceBase(ship);
-    if (!this.canBuy(ship, id) || !this.unlocked(id, base)) return false;
+    if (!this.atShop(ship)) return refuse("Only in a dock");
+    if (!this.canBuy(ship, id) || !this.unlocked(id, base)) return refuse("Not sold here");
     const account = this.accountOf(ship);
-    if (!this.atShop(ship) || account.credits < price) return false;
-    if (isProgram(id) ? !this.hasPartsFor(price, ship) : !this.canSupply(base, id)) return false;
-    // What it replaces has to find room in the player's locker.
-    const bought = this.attempt(ship, base, () => {
-      if (isProgram(id)) this.chargeForService(account, price, base);
-      else this.supply(account, id, base);
-      this.equip(ship, id, base);
-      return true;
-    });
-    if (!bought) return false;
+    if (account.credits < price) return refuse("Not enough credits");
+    if (isProgram(id) ? !this.hasPartsFor(price, ship) : !this.canSupply(base, id)) return refuse("The station is out of parts");
+    if (player && !isProgram(id)) {
+      const plan = this.planBuy(ship, id, into);
+      if (!("where" in plan)) return refuse(plan.refused);
+      this.supply(account, id, base);
+      if (plan.where === "mount") {
+        for (const mount of plan.mounts) ship.fit[mount] = { part: id, wear: 0 };
+        refresh(ship);
+        if (part.kind === "computer") trimPrograms(ship);
+      } else if (plan.where === "hold") ship.hold.push(...plan.spots);
+      else this.lockerAt(this.baseAt(ship)!).items.push(...plan.spots);
+    } else {
+      // What it replaces has to find room in the player's locker.
+      const bought = this.attempt(ship, base, () => {
+        if (isProgram(id)) this.chargeForService(account, price, base);
+        else this.supply(account, id, base);
+        this.equip(ship, id, base);
+        return true;
+      });
+      if (!bought) return false;
+    }
+    if (player) this.buyRefused = null;
     if (id === "retro" && ship === this.ship) this.tuning.retro = true;
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     if (ship !== this.ship && this.tuning.chatter) this.chatter.bought(this, ship, part.label.toLowerCase());
@@ -2858,21 +2946,28 @@ export class Sim {
     return true;
   }
 
-  /** Puts the hull's own gear back on any mount left without it: from the player's locker, or bought. */
+  /** Puts the hull's own gear back on any mount left without it: from the player's locker or bay, or bought. */
   private refitDefaults(ship: Ship, base: Base): void {
     for (const id of new Set(Object.values(hullDefaults(ship.model)) as PartId[])) {
       const mounts = mountsFor(ship, id);
       if (mounts.length === 0 || mounts.some((mount) => ship.fit[mount])) continue;
-      const locker = ship === this.ship ? this.lockerAt(base) : null;
-      const kept = (locker?.items ?? []).filter((item) => item.module.part === id && item.module.wear < 1);
-      if (locker && kept.length >= mounts.length) {
-        for (const mount of mounts) {
-          const item = kept.shift()!;
-          locker.items.splice(locker.items.indexOf(item), 1);
-          ship.fit[mount] = item.module;
+      // The player's own: from the locker first, then the bay, where taking it out leaves nothing floating.
+      if (ship === this.ship) {
+        const locker = this.lockerAt(base);
+        const grid = this.bayGrid(ship);
+        const fromLocker = locker.items.filter((item) => item.module.part === id && item.module.wear < 1);
+        const fromHold = ship.hold.filter((item) => item.module.part === id && item.module.wear < 1 && (!grid || floatsAfterRemoval(grid, ship.hold, item).length === 0));
+        const kept = [...fromLocker, ...fromHold];
+        if (kept.length >= mounts.length) {
+          for (const mount of mounts) {
+            const item = kept.shift()!;
+            if (locker.items.includes(item)) locker.items.splice(locker.items.indexOf(item), 1);
+            else ship.hold.splice(ship.hold.indexOf(item), 1);
+            ship.fit[mount] = item.module;
+          }
+          refresh(ship);
+          continue;
         }
-        refresh(ship);
-        continue;
       }
       this.supply(this.accountOf(ship), id, base);
       fitPart(ship, id);

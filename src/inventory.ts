@@ -62,15 +62,19 @@ export class Inventory {
     if (this.showLocker) this.drawLocker();
   }
 
-  private heading(text: string): void {
+  /** A heading. With `drop`, a shop item dragged onto it goes there. */
+  private heading(text: string, drop?: string): void {
     const h = document.createElement("h2");
     h.textContent = text;
+    if (drop) h.dataset.drop = drop;
     this.box.append(h);
   }
 
-  private row(text: string, actions: [string, () => boolean][]): void {
+  /** A line with its buttons. With `drop`, a shop item dragged onto it goes there. */
+  private row(text: string, actions: [string, () => boolean][], drop?: string): void {
     const row = document.createElement("div");
     row.className = "row";
+    if (drop) row.dataset.drop = drop;
     const label = document.createElement("span");
     label.textContent = text;
     row.append(label);
@@ -110,10 +114,11 @@ export class Inventory {
               ["to bay", () => sim.toHold(ship, place)],
             ]
           : [];
-      this.row(text, actions);
+      this.row(text, actions, docked ? `mount:${mount.id}` : undefined);
     }
+    if (docked) this.heading("In the bay", "hold");
     if (ship.hold.length > 0) {
-      this.heading("In the bay");
+      if (!docked) this.heading("In the bay");
       ship.hold.forEach(({ module: item, x, y }, index) => {
         const place: ItemPlace = { at: "hold", index };
         const actions: [string, () => boolean][] = docked
@@ -151,7 +156,7 @@ export class Inventory {
     const locker = sim.lockerAt(base);
     const cells = locker.rows * sim.tuning.lockerWidth;
     const used = locker.items.reduce((sum, { module }) => sum + shapeOf(module.part).w * shapeOf(module.part).h, 0);
-    this.heading(`Locker at ${sim.baseName(base.id)} - ${used} of ${cells} cells taken`);
+    this.heading(`Locker at ${sim.baseName(base.id)} - ${used} of ${cells} cells taken`, "locker");
     const roomy = sim.storageFree(base) >= sim.tuning.lockerWidth;
     this.row(`${locker.rows} rows of ${sim.tuning.lockerWidth}. The station has ${Math.max(0, sim.storageFree(base))} cells of storage free.`, roomy ? [[`buy a row ${sim.tuning.lockerRowPrice}`, () => sim.buyLockerRow()]] : []);
     if (locker.items.length === 0) this.note("Empty. What you take off or leave here stays here.");

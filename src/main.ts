@@ -11,8 +11,10 @@ import { Radio } from "./radio";
 import { type Base, type Deposit, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartId } from "./parts";
-import { computerSize, hullMax, mountsFor, mountsHolding, owns } from "./fitting";
+import { computerSize, hullMax, mountsHolding, owns } from "./fitting";
 import { Inventory } from "./inventory";
+import { dragging, makeDraggable, rotateDrag, setDropHandler } from "./drag";
+import { autoPlace } from "./grid";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
 const STORAGE_KEY = "flight-test-tuning";
@@ -60,6 +62,9 @@ const hud = document.getElementById("hud") as HTMLDivElement;
 const panel = document.getElementById("panel") as HTMLDivElement;
 const shop = document.getElementById("shop") as HTMLDivElement;
 const inventoryBox = document.getElementById("inventory") as HTMLDivElement;
+const dockHint = document.getElementById("dockhint") as HTMLDivElement;
+/** Whether the dock shop is open: B opens and closes it while docked, and leaving the dock closes it. */
+let shopOpen = false;
 const renderer = new Renderer(canvas);
 const audio = new Audio();
 /** `?dev` on the address shows the tuning panel, the status lines and every pointer. */
@@ -525,8 +530,10 @@ function saleLine(price: number, label: string, text: string, part: PartId | nul
   return { tag: "buy", style: "buy", text, enabled: true };
 }
 
-function shopButton(key: string, line: ShopLine, onClick: () => void): HTMLButtonElement {
+function shopButton(key: string, line: ShopLine, onClick: () => void, drag?: PartId): HTMLButtonElement {
   const button = document.createElement("button");
+  // A part for sale can also be dragged onto a mount, the bay or the locker.
+  if (drag && line.enabled) makeDraggable(button, () => ({ from: "shop", part: drag }), partOf(drag).label);
   button.className = line.style ?? "";
   button.disabled = !line.enabled;
   button.textContent = `${key ? `${key} ` : ""}[${line.tag}] ${line.text}`;
@@ -669,13 +676,22 @@ function updateShop(): void {
     const title = `Dock shop - station ${Math.floor(base.account.credits)} credits - ${haulerText(base)}`;
     if (shopHeading.textContent !== title) shopHeading.textContent = title;
   }
-  const state = `${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()}`;
+  if (!docked) shopOpen = false;
+  const locker = base ? sim.lockerAt(base) : null;
+  const state = `${shopOpen} ${sim.buyRefused} ${ship.ore} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()}`;
   if (state === shopState) return;
   shopState = state;
-  shop.hidden = !docked;
-  if (!docked) return;
+  shop.hidden = !docked || !shopOpen;
+  dockHint.hidden = !docked || shopOpen;
+  if (!docked || !shopOpen) return;
 
   shop.replaceChildren(shopHeading);
+  if (sim.buyRefused) {
+    const refused = document.createElement("p");
+    refused.className = "refused";
+    refused.textContent = sim.buyRefused;
+    shop.append(refused);
+  }
   const open = document.createElement("button");
   open.className = "small";
   open.textContent = "Ship and locker";
@@ -687,7 +703,7 @@ function updateShop(): void {
   for (const part of PARTS) {
     if (isProgram(part.id) || !isGear(part)) continue;
     const line = partLine(part);
-    if (line) shop.append(shopButton("", line, () => tradePart(part)));
+    if (line) shop.append(shopButton("", line, () => tradePart(part), line.tag === "buy" ? part.id : undefined));
   }
   const programs = document.createElement("h2");
   programs.className = "news";
@@ -802,18 +818,34 @@ function partLine(part: Part): ShopLine | null {
   return saleLine(price, part.label, `${part.label}: ${price} credits${weight}${store}. ${part.description}${replaces}`, part.id);
 }
 
-/** What buying a part would take off the ship, in words, if anything. */
+/** Where buying a part would put it, in words. A buy never takes anything off. */
 function replacedBy(part: Part): string {
   if (isProgram(part.id)) return "";
-  const { ship } = sim;
-  const off = new Set(
-    mountsFor(ship, part.id)
-      .map((mount) => ship.fit[mount]?.part)
-      // A gun isn't traded in for a turret: it moves onto it.
-      .filter((id): id is PartId => id !== undefined && !(part.kind === "turret" && partOf(id).kind === "gun")),
-  );
-  return off.size > 0 ? ` Your ${[...off].map((id) => partOf(id).label.toLowerCase()).join(" and ")} goes in your locker here` : "";
+  const goes = sim.whereBuyGoes(sim.ship, part.id);
+  if (goes === "mount") return "";
+  if (goes === "hold") return " Goes in your bay";
+  if (goes === "locker") return " Goes in your locker here";
+  return " No room on the ship or in your locker here";
 }
+
+/** A shop item dropped on the ship screen: bought straight onto that mount, or into the bay or locker. */
+setDropHandler((payload, target) => {
+  const { ship } = sim;
+  const base = sim.baseAt();
+  if (!base || payload.from !== "shop") return;
+  const module = { part: payload.part, wear: 0 };
+  if (target.startsWith("mount:")) sim.buyPart(ship, payload.part, { at: "mount", mount: target.slice("mount:".length) });
+  else if (target === "hold") {
+    const spot = sim.holdSpotFor(ship, module);
+    if (spot) sim.buyPart(ship, payload.part, { at: "hold", spot });
+    else sim.buyRefused = "No room for it in your bay";
+  } else if (target === "locker") {
+    const locker = sim.lockerAt(base);
+    const spot = autoPlace(sim.lockerGrid(locker), locker.items, module);
+    if (spot) sim.buyPart(ship, payload.part, { at: "locker", spot });
+    else sim.buyRefused = "No room for it in your locker here";
+  }
+});
 
 function saveTuning(): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(tuning));
@@ -1059,6 +1091,7 @@ window.addEventListener("keydown", (event) => {
   // The chart needs its part. Without it the key does nothing: JAM is meant to be discovered.
   if (event.code === "KeyI" && !event.repeat) inventory().toggleShip();
   if (event.code === "KeyL" && !event.repeat) inventory().toggleLocker();
+  if (event.code === "KeyB" && !event.repeat && sim.baseAt()) shopOpen = !shopOpen;
   if (event.code === "KeyC" && !event.repeat && sim.ship.parts.has("starmap")) {
     keys.clear();
     chart.open();
@@ -1071,7 +1104,11 @@ window.addEventListener("keydown", (event) => {
   }
   if (event.code === "Space" || event.code.startsWith("Arrow")) event.preventDefault();
   if (event.repeat) return;
-  if (event.code === "KeyR" && dev) restart();
+  // While something is dragged, R turns it and never restarts.
+  if (event.code === "KeyR") {
+    if (dragging()) rotateDrag();
+    else if (dev) restart();
+  }
   if (event.code === "KeyX") setRetro(!tuning.retro);
   const deposit = sim.isDocked() ? null : sim.depositAt();
   if (deposit && event.code === "Digit1") sim.sellToDeposit(sim.ship, deposit);

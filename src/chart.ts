@@ -1,3 +1,4 @@
+import { orbitEllipse } from "./kepler";
 import { bodyAt, orbitsAt, type Deposit, type OrbitRing, type Poi, type Sim, type SolidBody } from "./sim";
 
 /**
@@ -246,20 +247,30 @@ export class Chart {
     ctx.lineWidth = 1;
     // A partial orbit is 20 degrees of the full one, centred on the orbiting thing.
     const ARC = (10 * Math.PI) / 180;
-    const ring = (worldCenter: { x: number; y: number }, radius: number, angle: number, found: boolean): void => {
+    // `radius` is the semi-major axis. With an eccentricity the ring is an ellipse with the
+    // parent at a focus. A partial ring is the same 20 degrees of the ellipse's own circle,
+    // centred on the thing at `angle` from the parent.
+    const ring = (worldCenter: { x: number; y: number }, radius: number, angle: number, found: boolean, eccentricity = 0, periapsis = 0): void => {
       // Nothing to see on a ring that's under a couple of screen pixels, or no ring at all.
       if (radius <= 0 || radius * view.scale < 2) return;
-      const { x, y } = to(worldCenter.x, worldCenter.y);
+      const shape = orbitEllipse({ radius, eccentricity, periapsis });
+      const { x, y } = to(worldCenter.x + shape.cx, worldCenter.y + shape.cy);
+      const scale = view.scale * dpr;
       ctx.beginPath();
-      if (found) ctx.arc(x, y, radius * view.scale * dpr, 0, Math.PI * 2);
-      else ctx.arc(x, y, radius * view.scale * dpr, angle - ARC, angle + ARC);
+      if (found) ctx.ellipse(x, y, shape.a * scale, shape.b * scale, shape.rotation, 0, Math.PI * 2);
+      else {
+        // Where the thing is on the ellipse's own circle (its eccentric anomaly), from its direction from the parent.
+        const along = angle - periapsis;
+        const middle = Math.atan2(Math.sqrt(1 - eccentricity * eccentricity) * Math.sin(along), Math.cos(along) + eccentricity);
+        ctx.ellipse(x, y, shape.a * scale, shape.b * scale, shape.rotation, middle - ARC, middle + ARC);
+      }
       ctx.stroke();
     };
     // True rings: round where each thing goes round, whatever the frame's centre is.
     const drawRings = (rings: OrbitRing[] | undefined, at: { x: number; y: number }): void => {
-      for (const { center: chain, radius } of rings ?? []) {
+      for (const { center: chain, radius, eccentricity, periapsis } of rings ?? []) {
         const center = orbitsAt(chain, sim.now);
-        ring(center, radius, Math.atan2(at.y - center.y, at.x - center.x), this.ringFound(sim, center));
+        ring(center, radius, Math.atan2(at.y - center.y, at.x - center.x), this.ringFound(sim, center), eccentricity, periapsis);
       }
     };
     for (const body of sim.bodies) {
@@ -274,7 +285,7 @@ export class Chart {
         const center = bodyAt({ ...body, orbits: body.orbits.slice(0, i) }, sim.now);
         const at = bodyAt(body, sim.now);
         const angle = Math.atan2(at.y - center.y, at.x - center.x);
-        ring(center, body.orbits[i].radius, angle, this.ringFound(sim, center));
+        ring(center, body.orbits[i].radius, angle, this.ringFound(sim, center), body.orbits[i].eccentricity, body.orbits[i].periapsis);
       }
     }
     // Anchors orbit like bodies do.
@@ -297,7 +308,7 @@ export class Chart {
       if (poi.orbitRadius <= 0) continue;
       const parent = poi.parent ? { x: poi.parent.x, y: poi.parent.y } : { x: 0, y: 0 };
       const angle = Math.atan2(poi.y - parent.y, poi.x - parent.x);
-      ring(parent, poi.orbitRadius, angle, this.ringFound(sim, parent));
+      ring(parent, poi.orbitRadius, angle, this.ringFound(sim, parent), poi.orbitEccentricity, poi.orbitPeriapsis);
     }
 
     // The bodies. Unfound ones stay dark: only their orbit arcs hint at them.

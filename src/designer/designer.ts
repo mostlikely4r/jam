@@ -6,6 +6,8 @@ import {
   copyPositions,
   isBody,
   makeChild,
+  orbitDistances,
+  orbitShape,
   orbitSpeed,
   parentOf,
   parseWorld,
@@ -22,6 +24,7 @@ import {
   type World,
   type WorldNode,
 } from "./world";
+import { clampEccentricity, orbitEllipse, phaseToward } from "../kepler";
 import { linkSummary, linkedNodes, readGame, useLayout, type GameLink, type ShipMarkKind } from "./link";
 import { shippedWorld } from "./shipped";
 import { type Route } from "../route";
@@ -146,6 +149,21 @@ function readableDistance(units: number): string {
   if (u >= 1e6) return `${(units / 1e6).toFixed(2)} M`;
   if (u >= 1e4) return `${(units / 1e3).toFixed(1)} k`;
   return `${Math.round(units)}`;
+}
+
+/** An orbit's speed for the panel: one number for a circle, the closest and farthest points' for an ellipse. */
+function readableSpeeds(node: WorldNode): string {
+  const { near, far } = orbitSpeed(node);
+  return node.eccentricity > 0 ? `${near.toFixed(1)} units/s at its closest, ${far.toFixed(1)} at its farthest` : `${near.toFixed(1)} units/s`;
+}
+
+/** What the panel says of an orbit's shape: how near and far it gets, and a warning if it dips into what it orbits. */
+function readableShape(world: World, node: WorldNode, eccentricity: number): string {
+  const shaped = { ...node, eccentricity };
+  const { near, far } = orbitDistances(shaped);
+  const parent = parentOf(world, node);
+  const inside = parent !== null && near < parent.radius ? `. Its closest point is inside ${parent.name}` : "";
+  return eccentricity > 0 ? `${readableDistance(near)} at its closest, ${readableDistance(far)} at its farthest; ${readableSpeeds(shaped)}${inside}` : `a circle${inside}`;
 }
 
 /** A clean number for the scale bar: 1, 2 or 5 times a power of ten. */
@@ -459,7 +477,7 @@ Layouts: ${layouts.join(", ")}`, "");
     const extent = Math.max(
       node.radius,
       isBody(node.kind) ? node.pull : 0,
-      ...node.children.map((child) => child.orbitRadius + child.radius),
+      ...node.children.map((child) => orbitDistances(child).far + child.radius),
     );
     const { width, height } = this.canvas.getBoundingClientRect();
     if (width > 0 && extent > 0) this.scale = (Math.min(width, height) * 0.45) / extent;
@@ -651,7 +669,9 @@ Layouts: ${layouts.join(", ")}`, "");
     if (!isRoot) {
       orbit.push(
         this.number(node, "orbitRadius", "Orbit radius (from the parent's centre)", (v) => `${readableDistance(v)}; ${readableDistance(v - (parentOf(this.world, node)?.radius ?? 0))} from its surface`),
-        this.number(node, "orbitPeriod", "Orbit period, seconds (negative goes the other way)", (v) => `${readableTime(v)} per orbit, ${orbitSpeed({ ...node, orbitPeriod: v }).toFixed(1)} units/s`),
+        this.number(node, "orbitPeriod", "Orbit period, seconds (negative goes the other way)", (v) => `${readableTime(v)} per orbit, ${readableSpeeds({ ...node, orbitPeriod: v })}`),
+        this.number(node, "eccentricity", "Eccentricity (0 is a circle, up to 0.9; the parent is at a focus)", (v) => readableShape(this.world, node, clampEccentricity(v))),
+        this.number(node, "periapsisAngle", "Closest point's direction from the parent, degrees", () => ""),
         this.number(node, "orbitPhase", "Start angle on the orbit, degrees", () => ""),
       );
     }
@@ -841,6 +861,8 @@ Layouts: ${layouts.join(", ")}`, "");
       | "atmosphere"
       | "burnSpeed"
       | "orbitRadius"
+      | "eccentricity"
+      | "periapsisAngle"
       | "orbitPeriod"
       | "orbitPhase"
       | "spinPeriod"
@@ -865,8 +887,10 @@ Layouts: ${layouts.join(", ")}`, "");
     help.className = "hint";
     help.textContent = hint(node[key]);
     input.addEventListener("input", () => {
-      const value = Number(input.value);
+      let value = Number(input.value);
       if (input.value === "" || !Number.isFinite(value)) return;
+      // An orbit has to stay an ellipse.
+      if (key === "eccentricity") value = clampEccentricity(value);
       node[key] = value;
       help.textContent = hint(value);
       this.changed();
@@ -1018,7 +1042,7 @@ Layouts: ${layouts.join(", ")}`, "");
   /**
    * Right-drag: the selected object's orbit radius becomes the distance from its parent (as
    * drawn now) to the mouse. With Shift, its start angle is set so it sits towards the mouse
-   * as seen from its parent at the time shown. An object with no parent does nothing.
+   * as seen from its parent at the time shown (on an ellipse, that's by its mean longitude). An object with no parent does nothing.
    */
   private moveTweak(event: MouseEvent): void {
     const node = this.selected;
@@ -1032,9 +1056,8 @@ Layouts: ${layouts.join(", ")}`, "");
       const origin = this.toScreen(from.x, from.y);
       const pointing = Math.atan2(mouse.y - origin.y, mouse.x - origin.x);
       // The orbit has turned on since time 0, and the start angle is where it began.
-      const turned = node.orbitPeriod === 0 ? 0 : ((Math.PI * 2) / node.orbitPeriod) * this.t;
-      const degrees = (((pointing - turned) * 180) / Math.PI) % 360;
-      node.orbitPhase = Math.round(((degrees + 360) % 360) * 10) / 10;
+      const degrees = (phaseToward(pointing, this.t, orbitShape(node)) * 180) / Math.PI;
+      node.orbitPhase = Math.round((((degrees % 360) + 360) % 360) * 10) / 10;
     } else {
       const origin = this.toScreen(from.x, from.y);
       node.orbitRadius = Math.max(1, Math.round(Math.hypot(mouse.x - origin.x, mouse.y - origin.y) / this.scale));
@@ -1142,7 +1165,14 @@ Layouts: ${layouts.join(", ")}`, "");
     for (const { node, parent } of entries) {
       if (!parent) continue;
       const p = at.get(parent)!;
-      if (!ring(p.x, p.y, node.orbitRadius)) continue;
+      // An ellipse has its parent at a focus, so it's centred off to one side.
+      const shape = orbitEllipse(orbitShape(node));
+      const centre = this.toScreen(p.x + shape.cx, p.y + shape.cy);
+      const far = shape.a * this.scale;
+      const away = Math.hypot(centre.x - this.width / 2, centre.y - this.height / 2);
+      if (far < 1 || away - far > diagonal || far - away > diagonal) continue;
+      ctx.beginPath();
+      ctx.ellipse(centre.x, centre.y, far, shape.b * this.scale, shape.rotation, 0, Math.PI * 2);
       ctx.strokeStyle = node === this.selected ? "rgba(143, 180, 255, 0.6)" : "rgba(143, 180, 255, 0.16)";
       ctx.stroke();
     }

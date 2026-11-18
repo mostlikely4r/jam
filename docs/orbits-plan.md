@@ -1,9 +1,9 @@
 # Orbits plan: ellipses and Kepler speeds
 
-Written 2026-11-18, before any of it is built. Today every orbit in the system designer is a
+Written 2026-11-18. Built the same day (see "What was built" at the end). Today every orbit in the system designer is a
 circle at a steady speed. This plan lets any orbit be an ellipse, with the speeds a real orbit
 has: fast near the parent, slow far from it. There is still no gravity: nothing pulls on
-anything, the path is only drawn differently. Nothing here is built yet.
+anything, the path is only drawn differently.
 
 ## Why
 
@@ -183,3 +183,43 @@ point: the trips take different times and both arrive.
   until the author chooses otherwise.
 - **Refusing or adjusting an eccentric station orbit.** The designer reports it. It never
   blocks it.
+
+## What was built
+
+All five steps, 2026-11-18. The suite and the build pass, and every existing test passes
+unchanged. What differs from the plan above:
+
+- **`orbitPhase` is the mean longitude at clock 0, not the mean anomaly.** Mean longitude is the
+  periapsis angle plus the mean anomaly. At `e = 0` it is the angle it's at, as planned, but it
+  also means the periapsis angle has no effect at all on a circle, and turning `e` up from 0
+  doesn't make the body jump by the periapsis angle. The designer's Start angle field and the
+  Shift right-drag work in it. `Poi.orbitAngle` is the same quantity.
+- **Three places the plan didn't spell out.** The game's own first field, station and pirate
+  base take their orbits from the tuning, so the tuning gained `fieldEccentricity`,
+  `fieldPeriapsis` and the same for `station` and `pirate` (default 0; periapsis in radians).
+  `writeGame` fills them from the designer. Like the distances, the station's and base's orbit
+  radii are their semi-major axes.
+- **The warning for a closest point inside the parent** is in the eccentricity field's hint for
+  every kind of object, not only stations and bases (it reads the parent's radius).
+- **`orbitSpeed` in the designer returns `{ near, far }`**, and `orbitDistances` and
+  `orbitShape` are new beside it. Both speeds are shown when `e > 0`.
+- **`closestApproach`** samples more finely for eccentric orbits (by how much faster they swing
+  round their closest point) and then refines round the best sample. Circular results are
+  untouched.
+- **`Pilot.plan` returns a third value, `world`** (the route's corners and aim back in the
+  world, each where the body is when the ship gets there), and `Sim.keepOutAt` takes an
+  optional time. This works in the body's own frame for circles too, so trips round a body
+  whose orbit is circular now keep it in the right place for the whole trip, not just at the
+  start.
+- **Chart partial arcs** are 20° of the ellipse's own circle (its eccentric anomaly) centred on
+  the thing, which is the same 20° as before for a circle.
+- **`Orbit`'s and `OrbitRing`'s two new numbers are optional** (default 0), so specs written
+  without them still work.
+- **Right-drag still sets `orbitRadius`** to the distance from the parent to the mouse, which on
+  an ellipse is the semi-major axis, not where the thing then sits.
+
+Tests: `src/kepler.test.ts`, `src/designer/eccentric.test.ts` (map against sim, copies, closest
+approach, saves, the tuned places, carrying), and additions to `src/route.test.ts` and
+`src/fields.test.ts` (a trip to an eccentric field from its near and far points).
+
+Not tried: the designer's ellipses and the chart's rings have not been looked at in a browser.

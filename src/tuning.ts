@@ -57,6 +57,17 @@ export const DEFAULTS = {
   pirateBaseDistance: 4000,
   orbitPeriod: 900,
   pirateOrbitPeriod: 900,
+  /**
+   * How far each of the three places' orbits is from a circle (0 to 0.9), and the direction
+   * from its parent to the closest point, in radians. Set by the system designer. The station's
+   * and pirate base's distances above are their semi-major axes, less the field's radius.
+   */
+  fieldEccentricity: 0,
+  fieldPeriapsis: 0,
+  stationEccentricity: 0,
+  stationPeriapsis: 0,
+  pirateEccentricity: 0,
+  piratePeriapsis: 0,
   pirateRotationPeriod: 0,
   stationRotationPeriod: 300,
   /** Whether the station rebuilds wrecked ships. A wreck goes to the nearest station that does. */

@@ -302,15 +302,18 @@ class ShipPilot {
 
   /**
    * A trip by the route planner from one moving spot to another, round the body in the way
-   * nearest the start. The route is in that body's frame; `centre` is where the body is now.
+   * nearest the start. The route is in that body's own frame, where it stands still, however
+   * it moves along its orbit: `centre` is where the body is now, and `world` is the route's
+   * corners and aim back in the world, each where the body is when the ship gets there.
    */
-  plan(sim: Sim, start: (t: number) => Vec, end: (t: number) => Vec): { route: Route; centre: Vec } {
+  plan(sim: Sim, start: (t: number) => Vec, end: (t: number) => Vec): { route: Route; centre: Vec; world: { path: Vec[]; aim: Vec } } {
     const { ship } = this;
     const flight = { accel: sim.tuning.thrust * sim.shipResponse(ship), cruise: this.cruiseSpeed(sim) };
     const from = start(sim.now);
     const to = end(sim.now);
     // Round the body nearest the station of those across the way, in that body's frame.
     let centre = { x: 0, y: 0 };
+    let at = (_t: number): Vec => centre;
     let radius = 0;
     let nearest = Infinity;
     for (const body of sim.bodies) {
@@ -320,16 +323,26 @@ class ShipPilot {
         nearest = distance;
         centre = circle;
         radius = circle.radius;
+        at = (t) => sim.keepOutAt(body, t);
       }
     }
     const route = planRoute(
-      (t) => minus(start(t), centre),
-      (t) => minus(end(t), centre),
+      (t) => minus(start(t), at(t)),
+      (t) => minus(end(t), at(t)),
       sim.now,
       radius,
       flight,
     );
-    return { route, centre };
+    // The way points are reached part-way through the trip, by how far along the path they are.
+    const total = route.path.length;
+    let done = 0;
+    const path = route.path.points.map((point, i, points) => {
+      if (i > 0) done += Math.hypot(point.x - points[i - 1].x, point.y - points[i - 1].y);
+      const where = at(route.depart + (total > 0 ? done / total : 0) * (route.arrive - route.depart));
+      return { x: point.x + where.x, y: point.y + where.y };
+    });
+    const arriving = at(route.arrive);
+    return { route, centre, world: { path, aim: { x: route.aim.x + arriving.x, y: route.aim.y + arriving.y } } };
   }
 
   /** The speed it flies at between places. */

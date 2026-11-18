@@ -5,6 +5,7 @@ import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./p
 export { FIRST_FIELD };
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
+import { clampEccentricity, orbitState } from "./kepler";
 import { autoPlace, canPlace, floatsAfterRemoval, footprint, reachable, reachableCells, sticks, usedCells, type Cell, type GridSpec, type Placed } from "./grid";
 import { pilotKind, type StepProfile } from "./profile/step";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
@@ -338,9 +339,14 @@ export interface Poi {
   y: number;
   px: number;
   py: number;
-  /** Where it is on its orbit now. Worked out from the clock each tick, never added up. */
+  /** Where it is on its orbit now (the mean longitude: the angle itself, for a circle). Worked out from the clock each tick, never added up. */
   orbitAngle: number;
+  /** The semi-major axis: the radius, for a circle. */
   orbitRadius: number;
+  /** 0 is a circle; the parent is at a focus of an ellipse. */
+  orbitEccentricity: number;
+  /** Direction from the parent to the closest point, in radians. */
+  orbitPeriapsis: number;
   /** The orbit angle at clock 0, so the angle at any time is phase + rate × time. */
   orbitPhase: number;
   /** The period the phase was worked out for. A change of period moves the phase, not the POI. */
@@ -517,12 +523,18 @@ interface ExtraField {
 /** What touching a body's ground does: nothing, a bounce that hurts like a rock's, or the end. */
 export type Surface = "none" | "damage" | "death";
 
-/** One circle in a body's motion: a radius, seconds per turn, the angle at clock 0, and which way it counts. */
+/** One ellipse in a body's motion (a circle unless it has an eccentricity): its size, seconds per lap, where it is at clock 0, and which way it counts. */
 export interface Orbit {
+  /** The semi-major axis: the radius, for a circle. */
   radius: number;
   period: number;
+  /** The mean longitude at clock 0: for a circle, the angle it's at. */
   phase: number;
   sign: 1 | -1;
+  /** 0 (the default) is a circle. See kepler.ts. */
+  eccentricity?: number;
+  /** Direction from the parent to the closest point, in radians. Default 0. */
+  periapsis?: number;
 }
 
 /**
@@ -593,6 +605,10 @@ export interface AnchorSpec {
 export interface OrbitRing {
   center: Orbit[];
   radius: number;
+  /** 0 (the default) is a circle round `center`; otherwise an ellipse with `center` at a focus. */
+  eccentricity?: number;
+  /** Direction from `center` to the closest point, in radians. */
+  periapsis?: number;
 }
 
 /** A new game's start for one ship, from the system designer. */
@@ -607,13 +623,12 @@ export function orbitsAt(orbits: Orbit[], time: number): { x: number; y: number;
   let y = 0;
   let vx = 0;
   let vy = 0;
-  for (const { radius, period, phase, sign } of orbits) {
-    const rate = orbitRate(period);
-    const angle = phase + rate * time;
-    x += sign * Math.cos(angle) * radius;
-    y += sign * Math.sin(angle) * radius;
-    vx -= sign * Math.sin(angle) * radius * rate;
-    vy += sign * Math.cos(angle) * radius * rate;
+  for (const { radius, period, phase, sign, eccentricity = 0, periapsis = 0 } of orbits) {
+    const at = orbitState({ radius, eccentricity, periapsis, phase, period }, time);
+    x += sign * at.x;
+    y += sign * at.y;
+    vx += sign * at.vx;
+    vy += sign * at.vy;
   }
   return { x, y, vx, vy };
 }
@@ -1459,9 +1474,9 @@ export class Sim {
     return best;
   }
 
-  /** The circle round a body that a route keeps out of, as it stands now. */
-  keepOutAt(body: SolidBody): { x: number; y: number; radius: number } {
-    const at = bodyAt(body, this.clock);
+  /** The circle round a body that a route keeps out of, as it stands now or at a time on the clock. */
+  keepOutAt(body: SolidBody, time = this.clock): { x: number; y: number; radius: number } {
+    const at = bodyAt(body, time);
     return { x: at.x, y: at.y, radius: keepOutRadius(body) };
   }
 
@@ -1487,7 +1502,16 @@ export class Sim {
       const phase = this.startPhases[name];
       return phase === undefined ? own : phase + orbitRate(period) * this.clock;
     };
-    this.field = this.makePoi("field", null, tuning.fieldOrbitRadius, angle("field", 0, tuning.fieldOrbitPeriod), tuning.fieldOrbitPeriod, tuning.fieldRadius);
+    this.field = this.makePoi(
+      "field",
+      null,
+      tuning.fieldOrbitRadius,
+      angle("field", 0, tuning.fieldOrbitPeriod),
+      tuning.fieldOrbitPeriod,
+      tuning.fieldRadius,
+      tuning.fieldEccentricity,
+      tuning.fieldPeriapsis,
+    );
     // Starts behind the ship's starting point, on the far side from the rocks.
     this.station = this.makePoi(
       "station",
@@ -1496,6 +1520,8 @@ export class Sim {
       angle("station", Math.PI, tuning.orbitPeriod),
       tuning.orbitPeriod,
       STATION_REACH,
+      tuning.stationEccentricity,
+      tuning.stationPeriapsis,
     );
     // By default it orbits at the same pace as the station, so it stays on the far side of the field.
     this.pirateBase =
@@ -1507,6 +1533,8 @@ export class Sim {
             angle("pirate base", 0, tuning.pirateOrbitPeriod),
             tuning.pirateOrbitPeriod,
             PIRATE_BASE_RADIUS,
+            tuning.pirateEccentricity,
+            tuning.piratePeriapsis,
           )
         : null;
     this.spinPois();
@@ -1530,9 +1558,12 @@ export class Sim {
     orbitAngle: number,
     orbitPeriod: number,
     reach: number,
+    orbitEccentricity = 0,
+    orbitPeriapsis = 0,
   ): Poi {
-    const x = (parent?.x ?? 0) + Math.cos(orbitAngle) * orbitRadius;
-    const y = (parent?.y ?? 0) + Math.sin(orbitAngle) * orbitRadius;
+    const at = orbitState({ radius: orbitRadius, eccentricity: orbitEccentricity, periapsis: orbitPeriapsis, phase: orbitAngle, period: 0 }, 0);
+    const x = (parent?.x ?? 0) + at.x;
+    const y = (parent?.y ?? 0) + at.y;
     return {
       name,
       parent,
@@ -1542,6 +1573,8 @@ export class Sim {
       py: y,
       orbitAngle,
       orbitRadius,
+      orbitEccentricity,
+      orbitPeriapsis,
       // The clock keeps running through a restart, so the phase counts back from now.
       orbitPhase: orbitAngle - orbitRate(orbitPeriod) * this.clock,
       orbitPeriod,
@@ -3578,12 +3611,12 @@ export class Sim {
     this.profile?.end();
   }
 
-  /** Each POI follows a fixed circle around its parent, or the system's center. */
+  /** Each POI follows a fixed circle or ellipse around its parent, or the system's center. */
   private movePois(dt: number): void {
     const { tuning, field, station } = this;
-    this.movePoi(field, tuning.fieldOrbitPeriod, tuning.fieldRotationPeriod, dt);
-    this.movePoi(station, tuning.orbitPeriod, tuning.stationRotationPeriod, dt);
-    if (this.pirateBase) this.movePoi(this.pirateBase, tuning.pirateOrbitPeriod, tuning.pirateRotationPeriod, dt);
+    this.movePoi(field, tuning.fieldOrbitPeriod, tuning.fieldRotationPeriod, dt, tuning.fieldEccentricity, tuning.fieldPeriapsis);
+    this.movePoi(station, tuning.orbitPeriod, tuning.stationRotationPeriod, dt, tuning.stationEccentricity, tuning.stationPeriapsis);
+    if (this.pirateBase) this.movePoi(this.pirateBase, tuning.pirateOrbitPeriod, tuning.pirateRotationPeriod, dt, tuning.pirateEccentricity, tuning.piratePeriapsis);
     for (const { spec, poi } of this.extraFields) {
       poi.px = poi.x;
       poi.py = poi.y;
@@ -3607,7 +3640,7 @@ export class Sim {
     }
   }
 
-  private movePoi(poi: Poi, orbitPeriod: number, rotationPeriod: number, dt: number): void {
+  private movePoi(poi: Poi, orbitPeriod: number, rotationPeriod: number, dt: number, eccentricity: number, periapsis: number): void {
     poi.px = poi.x;
     poi.py = poi.y;
     poi.prevRotation = poi.rotation;
@@ -3617,11 +3650,22 @@ export class Sim {
       poi.orbitPhase = poi.orbitAngle - orbitRate(orbitPeriod) * (this.clock - dt);
       poi.orbitPeriod = orbitPeriod;
     }
+    poi.orbitEccentricity = clampEccentricity(eccentricity);
+    poi.orbitPeriapsis = periapsis;
     poi.orbitAngle = poi.orbitPhase + orbitRate(orbitPeriod) * this.clock;
     poi.turn = orbitRate(rotationPeriod) * dt;
     poi.rotation += poi.turn;
-    poi.x = (poi.parent?.x ?? 0) + Math.cos(poi.orbitAngle) * poi.orbitRadius;
-    poi.y = (poi.parent?.y ?? 0) + Math.sin(poi.orbitAngle) * poi.orbitRadius;
+    const at = this.poiOffset(poi, this.clock);
+    poi.x = (poi.parent?.x ?? 0) + at.x;
+    poi.y = (poi.parent?.y ?? 0) + at.y;
+  }
+
+  /** Where a POI is from its parent at a time on the clock, by its own orbit. */
+  private poiOffset(poi: Poi, time: number): { x: number; y: number } {
+    return orbitState(
+      { radius: poi.orbitRadius, eccentricity: poi.orbitEccentricity, periapsis: poi.orbitPeriapsis, phase: poi.orbitPhase, period: poi.orbitPeriod },
+      time,
+    );
   }
 
   /**
@@ -3634,8 +3678,8 @@ export class Sim {
       return { x, y };
     }
     const parent = poi.parent ? this.poiAt(poi.parent, time) : { x: 0, y: 0 };
-    const angle = poi.orbitPhase + orbitRate(poi.orbitPeriod) * time;
-    return { x: parent.x + Math.cos(angle) * poi.orbitRadius, y: parent.y + Math.sin(angle) * poi.orbitRadius };
+    const at = this.poiOffset(poi, time);
+    return { x: parent.x + at.x, y: parent.y + at.y };
   }
 
   /** Each POI's orbit angle at clock 0. */
@@ -3695,20 +3739,23 @@ export class Sim {
         return base;
       })];
     }
-    const place = (poi: Poi, orbitRadius: number, orbitPeriod: number) => {
+    const place = (poi: Poi, orbitRadius: number, orbitPeriod: number, eccentricity: number, periapsis: number) => {
       const rate = orbitRate(orbitPeriod);
       poi.orbitRadius = orbitRadius;
       poi.orbitPeriod = orbitPeriod;
+      poi.orbitEccentricity = clampEccentricity(eccentricity);
+      poi.orbitPeriapsis = periapsis;
       poi.orbitPhase = phases[poi.name] ?? poi.orbitAngle - rate * clock;
       poi.orbitAngle = poi.orbitPhase + rate * clock;
-      poi.x = poi.px = (poi.parent?.x ?? 0) + Math.cos(poi.orbitAngle) * orbitRadius;
-      poi.y = poi.py = (poi.parent?.y ?? 0) + Math.sin(poi.orbitAngle) * orbitRadius;
+      const at = this.poiOffset(poi, clock);
+      poi.x = poi.px = (poi.parent?.x ?? 0) + at.x;
+      poi.y = poi.py = (poi.parent?.y ?? 0) + at.y;
     };
     this.spinPois();
     field.reach = tuning.fieldRadius;
-    place(field, tuning.fieldOrbitRadius, tuning.fieldOrbitPeriod);
-    place(station, tuning.fieldRadius + tuning.stationDistance, tuning.orbitPeriod);
-    if (pirateBase) place(pirateBase, tuning.fieldRadius + tuning.pirateBaseDistance, tuning.pirateOrbitPeriod);
+    place(field, tuning.fieldOrbitRadius, tuning.fieldOrbitPeriod, tuning.fieldEccentricity, tuning.fieldPeriapsis);
+    place(station, tuning.fieldRadius + tuning.stationDistance, tuning.orbitPeriod, tuning.stationEccentricity, tuning.stationPeriapsis);
+    if (pirateBase) place(pirateBase, tuning.fieldRadius + tuning.pirateBaseDistance, tuning.pirateOrbitPeriod, tuning.pirateEccentricity, tuning.piratePeriapsis);
 
     const moved = (poi: Poi) => {
       const was = before.get(poi);
@@ -4215,10 +4262,10 @@ export class Sim {
     pilot.task = home ? "heading home" : "patrolling";
     const from = { x: ship.x, y: ship.y };
     const record: TripRecord = { goal: home ? "home" : "field", target, stage: "travel", depart: this.clock, arrive: this.clock, path: [from], aim: from };
-    const { route, centre } = pilot.plan(this, () => from, (t) => this.recordTargetAt(record, t));
+    const { route, world } = pilot.plan(this, () => from, (t) => this.recordTargetAt(record, t));
     record.arrive = route.arrive;
-    record.path = route.path.points.map((point) => ({ x: point.x + centre.x, y: point.y + centre.y }));
-    record.aim = { x: route.aim.x + centre.x, y: route.aim.y + centre.y };
+    record.path = world.path;
+    record.aim = world.aim;
     pilot.record = record;
   }
 
@@ -4384,10 +4431,10 @@ export class Sim {
     }
     const from = { x: ship.x, y: ship.y };
     const record: TripRecord = { goal, target, stage: "travel", depart: this.clock, arrive: this.clock, path: [from], aim: from };
-    const { route, centre } = pilot.plan(this, () => from, (t) => this.recordTargetAt(record, t));
+    const { route, world } = pilot.plan(this, () => from, (t) => this.recordTargetAt(record, t));
     record.arrive = route.arrive;
-    record.path = route.path.points.map((point) => ({ x: point.x + centre.x, y: point.y + centre.y }));
-    record.aim = { x: route.aim.x + centre.x, y: route.aim.y + centre.y };
+    record.path = world.path;
+    record.aim = world.aim;
     pilot.record = record;
   }
 

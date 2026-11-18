@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { orbitState } from "./kepler";
 import { pathAround, planRoute, travelTime, type Vec } from "./route";
 
 const R = 1000;
@@ -84,5 +85,31 @@ describe("route to a moving place", () => {
     expect(route.path.bends).toBe(true);
     const trip = travelTime(route.path.length, flight) + route.matching;
     expect(route.arrive - route.depart).toBeCloseTo(trip, 0);
+  });
+});
+
+describe("a route to a target on an ellipse", () => {
+  const target = (t: number): Vec => {
+    const at = orbitState({ radius: 50000, eccentricity: 0.6, periapsis: 1, phase: 0.5, period: 4000 }, t);
+    return { x: at.x, y: at.y };
+  };
+
+  it("aims at where the target will be on arrival, and settles, whenever it leaves", () => {
+    for (const now of [0, 700, 1500, 2300, 3100]) {
+      const route = planRoute(() => ({ x: -30000, y: 20000 }), target, now, 5000, { accel: 420, cruise: Infinity });
+      expect(route.settled).toBe(true);
+      const there = target(route.arrive);
+      expect(route.aim.x).toBeCloseTo(there.x, 6);
+      expect(route.aim.y).toBeCloseTo(there.y, 6);
+      expect(route.arrive).toBeGreaterThan(now);
+    }
+  });
+
+  it("takes different times from different points on the orbit", () => {
+    const times = [0, 1000, 2000, 3000].map((now) => {
+      const route = planRoute(() => ({ x: -30000, y: 20000 }), target, now, 0, { accel: 420, cruise: Infinity });
+      return route.arrive - route.depart;
+    });
+    expect(Math.max(...times) - Math.min(...times)).toBeGreaterThan(5);
   });
 });

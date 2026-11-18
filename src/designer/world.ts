@@ -1,11 +1,12 @@
 /**
- * The layout of a star system as a tree: each thing orbits its parent on a fixed circle
- * and spins at its own pace. Positions are worked out from time, not added up tick by
+ * The layout of a star system as a tree: each thing orbits its parent on a fixed circle (or
+ * ellipse, with the parent at a focus) and spins at its own pace. Positions are worked out from time, not added up tick by
  * tick, so any moment can be looked at directly (see docs/open-world-plan.md, 3.2).
  *
  * The system designer edits this. See link.ts for the parts the game flies in.
  */
 
+import { clampEccentricity, orbitSpeeds, orbitState, type OrbitShape } from "../kepler";
 import { PARTS, type PartId } from "../parts";
 
 export const WORLD_VERSION = 1;
@@ -42,11 +43,15 @@ export interface WorldNode {
   atmosphere: number;
   /** Bodies only: in the air, faster than this against the ground burns. */
   burnSpeed: number;
-  /** Distance from the parent's centre. Ignored for the root. */
+  /** Distance from the parent's centre; for an ellipse, its semi-major axis. Ignored for the root. */
   orbitRadius: number;
+  /** 0 is a circle. Up to 0.9: the closest point is `orbitRadius × (1 − e)`, the farthest `× (1 + e)`. */
+  eccentricity: number;
+  /** Degrees: the direction from the parent to the closest point. Means nothing for a circle. */
+  periapsisAngle: number;
   /** Seconds per orbit. 0 stands still; negative goes the other way round. */
   orbitPeriod: number;
-  /** Where on its orbit it is at time 0, in degrees. */
+  /** Where on its orbit it is at time 0, in degrees: the mean longitude, which for a circle is just the angle. */
   orbitPhase: number;
   /** Seconds per turn about its own centre. 0 doesn't spin; negative turns the other way. */
   spinPeriod: number;
@@ -94,9 +99,15 @@ function rate(period: number): number {
   return period === 0 ? 0 : TAU / period;
 }
 
-/** Orbit angle in radians at time `t`. */
-export function orbitAngle(node: WorldNode, t: number): number {
-  return (node.orbitPhase * Math.PI) / 180 + rate(node.orbitPeriod) * t;
+/** A node's orbit, or a copy's (which has its own size and start), as the shared orbit maths takes it. */
+export function orbitShape(node: WorldNode, copy: Pick<Copy, "orbitRadius" | "orbitPhase"> | null = null): OrbitShape {
+  return {
+    radius: copy?.orbitRadius ?? node.orbitRadius,
+    eccentricity: clampEccentricity(node.eccentricity ?? 0),
+    periapsis: ((node.periapsisAngle ?? 0) * Math.PI) / 180,
+    phase: ((copy?.orbitPhase ?? node.orbitPhase) * Math.PI) / 180,
+    period: node.orbitPeriod,
+  };
 }
 
 /** Rotation about its own centre in radians at time `t`. */
@@ -108,10 +119,10 @@ export function spinAngle(node: WorldNode, t: number): number {
 export function positions(world: World, t: number): Map<WorldNode, { x: number; y: number }> {
   const out = new Map<WorldNode, { x: number; y: number }>();
   const visit = (node: WorldNode, px: number, py: number, isRoot: boolean) => {
-    const angle = orbitAngle(node, t);
-    const r = isRoot ? 0 : node.orbitRadius;
-    const x = px + Math.cos(angle) * r;
-    const y = py + Math.sin(angle) * r;
+    // The root sits at the middle of everything: its own orbit counts for nothing.
+    const at = isRoot ? { x: 0, y: 0 } : orbitState(orbitShape(node), t);
+    const x = px + at.x;
+    const y = py + at.y;
     out.set(node, { x, y });
     for (const child of node.children) visit(child, x, y, false);
   };
@@ -119,9 +130,15 @@ export function positions(world: World, t: number): Map<WorldNode, { x: number; 
   return out;
 }
 
-/** Speed along its orbit relative to its parent, in units per second. */
-export function orbitSpeed(node: WorldNode): number {
-  return Math.abs(rate(node.orbitPeriod)) * node.orbitRadius;
+/** Speed along its orbit relative to its parent, in units per second: at the closest point and at the farthest, which are the same for a circle. */
+export function orbitSpeed(node: WorldNode): { near: number; far: number } {
+  return orbitSpeeds(orbitShape(node));
+}
+
+/** How near and far from its parent it gets. */
+export function orbitDistances(node: WorldNode): { near: number; far: number } {
+  const { radius, eccentricity } = orbitShape(node);
+  return { near: radius * (1 - eccentricity), far: radius * (1 + eccentricity) };
 }
 
 /** Every node with its parent, depth first. */
@@ -231,8 +248,8 @@ export function copyPositions(
     out.set(
       node,
       copiesOf(node).map((copy) => {
-        const angle = (copy.orbitPhase * Math.PI) / 180 + rate(node.orbitPeriod) * t;
-        return { x: centre.x + Math.cos(angle) * copy.orbitRadius, y: centre.y + Math.sin(angle) * copy.orbitRadius };
+        const at = orbitState(orbitShape(node, copy), t);
+        return { x: centre.x + at.x, y: centre.y + at.y };
       }),
     );
   }
@@ -250,7 +267,7 @@ export function newId(world: World): string {
 /** A sensible first guess for a new child: small, just outside its parent and siblings. */
 export function makeChild(world: World, parent: WorldNode, kind: NodeKind): WorldNode {
   const outermost = parent.children.reduce(
-    (far, child) => Math.max(far, child.orbitRadius + child.radius),
+    (far, child) => Math.max(far, child.orbitRadius * (1 + child.eccentricity) + child.radius),
     Math.max(parent.radius, parent.pull),
   );
   const radius = kind === "star" ? 100000 : kind === "planet" ? 12000 : kind === "moon" ? 3000 : kind === "asteroid" ? 600 : kind === "field" ? 5200 : 300;
@@ -266,6 +283,8 @@ export function makeChild(world: World, parent: WorldNode, kind: NodeKind): Worl
     ...placeDefaults(kind),
     spawns: [],
     orbitRadius,
+    eccentricity: 0,
+    periapsisAngle: 0,
     orbitPeriod,
     orbitPhase: 0,
     spinPeriod: 0,
@@ -298,6 +317,8 @@ export function seedWorld(): World {
     ...placeDefaults(kind),
     spawns: [],
     orbitRadius: 0,
+    eccentricity: 0,
+    periapsisAngle: 0,
     orbitPeriod: 0,
     orbitPhase: 0,
     spinPeriod: 0,
@@ -375,6 +396,8 @@ export function parseWorld(text: string): World | null {
         angleVariance: num("angleVariance"),
         orbitVariance: num("orbitVariance"),
         orbitRadius: num("orbitRadius"),
+        eccentricity: clampEccentricity(num("eccentricity")),
+        periapsisAngle: num("periapsisAngle"),
         orbitPeriod: num("orbitPeriod"),
         orbitPhase: num("orbitPhase"),
         spinPeriod: num("spinPeriod"),
@@ -390,8 +413,9 @@ export function parseWorld(text: string): World | null {
 }
 
 export function stringifyWorld(world: World): string {
-  // A spin start angle of 0 is left out, so layouts from before it existed read and save the same.
-  return JSON.stringify(world, (key, value) => (key === "spinPhase" && value === 0 ? undefined : value), 2) + "\n";
+  // A spin start angle of 0, and a circular orbit, are left out, so layouts from before they existed read and save the same.
+  const left = ["spinPhase", "eccentricity", "periapsisAngle"];
+  return JSON.stringify(world, (key, value) => (left.includes(key) && value === 0 ? undefined : value), 2) + "\n";
 }
 
 /** The chain from the root down to a node, both included. */
@@ -423,32 +447,50 @@ export function closestApproach(world: World, body: WorldNode, place: WorldNode)
   const b = pathTo(world, place);
   let shared = 0;
   while (shared < a.length && shared < b.length && a[shared] === b[shared]) shared++;
-  const moving = [...a.slice(shared), ...b.slice(shared)]
-    .map((node) => Math.abs(node.orbitPeriod))
-    .filter((period) => period > 0);
+  const below = [...a.slice(shared), ...b.slice(shared)];
+  const moving = below.map((node) => Math.abs(node.orbitPeriod)).filter((period) => period > 0);
   if (moving.length === 0) moving.push(1);
   const span = Math.max(...moving);
-  const step = Math.min(...moving) / 360;
+  // An eccentric orbit swings round its closest point faster than a circle of its period does.
+  const quickest = Math.max(...below.map((node) => (1 + node.eccentricity) ** 2 / (1 - node.eccentricity ** 2) ** 1.5));
+  const step = Math.min(...moving) / 360 / quickest;
   const samples = Math.min(200000, Math.ceil(span / step));
   const relative = (chain: WorldNode[], t: number) => {
     let x = 0;
     let y = 0;
     for (const node of chain) {
-      const angle = orbitAngle(node, t);
-      x += Math.cos(angle) * node.orbitRadius;
-      y += Math.sin(angle) * node.orbitRadius;
+      const at = orbitState(orbitShape(node), t);
+      x += at.x;
+      y += at.y;
     }
     return { x, y };
   };
   const belowA = a.slice(shared);
   const belowB = b.slice(shared);
+  const gapAt = (t: number) => {
+    const pa = relative(belowA, t);
+    const pb = relative(belowB, t);
+    return Math.hypot(pa.x - pb.x, pa.y - pb.y) - reachOf(body) - place.radius;
+  };
   let best = { gap: Infinity, at: 0 };
   for (let i = 0; i <= samples; i++) {
     const t = (span * i) / samples;
-    const pa = relative(belowA, t);
-    const pb = relative(belowB, t);
-    const gap = Math.hypot(pa.x - pb.x, pa.y - pb.y) - reachOf(body) - place.radius;
+    const gap = gapAt(t);
     if (gap < best.gap) best = { gap, at: t };
+  }
+  // The samples can step over a sharp pass, so look closer round the best of them when an orbit is eccentric.
+  if (quickest > 1) {
+    let low = best.at - span / samples;
+    let high = best.at + span / samples;
+    for (let i = 0; i < 40; i++) {
+      const one = low + (high - low) / 3;
+      const two = high - (high - low) / 3;
+      if (gapAt(one) < gapAt(two)) high = two;
+      else low = one;
+    }
+    const at = (low + high) / 2;
+    const gap = gapAt(at);
+    if (gap < best.gap) best = { gap, at };
   }
   return best;
 }

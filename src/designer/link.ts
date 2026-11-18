@@ -205,7 +205,7 @@ export function spawnsFor(world: World): Spawn[] {
 function ringsOf(world: World, place: (node: WorldNode, copy: Copy | null) => Orbit[], node: WorldNode, copy: Copy | null): OrbitRing[] {
   const parent = parentOf(world, node);
   if (!parent || node === world.root) return [];
-  return [{ center: place(parent, null), radius: copy?.orbitRadius ?? node.orbitRadius }];
+  return [{ center: place(parent, null), radius: copy?.orbitRadius ?? node.orbitRadius, eccentricity: node.eccentricity, periapsis: toRadians(node.periapsisAngle) }];
 }
 
 /** Works out a node's or a copy's chain of orbits, in the game's frame. */
@@ -218,6 +218,8 @@ function placer(world: World): (node: WorldNode, copy: Copy | null) => Orbit[] {
     period: node.orbitPeriod,
     phase: ((copy?.orbitPhase ?? node.orbitPhase) * Math.PI) / 180,
     sign,
+    eccentricity: node.eccentricity,
+    periapsis: toRadians(node.periapsisAngle),
   });
   // The root sits at the middle of everything: its own orbit counts for nothing.
   const own = (nodes: WorldNode[]) => nodes.filter((each) => each !== world.root);
@@ -246,6 +248,8 @@ export function writeGame(world: World, tuning: Tuning): void {
   tuning.fieldRadius = field.radius;
   tuning.fieldOrbitRadius = field.orbitRadius;
   tuning.fieldOrbitPeriod = field.orbitPeriod;
+  tuning.fieldEccentricity = field.eccentricity;
+  tuning.fieldPeriapsis = toRadians(field.periapsisAngle);
   tuning.fieldRotationPeriod = field.spinPeriod;
   tuning.fieldSpinPhase = toRadians(field.spinPhase);
   if (station) {
@@ -254,11 +258,15 @@ export function writeGame(world: World, tuning: Tuning): void {
     tuning.stationStorage = station.storage;
     tuning.stationDistance = station.orbitRadius - field.radius;
     tuning.orbitPeriod = station.orbitPeriod;
+    tuning.stationEccentricity = station.eccentricity;
+    tuning.stationPeriapsis = toRadians(station.periapsisAngle);
     tuning.stationRotationPeriod = station.spinPeriod;
   }
   if (pirates) {
     tuning.pirateBaseDistance = pirates.orbitRadius - field.radius;
     tuning.pirateOrbitPeriod = pirates.orbitPeriod;
+    tuning.pirateEccentricity = pirates.eccentricity;
+    tuning.piratePeriapsis = toRadians(pirates.periapsisAngle);
     tuning.pirateRotationPeriod = pirates.spinPeriod;
     tuning.pirateSpinPhase = toRadians(pirates.spinPhase);
   }

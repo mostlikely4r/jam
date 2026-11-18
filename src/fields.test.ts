@@ -162,6 +162,44 @@ describe("traffic between fields", () => {
     expect(homeWith).toBeGreaterThan(0);
   }, 240000);
 
+  it("flies to a field on an eccentric orbit, from where it is far out and from where it is near, and mines there", () => {
+    for (const half of [0, Math.PI]) {
+      const sim = new Sim(1, { ...WORLD, fieldWanderChance: 1 });
+      // The mean longitude equal to the periapsis angle, at the clock now, is the closest point.
+      const phase = 0.5 - (2 * Math.PI * sim.now) / 10800 + half;
+      sim.bodies = [PLANET];
+      const second: FieldSpec = {
+        id: "second:0",
+        name: "Second",
+        radius: 3000,
+        rocks: 40,
+        rockDrift: 0,
+        rockInflow: 0,
+        carryFull: Infinity,
+        carryNone: Infinity,
+        rotationPeriod: 0,
+        orbits: [{ radius: 90000, period: 10800, phase, sign: 1, eccentricity: 0.4, periapsis: 0.5 }],
+      };
+      sim.applyLayout({}, [second]);
+      const pilot = sim.traffic[0];
+      const { ship } = pilot;
+      const { poi } = sim.extraFields[0];
+      // At the closest point, or half a lap on at the farthest.
+      expect(Math.hypot(poi.x, poi.y)).toBeCloseTo(half === 0 ? 90000 * 0.6 : 90000 * 1.4, -2);
+      decide(sim, pilot);
+      expect(pilot.working).toBe("second:0");
+      let arrivedAt = Infinity;
+      for (let i = 0; i < Math.round(1500 / TICK) && arrivedAt === Infinity; i++) {
+        sim.step();
+        sim.events.length = 0;
+        if (pilot.task === "shooting" && sim.miningFieldAt(ship.x, ship.y).id === "second:0") arrivedAt = sim.now;
+      }
+      expect(arrivedAt).toBeLessThan(Infinity);
+      // It's in the field, where the field now is.
+      expect(Math.hypot(ship.x - poi.x, ship.y - poi.y)).toBeLessThan(3000 + 2000);
+    }
+  }, 240000);
+
   it("cornerToward is clear when nothing is in the way, and outside the pull when something is", () => {
     const sim = new Sim(1, { ...WORLD });
     sim.bodies = [PLANET];

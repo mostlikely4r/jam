@@ -89,7 +89,7 @@
       #shop button.pending { color: #c4a4f0; border-color: #8f6fc9; background: #211a30; }
       #shop button.poor { color: #e88a8a; border-color: #a84f4f; background: #2a1616; }
       #shop button.small { display: inline-block; width: auto; margin: 0 0 6px; font-size: 12px; }
-      #inventory { position: fixed; left: 12px; bottom: 44px; width: 420px; max-height: calc(100vh - 64px); overflow-y: auto;
+      #inventory { position: fixed; left: 12px; bottom: 44px; max-width: calc(100vw - 24px); max-height: calc(100vh - 64px); overflow: auto;
                    box-sizing: border-box; padding: 10px 12px; background: #0b0f18e8; border: 1px solid #46b4bd; font-size: 13px; }
       #inventory[hidden] { display: none; }
       #inventory h2 { font-size: 12px; margin: 10px 0 6px; color: #7fdfe6; text-transform: uppercase; letter-spacing: 1px; }
@@ -99,6 +99,42 @@
       #inventory .row span { flex: 1; }
       #inventory button { background: #1a2233; color: #cfd8e6; border: 1px solid #33405a; padding: 1px 6px; font: inherit; font-size: 12px; cursor: pointer; }
       #inventory button:hover { background: #26324a; }
+      #inventory .status { min-height: 18px; margin: 0 0 8px; color: #b8c3d4; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+      #inventory .status span { margin-right: 4px; color: #cfd8e6; }
+      #inventory .status.refused { color: #e88a8a; }
+      #inventory .columns { display: flex; gap: 18px; align-items: flex-start; }
+      #inventory .column { flex: none; max-width: 260px; }
+      #inventory .blueprint { position: relative; width: 240px; height: 240px; background: #0d1626;
+                              background-image: linear-gradient(#1b2a44 1px, transparent 1px), linear-gradient(90deg, #1b2a44 1px, transparent 1px);
+                              background-size: 20px 20px; border: 1px solid #2a3d5e; }
+      #inventory .blueprint canvas, #inventory .blueprint svg { position: absolute; left: 0; top: 0; pointer-events: none; }
+      #inventory .blueprint line { stroke: #46b4bd; stroke-width: 1; opacity: 0.6; }
+      #inventory .port { position: absolute; transform: translate(-50%, -50%); min-width: 22px; padding: 1px 4px; font-size: 11px; text-align: center;
+                         background: #122529; color: #7fdfe6; border: 1px solid #46b4bd; cursor: pointer; white-space: nowrap; user-select: none; }
+      #inventory .port.empty { background: #0b0f18; color: #5a6a80; border-style: dashed; cursor: default; }
+      #inventory .port.damaged, #inventory .item.damaged, #inventory .slot.damaged { color: #f0a868; border-color: #c97f3c; }
+      #inventory .port.destroyed, #inventory .item.destroyed { color: #8a6a6a; border-color: #5a3a3a; background: #1a1010; text-decoration: line-through; }
+      #inventory .port.selected, #inventory .item.selected { outline: 2px solid #f0d86a; }
+      #inventory .port.legal { background: #14261b; color: #8fe3a1; border-color: #8fe3a1; box-shadow: 0 0 6px #5fae66; }
+      #inventory .port.dim { opacity: 0.35; }
+      #inventory .port.lifted { opacity: 0.6; }
+      #inventory .grid { position: relative; background-color: #0d1626; border: 1px solid #2a3d5e;
+                         background-image: linear-gradient(#1b2a44 1px, transparent 1px), linear-gradient(90deg, #1b2a44 1px, transparent 1px);
+                         background-size: 24px 24px; }
+      #inventory .grid > div { position: absolute; box-sizing: border-box; }
+      #inventory .grid .pocket { background: repeating-linear-gradient(45deg, #1a2233, #1a2233 3px, #0d1626 3px, #0d1626 6px); }
+      #inventory .grid .entry { border: 2px solid #f0d86a; background: #29240f80; }
+      #inventory .grid .item { background: #1d3442; color: #cfe8ee; border: 1px solid #46b4bd; font-size: 10px; padding: 2px; overflow: hidden;
+                               cursor: pointer; user-select: none; }
+      #inventory .grid .preview { pointer-events: none; z-index: 2; }
+      #inventory .grid .preview.ok { background: #5fae6655; border: 2px solid #8fe3a1; }
+      #inventory .grid .preview.bad { background: #a84f4f55; border: 2px solid #e88a8a; }
+      #inventory .slots, #inventory .software { display: flex; gap: 4px; flex-wrap: wrap; min-height: 26px; margin-bottom: 6px; }
+      #inventory .slot, #inventory .chip { min-width: 44px; padding: 3px 6px; font-size: 11px; text-align: center; border: 1px solid #46b4bd;
+                                            background: #122529; color: #7fdfe6; cursor: pointer; user-select: none; }
+      #inventory .slot.empty { border-style: dashed; background: #0b0f18; cursor: default; }
+      #inventory .chip { border-color: #33405a; background: #1a2233; color: #cfd8e6; }
+      body.dragging #shop { outline: 2px dashed #46b4bd; }
       #dockhint { position: fixed; right: 12px; bottom: 44px; padding: 4px 10px; background: #0b0f18e8; border: 1px solid #5fae66;
                   color: #8fe3a1; font-size: 13px; pointer-events: none; }
       body:has(#panel:not([hidden])) #dockhint { right: 302px; }

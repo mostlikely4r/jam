@@ -4,8 +4,8 @@ Written 2026-11-18. The fitting plan (`docs/fitting-plan.md`) made parts into co
 on mounts, in the bay and in lockers, but the screens still treat them as lists: a part is
 something you have or don't, and the bay is one number shared by ore and modules. This plan
 makes them real things in real places: storage you can see as grids, a blueprint of the ship to
-fit onto, and items with a shape that take up space. Steps 1 to 3 are built (2026-11-18).
-Step 4 is not built yet.
+fit onto, and items with a shape that take up space. All four steps are built (2026-11-18).
+The question below is still open: it's answered by playing.
 
 ## The picture
 
@@ -227,6 +227,26 @@ in the bay. Fill the bay and buy again, and it lands in the locker.
 
 *Try in game:* move your stuff to Planet base. Pack the bay so the entry gets blocked, undock,
 and see that no ore comes in. Seal off a pocket and see it stay empty.
+
+**Built 2026-11-18.** Where it differs from the above, or settles what the plan left open:
+
+- The blueprint is drawn nose up. Ports sit on their mounts, pushed apart where mounts are
+  close together, with a thin line back to each mount's real spot. Empty mounts show a dashed
+  "+" port you can drop onto.
+- Dropping a part on a mount fits it on that mount in particular. What was there goes to the
+  spot the new part came from, or else anywhere in that bay or locker, or the drop is refused.
+  Pairs and turrets still go on the way the Fit button puts them. Clicking Fit still lets what
+  comes off fall back to the locker when the bay has no room for it.
+- New: a part can be dragged from one mount to another that takes it, swapping with what's
+  there if each takes the other's. This is for hulls with two mounts of a kind.
+- Legal drops are checked by trying the move and putting everything back (`Sim.dryRun`), so the
+  highlight and the drop can't disagree.
+- The bay grid shades pockets sealed off from the entry and says when the entry is blocked.
+  The selected item's buttons are Fit, To bay, To locker, Turn, Sell, and Drop in flight.
+  Something dragged onto the open shop is sold. A part on a mount sells as it does from the
+  shop line, and the hull's own gear can't be sold off its mount.
+- In flight the bay box draws its items as blocks over the box's own grid. Ore lumps stay out
+  of them and out of sealed pockets (`src/cargoBin.ts`, tested in `src/cargoBin.test.ts`).
 
 ## Not doing
 

@@ -76,11 +76,20 @@ export function usedCells(items: Placed[]): number {
 
 /** How many free cells ore can reach from the entry (every free cell in a locker). */
 export function reachableCells(grid: GridSpec, items: Placed[]): number {
+  return reachable(grid, items).size;
+}
+
+/** The free cells ore can reach from the entry, each as y * w + x (every free cell in a locker). */
+export function reachable(grid: GridSpec, items: Placed[]): Set<number> {
   const taken = new Set<number>();
   for (const i of items) for (const c of cellsOf(i)) taken.add(c.y * grid.w + c.x);
-  if (!grid.entry) return grid.w * grid.h - taken.size;
   const key = (c: Cell) => c.y * grid.w + c.x;
-  if (taken.has(key(grid.entry))) return 0;
+  if (!grid.entry) {
+    const free = new Set<number>();
+    for (let k = 0; k < grid.w * grid.h; k++) if (!taken.has(k)) free.add(k);
+    return free;
+  }
+  if (taken.has(key(grid.entry))) return new Set();
   const seen = new Set([key(grid.entry)]);
   const queue: Cell[] = [grid.entry];
   for (let cur = queue.pop(); cur; cur = queue.pop()) {
@@ -92,7 +101,7 @@ export function reachableCells(grid: GridSpec, items: Placed[]): number {
       queue.push(n);
     }
   }
-  return seen.size;
+  return seen;
 }
 
 /** Finds a spot for a new item: in a bay the one that keeps the most room reachable, in a locker the first free one. */

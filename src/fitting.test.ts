@@ -1090,3 +1090,54 @@ describe("buying, WoW style", () => {
     expect(ship.hold).toEqual([]);
   });
 });
+
+describe("moving things on the blueprint", () => {
+  it("a dry run says whether a change would go through, and changes nothing", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    const credits = ship.credits;
+    expect(sim.dryRun(ship, () => sim.buyPart(ship, "gun2"))).toBe(true);
+    expect(sim.dryRun(ship, () => sim.buyPart(ship, "gun2", { at: "mount", mount: "gun" }))).toBe(false);
+    expect(ship.credits).toBe(credits);
+    expect(ship.hold).toEqual([]);
+    expect(sim.buyRefused).toBeNull();
+    expect(sim.events.filter((event) => event.type === "sale")).toEqual([]);
+  });
+
+  it("dropped on a filled mount, a part swaps: the old one goes to the new one's spot", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    sim.buyPart(ship, "gun2", { at: "hold", spot: { x: 4, y: 0, turned: false } });
+    expect(sim.fitItem(ship, { at: "hold", index: 0 }, "gun")).toBe(true);
+    expect(ship.fit.gun!.part).toBe("gun2");
+    expect(ship.hold).toMatchObject([{ module: { part: "gun1" }, x: 4, y: 0 }]);
+    // A mount that doesn't take it refuses.
+    expect(sim.fitItem(ship, { at: "hold", index: 0 }, "computer")).toBe(false);
+  });
+
+  it("a swap is refused when the old part has no room where the new one came from", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    const base = sim.baseAt()!;
+    sim.devSet(ship, "largeBay", true);
+    const locker = sim.lockerAt(base);
+    locker.rows = 4;
+    // A full 6 by 4 locker: the small bay and five tractors.
+    sim.putInLocker(base, { part: "smallBay", wear: 0 }, { x: 0, y: 0, turned: false });
+    for (const [x, y] of [[2, 0], [4, 0], [0, 2], [2, 2], [4, 2]]) sim.putInLocker(base, { part: "tractor", wear: 0 }, { x, y, turned: false });
+    // The large bay can't go back in the small bay's 2 by 2 gap.
+    expect(sim.fitItem(ship, { at: "locker", index: 0 }, "section")).toBe(false);
+    expect(ship.fit.section!.part).toBe("largeBay");
+    expect(locker.items.length).toBe(6);
+  });
+
+  it("parts move between mounts that take them, swapping with what's there", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    sim.buyPart(ship, "strafe");
+    // The turn thrusters' mounts take only turn thrusters.
+    expect(sim.fitItem(ship, { at: "mount", mount: "thrusterStrafeLeft" }, "thrusterRotateLeft")).toBe(false);
+    expect(sim.fitItem(ship, { at: "mount", mount: "gun" }, "tractor")).toBe(false);
+    expect(ship.fit.gun!.part).toBe("gun1");
+  });
+});

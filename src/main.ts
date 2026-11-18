@@ -13,8 +13,7 @@ import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartId } from "./parts";
 import { computerSize, hullMax, mountsHolding, owns } from "./fitting";
 import { Inventory } from "./inventory";
-import { dragging, makeDraggable, rotateDrag, setDropHandler } from "./drag";
-import { autoPlace } from "./grid";
+import { dragging, makeDraggable, rotateDrag } from "./drag";
 import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
 
 const STORAGE_KEY = "flight-test-tuning";
@@ -61,6 +60,8 @@ const canvas = document.getElementById("view") as HTMLCanvasElement;
 const hud = document.getElementById("hud") as HTMLDivElement;
 const panel = document.getElementById("panel") as HTMLDivElement;
 const shop = document.getElementById("shop") as HTMLDivElement;
+// Something dragged from the ship or locker onto the shop is sold.
+shop.dataset.drop = "shop";
 const inventoryBox = document.getElementById("inventory") as HTMLDivElement;
 const dockHint = document.getElementById("dockhint") as HTMLDivElement;
 /** Whether the dock shop is open: B opens and closes it while docked, and leaving the dock closes it. */
@@ -827,25 +828,6 @@ function replacedBy(part: Part): string {
   if (goes === "locker") return " Goes in your locker here";
   return " No room on the ship or in your locker here";
 }
-
-/** A shop item dropped on the ship screen: bought straight onto that mount, or into the bay or locker. */
-setDropHandler((payload, target) => {
-  const { ship } = sim;
-  const base = sim.baseAt();
-  if (!base || payload.from !== "shop") return;
-  const module = { part: payload.part, wear: 0 };
-  if (target.startsWith("mount:")) sim.buyPart(ship, payload.part, { at: "mount", mount: target.slice("mount:".length) });
-  else if (target === "hold") {
-    const spot = sim.holdSpotFor(ship, module);
-    if (spot) sim.buyPart(ship, payload.part, { at: "hold", spot });
-    else sim.buyRefused = "No room for it in your bay";
-  } else if (target === "locker") {
-    const locker = sim.lockerAt(base);
-    const spot = autoPlace(sim.lockerGrid(locker), locker.items, module);
-    if (spot) sim.buyPart(ship, payload.part, { at: "locker", spot });
-    else sim.buyRefused = "No room for it in your locker here";
-  }
-});
 
 function saveTuning(): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(tuning));

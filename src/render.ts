@@ -1,7 +1,8 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
 import { DAMAGED_AT, facing, HULL_MOUNTS, turretMount, works, type Module } from "./fitting";
-import { drawBin, newBin, stepBin, type Bin } from "./cargoBin";
+import { drawBin, newBin, stepBin, type Bin, type Rect } from "./cargoBin";
+import { cellsOf, footprint, reachable } from "./grid";
 import { partOf } from "./parts";
 import { bayBox, drawVectorShip } from "./shipArt";
 import {
@@ -1281,11 +1282,42 @@ export class Renderer {
     }
     const share = Math.min(1, ship.ore / Math.max(1, sim.cargoSpace(ship)));
     const box = bayBox(ship);
-    stepBin(bin, box, share, ship, now);
-    if (bin.lumps.length === 0) return;
-    // The bay's transparency covers the ore riding in it too.
+    // The bay's grid laid over the box: items, and pockets sealed off from the entry, keep the ore out.
+    const grid = sim.bayGrid(ship);
+    const items: Rect[] = [];
+    const blocked: Rect[] = [];
+    if (grid) {
+      const cellW = box.w / grid.w;
+      const cellH = box.h / grid.h;
+      const rect = (x: number, y: number, w: number, h: number): Rect => ({ x: -box.w / 2 + x * cellW, y: -box.h / 2 + y * cellH, w: w * cellW, h: h * cellH });
+      for (const item of ship.hold) {
+        const { w, h } = footprint(item);
+        items.push(rect(item.x, item.y, w, h));
+      }
+      blocked.push(...items);
+      const open = reachable(grid, ship.hold);
+      const taken = new Set(ship.hold.flatMap((item) => cellsOf(item).map((cell) => cell.y * grid.w + cell.x)));
+      for (let k = 0; k < grid.w * grid.h; k++) if (!open.has(k) && !taken.has(k)) blocked.push(rect(k % grid.w, Math.floor(k / grid.w), 1, 1));
+    }
+    stepBin(bin, box, share, ship, now, blocked);
+    if (bin.lumps.length === 0 && items.length === 0) return;
+    // The bay's transparency covers the ore and items riding in it too.
     this.ctx.save();
     if ((box.alpha ?? 1) < 1) this.ctx.globalAlpha = box.alpha;
+    if (items.length > 0) {
+      const { ctx } = this;
+      ctx.save();
+      ctx.translate(box.x, box.y);
+      ctx.rotate(box.angle);
+      ctx.fillStyle = "rgba(70, 120, 140, 0.85)";
+      ctx.strokeStyle = "rgba(160, 220, 230, 0.9)";
+      ctx.lineWidth = 0.25;
+      for (const item of items) {
+        ctx.fillRect(item.x + 0.1, item.y + 0.1, item.w - 0.2, item.h - 0.2);
+        ctx.strokeRect(item.x + 0.1, item.y + 0.1, item.w - 0.2, item.h - 0.2);
+      }
+      ctx.restore();
+    }
     drawBin(this.ctx, bin, box, ORE_COLORS, share >= 1);
     this.ctx.restore();
   }

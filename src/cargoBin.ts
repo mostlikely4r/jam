@@ -31,6 +31,14 @@ export interface Box {
   h: number;
 }
 
+/** An area of the box, in the box's own frame (centred on its middle): `x`, `y` is its low corner. */
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** Each lump's size, and how much of the ship's push it feels: enough to slosh, not to vanish. */
 const LUMP = 1.5;
 const RADIUS = LUMP * 0.42;
@@ -48,12 +56,52 @@ export function binRoom(box: Box): number {
  * Moves the lumps on to `now`. `share` is how full the bay is (0 to 1). The ship's velocity
  * and spin are in the world; `angle` turns them into the ship's frame.
  */
-export function stepBin(bin: Bin, box: Box, share: number, ship: { vx: number; vy: number; spin: number; angle: number }, now: number): void {
-  const want = share <= 0 ? 0 : Math.max(1, Math.min(binRoom(box), Math.round(share * binRoom(box))));
+export function stepBin(
+  bin: Bin,
+  box: Box,
+  share: number,
+  ship: { vx: number; vy: number; spin: number; angle: number },
+  now: number,
+  blocked: Rect[] = [],
+): void {
+  // Parts of the box taken by items: lumps keep out, and the bay holds fewer.
+  let taken = 0;
+  for (const r of blocked) {
+    const w = Math.min(r.x + r.w, box.w / 2) - Math.max(r.x, -box.w / 2);
+    const h = Math.min(r.y + r.h, box.h / 2) - Math.max(r.y, -box.h / 2);
+    if (w > 0 && h > 0) taken += w * h;
+  }
+  const freeShare = Math.max(0, 1 - taken / (box.w * box.h));
+  const room = Math.round(binRoom(box) * freeShare);
+  const want = share <= 0 ? 0 : Math.max(1, Math.min(room, Math.round(share * room)));
   const halfW = box.w / 2 - RADIUS;
   const halfH = box.h / 2 - RADIUS;
+  const inside = (l: Lump, r: Rect) => l.x > r.x && l.x < r.x + r.w && l.y > r.y && l.y < r.y + r.h;
+  // A lump whose middle is inside a blocked area goes out by the nearest edge, bouncing off it.
+  const pushOut = (l: Lump) => {
+    for (const r of blocked) {
+      if (!inside(l, r)) continue;
+      const edges = [
+        { d: l.x - r.x, at: r.x, axis: 0, sign: -1 },
+        { d: r.x + r.w - l.x, at: r.x + r.w, axis: 0, sign: 1 },
+        { d: l.y - r.y, at: r.y, axis: 1, sign: -1 },
+        { d: r.y + r.h - l.y, at: r.y + r.h, axis: 1, sign: 1 },
+      ];
+      // An edge beyond the box's walls would only push the lump out of the box.
+      const usable = edges.filter((e) => Math.abs(e.at) <= (e.axis === 0 ? halfW : halfH));
+      const pick = (usable.length > 0 ? usable : edges).reduce((a, b) => (b.d < a.d ? b : a));
+      if (pick.axis === 0) (l.x = pick.at), (l.vx = pick.sign * Math.abs(l.vx) * BOUNCE);
+      else (l.y = pick.at), (l.vy = pick.sign * Math.abs(l.vy) * BOUNCE);
+    }
+  };
   while (bin.lumps.length < want) {
-    bin.lumps.push({ x: (Math.random() - 0.5) * 2 * halfW, y: (Math.random() - 0.5) * 2 * halfH, vx: 0, vy: 0, color: Math.floor(Math.random() * 3) });
+    const lump = { x: 0, y: 0, vx: 0, vy: 0, color: Math.floor(Math.random() * 3) };
+    for (let tries = 0; tries < 30; tries++) {
+      lump.x = (Math.random() - 0.5) * 2 * halfW;
+      lump.y = (Math.random() - 0.5) * 2 * halfH;
+      if (!blocked.some((r) => inside(lump, r))) break;
+    }
+    bin.lumps.push(lump);
   }
   bin.lumps.length = want;
   const elapsed = Math.min(0.1, Math.max(0, (now - bin.time) / 1000));
@@ -95,6 +143,7 @@ export function stepBin(bin: Bin, box: Box, share: number, ship: { vx: number; v
       if (lump.x > halfW) (lump.x = halfW), (lump.vx = -Math.abs(lump.vx) * BOUNCE);
       if (lump.y < -halfH) (lump.y = -halfH), (lump.vy = Math.abs(lump.vy) * BOUNCE);
       if (lump.y > halfH) (lump.y = halfH), (lump.vy = -Math.abs(lump.vy) * BOUNCE);
+      pushOut(lump);
     }
     // Lumps don't pass through each other: overlapping ones are pushed apart.
     const lumps = bin.lumps;
@@ -123,6 +172,7 @@ export function stepBin(bin: Bin, box: Box, share: number, ship: { vx: number; v
         }
       }
     }
+    if (blocked.length > 0) for (const lump of lumps) pushOut(lump);
   }
 }
 

@@ -1,6 +1,6 @@
 import { Chatter } from "./chatter";
-import { type BayGrid, type BlueprintId, isGear, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
-import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountsOf, mountWith, thrustOf, turretMount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
+import { type BayGrid, type BlueprintId, partFits, isGear, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, type PartId, type ShipModel } from "./parts";
+import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
 import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./pilot";
 export { FIRST_FIELD };
 export { MAX_HULL } from "./fitting";
@@ -2748,6 +2748,7 @@ export class Sim {
       fit: { ...ship.fit },
       hold: [...ship.hold],
       programs: [...ship.programs],
+      software: new Set(ship.software),
       items: locker ? [...locker.items] : [],
       credits: account.credits,
       baseCredits: base.account.credits,
@@ -2762,6 +2763,7 @@ export class Sim {
     ship.fit = saved.fit;
     ship.hold = saved.hold;
     ship.programs = saved.programs;
+    ship.software = saved.software;
     if (locker) locker.items = saved.items;
     account.credits = saved.credits;
     base.account.credits = saved.baseCredits;
@@ -2769,6 +2771,27 @@ export class Sim {
     base.stock = saved.stock;
     refresh(ship);
     return false;
+  }
+
+  /**
+   * Whether a change to a docked ship would go through, without making it: for the screens to
+   * light up where a dragged item can go. Everything it touches is put back after.
+   */
+  dryRun(ship: Ship, change: () => boolean): boolean {
+    const base = this.baseAt(ship);
+    if (!base) return false;
+    const events = this.events.length;
+    const loot = this.loot.length;
+    const refused = this.buyRefused;
+    let works = false;
+    this.attempt(ship, base, () => {
+      works = change() && !this.lockerOverflow;
+      return false;
+    });
+    this.events.length = events;
+    this.loot.length = loot;
+    this.buyRefused = refused;
+    return works;
   }
 
   /**
@@ -3007,13 +3030,89 @@ export class Sim {
    * Puts a module from the bay or the locker on the ship. Only in a dock. What comes off goes
    * where it came from, or into the locker; if there's no room there either, nothing changes.
    */
-  fitItem(ship: Ship, from: ItemPlace): boolean {
+  fitItem(ship: Ship, from: ItemPlace, mount?: MountId): boolean {
     const base = this.baseAt(ship);
     const item = this.itemAt(ship, from);
-    if (!base || !item || from.at === "mount" || item.wear >= 1) return false;
+    if (!base || !item || item.wear >= 1) return false;
+    const part = partOf(item.part);
+    // Onto one mount in particular: a single part, not a pair or a turret, which go as they always do.
+    if (mount !== undefined && (part.set ?? 1) === 1 && part.kind !== "turret") {
+      return this.attempt(ship, base, () => (from.at === "mount" ? this.moveMount(ship, from.mount, mount) : this.fitOn(ship, from, item, mount, base)));
+    }
+    if (from.at === "mount") return false;
+    if (mount !== undefined && !mountsFor(ship, item.part).includes(mount)) return false;
     return this.attempt(ship, base, () => this.fitFrom(ship, from, item, base));
   }
 
+  /** Whether a part can go on this mount of the ship as it is now. */
+  private mountTakesHere(ship: Ship, mount: MountId, id: PartId): boolean {
+    const spot = mountsOf(ship).find((each) => each.id === mount);
+    const part = partOf(id);
+    if (!spot || spot.decal || !partFits(part, ship.model) || part.kind === "program" || part.kind === "cockpit") return false;
+    // With a turret on, a gun goes only on the turret.
+    if (part.kind === "gun" && turretMount(ship) && mount !== "turretGun") return false;
+    return mountTakes(spot, id);
+  }
+
+  /**
+   * Fits a single part from the bay or locker onto one mount. What was on it goes where the new
+   * one came from, at its spot if it fits there, else anywhere in that grid; if it fits nowhere
+   * there, the fit is refused.
+   */
+  private fitOn(ship: Ship, from: ItemPlace, item: Module, mount: MountId, base: Base): boolean {
+    if (from.at === "mount" || !this.mountTakesHere(ship, mount, item.part)) return false;
+    const old = ship.fit[mount];
+    if (old && partOf(old.part).kind === "turret") return false;
+    const locker = this.lockerAt(base);
+    const pile = from.at === "hold" ? ship.hold : locker.items;
+    const placed = pile[from.index];
+    if (!this.canTake(ship, from)) return false;
+    const rest = pile.filter((each) => each !== placed);
+    if (from.at === "hold") ship.hold = rest;
+    else locker.items = rest;
+    ship.fit[mount] = item;
+    refresh(ship);
+    if (partOf(item.part).kind === "computer") trimPrograms(ship);
+    if (partOf(item.part).bay) this.settleHold(ship, base);
+    if (!old) return true;
+    // The old part goes where the new one was.
+    if (from.at === "hold") {
+      const grid = this.bayGrid(ship);
+      if (!grid) return false;
+      const tries = [false, true].map((turned) => ({ module: old, x: placed.x, y: placed.y, turned }));
+      const spot = tries.find((each) => {
+        const after = [...ship.hold, each];
+        return canPlace(grid, ship.hold, each) && after.every((other) => sticks(grid, after, other)) && reachableCells(grid, after) * this.tuning.orePerCell >= ship.ore;
+      });
+      const found = spot ?? this.holdSpotFor(ship, old);
+      if (!found) return false;
+      ship.hold.push(found);
+    } else {
+      const grid = this.lockerGrid(locker);
+      const tries = [false, true].map((turned) => ({ module: old, x: placed.x, y: placed.y, turned }));
+      const found = tries.find((each) => canPlace(grid, locker.items, each)) ?? autoPlace(grid, locker.items, old);
+      if (!found) return false;
+      locker.items.push(found);
+    }
+    return true;
+  }
+
+  /** Moves a part from one mount to another; with something on the other, the two swap, if each takes the other's. */
+  private moveMount(ship: Ship, from: MountId, to: MountId): boolean {
+    const moving = ship.fit[from];
+    const there = ship.fit[to];
+    if (!moving || from === to || from === "turretGun" || to === "turretGun") return false;
+    if (partOf(moving.part).kind === "turret" || (there && partOf(there.part).kind === "turret")) return false;
+    if (!this.mountTakesHere(ship, to, moving.part)) return false;
+    if (there && !this.mountTakesHere(ship, from, there.part)) return false;
+    ship.fit[to] = moving;
+    if (there) ship.fit[from] = there;
+    else delete ship.fit[from];
+    refresh(ship);
+    return true;
+  }
+
+  /** Fits a module from the bay or locker on the mounts it goes on, the way a click on Fit does. */
   private fitFrom(ship: Ship, from: ItemPlace, item: Module, base: Base): boolean {
     if (mountsFor(ship, item.part).length === 0) return false;
     // A pair goes on as a pair: the other half has to be where this one is.

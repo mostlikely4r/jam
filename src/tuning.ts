@@ -47,6 +47,10 @@ export const DEFAULTS = {
   fieldOrbitRadius: 20000,
   fieldOrbitPeriod: 3600,
   fieldRotationPeriod: 1800,
+  /** The turn, in radians, each of these has at time 0. */
+  fieldSpinPhase: 0,
+  stationSpinPhase: 0,
+  pirateSpinPhase: 0,
 
   stationDistance: 5000,
   /** How far beyond the field's edge the pirate base sits, on the far side from the station. */

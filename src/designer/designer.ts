@@ -2,6 +2,7 @@ import {
   BODY_KINDS,
   PLACE_KINDS,
   closestApproach,
+  pathTo,
   copyPositions,
   isBody,
   makeChild,
@@ -182,6 +183,10 @@ export class Designer {
   private lastFrame = 0;
   private drag: { x: number; y: number; moved: boolean } | null = null;
   private passTimer = 0;
+  /** Close passes being worked out a body a frame, so a click never waits on them. */
+  private passJob: { selected: WorldNode; queue: WorldNode[]; rows: { name: string; gap: number; at: number }[] } | null = null;
+  /** A right-button drag on the canvas: resizing the selected object, or turning its start angle with Shift. */
+  private tweak: Record<string, never> | null = null;
   /** The place a route is previewed to from the selected object, and how it's flown. */
   private routeTo: WorldNode | null = null;
   private flightKind = "floater";
@@ -378,6 +383,7 @@ export class Designer {
       // Storage off or full: the file buttons still work.
     }
     this.passTimer = 0.25;
+    this.passJob = null;
   }
 
   private replace(world: World): void {
@@ -467,6 +473,7 @@ Layouts: ${layouts.join(", ")}`, "");
     this.buildRouteBox();
     this.linkText.textContent = linkSummary(this.world);
     this.passTimer = 0;
+    this.passJob = null;
   }
 
   /**
@@ -572,6 +579,8 @@ Layouts: ${layouts.join(", ")}`, "");
     if (node !== this.selected) this.closedOnPath.clear();
     this.selected = node;
     this.rebuild();
+    // Paint the selection first: the close passes take a second to work out, and start a beat later.
+    this.passTimer = 0.2;
     // Picked on the map, it may be far down the tree.
     this.tree.querySelector("button.on")?.scrollIntoView({ block: "nearest" });
   }
@@ -646,7 +655,10 @@ Layouts: ${layouts.join(", ")}`, "");
         this.number(node, "orbitPhase", "Start angle on the orbit, degrees", () => ""),
       );
     }
-    orbit.push(this.number(node, "spinPeriod", "Spin period, seconds (negative turns the other way)", (v) => `${readableTime(v)} per turn`));
+    orbit.push(
+      this.number(node, "spinPeriod", "Spin period, seconds (negative turns the other way)", (v) => `${readableTime(v)} per turn`),
+      this.number(node, "spinPhase", "Spin start angle, degrees (the turn at time 0)", () => ""),
+    );
     parts.push(...this.group(isRoot ? "Spin" : "Orbit and spin", orbit));
     if (node.kind === "field") {
       parts.push(
@@ -827,6 +839,7 @@ Layouts: ${layouts.join(", ")}`, "");
       | "orbitPeriod"
       | "orbitPhase"
       | "spinPeriod"
+      | "spinPhase"
       | "count"
       | "angleVariance"
       | "orbitVariance"
@@ -857,34 +870,36 @@ Layouts: ${layouts.join(", ")}`, "");
     return label;
   }
 
-  /** Close passes for the selected object against every body it isn't part of. */
+  /** Starts the close passes for the selected object against every body it isn't part of. */
   private updatePasses(): void {
     const selected = this.selected;
-    const entries = walk(this.world);
-    const inside = (node: WorldNode, container: WorldNode) => {
-      let at: WorldNode | null = node;
-      while (at) {
-        if (at === container) return true;
-        at = parentOf(this.world, at);
-      }
-      return false;
-    };
-    const rows: { name: string; gap: number; at: number }[] = [];
-    for (const { node } of entries) {
-      if (node === selected || !isBody(node.kind)) continue;
-      // Its own children orbit inside it on purpose, and a body's own parents are the frame it moves in.
-      if (inside(node, selected)) continue;
-      const pass = closestApproach(this.world, node, selected);
-      rows.push({ name: node.name, ...pass });
+    // Its own children orbit inside it on purpose, and a body's own parents are the frame it moves in.
+    const queue = walk(this.world)
+      .map((entry) => entry.node)
+      .filter((node) => node !== selected && isBody(node.kind) && !pathTo(this.world, node).includes(selected));
+    this.passJob = { selected, queue, rows: [] };
+    if (queue.length === 0) this.stepPasses();
+  }
+
+  /** One body's pass per frame (each can take tens of milliseconds), then the list. */
+  private stepPasses(): void {
+    const job = this.passJob;
+    if (!job) return;
+    if (job.selected !== this.selected) {
+      this.passJob = null;
+      return;
     }
-    rows.sort((a, b) => a.gap - b.gap);
-    const shown = rows.slice(0, 6);
-    if (shown.length === 0) {
+    const node = job.queue.shift();
+    if (node) job.rows.push({ name: node.name, ...closestApproach(this.world, node, job.selected) });
+    if (job.queue.length > 0) return;
+    this.passJob = null;
+    const rows = job.rows.sort((a, b) => a.gap - b.gap).slice(0, 6);
+    if (rows.length === 0) {
       this.passes.replaceChildren(this.text("No bodies to pass."));
       return;
     }
     this.passes.replaceChildren(
-      ...shown.map(({ name, gap, at }) => {
+      ...rows.map(({ name, gap, at }) => {
         const line = document.createElement("div");
         const screen = window.innerWidth / MAX_OUT_ZOOM;
         line.className = `pass ${gap < 0 ? "bad" : gap < screen ? "close" : "ok"}`;
@@ -911,10 +926,18 @@ Layouts: ${layouts.join(", ")}`, "");
         this.setPlaying(!this.playing);
       }
     });
+    // Right button: no browser menu, the drag changes the selected object instead.
+    this.canvas.addEventListener("contextmenu", (event) => event.preventDefault());
     this.canvas.addEventListener("mousedown", (event) => {
-      this.drag = { x: event.clientX, y: event.clientY, moved: false };
+      if (event.button === 2) {
+        event.preventDefault();
+        this.startTweak();
+      } else if (event.button === 0) {
+        this.drag = { x: event.clientX, y: event.clientY, moved: false };
+      }
     });
     window.addEventListener("mousemove", (event) => {
+      if (this.tweak && this.isOpen) this.moveTweak(event);
       if (!this.drag || !this.isOpen) return;
       const dx = event.clientX - this.drag.x;
       const dy = event.clientY - this.drag.y;
@@ -937,7 +960,8 @@ Layouts: ${layouts.join(", ")}`, "");
       this.drag.y = event.clientY;
     });
     window.addEventListener("mouseup", (event) => {
-      if (!this.drag) return;
+      if (event.button === 2) this.tweak = null;
+      if (!this.drag || event.button !== 0) return;
       const clicked = !this.drag.moved;
       this.drag = null;
       this.canvas.classList.remove("dragging");
@@ -972,6 +996,46 @@ Layouts: ${layouts.join(", ")}`, "");
       },
       { passive: false },
     );
+  }
+
+  /** Where the mouse is on the canvas, in its pixels. */
+  private canvasPoint(event: MouseEvent): { x: number; y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }
+
+  private startTweak(): void {
+    if (!positions(this.world, this.t).get(this.selected)) return;
+    this.tweak = {};
+  }
+
+  /**
+   * Right-drag: the selected object's orbit radius becomes the distance from its parent (as
+   * drawn now) to the mouse. With Shift, its start angle is set so it sits towards the mouse
+   * as seen from its parent at the time shown. An object with no parent does nothing.
+   */
+  private moveTweak(event: MouseEvent): void {
+    const node = this.selected;
+    if (!this.tweak) return;
+    const at = positions(this.world, this.t);
+    const parent = parentOf(this.world, node);
+    const from = parent && at.get(parent);
+    if (!parent || !from) return;
+    const mouse = this.canvasPoint(event);
+    if (event.shiftKey) {
+      const origin = this.toScreen(from.x, from.y);
+      const pointing = Math.atan2(mouse.y - origin.y, mouse.x - origin.x);
+      // The orbit has turned on since time 0, and the start angle is where it began.
+      const turned = node.orbitPeriod === 0 ? 0 : ((Math.PI * 2) / node.orbitPeriod) * this.t;
+      const degrees = (((pointing - turned) * 180) / Math.PI) % 360;
+      node.orbitPhase = Math.round(((degrees + 360) % 360) * 10) / 10;
+    } else {
+      const origin = this.toScreen(from.x, from.y);
+      node.orbitRadius = Math.max(1, Math.round(Math.hypot(mouse.x - origin.x, mouse.y - origin.y) / this.scale));
+    }
+    this.changed();
+    // The panel's fields show the new numbers.
+    this.buildEditor();
   }
 
   /** The object under a screen point: the smallest one whose circle (or a 10 px dot) contains it. */
@@ -1014,6 +1078,7 @@ Layouts: ${layouts.join(", ")}`, "");
       this.passTimer = -1;
       this.updatePasses();
     }
+    this.stepPasses();
     this.routeTimer -= seconds;
     if (this.routeTimer <= 0) {
       this.routeTimer = 0.1;
@@ -1156,6 +1221,8 @@ Layouts: ${layouts.join(", ")}`, "");
       }
     }
 
+    this.drawCarrying(at, ring);
+
     // Labels, once they have room to be told apart.
     ctx.font = "12px ui-monospace, Consolas, monospace";
     for (const { node, parent } of entries) {
@@ -1201,6 +1268,33 @@ Layouts: ${layouts.join(", ")}`, "");
     this.drawRoute(at);
     this.drawScreenBoxes();
     this.drawScaleBar();
+  }
+
+  /** While the Carrying group is open: how far the selected place carries, as rings from its edge. */
+  private drawCarrying(at: Map<WorldNode, { x: number; y: number }>, ring: (x: number, y: number, r: number) => boolean): void {
+    const node = this.selected;
+    if (!this.openGroups.has("Carrying")) return;
+    if (node.kind !== "field" && node.kind !== "station" && node.kind !== "pirate base") return;
+    const pos = at.get(node);
+    if (!pos) return;
+    const { ctx } = this;
+    const rings: [number, string, string][] = [[node.carryFull, "fully carried", "rgba(120, 230, 160, 0.9)"]];
+    if (node.carryNone > 0) rings.push([node.carryNone, "carried to nothing", "rgba(255, 200, 90, 0.9)"]);
+    ctx.setLineDash([2, 5]);
+    ctx.lineWidth = 1.5;
+    for (const [reach, label, color] of rings) {
+      const r = node.radius + reach;
+      if (!(r > 0) || !ring(pos.x, pos.y, r)) continue;
+      ctx.strokeStyle = color;
+      ctx.stroke();
+      const top = this.toScreen(pos.x, pos.y - r);
+      if (top.x > 0 && top.y > 12 && top.x < this.width && top.y < this.height) {
+        ctx.fillStyle = color;
+        ctx.fillText(`${label}: ${readableDistance(reach)} from the edge`, top.x + 6, top.y - 4);
+      }
+    }
+    ctx.setLineDash([]);
+    ctx.lineWidth = 1;
   }
 
   /**

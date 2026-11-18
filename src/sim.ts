@@ -358,6 +358,8 @@ export interface FieldSpec {
   carryFull: number;
   carryNone: number;
   rotationPeriod: number;
+  /** Its spin at clock 0, in radians. */
+  spinPhase?: number;
   orbits: Orbit[];
 }
 
@@ -378,6 +380,8 @@ export interface StationSpec {
   id: string;
   name: string;
   rotationPeriod: number;
+  /** Its spin at clock 0, in radians. */
+  spinPhase?: number;
   orbits: Orbit[];
   carryFull: number;
   carryNone: number;
@@ -510,6 +514,8 @@ export interface SolidBody {
   atmosphere: number;
   burnSpeed: number;
   spinPeriod: number;
+  /** Its spin at clock 0, in radians. */
+  spinPhase?: number;
   orbits: Orbit[];
 }
 
@@ -1452,6 +1458,18 @@ export class Sim {
             PIRATE_BASE_RADIUS,
           )
         : null;
+    this.spinPois();
+  }
+
+  /** Sets the three tuned places to the turn the tuning says they have at the clock. */
+  private spinPois(): void {
+    const { tuning, field, station, pirateBase } = this;
+    const set = (poi: Poi, phase: number, period: number) => {
+      poi.rotation = poi.prevRotation = phase + orbitRate(period) * this.clock;
+    };
+    set(field, tuning.fieldSpinPhase, tuning.fieldRotationPeriod);
+    set(station, tuning.stationSpinPhase, tuning.stationRotationPeriod);
+    if (pirateBase) set(pirateBase, tuning.pirateSpinPhase, tuning.pirateRotationPeriod);
   }
 
   private makePoi(
@@ -3083,6 +3101,7 @@ export class Sim {
         const old = kept.get(spec.id);
         const extra = old ?? { spec, poi: this.makePoi("field", null, 0, 0, 0, spec.radius), inflowTimer: 1 };
         extra.spec = spec;
+        if (!old) extra.poi.rotation = extra.poi.prevRotation = (spec.spinPhase ?? 0) + orbitRate(spec.rotationPeriod) * this.clock;
         this.fitExtraField(extra);
         if (!old) added.push(extra);
         return extra;
@@ -3103,6 +3122,7 @@ export class Sim {
         if (!base || base === this.bases[0]) {
           base = this.makeBase(spec.id, spec, this.makePoi("station", null, 0, 0, 0, STATION_REACH));
           base.spec = spec;
+          base.poi.rotation = base.poi.prevRotation = (spec.spinPhase ?? 0) + orbitRate(spec.rotationPeriod) * this.clock;
           this.fitBase(base);
           // A new base comes with its defenders. One from a save has them in the save already.
           if (!this.takeSaved(base)) this.addDefenders(base);
@@ -3121,6 +3141,7 @@ export class Sim {
       poi.x = poi.px = (poi.parent?.x ?? 0) + Math.cos(poi.orbitAngle) * orbitRadius;
       poi.y = poi.py = (poi.parent?.y ?? 0) + Math.sin(poi.orbitAngle) * orbitRadius;
     };
+    this.spinPois();
     field.reach = tuning.fieldRadius;
     place(field, tuning.fieldOrbitRadius, tuning.fieldOrbitPeriod);
     place(station, tuning.fieldRadius + tuning.stationDistance, tuning.orbitPeriod);

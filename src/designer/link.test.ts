@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bodyAt, orbitsAt } from "../sim";
 import { DEFAULTS } from "../tuning";
-import { bodiesFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, stationsFor, writeGame } from "./link";
+import { bodiesFor, fieldsFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, stationsFor, writeGame } from "./link";
 import { limitCarrying, makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk } from "./world";
 
 describe("the link between the designer and the game", () => {
@@ -18,6 +18,19 @@ describe("the link between the designer and the game", () => {
     // Measured from the field's edge in the game, from its centre in the designer.
     expect(tuning.fieldRadius + tuning.stationDistance).toBe(10200);
     expect(tuning.fieldRadius + tuning.pirateBaseDistance).toBe(9200);
+  });
+
+  it("writes the field's, station's and pirate base's spin start angles into the tuning, in radians", () => {
+    const world = seedWorld();
+    const { field, station, pirates } = linkedNodes(world);
+    Object.assign(field!, { spinPhase: 90 });
+    Object.assign(station!, { spinPhase: 180 });
+    Object.assign(pirates!, { spinPhase: 45 });
+    const tuning = { ...DEFAULTS };
+    writeGame(world, tuning);
+    expect(tuning.fieldSpinPhase).toBeCloseTo(Math.PI / 2, 9);
+    expect(tuning.stationSpinPhase).toBeCloseTo(Math.PI, 9);
+    expect(tuning.pirateSpinPhase).toBeCloseTo(Math.PI / 4, 9);
   });
 
   it("writes each place's rocks and carrying, no outer edge meaning everywhere", () => {
@@ -122,8 +135,25 @@ describe("the link between the designer and the game", () => {
     extra.children.push(outpost, hideout);
     planet!.children.push(extra);
     expect(linkedNodes(world).field).toBe(field);
-    expect(linkSummary(world)).toContain(`In the game: Star, Planet, Field, Station, Pirate base, ${extra.name}, Outpost`);
+    expect(linkSummary(world)).not.toContain("In the game");
     expect(linkSummary(world)).toContain("Map only: Hideout");
+  });
+
+  it("hands each body's, field's and station's spin start angle to the game, in radians", () => {
+    const world = seedWorld();
+    const { planet, field, station } = linkedNodes(world);
+    Object.assign(planet!, { spinPhase: 90 });
+    Object.assign(field!, { spinPhase: 180 });
+    const extra = makeChild(world, planet!, "field");
+    const outpost = makeChild(world, extra, "station");
+    outpost.spinPhase = 45;
+    extra.spinPhase = 270;
+    extra.children.push(outpost);
+    planet!.children.push(extra);
+    expect(station).not.toBeNull();
+    expect(bodiesFor(world).find((body) => body.name === "Planet")!.spinPhase).toBeCloseTo(Math.PI / 2, 9);
+    expect(fieldsFor(world).find((spec) => spec.id.startsWith(extra.id))!.spinPhase).toBeCloseTo(Math.PI * 1.5, 9);
+    expect(stationsFor(world).find((spec) => spec.id.startsWith(outpost.id))!.spinPhase).toBeCloseTo(Math.PI / 4, 9);
   });
 
   it("hands a station's held blueprints over, and a saved world keeps only real held parts", () => {

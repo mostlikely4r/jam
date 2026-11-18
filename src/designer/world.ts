@@ -50,6 +50,8 @@ export interface WorldNode {
   orbitPhase: number;
   /** Seconds per turn about its own centre. 0 doesn't spin; negative turns the other way. */
   spinPeriod: number;
+  /** Where its spin is at time 0, in degrees. */
+  spinPhase: number;
   /** Fields only: how many rocks, how fast they drift at the start, and big ones drifting in per minute. */
   rocks: number;
   rockDrift: number;
@@ -97,7 +99,7 @@ export function orbitAngle(node: WorldNode, t: number): number {
 
 /** Rotation about its own centre in radians at time `t`. */
 export function spinAngle(node: WorldNode, t: number): number {
-  return rate(node.spinPeriod) * t;
+  return ((node.spinPhase ?? 0) * Math.PI) / 180 + rate(node.spinPeriod) * t;
 }
 
 /** Every node's centre at time `t`, the root at the origin. */
@@ -265,6 +267,7 @@ export function makeChild(world: World, parent: WorldNode, kind: NodeKind): Worl
     orbitPeriod,
     orbitPhase: 0,
     spinPeriod: 0,
+    spinPhase: 0,
     count: 1,
     angleVariance: 0,
     orbitVariance: 0,
@@ -296,6 +299,7 @@ export function seedWorld(): World {
     orbitPeriod: 0,
     orbitPhase: 0,
     spinPeriod: 0,
+    spinPhase: 0,
     count: 1,
     angleVariance: 0,
     orbitVariance: 0,
@@ -371,6 +375,7 @@ export function parseWorld(text: string): World | null {
         orbitPeriod: num("orbitPeriod"),
         orbitPhase: num("orbitPhase"),
         spinPeriod: num("spinPeriod"),
+        spinPhase: num("spinPhase"),
         children: children as WorldNode[],
       };
     };
@@ -382,7 +387,8 @@ export function parseWorld(text: string): World | null {
 }
 
 export function stringifyWorld(world: World): string {
-  return JSON.stringify(world, null, 2) + "\n";
+  // A spin start angle of 0 is left out, so layouts from before it existed read and save the same.
+  return JSON.stringify(world, (key, value) => (key === "spinPhase" && value === 0 ? undefined : value), 2) + "\n";
 }
 
 /** The chain from the root down to a node, both included. */

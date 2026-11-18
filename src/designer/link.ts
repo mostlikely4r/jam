@@ -58,6 +58,11 @@ export function shipMarks(sim: Sim): ShipMark[] {
   return marks;
 }
 
+/** Degrees to radians; a node from before spin phases has none. */
+function toRadians(degrees: number | undefined): number {
+  return ((degrees ?? 0) * Math.PI) / 180;
+}
+
 export interface Linked {
   planet: WorldNode | null;
   field: WorldNode | null;
@@ -96,6 +101,7 @@ export function bodiesFor(world: World): SolidBody[] {
         atmosphere: node.atmosphere,
         burnSpeed: node.burnSpeed,
         spinPeriod: node.spinPeriod,
+        spinPhase: toRadians(node.spinPhase),
         orbits: place(node, copy),
       }));
     });
@@ -127,6 +133,7 @@ export function fieldsFor(world: World): FieldSpec[] {
             carryFull,
             carryNone,
             rotationPeriod: node.spinPeriod,
+            spinPhase: toRadians(node.spinPhase),
             orbits: place(node, copy),
           };
         }),
@@ -153,6 +160,7 @@ export function stationsFor(world: World): StationSpec[] {
             id: `${node.id}:${index}`,
             name: index === 0 ? node.name : `${node.name} ${index + 1}`,
             rotationPeriod: node.spinPeriod,
+            spinPhase: toRadians(node.spinPhase),
             orbits: place(node, copy),
             carryFull,
             carryNone,
@@ -211,7 +219,9 @@ export function writeGame(world: World, tuning: Tuning): void {
   tuning.fieldOrbitRadius = field.orbitRadius;
   tuning.fieldOrbitPeriod = field.orbitPeriod;
   tuning.fieldRotationPeriod = field.spinPeriod;
+  tuning.fieldSpinPhase = toRadians(field.spinPhase);
   if (station) {
+    tuning.stationSpinPhase = toRadians(station.spinPhase);
     tuning.stationShipyard = station.shipyard;
     tuning.stationDistance = station.orbitRadius - field.radius;
     tuning.orbitPeriod = station.orbitPeriod;
@@ -221,6 +231,7 @@ export function writeGame(world: World, tuning: Tuning): void {
     tuning.pirateBaseDistance = pirates.orbitRadius - field.radius;
     tuning.pirateOrbitPeriod = pirates.orbitPeriod;
     tuning.pirateRotationPeriod = pirates.spinPeriod;
+    tuning.pirateSpinPhase = toRadians(pirates.spinPhase);
   }
   tuning.rockCount = field.rocks;
   tuning.rockDrift = field.rockDrift;
@@ -270,7 +281,7 @@ export function linkSummary(world: World): string {
   // Every body and field is real. Of the other places, only the ones the game has.
   const real = nodes.filter((node) => isBody(node.kind) || node.kind === "field" || node.kind === "station" || linkedPlaces.includes(node));
   const places = nodes.filter((node) => !real.includes(node));
-  const lines = [`In the game: ${real.map((node) => node.name).join(", ") || "nothing"}`];
+  const lines: string[] = [];
   if (places.length > 0) lines.push(`Map only: ${places.map((node) => node.name).join(", ")}`);
   const starts = SHIP_CHOICES.map((ship) => {
     const places = nodes.filter((node) => node.spawns.includes(ship)).map((node) => node.name);

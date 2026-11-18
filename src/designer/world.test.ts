@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { closestApproach, makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk, type World } from "./world";
+import { closestApproach, spinAngle, makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk, type World } from "./world";
 
 const find = (world: World, id: string) => walk(world).find((entry) => entry.node.id === id)!.node;
 
@@ -51,5 +51,24 @@ describe("world layout", () => {
     find(world, "field").orbitRadius = 60000;
     const pass = closestApproach(world, find(world, "planet"), find(world, "station"));
     expect(pass.gap).toBeGreaterThan(0);
+  });
+
+  it("starts a spin at its start angle and turns on from there", () => {
+    const planet = find(seedWorld(), "planet");
+    planet.spinPeriod = 100;
+    planet.spinPhase = 90;
+    expect(spinAngle(planet, 0)).toBeCloseTo(Math.PI / 2, 9);
+    expect(spinAngle(planet, 25)).toBeCloseTo(Math.PI, 9);
+    planet.spinPeriod = 0;
+    expect(spinAngle(planet, 500)).toBeCloseTo(Math.PI / 2, 9);
+  });
+
+  it("loads a world with no spin start angle as 0, and keeps one that has it", () => {
+    const world = seedWorld();
+    const text = stringifyWorld(world);
+    expect(text).not.toContain("spinPhase");
+    expect(find(parseWorld(text)!, "planet").spinPhase).toBe(0);
+    find(world, "planet").spinPhase = 33;
+    expect(find(parseWorld(stringifyWorld(world))!, "planet").spinPhase).toBe(33);
   });
 });

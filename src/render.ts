@@ -427,7 +427,7 @@ export class Renderer {
       ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.fill();
       // Each body turns its marks a different way round, so no two look the same.
-      const turn = index * 2.4 + (body.spinPeriod !== 0 ? (Math.PI * 2 * time) / body.spinPeriod : 0);
+      const turn = index * 2.4 + (body.spinPhase ?? 0) + (body.spinPeriod !== 0 ? (Math.PI * 2 * time) / body.spinPeriod : 0);
       for (const light of [false, true]) {
         ctx.fillStyle = light ? look.light : look.dark;
         ctx.beginPath();

@@ -11,14 +11,16 @@ describe("the link between the designer and the game", () => {
     expect([planet?.id, field?.id, station?.id, pirates?.id]).toEqual(["planet", "field", "station", "pirates"]);
   });
 
-  it("writes the layout into the tuning", () => {
+  it("hands the game the first field as a field like any other, and the station's orbit through the tuning", () => {
+    const world = seedWorld();
     const tuning = { ...DEFAULTS };
-    writeGame(seedWorld(), tuning);
-    expect(tuning.fieldOrbitRadius).toBe(60000);
-    expect(tuning.fieldOrbitPeriod).toBe(10800);
+    writeGame(world, tuning);
+    const [first] = fieldsFor(world);
+    expect(first.id).toBe("field:0");
+    expect(first.orbits).toEqual([expect.objectContaining({ radius: 60000, period: 10800 })]);
     // Measured from the field's edge in the game, from its centre in the designer.
-    expect(tuning.fieldRadius + tuning.stationDistance).toBe(10200);
-    expect(tuning.fieldRadius + tuning.pirateBaseDistance).toBe(9200);
+    expect(first.radius + tuning.stationDistance).toBe(10200);
+    expect(first.radius + tuning.pirateBaseDistance).toBe(9200);
   });
 
   it("writes the field's, station's and pirate base's spin start angles into the tuning, in radians", () => {
@@ -29,7 +31,7 @@ describe("the link between the designer and the game", () => {
     Object.assign(pirates!, { spinPhase: 45 });
     const tuning = { ...DEFAULTS };
     writeGame(world, tuning);
-    expect(tuning.fieldSpinPhase).toBeCloseTo(Math.PI / 2, 9);
+    expect(fieldsFor(world)[0].spinPhase).toBeCloseTo(Math.PI / 2, 9);
     expect(tuning.stationSpinPhase).toBeCloseTo(Math.PI, 9);
     expect(tuning.pirateSpinPhase).toBeCloseTo(Math.PI / 4, 9);
   });
@@ -41,8 +43,9 @@ describe("the link between the designer and the game", () => {
     Object.assign(station!, { carryFull: 0, carryNone: 0 });
     const tuning = { ...DEFAULTS };
     writeGame(world, tuning);
-    expect([tuning.rockCount, tuning.rockDrift, tuning.rockInflow]).toEqual([300, 5, 2]);
-    expect([tuning.fieldCarryFull, tuning.fieldCarryNone]).toEqual([1000, 9000]);
+    const [first] = fieldsFor(world);
+    expect([first.rocks, first.rockDrift, first.rockInflow]).toEqual([300, 5, 2]);
+    expect([first.carryFull, first.carryNone]).toEqual([1000, 9000]);
     expect([tuning.stationCarryFull, tuning.stationCarryNone]).toEqual([Infinity, Infinity]);
   });
 
@@ -83,9 +86,11 @@ describe("the link between the designer and the game", () => {
     const world = seedWorld();
     readGame(world, { field: -Math.PI / 2, station: 3 * Math.PI });
     const { field, station } = linkedNodes(world);
-    expect(field?.orbitPhase).toBe(270);
+    // A field's place comes with its orbit, so the game has no angle of its own to give back.
+    expect(field?.orbitPhase).toBe(0);
     expect(station?.orbitPhase).toBe(180);
-    expect(phasesFromWorld(world).field).toBeCloseTo((3 * Math.PI) / 2, 9);
+    expect(phasesFromWorld(world).field).toBeUndefined();
+    expect(phasesFromWorld(world).station).toBeCloseTo(Math.PI, 9);
   });
 
   it("hands over every body, placed round what the field orbits", () => {

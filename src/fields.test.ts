@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { FIRST_FIELD, homeFields, homeSim } from "./home";
 import type { DronePilot } from "./pilot";
 import { DEFAULTS } from "./tuning";
-import { DOCK_OFFSET, type FieldSpec, FIRST_FIELD, keepOutRadius, Sim, type SolidBody, TICK } from "./sim";
+import { DOCK_OFFSET, type FieldSpec, keepOutRadius, type Sim, type SolidBody, TICK } from "./sim";
 
 // Long runs never give the worker a turn of the event loop otherwise (see pilot.test.ts).
 afterEach(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
@@ -45,7 +46,7 @@ const PLANET: SolidBody = {
 
 /** A world with a second field on the first one's orbit, `apart` radians further round. */
 function world(apart: number, tuning: Partial<typeof WORLD> = {}): { sim: Sim; pilot: DronePilot } {
-  const sim = new Sim(1, { ...WORLD, ...tuning });
+  const sim = homeSim(1, { ...WORLD, ...tuning });
   sim.bodies = [PLANET];
   const home = Math.atan2(sim.field.y, sim.field.x) - (2 * Math.PI * sim.now) / 10800;
   const second: FieldSpec = {
@@ -60,7 +61,7 @@ function world(apart: number, tuning: Partial<typeof WORLD> = {}): { sim: Sim; p
     rotationPeriod: 0,
     orbits: [{ radius: 60000, period: 10800, phase: home + apart, sign: 1 }],
   };
-  sim.applyLayout({}, [second]);
+  sim.applyLayout({}, homeFields(sim, second));
   return { sim, pilot: sim.traffic[0] };
 }
 
@@ -164,7 +165,7 @@ describe("traffic between fields", () => {
 
   it("flies to a field on an eccentric orbit, from where it is far out and from where it is near, and mines there", () => {
     for (const half of [0, Math.PI]) {
-      const sim = new Sim(1, { ...WORLD, fieldWanderChance: 1 });
+      const sim = homeSim(1, { ...WORLD, fieldWanderChance: 1 });
       // The mean longitude equal to the periapsis angle, at the clock now, is the closest point.
       const phase = 0.5 - (2 * Math.PI * sim.now) / 10800 + half;
       sim.bodies = [PLANET];
@@ -180,10 +181,10 @@ describe("traffic between fields", () => {
         rotationPeriod: 0,
         orbits: [{ radius: 90000, period: 10800, phase, sign: 1, eccentricity: 0.4, periapsis: 0.5 }],
       };
-      sim.applyLayout({}, [second]);
+      sim.applyLayout({}, homeFields(sim, second));
       const pilot = sim.traffic[0];
       const { ship } = pilot;
-      const { poi } = sim.extraFields[0];
+      const { poi } = sim.extraFields[1];
       // At the closest point, or half a lap on at the farthest.
       expect(Math.hypot(poi.x, poi.y)).toBeCloseTo(half === 0 ? 90000 * 0.6 : 90000 * 1.4, -2);
       decide(sim, pilot);
@@ -201,7 +202,7 @@ describe("traffic between fields", () => {
   }, 240000);
 
   it("cornerToward is clear when nothing is in the way, and outside the pull when something is", () => {
-    const sim = new Sim(1, { ...WORLD });
+    const sim = homeSim(1, { ...WORLD });
     sim.bodies = [PLANET];
     expect(sim.cornerToward(60000, 0, 60000, 10000)).toBeNull();
     const corner = sim.cornerToward(60000, 0, -60000, 0)!;

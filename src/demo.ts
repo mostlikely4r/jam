@@ -1,6 +1,7 @@
 import { DronePilot } from "./pilot";
+import { homeSim } from "./home";
 import { Renderer } from "./render";
-import { type Rock, Sim, TICK } from "./sim";
+import { type Rock, type Sim, TICK } from "./sim";
 import { DEFAULTS, type Tuning } from "./tuning";
 
 /** A demo starts over after this long, so it keeps showing the ship at work in the field. */
@@ -91,7 +92,7 @@ export class ShipDemo {
       zoom: 1.2,
       dragAbsolute: true,
     };
-    this.sim = new Sim(this.seed++, tuning);
+    this.sim = homeSim(this.seed++, tuning);
     this.age = 0;
     this.accumulator = 0;
     this.gesture = null;

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { homeFields, homeSim } from "./home";
 import { itemDef, ITEM_RECIPES, ITEMS, itemsFileNow, SHIPPED_ITEMS, thingOf, useItemsFile, type ItemsFile } from "./items";
 import { isItem, partOf, PARTS, volumeOf, type PartId } from "./parts";
 import { roundTrip } from "./save";
@@ -136,7 +137,7 @@ function world(
   drops: FieldSpec["drops"] | null = [{ item: "oreB", chance: 1 }],
   seed = 1,
 ): { sim: Sim; outpost: Poi; field: FieldSpec } {
-  const sim = new Sim(seed, { ...WORLD, ...tuning });
+  const sim = homeSim(seed, { ...WORLD, ...tuning });
   const home = Math.atan2(sim.field.y, sim.field.x) - (2 * Math.PI * sim.now) / 10800;
   const orbit = (apart: number) => [{ radius: 60000, period: 10800, phase: home + apart, sign: 1 as const }];
   const field: FieldSpec = {
@@ -163,7 +164,7 @@ function world(
     blueprints: ["tractorAll"],
     ...outpost,
   };
-  sim.applyLayout({}, [field], [spec]);
+  sim.applyLayout({}, homeFields(sim, field), [spec]);
   return { sim, outpost: sim.bases[1].poi, field };
 }
 

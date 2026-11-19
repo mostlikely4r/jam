@@ -30,8 +30,6 @@ const DIRECT_LIMIT = 80;
 const REVERSE_BRAKE_SECONDS = 0.3;
 const ORE_SIGHT = 800;
 const PASS_THROUGH_ORE_SPEED = 45;
-/** The first field's id among the mining fields. The others go by their designer id. */
-export const FIRST_FIELD = "first";
 
 /** Added to a field's cost when it's empty or feared, so it's only picked when every field is. */
 const LAST_RESORT = 1e6;
@@ -553,8 +551,8 @@ export class DronePilot extends ShipPilot {
   trading: Deposit | "pirate base" | null = null;
   /** Whether it has decided on this stay at the dock whether to make a buying run. */
   private decidedTrade = false;
-  /** The field it mines this trip, by id. Traffic picks one each time it leaves the dock. */
-  working: string = FIRST_FIELD;
+  /** The field it mines this trip, by id. Traffic picks one each time it leaves the dock. None yet: the field by its own base. */
+  working = "";
   /** The field it last mined, which it's a little drawn back to. */
   habit: string | null = null;
   /** Whether it has picked a field on this stay at the dock. */
@@ -667,12 +665,13 @@ export class DronePilot extends ShipPilot {
     this.decidedField = true;
     const fields = sim.miningFields();
     if (fields.length === 1) {
-      this.working = FIRST_FIELD;
+      this.working = fields[0].id;
       return;
     }
     const { tuning } = sim;
     const open = fields.filter((field) => !sim.fieldEmpty(field));
-    const elsewhere = open.filter((field) => field.id !== this.working);
+    const current = this.workingField(sim).id;
+    const elsewhere = open.filter((field) => field.id !== current);
     if (elsewhere.length > 0 && sim.roll() < tuning.fieldWanderChance) {
       this.working = elsewhere[Math.floor(sim.roll() * elsewhere.length)].id;
       return;
@@ -715,10 +714,9 @@ export class DronePilot extends ShipPilot {
     return route.arrive - route.depart;
   }
 
-  /** The field it's working this trip, or the first if that one's gone. */
+  /** The field it's working this trip, or the one by its own base if that one's gone. */
   private workingField(sim: Sim): MiningField {
-    const fields = sim.miningFields();
-    return fields.find((field) => field.id === this.working) ?? fields[0];
+    return sim.miningFields().find((field) => field.id === this.working) ?? sim.ownField(this.ship);
   }
 
   /** Flies to where it's buying, buys a full hold, and from there it's an ordinary haul home. */
@@ -872,7 +870,7 @@ export class DronePilot extends ShipPilot {
         sim.sleeping.has(field.id) ||
         sim.cornerToward(ship.x, ship.y, field.poi.x, field.poi.y) !== null);
     if (away && ship.ore === 0) {
-      this.task = field.id === FIRST_FIELD ? "to field" : "to far field";
+      this.task = field.id === sim.ownField(ship).id ? "to field" : "to far field";
       this.travel(sim, field.poi, field.radius * FIELD_ARRIVAL_SHARE, 0, null);
       return;
     }
@@ -892,9 +890,10 @@ export class DronePilot extends ShipPilot {
       this.hauling = true;
       return;
     }
-    // Mined out: back to the first field, which is by the station.
-    if (field.id !== FIRST_FIELD) {
-      this.working = FIRST_FIELD;
+    // Mined out: back to the field by its own base.
+    const own = sim.ownField(ship);
+    if (field.id !== own.id) {
+      this.working = own.id;
       return;
     }
     this.task = "idle";

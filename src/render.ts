@@ -663,7 +663,7 @@ export class Renderer {
    */
   private drawPoiZones(sim: Sim, alpha: number): void {
     const { ctx } = this;
-    const pois = [sim.field, ...sim.docks, ...(sim.pirateBase ? [sim.pirateBase] : []), ...sim.extraFields.map((extra) => extra.poi)];
+    const pois = [...sim.extraFields.map((extra) => extra.poi), ...sim.docks, ...(sim.pirateBase ? [sim.pirateBase] : [])];
     ctx.lineWidth = 2;
     for (const poi of pois) {
       const { full, none } = sim.carryRange(poi);

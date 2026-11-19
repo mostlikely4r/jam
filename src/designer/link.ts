@@ -1,10 +1,8 @@
 /**
- * What the game flies from the designer's layout. The game's own world is fixed in shape: a
- * planet at the centre of a field's orbit, with a station and a pirate base round the field.
- * The designer's tree is free, so this finds those four in it. Anything else is map only.
- *
- * The tuning is the one channel between them. The designer writes into the same values the
- * sliders use, and reads them back when it opens, so whichever was changed last wins.
+ * What the game flies from the designer's layout. The game's frame is centred on whatever the
+ * first field orbits. Every field, the first included, goes over as a field spec. The station
+ * and pirate base on the first field still go over through the tuning, which the designer
+ * writes into and reads back from, so whichever was changed last wins (docs/home-pair-plan.md).
  */
 import { TICK, type AnchorSpec, type FieldSpec, type Orbit, type OrbitRing, type Poi, type Sim, type SolidBody, type Spawn, type StationSpec } from "../sim";
 import type { Tuning } from "../tuning";
@@ -109,11 +107,10 @@ export function bodiesFor(world: World): SolidBody[] {
 }
 
 /**
- * Every field beyond the first, and every copy of any field, as rocks the game can fly
- * through. Their stations and other children stay on the map.
+ * Every field, and every copy of any field, as rocks the game can fly through, in the
+ * tree's order. Their stations and other children stay on the map.
  */
 export function fieldsFor(world: World): FieldSpec[] {
-  const { field: first } = linkedNodes(world);
   const place = placer(world);
   return walk(world)
     .map((entry) => entry.node)
@@ -121,7 +118,6 @@ export function fieldsFor(world: World): FieldSpec[] {
     .flatMap((node) =>
       [null, ...copiesOf(node)]
         .map((copy, index) => ({ copy, index }))
-        .filter(({ copy }) => node !== first || copy !== null)
         .map(({ copy, index }) => {
           const [carryFull, carryNone] = carrying(node);
           return {
@@ -248,13 +244,6 @@ export function useLayout(world: World, game: GameLink, keep = false): void {
 export function writeGame(world: World, tuning: Tuning): void {
   const { field, station, pirates } = linkedNodes(world);
   if (!field) return;
-  tuning.fieldRadius = field.radius;
-  tuning.fieldOrbitRadius = field.orbitRadius;
-  tuning.fieldOrbitPeriod = field.orbitPeriod;
-  tuning.fieldEccentricity = field.eccentricity;
-  tuning.fieldPeriapsis = toRadians(field.periapsisAngle);
-  tuning.fieldRotationPeriod = field.spinPeriod;
-  tuning.fieldSpinPhase = toRadians(field.spinPhase);
   if (station) {
     tuning.stationSpinPhase = toRadians(station.spinPhase);
     tuning.stationShipyard = station.shipyard;
@@ -273,10 +262,6 @@ export function writeGame(world: World, tuning: Tuning): void {
     tuning.pirateRotationPeriod = pirates.spinPeriod;
     tuning.pirateSpinPhase = toRadians(pirates.spinPhase);
   }
-  tuning.rockCount = field.rocks;
-  tuning.rockDrift = field.rockDrift;
-  tuning.rockInflow = field.rockInflow;
-  [tuning.fieldCarryFull, tuning.fieldCarryNone] = carrying(field);
   if (station) [tuning.stationCarryFull, tuning.stationCarryNone] = carrying(station);
   if (pirates) [tuning.pirateCarryFull, tuning.pirateCarryNone] = carrying(pirates);
 }
@@ -297,17 +282,15 @@ function degrees(radians: number): number {
  * has moved them on since. Everything else about them is the designer's own.
  */
 export function readGame(world: World, phases: Phases): void {
-  const { field, station, pirates } = linkedNodes(world);
-  if (field && phases.field !== undefined) field.orbitPhase = degrees(phases.field);
+  const { station, pirates } = linkedNodes(world);
   if (station && phases.station !== undefined) station.orbitPhase = degrees(phases.station);
   if (pirates && phases["pirate base"] !== undefined) pirates.orbitPhase = degrees(phases["pirate base"]);
 }
 
 export function phasesFromWorld(world: World): Phases {
-  const { field, station, pirates } = linkedNodes(world);
+  const { station, pirates } = linkedNodes(world);
   const radians = (node: WorldNode) => (node.orbitPhase * Math.PI) / 180;
   return {
-    ...(field && { field: radians(field) }),
     ...(station && { station: radians(station) }),
     ...(pirates && { "pirate base": radians(pirates) }),
   };

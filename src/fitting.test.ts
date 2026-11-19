@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { homeSim } from "./home";
 import { decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, refresh, resetPartStats, shipFileNow, thrustOf, useShipFile } from "./fitting";
 import { SHIP_MODELS, type PartId } from "./parts";
 import { bayBox, drawVectorShip } from "./shipArt";
@@ -35,7 +36,7 @@ function buyAndFit(sim: Sim, id: PartId): boolean {
 }
 
 function docked(model: "racer" | "floater"): Sim {
-  const sim = new Sim(1, { ...WORLD, floaterStart: model === "floater" });
+  const sim = homeSim(1, { ...WORLD, floaterStart: model === "floater" });
   sim.ship.x = sim.ship.px = sim.station.x + DOCK_OFFSET;
   sim.ship.y = sim.ship.py = sim.station.y;
   sim.ship.credits = 10000;
@@ -79,7 +80,7 @@ describe("the shop fits what it sells", () => {
   });
 
   it("AI ships sell back what comes off instead", () => {
-    const sim = new Sim(1, { ...WORLD, floaterStart: false, trafficRacers: 1 });
+    const sim = homeSim(1, { ...WORLD, floaterStart: false, trafficRacers: 1 });
     const { ship } = sim.traffic[0];
     ship.x = ship.px = sim.station.x + DOCK_OFFSET;
     ship.y = ship.py = sim.station.y;
@@ -1079,7 +1080,7 @@ describe("buying, WoW style", () => {
   });
 
   it("AI ships still swap, and sell the old part to the base", () => {
-    const sim = new Sim(1, { ...WORLD, floaterStart: false, trafficRacers: 1 });
+    const sim = homeSim(1, { ...WORLD, floaterStart: false, trafficRacers: 1 });
     const { ship } = sim.traffic[0];
     ship.x = ship.px = sim.station.x + DOCK_OFFSET;
     ship.y = ship.py = sim.station.y;

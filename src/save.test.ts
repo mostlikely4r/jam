@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { homeSim } from "./home";
 import { layoutKey, loadStart, makeStart, roundTrip, type StartFile } from "./save";
 import { Sim, TICK } from "./sim";
 import { DEFAULTS } from "./tuning";
@@ -12,12 +13,12 @@ function run(sim: Sim, seconds: number): void {
 
 describe("save and load", () => {
   it("carries on from where it was: the ship, the money, the world, and who's linked to whom", () => {
-    const sim = new Sim(3, { ...DEFAULTS, haulers: true, depositFree: true, guardsDepositFree: true });
+    const sim = homeSim(3, { ...DEFAULTS, haulers: true, depositFree: true, guardsDepositFree: true });
     run(sim, 30);
     sim.ship.credits = 1234;
     sim.ship.marked = true;
     sim.ores.push({ x: 1, y: 2, px: 1, py: 2, vx: 0, vy: 0, kind: 0, amount: 1, from: sim.ship });
-    const into = new Sim(99, { ...DEFAULTS });
+    const into = homeSim(99, { ...DEFAULTS });
     roundTrip(sim, into);
 
     expect(into.ship.x).toBe(sim.ship.x);
@@ -42,13 +43,13 @@ describe("save and load", () => {
   }, 30000);
 
   it("remembers the places found, which a new game forgets", () => {
-    const sim = new Sim(1, { ...DEFAULTS });
+    const sim = homeSim(1, { ...DEFAULTS });
     expect(sim.discovered.has("dock")).toBe(false);
     sim.ship.x = sim.dockPoint().x;
     sim.ship.y = sim.dockPoint().y;
     sim.step();
     expect(sim.discovered.has("dock")).toBe(true);
-    const into = new Sim(2, { ...DEFAULTS });
+    const into = homeSim(2, { ...DEFAULTS });
     roundTrip(sim, into);
     expect(into.discovered.has("dock")).toBe(true);
     into.reset(3);
@@ -58,10 +59,10 @@ describe("save and load", () => {
   });
 
   it("a ship saved before a field existed gets it as new", () => {
-    const sim = new Sim(1, { ...DEFAULTS });
+    const sim = homeSim(1, { ...DEFAULTS });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     delete (sim.ship as any).wanted;
-    const into = new Sim(2, { ...DEFAULTS });
+    const into = homeSim(2, { ...DEFAULTS });
     roundTrip(sim, into);
     expect(into.ship.wanted).toBe(false);
   });

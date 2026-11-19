@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { homeFields, homeSim } from "./home";
 import { DEFAULTS } from "./tuning";
 import { roundTrip } from "./save";
 import { type FieldSpec, MAX_HULL, type Poi, type Ship, Sim, type StationSpec, TICK } from "./sim";
@@ -33,7 +34,7 @@ const FAR = 2.4;
 
 /** A second field far round the first one's orbit, and a second base just past it. */
 function world(tuning: Partial<typeof WORLD> = {}, outpost: Partial<StationSpec> = {}): { sim: Sim; outpost: Poi } {
-  const sim = new Sim(1, { ...WORLD, ...tuning });
+  const sim = homeSim(1, { ...WORLD, ...tuning });
   const home = Math.atan2(sim.field.y, sim.field.x) - (2 * Math.PI * sim.now) / 10800;
   const orbit = (apart: number) => [{ radius: 60000, period: 10800, phase: home + apart, sign: 1 as const }];
   const second: FieldSpec = {
@@ -59,7 +60,7 @@ function world(tuning: Partial<typeof WORLD> = {}, outpost: Partial<StationSpec>
     blueprints: [],
     ...outpost,
   };
-  sim.applyLayout({}, [second], [spec]);
+  sim.applyLayout({}, homeFields(sim, second), [spec]);
   return { sim, outpost: sim.bases[1].poi };
 }
 
@@ -85,7 +86,7 @@ describe("a second base", () => {
     run(sim, 5);
     expect(sim.docks).toEqual([sim.station, outpost]);
     expect(outpost.rotation).not.toBe(turned);
-    expect(Math.hypot(outpost.x - sim.extraFields[0].poi.x, outpost.y - sim.extraFields[0].poi.y)).toBeLessThan(8000);
+    expect(Math.hypot(outpost.x - sim.extraFields[1].poi.x, outpost.y - sim.extraFields[1].poi.y)).toBeLessThan(8000);
   });
 
   it("buys ore and repairs out of its own money and store, not the first base's", () => {
@@ -238,7 +239,7 @@ describe("a second base's own defence", () => {
     expect(sim.homeBaseOf(theirs)).toBe(sim.bases[1]);
     expect(sim.accountOf(theirs)).toBe(sim.bases[1].account);
     run(sim, 90);
-    const second = sim.extraFields[0].poi;
+    const second = sim.extraFields[1].poi;
     expect(Math.hypot(theirs.x - second.x, theirs.y - second.y)).toBeLessThan(9000);
     expect(Math.hypot(theirs.x - outpost.x, theirs.y - outpost.y)).toBeLessThan(15000);
   }, 60000);

@@ -2,8 +2,7 @@ import { Chatter } from "./chatter";
 import { type BayGrid, type BlueprintId, ORE_BLOCK, partFits, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
 import { hubInputs, hubRecipes, itemDef, saleRecipes } from "./items";
 import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
-import { ClickPilot, DronePilot, FighterPilot, FIRST_FIELD, LOW_HULL } from "./pilot";
-export { FIRST_FIELD };
+import { ClickPilot, DronePilot, FighterPilot, LOW_HULL } from "./pilot";
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
 import { clampEccentricity, orbitState } from "./kepler";
@@ -360,7 +359,7 @@ export interface Poi {
   reach: number;
   /** Rotation made on the current tick. */
   turn: number;
-  /** A field from the designer beyond the first: placed by its chain of orbits instead. */
+  /** A place from the designer: placed by its chain of orbits instead. */
   orbits?: Orbit[];
   /** Its own true orbit for the chart, when `orbits` can't show it. */
   rings?: OrbitRing[];
@@ -369,8 +368,8 @@ export interface Poi {
 }
 
 /**
- * A field from the designer beyond the first: rocks and nothing else. Not saved: the
- * designer hands them over each time, and the rocks in them are saved like any other.
+ * A field: rocks and nothing else. Not saved: the designer (or the plain home, home.ts) hands
+ * them over each time, and the rocks in them are saved like any other.
  */
 export interface FieldSpec {
   id: string;
@@ -842,6 +841,27 @@ interface Carriers {
   shares: Float64Array;
 }
 
+/** Where "the field" is in a world without any: a still spot at the middle, carrying nothing. */
+const NOWHERE: Poi = {
+  name: "field",
+  parent: null,
+  x: 0,
+  y: 0,
+  px: 0,
+  py: 0,
+  orbitAngle: 0,
+  orbitRadius: 0,
+  orbitEccentricity: 0,
+  orbitPeriapsis: 0,
+  orbitPhase: 0,
+  orbitPeriod: 0,
+  rotation: 0,
+  prevRotation: 0,
+  reach: 0,
+  turn: 0,
+  carry: { full: 0, none: 0 },
+};
+
 export class Sim {
   tuning: Tuning;
   controls: Controls = {
@@ -961,9 +981,9 @@ export class Sim {
   spawns: Spawn[] = [];
   /** Each POI's angle at clock 0 for new games, from the designer. Missing: the game's own start. */
   startPhases: Partial<Record<Poi["name"], number>> = {};
-  /** Fields beyond the first, from the designer. Rocks only: no station, deposit or traffic of their own. */
+  /** Every field, from the layout, in its order. Rocks only: no station, deposit or traffic of their own. */
   extraFields: ExtraField[] = [];
-  private miningCache: { clock: number; extras: ExtraField[]; radius: number; fields: MiningField[] } | null = null;
+  private miningCache: { clock: number; extras: ExtraField[]; fields: MiningField[] } | null = null;
   /** Where each body is this tick. */
   private bodySpots: { body: SolidBody; x: number; y: number; vx: number; vy: number }[] = [];
   shots: Shot[] = [];
@@ -982,7 +1002,13 @@ export class Sim {
   itemFlow = new Map<PartId, number>();
   /** Set while the player has lost their ship and not yet got a new one. */
   down: Down | null = null;
-  field!: Poi;
+  /**
+   * The first field in the layout, for where a new game starts and the like. Worked out, not
+   * kept. Without any field, a still spot at the middle of the world.
+   */
+  get field(): Poi {
+    return this.extraFields[0]?.poi ?? NOWHERE;
+  }
   station!: Poi;
   events: SimEvent[] = [];
   stats: Stats = { bestOre: 0, topSpeed: 0 };
@@ -996,8 +1022,6 @@ export class Sim {
   private seed = 1;
   private random = (): number => nextRandom(this.randomState);
   chatter = new Chatter(1);
-  /** Counts down to the next rock drifting in, in units of the average wait. */
-  private inflowTimer = 1;
 
   constructor(seed = 1, tuning: Tuning = { ...DEFAULTS }) {
     this.tuning = tuning;
@@ -1048,11 +1072,9 @@ export class Sim {
       hub: this.hub,
       itemFlow: this.itemFlow,
       down: this.down,
-      field: this.field,
       station: this.station,
       stats: this.stats,
       discovered: this.discovered,
-      inflowTimer: this.inflowTimer,
       sleeping: [...this.sleeping.values()],
       lockers: this.lockers,
       randomState: this.randomState,
@@ -1082,7 +1104,7 @@ export class Sim {
       made.buys = each.buys;
       made.flees = each.flees;
       made.wishlist = each.wishlist;
-      made.working = each.working ?? FIRST_FIELD;
+      made.working = each.working ?? "";
       made.habit = each.habit ?? null;
       made.record = each.record ?? null;
       return made;
@@ -1096,7 +1118,7 @@ export class Sim {
     const plain = [
       "pirateBase", "deposits", "batteries", "pirateOre",
       "pirateCredits", "pirateCap", "blackMarket", "blackMarketTimer", "distress", "clock", "rocks",
-      "shots", "ores", "loot", "down", "field", "station", "stats", "inflowTimer", "randomState", "lookState", "seed",
+      "shots", "ores", "loot", "down", "station", "stats", "randomState", "lookState", "seed",
     ] as const;
     for (const key of plain) if (key in data) Object.assign(this, { [key]: data[key] });
     // A save from before every base had its own: what it held was the first base's.
@@ -1147,7 +1169,11 @@ export class Sim {
     this.stats = { bestOre: this.stats.bestOre, topSpeed: 0 };
     this.discovered = new Set();
     this.lockers = new Map();
-    this.inflowTimer = 1;
+    // The fields first: the station goes round the first.
+    for (const extra of this.extraFields) {
+      this.fitExtraField(extra);
+      extra.inflowTimer = 1;
+    }
     this.placePois();
     // Every base starts out as a starter base, the designer's included.
     this.bases = [this.makeBase(FIRST_BASE, null, this.station), ...this.bases.slice(1).map((base) => this.makeBase(base.id, base.spec, base.poi))];
@@ -1179,12 +1205,7 @@ export class Sim {
       if (i < this.tuning.testDrones) this.addDrone(this.startX(), y);
       else this.addTraffic(this.trafficStartX(), y, models[i - this.tuning.testDrones]);
     }
-    this.layRocks(this.field, this.tuning.fieldRadius, this.tuning.rockCount, this.tuning.rockDrift);
-    for (const extra of this.extraFields) {
-      this.fitExtraField(extra);
-      extra.inflowTimer = 1;
-      this.layExtraField(extra);
-    }
+    for (const extra of this.extraFields) this.layExtraField(extra);
     // Every other base starts with traffic of its own, docked, working the field it sits by.
     for (const base of this.bases.slice(1)) {
       const dock = this.dockPoint(false, base.poi);
@@ -1284,8 +1305,7 @@ export class Sim {
   /** How many rocks a field starts with, how far it spreads them, and how fast they drift. */
   private fieldMake(id: string): { count: number; radius: number; drift: number } {
     const extra = this.extraFields.find((each) => each.spec.id === id);
-    if (extra) return { count: extra.spec.rocks, radius: extra.spec.radius, drift: extra.spec.rockDrift };
-    return { count: this.tuning.rockCount, radius: this.tuning.fieldRadius, drift: this.tuning.rockDrift };
+    return extra ? { count: extra.spec.rocks, radius: extra.spec.radius, drift: extra.spec.rockDrift } : { count: 0, radius: 0, drift: 0 };
   }
 
   /**
@@ -1411,9 +1431,9 @@ export class Sim {
     poi.y = poi.py = at.y;
   }
 
-  /** Every field with its size: the first, from the tuning, then the designer's others. */
+  /** Every field with its size. */
   private rockFields(): { poi: Poi; radius: number }[] {
-    return [{ poi: this.field, radius: this.tuning.fieldRadius }, ...this.extraFields.map(({ poi, spec }) => ({ poi, radius: spec.radius }))];
+    return this.extraFields.map(({ poi, spec }) => ({ poi, radius: spec.radius }));
   }
 
   /**
@@ -1422,25 +1442,26 @@ export class Sim {
    * only looks among these for its field, however many fields there are.
    */
   private awakeRockFields(): { poi: Poi; radius: number; index: number }[] {
-    const ids = [FIRST_FIELD, ...this.extraFields.map((extra) => extra.spec.id)];
+    const ids = this.extraFields.map((extra) => extra.spec.id);
     return this.rockFields()
       .map((field, index) => ({ ...field, index }))
       .filter((field) => !this.sleeping.has(ids[field.index]));
   }
 
-  /** Every field there is to mine, the first one first. */
+  /** Every field there is to mine, in the layout's order. */
   miningFields(): MiningField[] {
     // Asked for per rock and per ship, so worked out once a tick.
     const cache = this.miningCache;
-    if (cache && cache.clock === this.clock && cache.extras === this.extraFields && cache.radius === this.tuning.fieldRadius) {
-      return cache.fields;
-    }
-    const fields = [
-      { id: FIRST_FIELD, poi: this.field, radius: this.tuning.fieldRadius, full: this.tuning.rockCount },
-      ...this.extraFields.map(({ poi, spec }) => ({ id: spec.id, poi, radius: spec.radius, full: spec.rocks })),
-    ];
-    this.miningCache = { clock: this.clock, extras: this.extraFields, radius: this.tuning.fieldRadius, fields };
+    if (cache && cache.clock === this.clock && cache.extras === this.extraFields) return cache.fields;
+    const fields = this.extraFields.map(({ poi, spec }) => ({ id: spec.id, poi, radius: spec.radius, full: spec.rocks }));
+    this.miningCache = { clock: this.clock, extras: this.extraFields, fields };
     return fields;
+  }
+
+  /** The field by a ship's own base: where its pilot works when it has picked no other. */
+  ownField(ship: Ship): MiningField {
+    const { poi } = this.homeBaseOf(ship);
+    return this.miningFieldAt(poi.x, poi.y);
   }
 
   /** The field whose edge is nearest a spot. */
@@ -1451,7 +1472,7 @@ export class Sim {
 
   /** Whether a rock belongs to a field: it's nearer that field's edge than any other's. */
   rockIn(field: MiningField, rock: Rock): boolean {
-    if (this.extraFields.length === 0) return true;
+    if (this.extraFields.length <= 1) return true;
     return this.miningFieldAt(rock.x, rock.y).id === field.id;
   }
 
@@ -1533,21 +1554,12 @@ export class Sim {
       const phase = this.startPhases[name];
       return phase === undefined ? own : phase + orbitRate(period) * this.clock;
     };
-    this.field = this.makePoi(
-      "field",
-      null,
-      tuning.fieldOrbitRadius,
-      angle("field", 0, tuning.fieldOrbitPeriod),
-      tuning.fieldOrbitPeriod,
-      tuning.fieldRadius,
-      tuning.fieldEccentricity,
-      tuning.fieldPeriapsis,
-    );
+    const home = this.homeField();
     // Starts behind the ship's starting point, on the far side from the rocks.
     this.station = this.makePoi(
       "station",
-      this.field,
-      tuning.fieldRadius + tuning.stationDistance,
+      home?.poi ?? null,
+      (home?.spec.radius ?? 0) + tuning.stationDistance,
       angle("station", Math.PI, tuning.orbitPeriod),
       tuning.orbitPeriod,
       STATION_REACH,
@@ -1559,8 +1571,8 @@ export class Sim {
       tuning.pirates > 0
         ? this.makePoi(
             "pirate base",
-            this.field,
-            tuning.fieldRadius + tuning.pirateBaseDistance,
+            home?.poi ?? null,
+            (home?.spec.radius ?? 0) + tuning.pirateBaseDistance,
             angle("pirate base", 0, tuning.pirateOrbitPeriod),
             tuning.pirateOrbitPeriod,
             PIRATE_BASE_RADIUS,
@@ -1571,13 +1583,20 @@ export class Sim {
     this.spinPois();
   }
 
-  /** Sets the three tuned places to the turn the tuning says they have at the clock. */
+  /**
+   * The first field, which the station and pirate base go round until they have specs of
+   * their own (docs/home-pair-plan.md).
+   */
+  private homeField(): ExtraField | null {
+    return this.extraFields[0] ?? null;
+  }
+
+  /** Sets the two tuned places to the turn the tuning says they have at the clock. */
   private spinPois(): void {
-    const { tuning, field, station, pirateBase } = this;
+    const { tuning, station, pirateBase } = this;
     const set = (poi: Poi, phase: number, period: number) => {
       poi.rotation = poi.prevRotation = phase + orbitRate(period) * this.clock;
     };
-    set(field, tuning.fieldSpinPhase, tuning.fieldRotationPeriod);
     set(station, tuning.stationSpinPhase, tuning.stationRotationPeriod);
     if (pirateBase) set(pirateBase, tuning.pirateSpinPhase, tuning.pirateRotationPeriod);
   }
@@ -1623,6 +1642,7 @@ export class Sim {
 
   private addDrone(x: number, y: number): DronePilot {
     const drone = this.makePilot(x, y);
+    if (this.extraFields.length > 0) drone.working = this.ownField(drone.ship).id;
     this.drones.push(drone);
     return drone;
   }
@@ -1633,6 +1653,8 @@ export class Sim {
     pilot.ship.home = home;
     pilot.buys = "upgrades";
     pilot.flees = true;
+    // It starts out working the field by its own base.
+    if (this.extraFields.length > 0) pilot.working = this.ownField(pilot.ship).id;
     this.traffic.push(pilot);
   }
 
@@ -2236,7 +2258,7 @@ export class Sim {
   }
 
   private startX(): number {
-    return this.field.x - this.tuning.fieldRadius - 200;
+    return this.field.x - this.field.reach - 200;
   }
 
   /**
@@ -2244,7 +2266,7 @@ export class Sim {
    * shows itself bit by bit: first on the radio, then in person.
    */
   private trafficStartX(): number {
-    return this.field.x + this.tuning.fieldRadius * this.tuning.trafficStartShare;
+    return this.field.x + this.field.reach * this.tuning.trafficStartShare;
   }
 
   private makeShip(x: number, y: number, controls: Controls, model: ShipModel = "racer"): Ship {
@@ -3813,10 +3835,8 @@ export class Sim {
 
   /** Each POI follows a fixed circle or ellipse around its parent, or the system's center. */
   private movePois(dt: number): void {
-    const { tuning, field, station } = this;
-    this.movePoi(field, tuning.fieldOrbitPeriod, tuning.fieldRotationPeriod, dt, tuning.fieldEccentricity, tuning.fieldPeriapsis);
-    this.movePoi(station, tuning.orbitPeriod, tuning.stationRotationPeriod, dt, tuning.stationEccentricity, tuning.stationPeriapsis);
-    if (this.pirateBase) this.movePoi(this.pirateBase, tuning.pirateOrbitPeriod, tuning.pirateRotationPeriod, dt, tuning.pirateEccentricity, tuning.piratePeriapsis);
+    const { tuning, station } = this;
+    // The fields first: the station and pirate base go round the first.
     for (const { spec, poi } of this.extraFields) {
       poi.px = poi.x;
       poi.py = poi.y;
@@ -3827,6 +3847,8 @@ export class Sim {
       poi.turn = orbitRate(spec.rotationPeriod) * dt;
       poi.rotation += poi.turn;
     }
+    this.movePoi(station, tuning.orbitPeriod, tuning.stationRotationPeriod, dt, tuning.stationEccentricity, tuning.stationPeriapsis);
+    if (this.pirateBase) this.movePoi(this.pirateBase, tuning.pirateOrbitPeriod, tuning.pirateRotationPeriod, dt, tuning.pirateEccentricity, tuning.piratePeriapsis);
     for (const { spec, poi } of this.bases) {
       if (!spec) continue;
       poi.px = poi.x;
@@ -3882,10 +3904,10 @@ export class Sim {
     return { x: parent.x + at.x, y: parent.y + at.y };
   }
 
-  /** Each POI's orbit angle at clock 0. */
+  /** The tuned places' orbit angles at clock 0. The others' come with their orbits. */
   orbitPhases(): Partial<Record<Poi["name"], number>> {
-    const { field, station, pirateBase } = this;
-    return Object.fromEntries((pirateBase ? [field, station, pirateBase] : [field, station]).map((poi) => [poi.name, poi.orbitPhase]));
+    const { station, pirateBase } = this;
+    return Object.fromEntries((pirateBase ? [station, pirateBase] : [station]).map((poi) => [poi.name, poi.orbitPhase]));
   }
 
   /**
@@ -3895,7 +3917,7 @@ export class Sim {
    * a phase goes exactly there. Without one it carries on from the angle it's at.
    */
   applyLayout(phases: Partial<Record<Poi["name"], number>> = {}, fields?: FieldSpec[], stationSpecs?: StationSpec[]): void {
-    const { field, station, pirateBase, tuning, clock } = this;
+    const { station, pirateBase, tuning, clock } = this;
     // What's at a station goes where that station goes, every base's included.
     const stations = [...this.docks, ...(pirateBase ? [pirateBase] : [])];
     const before = new Map(this.pois.map((poi) => [poi, { x: poi.x, y: poi.y }]));
@@ -3919,7 +3941,7 @@ export class Sim {
         this.rocks = this.rocks.filter((rock) => !gone.some(({ poi, spec }) => Math.hypot(rock.x - poi.x, rock.y - poi.y) < spec.radius * 1.5));
       }
       this.extraFields = next;
-      const ids = new Set([FIRST_FIELD, ...next.map((extra) => extra.spec.id)]);
+      const ids = new Set(next.map((extra) => extra.spec.id));
       for (const id of this.sleeping.keys()) if (!ids.has(id)) this.sleeping.delete(id);
     }
     if (stationSpecs) {
@@ -3952,10 +3974,13 @@ export class Sim {
       poi.y = poi.py = (poi.parent?.y ?? 0) + at.y;
     };
     this.spinPois();
-    field.reach = tuning.fieldRadius;
-    place(field, tuning.fieldOrbitRadius, tuning.fieldOrbitPeriod, tuning.fieldEccentricity, tuning.fieldPeriapsis);
-    place(station, tuning.fieldRadius + tuning.stationDistance, tuning.orbitPeriod, tuning.stationEccentricity, tuning.stationPeriapsis);
-    if (pirateBase) place(pirateBase, tuning.fieldRadius + tuning.pirateBaseDistance, tuning.pirateOrbitPeriod, tuning.pirateEccentricity, tuning.piratePeriapsis);
+    // The station and pirate base go round the first field, whichever that is now.
+    const home = this.homeField();
+    const homeRadius = home?.spec.radius ?? 0;
+    station.parent = home?.poi ?? null;
+    if (pirateBase) pirateBase.parent = home?.poi ?? null;
+    place(station, homeRadius + tuning.stationDistance, tuning.orbitPeriod, tuning.stationEccentricity, tuning.stationPeriapsis);
+    if (pirateBase) place(pirateBase, homeRadius + tuning.pirateBaseDistance, tuning.pirateOrbitPeriod, tuning.pirateEccentricity, tuning.piratePeriapsis);
 
     const moved = (poi: Poi) => {
       const was = before.get(poi);
@@ -3986,10 +4011,11 @@ export class Sim {
         const was = before.get(poi)!;
         return Math.hypot(body.x - was.x, body.y - was.y) < poi.reach + LAYOUT_NEIGHBOURHOOD;
       });
-      shift(body, at ? moved(at) : moved(fieldsBefore[this.fieldAtBefore(fieldsBefore, before, body)].poi));
+      if (at) shift(body, moved(at));
+      else if (fieldsBefore.length > 0) shift(body, moved(fieldsBefore[this.fieldAtBefore(fieldsBefore, before, body)].poi));
     }
     for (const base of this.bases) if (base.hauler) shift(base.hauler, moved(base.poi));
-    if (this.blackMarket) shift(this.blackMarket, moved(pirateBase ?? field));
+    if (this.blackMarket) shift(this.blackMarket, moved(pirateBase ?? this.field));
     // These follow their POIs, and a jump in one of them would carry whatever is inside it.
     this.moveDeposits();
     for (const deposit of this.deposits) {
@@ -4017,9 +4043,9 @@ export class Sim {
   }
 
   private get pois(): Poi[] {
-    const { field, station, pirateBase } = this;
-    const own = pirateBase ? [field, station, pirateBase] : [field, station];
-    return [...own, ...this.extraFields.map((extra) => extra.poi), ...this.bases.slice(1).map((base) => base.poi)];
+    const { station, pirateBase } = this;
+    const own = pirateBase ? [station, pirateBase] : [station];
+    return [...this.extraFields.map((extra) => extra.poi), ...own, ...this.bases.slice(1).map((base) => base.poi)];
   }
 
   /** Distance from a POI's edge, as of the last tick. Negative inside it. */
@@ -4066,11 +4092,7 @@ export class Sim {
     if (poi.carry) return poi.carry;
     const { tuning } = this;
     const [full, none] =
-      poi.name === "field"
-        ? [tuning.fieldCarryFull, tuning.fieldCarryNone]
-        : poi.name === "station"
-          ? [tuning.stationCarryFull, tuning.stationCarryNone]
-          : [tuning.pirateCarryFull, tuning.pirateCarryNone];
+      poi.name === "station" ? [tuning.stationCarryFull, tuning.stationCarryNone] : [tuning.pirateCarryFull, tuning.pirateCarryNone];
     return { full, none: Math.max(full, none) };
   }
 
@@ -4117,7 +4139,6 @@ export class Sim {
   private carriersNow(): Carriers {
     // A sleeping field carries nothing: its rocks are kept with it, and nobody is near it.
     const asleep = new Set(this.extraFields.filter((extra) => this.sleeping.has(extra.spec.id)).map((extra) => extra.poi));
-    if (this.sleeping.has(FIRST_FIELD)) asleep.add(this.field);
     const pois = this.pois.filter((poi) => !asleep.has(poi));
     const count = pois.length;
     const carriers: Carriers = {
@@ -4222,7 +4243,7 @@ export class Sim {
       const centerY = isStation ? y + sin * STATION_SHAPE_CENTER : y;
       const extentX = isStation ? Math.abs(cos) * STATION_SHAPE_HALF + Math.abs(sin) * STATION_HALF : 0;
       const extentY = isStation ? Math.abs(sin) * STATION_SHAPE_HALF + Math.abs(cos) * STATION_HALF : 0;
-      const radius = isStation ? 0 : poi === this.field ? tuning.fieldRadius : poi.reach;
+      const radius = isStation ? 0 : poi.reach;
       const viewX = shipX + ship.vx * tuning.lookahead;
       const viewY = shipY + ship.vy * tuning.lookahead;
       const outX = Math.max(0, Math.abs(centerX - viewX) - viewHalfWidth - extentX);
@@ -4626,8 +4647,9 @@ export class Sim {
       pilot.task = "to station";
     } else {
       goal = "field";
-      target = fields.some((field) => field.id === pilot.working) ? pilot.working : FIRST_FIELD;
-      pilot.task = target === FIRST_FIELD ? "to field" : "to far field";
+      const own = this.ownField(ship).id;
+      target = fields.some((field) => field.id === pilot.working) ? pilot.working : own;
+      pilot.task = target === own ? "to field" : "to far field";
     }
     const from = { x: ship.x, y: ship.y };
     const record: TripRecord = { goal, target, stage: "travel", depart: this.clock, arrive: this.clock, path: [from], aim: from };
@@ -4671,8 +4693,8 @@ export class Sim {
     if (record.goal === "field") {
       const want = Math.max(0, this.deliveryLoad(ship) - ship.ore);
       ship.ore += Math.min(want, Math.floor(this.takeOre(record.target, want) + 1e-9));
-      // Mined out before the hold was full: home with what it has, or with nothing, back to the first field.
-      if (ship.ore === 0) pilot.working = FIRST_FIELD;
+      // Mined out before the hold was full: home with what it has, or with nothing, back to the field by its own base.
+      if (ship.ore === 0) pilot.working = this.ownField(ship).id;
       else if (ship.ore < this.deliveryLoad(ship)) pilot.startHauling();
       this.nextLegAt(pilot, due);
       return;
@@ -4907,8 +4929,8 @@ export class Sim {
       this.rocks.push(rock);
     }
     const extra = this.extraFields.find((each) => each.spec.id === field.id);
-    const perMinute = extra ? extra.spec.rockInflow : this.tuning.rockInflow;
-    const drift = extra ? extra.spec.rockDrift : this.tuning.rockDrift;
+    const perMinute = extra?.spec.rockInflow ?? 0;
+    const drift = extra?.spec.rockDrift ?? 0;
     const room = field.full - sleeping.rocks.length;
     const grown = Math.min(room, Math.floor(((this.clock - sleeping.since) * perMinute) / 60));
     const viewer = this.viewer();
@@ -4934,13 +4956,9 @@ export class Sim {
     const counts = fields.map(() => 0);
     if (awake.length === 1) counts[awake[0].index] = this.rocks.length;
     else if (awake.length > 1) for (const rock of this.rocks) counts[awake[this.fieldAt(awake, rock.x, rock.y)].index]++;
-    const { tuning } = this;
-    if (!this.sleeping.has(FIRST_FIELD)) {
-      this.inflowTimer = this.driftInto(fields[0], tuning.rockInflow, tuning.rockCount, counts[0], this.inflowTimer, dt);
-    }
     this.extraFields.forEach((extra, i) => {
       if (this.sleeping.has(extra.spec.id)) return;
-      extra.inflowTimer = this.driftInto(fields[i + 1], extra.spec.rockInflow, extra.spec.rocks, counts[i + 1], extra.inflowTimer, dt);
+      extra.inflowTimer = this.driftInto(fields[i], extra.spec.rockInflow, extra.spec.rocks, counts[i], extra.inflowTimer, dt);
     });
   }
 
@@ -5934,7 +5952,6 @@ export class Sim {
 
   /** The chart's own key for a place: what the discovered set holds for it. */
   chartKey(poi: Poi): string {
-    if (poi === this.field) return "field";
     if (poi === this.station) return "station";
     if (poi === this.pirateBase) return "pirate base";
     const extra = this.extraFields.find(({ poi: at }) => at === poi);

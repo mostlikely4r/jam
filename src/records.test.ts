@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { HOME, homeOf, homeSim } from "./home";
 import { roundTrip } from "./save";
 import { Sim, TICK, TRAFFIC_WAKE_DISTANCE } from "./sim";
 import { DEFAULTS } from "./tuning";
@@ -45,13 +46,13 @@ const sold = (sim: Sim) => sim.traffic.reduce((sum, pilot) => sum + pilot.ship.e
 
 describe("traffic out of view", () => {
   it("becomes a trip record, flown by nobody, and a ship again when the camera comes near", () => {
-    const sim = new Sim(1, { ...QUIET });
+    const sim = homeSim(1, { ...QUIET });
     run(sim, 2, () => parkAway(sim));
     expect(sim.traffic.every((pilot) => pilot.record)).toBe(true);
     expect(sim.ships.filter((ship) => ship !== sim.ship).length).toBe(0);
     // Its ship still says where it is.
     const { ship } = sim.traffic[0];
-    expect(Math.hypot(ship.x - sim.field.x, ship.y - sim.field.y)).toBeLessThan(sim.tuning.fieldRadius + 4000);
+    expect(Math.hypot(ship.x - sim.field.x, ship.y - sim.field.y)).toBeLessThan(homeOf(sim).fieldRadius + 4000);
     // The camera comes to it.
     sim.ship.x = sim.ship.px = ship.x + TRAFFIC_WAKE_DISTANCE / 2;
     sim.ship.y = sim.ship.py = ship.y;
@@ -61,7 +62,7 @@ describe("traffic out of view", () => {
   });
 
   it("keeps mining, selling and shopping as a record", () => {
-    const sim = new Sim(1, { ...QUIET });
+    const sim = homeSim(1, { ...QUIET });
     const rocks = () => sim.rocks.length + [...sim.sleeping.values()].reduce((sum, field) => sum + field.rocks.length, 0);
     run(sim, 900, () => parkAway(sim));
     expect(sim.traffic.every((pilot) => pilot.record)).toBe(true);
@@ -69,14 +70,14 @@ describe("traffic out of view", () => {
     expect(sold(sim)).toBeGreaterThan(100);
     expect(sim.bases[0].ore).toBeGreaterThan(0);
     // The field is mined, as it would be: broken rocks leave smaller ones.
-    expect(rocks()).not.toBe(QUIET.rockCount);
+    expect(rocks()).not.toBe(HOME.rockCount);
   }, 120000);
 
   it("sells about as much ore as flown traffic does", () => {
     const minutes = 20;
-    const flown = new Sim(3, { ...QUIET, trafficRecords: false });
+    const flown = homeSim(3, { ...QUIET, trafficRecords: false });
     run(flown, minutes * 60, () => parkAway(flown));
-    const recorded = new Sim(3, { ...QUIET });
+    const recorded = homeSim(3, { ...QUIET });
     run(recorded, minutes * 60, () => parkAway(recorded));
     const ratio = sold(recorded) / sold(flown);
     expect(ratio).toBeGreaterThan(0.7);
@@ -84,9 +85,9 @@ describe("traffic out of view", () => {
   }, 300000);
 
   it("goes into a save and carries on after loading", () => {
-    const sim = new Sim(1, { ...QUIET });
+    const sim = homeSim(1, { ...QUIET });
     run(sim, 30, () => parkAway(sim));
-    const loaded = new Sim(1, { ...QUIET });
+    const loaded = homeSim(1, { ...QUIET });
     roundTrip(sim, loaded);
     expect(loaded.traffic.map((pilot) => pilot.record)).toEqual(sim.traffic.map((pilot) => pilot.record));
     run(loaded, 300, () => parkAway(loaded));
@@ -94,7 +95,7 @@ describe("traffic out of view", () => {
   }, 120000);
 
   it("stays a flown ship while a pirate is near it, so a fight is a real one", () => {
-    const sim = new Sim(1, { ...QUIET, pirates: 1, trafficRacers: 1, trafficFloaters: 0, fighterRecords: false });
+    const sim = homeSim(1, { ...QUIET, pirates: 1, trafficRacers: 1, trafficFloaters: 0, fighterRecords: false });
     const pirate = sim.fighters[0].ship;
     const { ship } = sim.traffic[0];
     run(sim, 2, () => {
@@ -111,7 +112,7 @@ describe("pirates and defenders out of view", () => {
   const ALONE = { ...QUIET, trafficRacers: 0, trafficFloaters: 0, pirates: 1, defenders: 1 };
 
   it("become trip records, and ships again when the camera comes near", () => {
-    const sim = new Sim(1, { ...ALONE });
+    const sim = homeSim(1, { ...ALONE });
     run(sim, 2, () => parkAway(sim));
     expect(sim.fighters.every((pilot) => pilot.record)).toBe(true);
     expect(sim.ships).toEqual([sim.ship]);
@@ -124,14 +125,14 @@ describe("pirates and defenders out of view", () => {
   });
 
   it("a pirate as a record mines its field and sells the ore at its base", () => {
-    const sim = new Sim(1, { ...ALONE, defenders: 0 });
+    const sim = homeSim(1, { ...ALONE, defenders: 0 });
     run(sim, 900, () => parkAway(sim));
     expect(sim.fighters[0].record).not.toBeNull();
     expect(sim.pirateOre).toBeGreaterThan(0);
   }, 120000);
 
   it("a pirate as a record spots laden traffic in its field: both are ships again, and it attacks", () => {
-    const sim = new Sim(1, { ...QUIET, pirates: 1, trafficRacers: 1, trafficFloaters: 0, recordSpotPirate: 1 });
+    const sim = homeSim(1, { ...QUIET, pirates: 1, trafficRacers: 1, trafficFloaters: 0, recordSpotPirate: 1 });
     const pirate = sim.fighters[0];
     const trader = sim.traffic[0];
     let met = false;
@@ -144,7 +145,7 @@ describe("pirates and defenders out of view", () => {
   }, 120000);
 
   it("a defender as a record answers a call for help near its base", () => {
-    const sim = new Sim(1, { ...ALONE, pirates: 0 });
+    const sim = homeSim(1, { ...ALONE, pirates: 0 });
     run(sim, 2, () => parkAway(sim));
     const defender = sim.fighters[0];
     expect(defender.record).not.toBeNull();
@@ -156,9 +157,9 @@ describe("pirates and defenders out of view", () => {
   });
 
   it("go into a save and carry on after loading", () => {
-    const sim = new Sim(1, { ...ALONE });
+    const sim = homeSim(1, { ...ALONE });
     run(sim, 30, () => parkAway(sim));
-    const loaded = new Sim(1, { ...ALONE });
+    const loaded = homeSim(1, { ...ALONE });
     roundTrip(sim, loaded);
     expect(loaded.fighters.map((pilot) => pilot.record)).toEqual(sim.fighters.map((pilot) => pilot.record));
     run(loaded, 60, () => parkAway(loaded));

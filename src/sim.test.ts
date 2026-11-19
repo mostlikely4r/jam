@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { FIRST_FIELD, HOME, type Home, homeFields, homeOf, homeSim, rehome } from "./home";
 import { PARTS, partFits } from "./parts";
-import { FIRST_FIELD } from "./pilot";
 import { roundTrip } from "./save";
 import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
 import { bodyAt, DOCK_OFFSET, type FieldSpec, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, type SolidBody, STATION_HALF, TICK } from "./sim";
@@ -54,7 +54,7 @@ function fitAll(sim: Sim): Sim {
 
 /** No rocks, and the field stays put, so tests can reason in plain coordinates. */
 function emptySim(): Sim {
-  const sim = new Sim(1, {
+  const sim = homeSim(1, {
     ...DEFAULTS,
     rockCount: 0,
     testDrones: 0,
@@ -273,7 +273,7 @@ describe("station", () => {
     const base = { ...DEFAULTS, rockCount: 0, testDrones: 0, pirates: 1 };
 
     it("start the ship at a spawn for its model, picked at random from several", () => {
-      const sim = new Sim(1, { ...base, floaterStart: true });
+      const sim = homeSim(1, { ...base, floaterStart: true });
       sim.spawns = [
         { ship: "racer", orbits: [{ radius: 1000, period: 0, phase: 0, sign: 1 }] },
         { ship: "floater", orbits: [{ radius: 40000, period: 0, phase: 0, sign: 1 }] },
@@ -289,23 +289,27 @@ describe("station", () => {
     });
 
     it("start by the field when no spawn is for this ship", () => {
-      const sim = new Sim(1, { ...base, floaterStart: false });
+      const sim = homeSim(1, { ...base, floaterStart: false });
       sim.spawns = [{ ship: "floater", orbits: [{ radius: 40000, period: 0, phase: 0, sign: 1 }] }];
       sim.reset(2);
-      expect(Math.hypot(sim.ship.x - sim.field.x, sim.ship.y - sim.field.y)).toBeLessThan(DEFAULTS.fieldRadius + 500);
+      expect(Math.hypot(sim.ship.x - sim.field.x, sim.ship.y - sim.field.y)).toBeLessThan(HOME.fieldRadius + 500);
     });
 
     it("put the places at the designer's angles for the clock now", () => {
-      const sim = new Sim(1, { ...base, fieldOrbitPeriod: 600 });
+      const sim = homeSim(1, { ...base, fieldOrbitPeriod: 600 });
       run(sim, 100);
-      sim.startPhases = { field: 1, station: 2 };
+      // The field's angle comes with its orbit, the station's (still tuned) with the phases.
+      rehome(sim, { fieldPhase: 1 });
+      sim.startPhases = { station: 2 };
       sim.reset(2);
-      expect(sim.field.orbitAngle).toBeCloseTo(1 + ((2 * Math.PI) / 600) * sim.now, 9);
+      const field = 1 + ((2 * Math.PI) / 600) * sim.now;
+      expect(sim.field.x).toBeCloseTo(Math.cos(field) * HOME.fieldOrbitRadius, 6);
+      expect(sim.field.y).toBeCloseTo(Math.sin(field) * HOME.fieldOrbitRadius, 6);
       expect(sim.station.orbitAngle).toBeCloseTo(2 + ((2 * Math.PI) / DEFAULTS.orbitPeriod) * sim.now, 9);
     });
 
     it("let each place carry to its own range", () => {
-      const sim = new Sim(1, { ...base, fieldCarryFull: Infinity, fieldCarryNone: Infinity, stationCarryFull: 0, stationCarryNone: 0 });
+      const sim = homeSim(1, { ...base, fieldCarryFull: Infinity, fieldCarryNone: Infinity, stationCarryFull: 0, stationCarryNone: 0 });
       expect(sim.carryRange(sim.station)).toEqual({ full: 0, none: 0 });
       expect(sim.carryRange(sim.field)).toEqual({ full: Infinity, none: Infinity });
     });
@@ -326,12 +330,12 @@ describe("station", () => {
       ...extra,
     });
     const inSecond = (sim: Sim) => {
-      const { poi } = sim.extraFields[0];
+      const { poi } = sim.extraFields[1];
       return sim.rocks.filter((rock) => Math.hypot(rock.x - poi.x, rock.y - poi.y) < 3000 + 500);
     };
     /** Puts the player's ship, and so the camera, in the second field and lets it wake. */
     function visitSecond(sim: Sim): void {
-      const { poi } = sim.extraFields[0];
+      const { poi } = sim.extraFields[1];
       sim.ship.x = sim.ship.px = poi.x;
       sim.ship.y = sim.ship.py = poi.y;
       sim.step();
@@ -341,9 +345,9 @@ describe("station", () => {
       sim.ship.x = sim.ship.px = sim.field.x;
       sim.ship.y = sim.ship.py = sim.field.y;
     }
-    function withSecond(extra: Partial<FieldSpec> = {}, tuning: Partial<typeof DEFAULTS> = {}): Sim {
-      const sim = new Sim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800, ...tuning });
-      sim.applyLayout({}, [second(extra)]);
+    function withSecond(extra: Partial<FieldSpec> = {}, tuning: Partial<typeof DEFAULTS & Home> = {}): Sim {
+      const sim = homeSim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800, ...tuning });
+      sim.applyLayout({}, homeFields(sim, second(extra)));
       return sim;
     }
 
@@ -366,7 +370,7 @@ describe("station", () => {
       visitSecond(late);
       // Where each rock is from the field's centre, in its own turning frame.
       const shape = (sim: Sim) => {
-        const { poi } = sim.extraFields[0];
+        const { poi } = sim.extraFields[1];
         const turn = -poi.rotation;
         return inSecond(sim).flatMap((rock) => {
           const dx = rock.x - poi.x;
@@ -380,15 +384,15 @@ describe("station", () => {
       // Within a unit: in the step it wakes, a rock near the edge is carried a touch differently.
       expect(Math.max(...a.map((n, i) => Math.abs(n - b[i])))).toBeLessThan(1);
       // The world's own dice go on the same as with no second field at all.
-      const plain = new Sim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800 });
+      const plain = homeSim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800 });
       expect(plain.roll()).toBe(withSecond().roll());
     });
 
     it("is laid at once when it appears where the camera is", () => {
-      const sim = new Sim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800 });
+      const sim = homeSim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800 });
       sim.ship.x = sim.ship.px = Math.cos(Math.PI) * 90000;
       sim.ship.y = sim.ship.py = 0;
-      sim.applyLayout({}, [second({ orbits: [{ radius: 90000, period: 0, phase: Math.PI, sign: 1 }] })]);
+      sim.applyLayout({}, homeFields(sim, second({ orbits: [{ radius: 90000, period: 0, phase: Math.PI, sign: 1 }] })));
       expect(sim.sleeping.has("second:0")).toBe(false);
       expect(inSecond(sim).length).toBeGreaterThan(90);
     });
@@ -396,7 +400,7 @@ describe("station", () => {
     it("goes round its own orbit, and its rocks stay with it", () => {
       const sim = withSecond();
       run(sim, 120);
-      const { poi } = sim.extraFields[0];
+      const { poi } = sim.extraFields[1];
       const angle = Math.PI + ((2 * Math.PI) / 7200) * sim.now;
       expect(poi.x).toBeCloseTo(Math.cos(angle) * 90000, 3);
       // Nobody's been there, so it's still only a seed.
@@ -415,7 +419,7 @@ describe("station", () => {
 
     it("refills from its own inflow, not the first field's", () => {
       const sim = withSecond({ rocks: 100, rockInflow: 60 });
-      const { poi } = sim.extraFields[0];
+      const { poi } = sim.extraFields[1];
       visitSecond(sim);
       sim.rocks = sim.rocks.filter((rock) => Math.hypot(rock.x - poi.x, rock.y - poi.y) > 10000);
       leaveSecond(sim);
@@ -431,14 +435,14 @@ describe("station", () => {
 
     it("takes its rocks with it when it's taken away", () => {
       const sim = withSecond();
-      sim.applyLayout({}, []);
-      expect(sim.extraFields.length).toBe(0);
+      sim.applyLayout({}, homeFields(sim));
+      expect(sim.extraFields.length).toBe(1);
       expect(sim.rocks.length).toBe(50);
     });
 
     it("sleeps while nobody is near, and wakes with any gap shot in it still there", () => {
       const sim = withSecond();
-      const { poi } = sim.extraFields[0];
+      const { poi } = sim.extraFields[1];
       visitSecond(sim);
       // Shoot a hole in one side of it.
       sim.rocks = sim.rocks.filter((rock) => !(Math.hypot(rock.x - poi.x, rock.y - poi.y) < 3500 && rock.x > poi.x));
@@ -459,8 +463,8 @@ describe("station", () => {
       leaveSecond(sim);
       run(sim, 5);
       expect(sim.sleeping.has("second:0")).toBe(true);
-      const loaded = new Sim(1, { ...sim.tuning });
-      loaded.applyLayout({}, [second()]);
+      const loaded = homeSim(1, { ...sim.tuning, ...homeOf(sim) });
+      loaded.applyLayout({}, homeFields(loaded, second()));
       roundTrip(sim, loaded);
       expect(loaded.sleeping.get("second:0")?.rocks.length).toBe(100);
       visitSecond(loaded);
@@ -469,8 +473,8 @@ describe("station", () => {
 
     it("keeps a never-seen field a seed through a save, and lays the same rocks after", () => {
       const sim = withSecond();
-      const loaded = new Sim(1, { ...sim.tuning });
-      loaded.applyLayout({}, [second()]);
+      const loaded = homeSim(1, { ...sim.tuning, ...homeOf(sim) });
+      loaded.applyLayout({}, homeFields(loaded, second()));
       roundTrip(sim, loaded);
       expect(loaded.sleeping.get("second:0")?.fresh).toBe(sim.sleeping.get("second:0")?.fresh);
       visitSecond(sim);
@@ -481,7 +485,7 @@ describe("station", () => {
     it("stays awake while any ship is near it", () => {
       // A flown ship: a record never keeps a field awake.
       const sim = withSecond({}, { trafficRacers: 1, trafficRecords: false });
-      const { poi } = sim.extraFields[0];
+      const { poi } = sim.extraFields[1];
       const traffic = sim.traffic[0].ship;
       const park = () => {
         traffic.x = traffic.px = poi.x;
@@ -497,7 +501,7 @@ describe("station", () => {
 
     it("carries to its own range", () => {
       const sim = withSecond({ carryFull: 0, carryNone: 1000 });
-      expect(sim.carryRange(sim.extraFields[0].poi)).toEqual({ full: 0, none: 1000 });
+      expect(sim.carryRange(sim.extraFields[1].poi)).toEqual({ full: 0, none: 1000 });
     });
 
     it("moves its rocks along when its orbit changes, without touching the first field's", () => {
@@ -507,9 +511,9 @@ describe("station", () => {
       const firstRock = sim.sleeping.get(FIRST_FIELD)!.rocks[0];
       const firstAt = { x: firstRock.x, y: firstRock.y };
       const rock = inSecond(sim)[0];
-      const offset = { x: rock.x - sim.extraFields[0].poi.x, y: rock.y - sim.extraFields[0].poi.y };
-      sim.applyLayout({}, [second({ orbits: [{ radius: 120000, period: 7200, phase: 2, sign: 1 }] })]);
-      const { poi } = sim.extraFields[0];
+      const offset = { x: rock.x - sim.extraFields[1].poi.x, y: rock.y - sim.extraFields[1].poi.y };
+      sim.applyLayout({}, homeFields(sim, second({ orbits: [{ radius: 120000, period: 7200, phase: 2, sign: 1 }] })));
+      const { poi } = sim.extraFields[1];
       expect(rock.x - poi.x).toBeCloseTo(offset.x, 6);
       expect(rock.y - poi.y).toBeCloseTo(offset.y, 6);
       expect(firstRock.x).toBeCloseTo(firstAt.x, 6);
@@ -523,7 +527,7 @@ describe("station", () => {
     }
     /** A still field far away, so nothing carries the ship near the body. */
     function near(body: SolidBody, x: number, vx = 0): Sim {
-      const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, fieldOrbitRadius: 200000, fieldOrbitPeriod: 0, fieldRotationPeriod: 0, orbitPeriod: 0, stationRotationPeriod: 0 });
+      const sim = homeSim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, fieldOrbitRadius: 200000, fieldOrbitPeriod: 0, fieldRotationPeriod: 0, orbitPeriod: 0, stationRotationPeriod: 0 });
       sim.bodies = [body];
       Object.assign(sim.ship, { x, y: 0, px: x, py: 0, vx, vy: 0 });
       return sim;
@@ -631,7 +635,7 @@ describe("station", () => {
 
   describe("a layout changed from outside the game", () => {
     function linkedSim(): Sim {
-      return new Sim(1, { ...DEFAULTS, rockCount: 30, testDrones: 0, pirates: 1, fieldOrbitPeriod: 600, orbitPeriod: 300 });
+      return homeSim(1, { ...DEFAULTS, rockCount: 30, testDrones: 0, pirates: 1, fieldOrbitPeriod: 600, orbitPeriod: 300 });
     }
 
     it("brings the whole scene along when the field moves out", () => {
@@ -640,8 +644,7 @@ describe("station", () => {
       const offset = { x: sim.ship.x - sim.field.x, y: sim.ship.y - sim.field.y };
       const rock = sim.rocks[0];
       const rockOffset = { x: rock.x - sim.field.x, y: rock.y - sim.field.y };
-      sim.tuning.fieldOrbitRadius = 60000;
-      sim.applyLayout();
+      rehome(sim, { fieldOrbitRadius: 60000 });
       expect(Math.hypot(sim.field.x, sim.field.y)).toBeCloseTo(60000, 6);
       expect(sim.ship.x - sim.field.x).toBeCloseTo(offset.x, 6);
       expect(sim.ship.y - sim.field.y).toBeCloseTo(offset.y, 6);
@@ -652,8 +655,7 @@ describe("station", () => {
     it("carries on smoothly the tick after, with nothing thrown by the jump", () => {
       const sim = linkedSim();
       run(sim, 5);
-      sim.tuning.fieldOrbitRadius = 60000;
-      sim.applyLayout();
+      rehome(sim, { fieldOrbitRadius: 60000 });
       const before = { x: sim.ship.x - sim.field.x, y: sim.ship.y - sim.field.y };
       run(sim, TICK);
       expect(Math.hypot(sim.ship.x - sim.field.x - before.x, sim.ship.y - sim.field.y - before.y)).toBeLessThan(5);
@@ -673,10 +675,9 @@ describe("station", () => {
     it("goes exactly to a phase it's given, and stays on the formula", () => {
       const sim = linkedSim();
       run(sim, 20);
-      sim.tuning.fieldOrbitPeriod = 1200;
-      sim.applyLayout({ field: 1 });
+      rehome(sim, { fieldOrbitPeriod: 1200, fieldPhase: 1 });
       const angle = 1 + ((Math.PI * 2) / 1200) * sim.now;
-      expect(sim.field.x).toBeCloseTo(Math.cos(angle) * sim.tuning.fieldOrbitRadius, 6);
+      expect(sim.field.x).toBeCloseTo(Math.cos(angle) * homeOf(sim).fieldOrbitRadius, 6);
       run(sim, 10);
       const at = sim.poiAt(sim.field, sim.now);
       expect(at.x).toBeCloseTo(sim.field.x, 6);
@@ -685,19 +686,19 @@ describe("station", () => {
     it("stays where it is on the orbit when given no phase", () => {
       const sim = linkedSim();
       run(sim, 20);
-      const angle = sim.field.orbitAngle;
-      sim.tuning.fieldOrbitPeriod = 1200;
+      const angle = sim.station.orbitAngle;
+      sim.tuning.orbitPeriod = 1200;
       sim.applyLayout();
-      expect(sim.field.orbitAngle).toBeCloseTo(angle, 9);
+      expect(sim.station.orbitAngle).toBeCloseTo(angle, 9);
     });
 
     it("orbits the other way for a negative period, and the pirate base at its own pace", () => {
-      const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, pirates: 1, fieldOrbitPeriod: -600, orbitPeriod: 300, pirateOrbitPeriod: 600 });
-      const field = sim.field.orbitAngle;
+      const sim = homeSim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, pirates: 1, fieldOrbitPeriod: -600, orbitPeriod: 300, pirateOrbitPeriod: 600 });
+      const field = Math.atan2(sim.field.y, sim.field.x);
       const station = sim.station.orbitAngle;
       const base = sim.pirateBase!.orbitAngle;
       run(sim, 10);
-      expect(sim.field.orbitAngle).toBeLessThan(field);
+      expect(Math.atan2(sim.field.y, sim.field.x)).toBeLessThan(field);
       expect(sim.station.orbitAngle - station).toBeCloseTo(2 * (sim.pirateBase!.orbitAngle - base), 6);
     });
   });
@@ -705,7 +706,7 @@ describe("station", () => {
   describe("orbits worked out from time", () => {
     /** The field circling the system's centre, the station and pirate base circling the field. */
     function orbiting(): Sim {
-      return new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, pirates: 1, fieldOrbitPeriod: 600, orbitPeriod: 300 });
+      return homeSim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, pirates: 1, fieldOrbitPeriod: 600, orbitPeriod: 300 });
     }
 
     it("puts each POI where the formula says, hours in", () => {
@@ -744,22 +745,23 @@ describe("station", () => {
       expect(biggest).toBeCloseTo(((2 * Math.PI * radius) / 120) * TICK, 3);
     });
 
-    it("starts a restarted world's POIs where a new world's start", () => {
+    it("starts a restarted world's station where a new world's starts, round its field", () => {
       const fresh = orbiting();
       const sim = orbiting();
       run(sim, 500);
       sim.reset(1);
       sim.step();
       fresh.step();
-      expect(sim.station.x).toBeCloseTo(fresh.station.x, 6);
-      expect(sim.station.y).toBeCloseTo(fresh.station.y, 6);
+      // A field is where its orbit puts it at the clock, which runs on through a restart.
+      expect(sim.station.x - sim.field.x).toBeCloseTo(fresh.station.x - fresh.field.x, 6);
+      expect(sim.station.y - sim.field.y).toBeCloseTo(fresh.station.y - fresh.field.y, 6);
     });
 
     it("carries on smoothly from a save made before orbits had a phase", () => {
       const sim = orbiting();
       run(sim, 200);
       const { x, y } = sim.station;
-      for (const poi of [sim.field, sim.station] as Partial<Poi>[]) {
+      for (const poi of [sim.station] as Partial<Poi>[]) {
         delete poi.orbitPhase;
         delete poi.orbitPeriod;
       }
@@ -874,7 +876,7 @@ describe("motion relative to the nearest POI", () => {
   }
 
   function movingSim(): Sim {
-    return fitAll(new Sim(1, {
+    return fitAll(homeSim(1, {
       ...DEFAULTS,
       rockCount: 0,
       fieldOrbitPeriod: 600,
@@ -937,8 +939,8 @@ describe("motion relative to the nearest POI", () => {
   });
 
   it("a part command is a part throttle: that share of the push, and a smaller flame", () => {
-    const full = new Sim(1, { ...DEFAULTS, retro: false });
-    const part = new Sim(1, { ...DEFAULTS, retro: false });
+    const full = homeSim(1, { ...DEFAULTS, retro: false });
+    const part = homeSim(1, { ...DEFAULTS, retro: false });
     for (const sim of [full, part]) {
       sim.ship.vx = 0;
       sim.ship.vy = 0;
@@ -979,7 +981,7 @@ describe("motion relative to the nearest POI", () => {
   it("keeps relative speed when crossing into another POI's zone", () => {
     const sim = emptySim();
     // Halfway between the field's edge and the station's reach.
-    sim.ship.x = -sim.tuning.fieldRadius - 2270;
+    sim.ship.x = -homeOf(sim).fieldRadius - 2270;
     sim.ship.y = 0;
     sim.ship.vx = -100;
     sim.step();
@@ -994,7 +996,7 @@ describe("motion relative to the nearest POI", () => {
 describe("parts", () => {
   /** A ship with no parts, sitting still in the dock. */
   function bareSim(): Sim {
-    const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, stationRotationPeriod: 0 });
+    const sim = homeSim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, stationRotationPeriod: 0 });
     sim.ship.x = sim.station.x + DOCK_OFFSET;
     sim.ship.y = sim.station.y;
     return sim;
@@ -1106,7 +1108,7 @@ describe("parts", () => {
 describe("rocks drifting in", () => {
   /** A small field target with one rock, so the field always wants more. */
   function inflowSim(rockInflow: number): Sim {
-    return new Sim(1, {
+    return homeSim(1, {
       ...DEFAULTS,
       rockCount: 50,
       rockInflow,
@@ -1128,14 +1130,14 @@ describe("rocks drifting in", () => {
     expect(newest.tier).toBe(2);
     expect(newest.arriving).toBe(true);
     expect(Math.hypot(newest.x - sim.field.x, newest.y - sim.field.y)).toBeGreaterThan(
-      DEFAULTS.fieldRadius,
+      HOME.fieldRadius,
     );
   });
 
   it("never starts a rock close to the player", () => {
     const sim = inflowSim(10);
     clearRocks(sim);
-    sim.ship.x = sim.field.x + DEFAULTS.fieldRadius + 1500;
+    sim.ship.x = sim.field.x + HOME.fieldRadius + 1500;
     sim.ship.y = sim.field.y;
     const seen = new Set<object>();
     const ticks = Math.round(120 / TICK);
@@ -1155,7 +1157,7 @@ describe("rocks drifting in", () => {
   it("stops once the field is full", () => {
     const sim = inflowSim(10);
     clearRocks(sim);
-    sim.tuning.rockCount = 3;
+    rehome(sim, { rockCount: 3 });
     run(sim, 120);
     expect(sim.rocks.length).toBe(3);
   });
@@ -1170,7 +1172,7 @@ describe("rocks drifting in", () => {
   it("drifts in at a steady speed and joins the field", () => {
     const sim = inflowSim(10);
     clearRocks(sim);
-    sim.tuning.rockCount = 1;
+    rehome(sim, { rockCount: 1 });
     run(sim, 10);
     const rock = sim.rocks[0];
     const speed = Math.hypot(rock.vx, rock.vy);
@@ -1187,7 +1189,7 @@ describe("rocks drifting in", () => {
 
 describe("repairs", () => {
   function dockedSim(): Sim {
-    const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, stationRotationPeriod: 0 });
+    const sim = homeSim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, stationRotationPeriod: 0 });
     sim.ship.x = sim.station.x + DOCK_OFFSET;
     sim.ship.y = sim.station.y;
     return sim;
@@ -1274,9 +1276,9 @@ describe("overlapping rocks", () => {
 describe("POI readings", () => {
   it("measures the field until its edge enters the view", () => {
     const sim = emptySim();
-    sim.ship.x = DEFAULTS.fieldRadius + 400 + 1000;
+    sim.ship.x = HOME.fieldRadius + 400 + 1000;
     expect(sim.readPoi(sim.field, 400, 300).distance).toBeCloseTo(1000, 5);
-    sim.ship.x = DEFAULTS.fieldRadius + 400;
+    sim.ship.x = HOME.fieldRadius + 400;
     expect(sim.readPoi(sim.field, 400, 300).distance).toBe(0);
     sim.ship.x = 100;
     expect(sim.readPoi(sim.field, 400, 300).distance).toBe(0);
@@ -1330,7 +1332,7 @@ describe("POI readings", () => {
   });
 
   it("reads no closing speed while carried by that POI", () => {
-    const sim = new Sim(1, { ...DEFAULTS, rockCount: 0, stationRotationPeriod: 60 });
+    const sim = homeSim(1, { ...DEFAULTS, rockCount: 0, stationRotationPeriod: 60 });
     sim.ship.x = sim.station.x + DOCK_OFFSET;
     sim.ship.y = sim.station.y;
     run(sim, 5);
@@ -1375,15 +1377,15 @@ describe("mining", () => {
   });
 
   it("builds the same field from the same seed", () => {
-    const a = new Sim(7, { ...DEFAULTS });
-    const b = new Sim(7, { ...DEFAULTS });
+    const a = homeSim(7, { ...DEFAULTS });
+    const b = homeSim(7, { ...DEFAULTS });
     expect(a.rocks.map((r) => [r.x, r.y, r.tier])).toEqual(b.rocks.map((r) => [r.x, r.y, r.tier]));
   });
 });
 
 describe("the new ship", () => {
-  function floater(extra: Partial<typeof DEFAULTS> = {}): Sim {
-    return new Sim(1, {
+  function floater(extra: Partial<typeof DEFAULTS & Home> = {}): Sim {
+    return homeSim(1, {
       ...GAME_DEFAULTS,
       trafficRacers: 0,
       trafficFloaters: 0,
@@ -1976,8 +1978,8 @@ describe("the new ship", () => {
 });
 
 describe("POI carrying zones", () => {
-  function zoned(extra: Partial<typeof DEFAULTS> = {}): Sim {
-    return new Sim(1, {
+  function zoned(extra: Partial<typeof DEFAULTS & Home> = {}): Sim {
+    return homeSim(1, {
       ...GAME_DEFAULTS,
       trafficRacers: 0,
       trafficFloaters: 0,
@@ -2052,8 +2054,8 @@ describe("POI carrying zones", () => {
 });
 
 describe("drag drift", () => {
-  function moving(extra: Partial<typeof DEFAULTS> = {}): Sim {
-    const sim = new Sim(1, {
+  function moving(extra: Partial<typeof DEFAULTS & Home> = {}): Sim {
+    const sim = homeSim(1, {
       ...GAME_DEFAULTS,
       trafficRacers: 0,
       trafficFloaters: 0,
@@ -2125,8 +2127,8 @@ describe("drag drift", () => {
 });
 
 describe("loose ore far out", () => {
-  function open(extra: Partial<typeof DEFAULTS> = {}): Sim {
-    return new Sim(1, {
+  function open(extra: Partial<typeof DEFAULTS & Home> = {}): Sim {
+    return homeSim(1, {
       ...GAME_DEFAULTS,
       trafficRacers: 0,
       trafficFloaters: 0,

@@ -65,7 +65,7 @@ describe("copies round the same orbit", () => {
     expect(bodyAt(copy, t).y).toBeCloseTo(drawn.y - at.get(planet)!.y, 2);
   });
 
-  it("make every field but the first real rocks in the game, copies of the first too", () => {
+  it("make every field real rocks in the game, the first and its copies included", () => {
     const world = seedWorld();
     const { planet, field } = linkedNodes(world);
     const second = makeChild(world, planet!, "field");
@@ -73,13 +73,13 @@ describe("copies round the same orbit", () => {
     planet!.children.push(second);
     field!.count = 2;
     const fields = fieldsFor(world);
-    expect(fields.map((each) => each.name)).toEqual(["Field 2", "Second", "Second 2"]);
-    expect(new Set(fields.map((each) => each.id)).size).toBe(3);
+    expect(fields.map((each) => each.name)).toEqual(["Field", "Field 2", "Second", "Second 2"]);
+    expect(new Set(fields.map((each) => each.id)).size).toBe(4);
     const t = 400;
     const at = positions(world, t);
-    const there = orbitsAt(fields[1].orbits, t);
+    const there = orbitsAt(fields[2].orbits, t);
     expect(there.x).toBeCloseTo(at.get(second)!.x - at.get(planet!)!.x, 3);
-    expect(fields[1]).toMatchObject({ radius: 5200, rocks: 80, carryFull: 2000, carryNone: 8000 });
+    expect(fields[2]).toMatchObject({ radius: 5200, rocks: 80, carryFull: 2000, carryNone: 8000 });
   });
 
   it("old saves without copies have just the one", () => {

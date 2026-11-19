@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { homeSim } from "./home";
 import { bodyAt, MAX_HULL, type SolidBody, Sim, TICK } from "./sim";
 import { DEFAULTS } from "./tuning";
 
@@ -33,7 +34,7 @@ function run(sim: Sim, seconds: number, each?: () => void): void {
 
 describe("chart", () => {
   it("starts knowing nothing, and finds the field by getting near it", () => {
-    const sim = new Sim(1, { ...ALONE });
+    const sim = homeSim(1, { ...ALONE });
     sim.ship.x = sim.field.x + sim.field.reach * 5;
     sim.ship.y = sim.field.y;
     sim.ship.px = sim.ship.x;
@@ -49,7 +50,7 @@ describe("chart", () => {
   });
 
   it("a place visited later joins the chart", () => {
-    const sim = new Sim(1, { ...ALONE });
+    const sim = homeSim(1, { ...ALONE });
     run(sim, 1);
     const dock = sim.dockPoint();
     sim.ship.x = dock.x;
@@ -61,7 +62,7 @@ describe("chart", () => {
   });
 
   it("a body joins the chart once the ship has been near it", () => {
-    const sim = new Sim(1, { ...ALONE });
+    const sim = homeSim(1, { ...ALONE });
     const body: SolidBody = {
       name: "Test planet",
       kind: "planet",
@@ -88,7 +89,7 @@ describe("chart", () => {
   });
 
   it("an anchor is found when its size comes on screen, even a size of zero", () => {
-    const sim = new Sim(1, { ...ALONE });
+    const sim = homeSim(1, { ...ALONE });
     const orbits = [{ radius: 50000, period: 0, phase: 0, sign: 1 as const }];
     const point = { id: "a:0", name: "Point", radius: 0, orbits };
     const wide = { id: "b:0", name: "Wide", radius: 3000, orbits: [{ radius: 90000, period: 0, phase: 0, sign: 1 as const }] };
@@ -108,7 +109,7 @@ describe("chart", () => {
   });
 
   it("lists every place: the game's own three, the designer's outposts and fields", () => {
-    const sim = new Sim(1, { ...ALONE });
+    const sim = homeSim(1, { ...ALONE });
     const pois = sim.allPois();
     expect(pois).toContain(sim.field);
     expect(pois).toContain(sim.station);
@@ -116,7 +117,7 @@ describe("chart", () => {
   });
 
   it("a course needs the autopilot part, and one without it never flies", () => {
-    const sim = new Sim(1, { ...ALONE });
+    const sim = homeSim(1, { ...ALONE });
     expect(sim.orderTravel(sim.station)).toBe(false);
     expect(sim.clickPilot.active).toBe(false);
     run(sim, 5);
@@ -124,7 +125,7 @@ describe("chart", () => {
   });
 
   it("a course chases its place: the target stays at the moving dock", () => {
-    const sim = new Sim(1, { ...ALONE });
+    const sim = homeSim(1, { ...ALONE });
     sim.devSet(sim.ship, "autopilot", true);
     expect(sim.orderTravel(sim.station)).toBe(true);
     expect(sim.clickPilot.active).toBe(true);
@@ -135,7 +136,7 @@ describe("chart", () => {
   });
 
   it("the autopilot flies a long course, round whatever's in the way, and docks", () => {
-    const sim = new Sim(1, { ...ALONE });
+    const sim = homeSim(1, { ...ALONE });
     const { ship } = sim;
     sim.devSet(ship, "autopilot", true);
     sim.devSet(ship, "reverse", true);
@@ -160,7 +161,7 @@ describe("chart", () => {
   }, 60000);
 
   it("selling the autopilot mid-course cancels the course", () => {
-    const sim = new Sim(1, { ...ALONE });
+    const sim = homeSim(1, { ...ALONE });
     const { ship } = sim;
     sim.devSet(ship, "autopilot", true);
     expect(sim.orderTravel(sim.station)).toBe(true);
@@ -171,7 +172,7 @@ describe("chart", () => {
   });
 
   it("a course for a field stops short, just inside its edge", () => {
-    const sim = new Sim(1, { ...ALONE });
+    const sim = homeSim(1, { ...ALONE });
     const { ship } = sim;
     sim.devSet(ship, "autopilot", true);
     sim.devSet(ship, "reverse", true);

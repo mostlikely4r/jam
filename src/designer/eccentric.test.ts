@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { orbitState } from "../kepler";
+import { homeSim } from "../home";
 import { linkTo } from "../profile/world";
 import { DOCK_OFFSET, Sim, TICK, bodyAt, orbitsAt } from "../sim";
 import { DEFAULTS } from "../tuning";
@@ -144,7 +145,8 @@ describe("eccentric orbits in the game", () => {
         expect(spot.y).toBeCloseTo(want.y - centre.y, 3);
       };
       check(bodyAt(bodies.find((body) => body.name === "Moon")!, t), moon);
-      fields.forEach((spec, i) => check(orbitsAt(spec.orbits, t), field, i - 1 < 0 ? -1 : i - 1));
+      // The seeded field first, then the far one and its copies.
+      fields.filter((spec) => spec.name.startsWith("Far")).forEach((spec, i) => check(orbitsAt(spec.orbits, t), field, i - 1 < 0 ? -1 : i - 1));
       check(orbitsAt(stations.find((spec) => spec.name === "Outpost")!.orbits, t), station);
       check(orbitsAt(anchors.find((spec) => spec.name === "Mark")!.orbits, t), anchor);
       check(orbitsAt(spawns[0].orbits, t), anchor);
@@ -167,16 +169,19 @@ describe("eccentric orbits in the game", () => {
     }
   });
 
-  it("flies the game's own field, station and pirate base on their ellipses by the tuning", () => {
+  it("flies the first field on its ellipse like any field, and the station and pirate base on theirs by the tuning", () => {
     const world = seedWorld();
     const { field, station, pirates } = linkedNodes(world);
-    Object.assign(field!, { eccentricity: 0.3, periapsisAngle: 40 });
+    Object.assign(field!, { eccentricity: 0.3, periapsisAngle: 40, rocks: 0 });
     Object.assign(station!, { eccentricity: 0.2, periapsisAngle: 100 });
     Object.assign(pirates!, { eccentricity: 0.1, periapsisAngle: 200 });
-    const tuning = { ...DEFAULTS, rockCount: 0, testDrones: 0, pirates: 1 };
+    const tuning = { ...DEFAULTS, testDrones: 0, pirates: 1 };
     writeGame(world, tuning);
-    expect(tuning).toMatchObject({ fieldEccentricity: 0.3, stationEccentricity: 0.2, pirateEccentricity: 0.1 });
-    expect(tuning.fieldPeriapsis).toBeCloseTo((40 * Math.PI) / 180, 9);
+    expect(tuning).toMatchObject({ stationEccentricity: 0.2, pirateEccentricity: 0.1 });
+    // The field's own ellipse comes as its orbit, like any field's.
+    const own = fieldsFor(world)[0].orbits.at(-1)!;
+    expect(own.eccentricity).toBe(0.3);
+    expect(own.periapsis).toBeCloseTo((40 * Math.PI) / 180, 9);
     const sim = new Sim(1, tuning);
     useLayout(world, linkTo(sim));
     for (let i = 0; i < 2000; i++) sim.step();
@@ -199,7 +204,7 @@ describe("eccentric orbits in the game", () => {
   });
 
   it("carries things near an eccentric station along with its changing speed", () => {
-    const sim = new Sim(1, {
+    const sim = homeSim(1, {
       ...DEFAULTS,
       rockCount: 0,
       testDrones: 0,

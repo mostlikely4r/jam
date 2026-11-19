@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { Sim, bodyAt } from "../sim";
-import { roundTrip } from "../save";
 import { DEFAULTS } from "../tuning";
 import file from "./world.json";
 import { shipMarks, useLayout, type GameLink } from "./link";
@@ -30,7 +29,7 @@ function clearance(sim: Sim): number {
   return Math.min(
     ...sim.bodies.map((body) => {
       const at = bodyAt(body, sim.now);
-      return Math.hypot(sim.field.x - at.x, sim.field.y - at.y) - body.radius - sim.tuning.fieldRadius;
+      return Math.hypot(sim.field.x - at.x, sim.field.y - at.y) - body.radius - sim.field.reach;
     }),
   );
 }
@@ -49,20 +48,6 @@ describe("the shipped world", () => {
     expect(clearance(sim)).toBeGreaterThan(0);
   });
 
-  it("lays a save from before the planet out round it, keeping its places' angles", () => {
-    // Made with the defaults alone, as the public game was before it shipped the world.
-    const old = new Sim(3, { ...DEFAULTS });
-    for (let i = 0; i < 60; i++) old.step();
-    const sim = new Sim(1, { ...DEFAULTS });
-    useLayout(shippedWorld(), linkTo(sim));
-    roundTrip(old, sim);
-    const angle = sim.field.orbitAngle;
-    useLayout(shippedWorld(), linkTo(sim), true);
-    expect(sim.field.orbitAngle).toBeCloseTo(angle, 6);
-    expect(sim.field.orbitRadius).toBe(sim.tuning.fieldOrbitRadius);
-    expect(clearance(sim)).toBeGreaterThan(0);
-    expect(Math.hypot(sim.ship.x - sim.field.x, sim.ship.y - sim.field.y)).toBeLessThan(sim.tuning.fieldRadius * 3);
-  });
 });
 
 describe("the designer's ship marks", () => {

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { HOME, type Home, homeSim } from "./home";
 import { APPROACH, BOUGHT, HEADING_BACK, OUTBOUND, THANKS } from "./chatter";
 import { PARTS } from "./parts";
 import { DEFAULTS } from "./tuning";
@@ -68,7 +69,7 @@ function placeInDock(sim: Sim, ship: Sim["ship"]): void {
 
 describe("drone", () => {
   it("mines, hauls to the dock, sells, and goes back for more", () => {
-    const sim = new Sim(1, { ...SOLO });
+    const sim = homeSim(1, { ...SOLO });
     const { ship } = sim.drones[0];
     let breaks = 0;
     run(sim, 420, () => {
@@ -82,7 +83,7 @@ describe("drone", () => {
   }, 30000);
 
   it("only fires what it has, whatever the player's panel says", () => {
-    const sim = new Sim(1, {
+    const sim = homeSim(1, {
       ...SOLO,
       retro: true,
       thrusterMain: false,
@@ -97,7 +98,7 @@ describe("drone", () => {
   }, 30000);
 
   it("restarts in the dock without its cargo when wrecked, and that isn't a trip", () => {
-    const sim = new Sim(1, { ...SOLO, safeImpactSpeed: 0, damagePerSpeed: 100 });
+    const sim = homeSim(1, { ...SOLO, safeImpactSpeed: 0, damagePerSpeed: 100 });
     const { ship } = sim.drones[0];
     ship.ore = 5;
     ship.vx = 400;
@@ -115,7 +116,7 @@ describe("drone", () => {
   });
 
   it("delivers what it has when the field runs out, then waits", () => {
-    const sim = new Sim(1, { ...SOLO, rockCount: 0 });
+    const sim = homeSim(1, { ...SOLO, rockCount: 0 });
     const { ship } = sim.drones[0];
     ship.ore = 3;
     run(sim, 180);
@@ -124,7 +125,7 @@ describe("drone", () => {
   }, 30000);
 
   it("leaves the player's cargo and wrecks alone", () => {
-    const sim = new Sim(1, { ...SOLO });
+    const sim = homeSim(1, { ...SOLO });
     sim.ship.ore = 2;
     run(sim, 30);
     expect(sim.ship.ore).toBeGreaterThanOrEqual(2);
@@ -132,7 +133,7 @@ describe("drone", () => {
   }, 30000);
 
   it("buys parts with its own earnings when it's empty in the dock, in order", () => {
-    const sim = new Sim(1, { ...SOLO, rockCount: 0, droneParts: 5 });
+    const sim = homeSim(1, { ...SOLO, rockCount: 0, droneParts: 5 });
     const { ship } = sim.drones[0];
     placeInDock(sim, ship);
     ship.credits = 320;
@@ -143,7 +144,7 @@ describe("drone", () => {
   });
 
   it("stops buying at the limit", () => {
-    const sim = new Sim(1, { ...SOLO, rockCount: 0, droneParts: 1 });
+    const sim = homeSim(1, { ...SOLO, rockCount: 0, droneParts: 1 });
     const { ship } = sim.drones[0];
     placeInDock(sim, ship);
     ship.credits = 1000;
@@ -152,7 +153,7 @@ describe("drone", () => {
   });
 
   it("sells a new drone only in the dock, for the price, and up to the limit", () => {
-    const sim = new Sim(1, { ...SOLO, rockCount: 0, testDrones: 0, droneLimit: 1 });
+    const sim = homeSim(1, { ...SOLO, rockCount: 0, testDrones: 0, droneLimit: 1 });
     sim.ship.credits = DEFAULTS.dronePrice;
     expect(sim.buyDrone(sim.ship)).toBeNull();
     placeInDock(sim, sim.ship);
@@ -170,7 +171,7 @@ describe("drone", () => {
   });
 
   it("buys a drone only after everything on its parts list", () => {
-    const sim = new Sim(1, { ...SOLO, rockCount: 0, droneParts: 1, droneLimit: 5 });
+    const sim = homeSim(1, { ...SOLO, rockCount: 0, droneParts: 1, droneLimit: 5 });
     const { ship } = sim.drones[0];
     placeInDock(sim, ship);
     ship.credits = DEFAULTS.dronePrice;
@@ -184,7 +185,7 @@ describe("drone", () => {
   });
 
   it("flies a bought drone through the same loop", () => {
-    const sim = new Sim(1, { ...SOLO, testDrones: 0, droneLimit: 1 });
+    const sim = homeSim(1, { ...SOLO, testDrones: 0, droneLimit: 1 });
     placeInDock(sim, sim.ship);
     sim.ship.credits = DEFAULTS.dronePrice;
     const drone = sim.buyDrone(sim.ship)!;
@@ -193,13 +194,13 @@ describe("drone", () => {
   }, 30000);
 
   it("stays at the drone limit on its own earnings", () => {
-    const sim = new Sim(1, { ...SOLO, testDrones: 1, droneLimit: 2, dronePrice: 50 });
+    const sim = homeSim(1, { ...SOLO, testDrones: 1, droneLimit: 2, dronePrice: 50 });
     run(sim, 420);
     expect(sim.drones).toHaveLength(2);
   }, 30000);
 
   it("repairs before buying anything", () => {
-    const sim = new Sim(1, { ...SOLO, rockCount: 0, droneParts: 5, repairCost: 2 });
+    const sim = homeSim(1, { ...SOLO, rockCount: 0, droneParts: 5, repairCost: 2 });
     const { ship } = sim.drones[0];
     placeInDock(sim, ship);
     ship.hull = 50;
@@ -215,7 +216,7 @@ describe("drone", () => {
   });
 
   it("heads home early on a low hull when it can pay", () => {
-    const sim = new Sim(1, { ...SOLO, repairCost: 2 });
+    const sim = homeSim(1, { ...SOLO, repairCost: 2 });
     const { ship } = sim.drones[0];
     ship.hull = 20;
     ship.ore = 1;
@@ -224,7 +225,7 @@ describe("drone", () => {
   });
 
   it("keeps mining on a low hull when it has no way to pay", () => {
-    const sim = new Sim(1, { ...SOLO, repairCost: 2 });
+    const sim = homeSim(1, { ...SOLO, repairCost: 2 });
     const { ship } = sim.drones[0];
     ship.hull = 20;
     sim.step();
@@ -232,7 +233,7 @@ describe("drone", () => {
   });
 
   it("works off a rebuild's debt instead of stopping", () => {
-    const sim = new Sim(1, { ...SOLO, repairCost: 2, rebuildCost: 300 });
+    const sim = homeSim(1, { ...SOLO, repairCost: 2, rebuildCost: 300 });
     const { ship } = sim.drones[0];
     ship.credits = -100;
     run(sim, 420);
@@ -242,7 +243,7 @@ describe("drone", () => {
 
   describe("a drone the player bought", () => {
     it("buys upgrades from the player's money, leaving the player a buffer", () => {
-      const sim = new Sim(1, { ...SOLO, testDrones: 0, rockCount: 0, droneBuffer: 500, dronePrice: 500 });
+      const sim = homeSim(1, { ...SOLO, testDrones: 0, rockCount: 0, droneBuffer: 500, dronePrice: 500 });
       placeInDock(sim, sim.ship);
       sim.ship.credits = 500;
       const drone = sim.buyDrone(sim.ship)!;
@@ -257,8 +258,8 @@ describe("drone", () => {
       expect(drone.ship.credits).toBe(0);
     });
 
-    function owned(extra: Partial<typeof SOLO> = {}): Sim {
-      const sim = new Sim(1, { ...SOLO, testDrones: 0, droneLimit: 5, dronePrice: 500, ...extra });
+    function owned(extra: Partial<typeof SOLO & Home> = {}): Sim {
+      const sim = homeSim(1, { ...SOLO, testDrones: 0, droneLimit: 5, dronePrice: 500, ...extra });
       placeInDock(sim, sim.ship);
       sim.ship.credits = 500;
       expect(sim.buyDrone(sim.ship)).not.toBeNull();
@@ -297,7 +298,7 @@ describe("drone", () => {
     });
 
     it("leaves other drones keeping their own money", () => {
-      const sim = new Sim(1, { ...SOLO, droneLimit: 5, dronePrice: 500 });
+      const sim = homeSim(1, { ...SOLO, droneLimit: 5, dronePrice: 500 });
       const rival = sim.drones[0].ship;
       placeInDock(sim, rival);
       rival.credits = 500;
@@ -309,14 +310,14 @@ describe("drone", () => {
 
   describe("traffic", () => {
     it("starts as one of each ship, apart from drones", () => {
-      const sim = new Sim(1, { ...DEFAULTS, pirates: 0, defenders: 0 });
+      const sim = homeSim(1, { ...DEFAULTS, pirates: 0, defenders: 0 });
       expect(sim.drones.length).toBe(0);
       expect(sim.traffic.map((pilot) => pilot.ship.model)).toEqual(["racer", "floater"]);
       expect(sim.traffic[1].ship.parts.has("gun2")).toBe(true);
     });
 
     it("buys the upgrades it can use, never drones, and keeps a buffer", () => {
-      const sim = new Sim(1, { ...SOLO, testDrones: 0, trafficRacers: 1, rockCount: 0, trafficBuffer: 400 });
+      const sim = homeSim(1, { ...SOLO, testDrones: 0, trafficRacers: 1, rockCount: 0, trafficBuffer: 400 });
       const { ship } = sim.traffic[0];
       placeInDock(sim, ship);
       ship.credits = sim.partPrice("reverse") + 399;
@@ -330,7 +331,7 @@ describe("drone", () => {
     });
 
     it("new-ship traffic buys a tractor and a turret first", () => {
-      const sim = new Sim(1, { ...SOLO, testDrones: 0, trafficFloaters: 1, rockCount: 0 });
+      const sim = homeSim(1, { ...SOLO, testDrones: 0, trafficFloaters: 1, rockCount: 0 });
       const { ship } = sim.traffic[0];
       placeInDock(sim, ship);
       ship.credits = sim.partPrice("tractor") + sim.partPrice("turret") + 400;
@@ -341,7 +342,7 @@ describe("drone", () => {
     });
 
     it("traffic with a turret mines with it, aiming without turning", () => {
-      const sim = new Sim(1, {
+      const sim = homeSim(1, {
         ...SOLO,
         testDrones: 0,
         trafficFloaters: 1,
@@ -360,14 +361,14 @@ describe("drone", () => {
     }, 60000);
 
     it("doesn't count against the player's drone limit", () => {
-      const sim = new Sim(1, { ...SOLO, testDrones: 0, trafficRacers: 2, droneLimit: 1, rockCount: 0 });
+      const sim = homeSim(1, { ...SOLO, testDrones: 0, trafficRacers: 2, droneLimit: 1, rockCount: 0 });
       placeInDock(sim, sim.ship);
       sim.ship.credits = 1000;
       expect(sim.buyDrone(sim.ship)).not.toBeNull();
     });
 
     it.each(["racer", "floater"])("a %s completes the mining loop", (model) => {
-      const sim = new Sim(1, {
+      const sim = homeSim(1, {
         ...SOLO,
         testDrones: 0,
         trafficRacers: model === "racer" ? 1 : 0,
@@ -383,7 +384,7 @@ describe("drone", () => {
   });
 
   it("goes back to a rock it gave up on when nothing else is left", () => {
-    const sim = new Sim(1, { ...SOLO, rockCount: 0 });
+    const sim = homeSim(1, { ...SOLO, rockCount: 0 });
     const drone = sim.drones[0];
     const rock = sim.makeRock(1, drone.ship.x + 400, drone.ship.y, 0, 0);
     sim.rocks.push(rock);
@@ -399,7 +400,7 @@ describe("drone", () => {
     ["reverse and strafe", ["reverse", "strafe"]],
     ["everything", PARTS.filter((part) => !part.bay).map((part) => part.id)],
   ] as const)("still completes trips with %s", (_name, parts) => {
-    const sim = new Sim(1, { ...SOLO });
+    const sim = homeSim(1, { ...SOLO });
     const { ship } = sim.drones[0];
     for (const part of parts) sim.devSet(ship, part, true);
     run(sim, 420);
@@ -408,7 +409,7 @@ describe("drone", () => {
   }, 30000);
 
   it("uses reverse when it has it, and strafe when it has it", () => {
-    const sim = new Sim(1, { ...SOLO });
+    const sim = homeSim(1, { ...SOLO });
     const { ship } = sim.drones[0];
     sim.devSet(ship, "reverse", true);
     sim.devSet(ship, "strafe", true);
@@ -422,8 +423,8 @@ describe("drone", () => {
 });
 
 describe("pirate and defender", () => {
-  function arena(extra: Partial<typeof SOLO> = {}): Sim {
-    const sim = new Sim(1, {
+  function arena(extra: Partial<typeof SOLO & Home> = {}): Sim {
+    const sim = homeSim(1, {
       ...SOLO,
       testDrones: 0,
       rockCount: 0,
@@ -450,7 +451,7 @@ describe("pirate and defender", () => {
   }
 
   it("the pirate starts away from the field, opposite the station, and the defender in the dock", () => {
-    const sim = new Sim(1, { ...SOLO, testDrones: 0, pirates: 1, defenders: 1 });
+    const sim = homeSim(1, { ...SOLO, testDrones: 0, pirates: 1, defenders: 1 });
     const pirate = sim.fighters[0].ship;
     const defender = sim.fighters[1].ship;
     const toPirate = Math.atan2(pirate.y - sim.field.y, pirate.x - sim.field.x);
@@ -458,7 +459,7 @@ describe("pirate and defender", () => {
     const apart = Math.abs(Math.atan2(Math.sin(toPirate - toStation), Math.cos(toPirate - toStation)));
     expect(apart).toBeCloseTo(Math.PI, 3);
     expect(Math.hypot(pirate.x - sim.field.x, pirate.y - sim.field.y)).toBeGreaterThan(
-      DEFAULTS.fieldRadius,
+      HOME.fieldRadius,
     );
     expect(sim.isDocked(defender)).toBe(true);
     for (const { ship } of sim.fighters) {
@@ -730,7 +731,7 @@ describe("pirate and defender", () => {
     });
 
     /** Traffic beside the station, with a pirate behind its tail and in range. */
-    function chased(extra: Partial<typeof SOLO> = {}) {
+    function chased(extra: Partial<typeof SOLO & Home> = {}) {
       const sim = arena({ pirates: 1, trafficRacers: 1, shotDamage: 0, ...extra });
       const pirate = sim.fighters[0].ship;
       const pilot = sim.traffic[0] ?? sim.drones[0];
@@ -792,7 +793,7 @@ describe("pirate and defender", () => {
   });
 
   describe("pirate base trade", () => {
-    function baseWorld(extra: Partial<typeof SOLO> = {}): Sim {
+    function baseWorld(extra: Partial<typeof SOLO & Home> = {}): Sim {
       return arena({ pirates: 1, pirateLimit: 1, chatter: false, blackMarketFirst: 10000, ...extra });
     }
 
@@ -925,7 +926,7 @@ describe("pirate and defender", () => {
       return said;
     }
     /** A pirate with the player close in front of it. */
-    function facing(extra: Partial<typeof SOLO> = {}) {
+    function facing(extra: Partial<typeof SOLO & Home> = {}) {
       const sim = arena({ pirates: 1, defenders: 0, shotDamage: 0, detectSeconds: 0, ...extra });
       const pilot = sim.fighters[0];
       const hold = () => {
@@ -1208,7 +1209,7 @@ describe("pirate and defender", () => {
   });
 
   describe("shop unlocks", () => {
-    function shopWorld(extra: Partial<typeof SOLO> = {}): Sim {
+    function shopWorld(extra: Partial<typeof SOLO & Home> = {}): Sim {
       const sim = arena({ stationUnlocks: true, haulers: false, stationStartCredits: 0, stationCashBuffer: 300, blueprintScale: 0.75, ...extra });
       placeInDock(sim, sim.ship);
       return sim;
@@ -1309,7 +1310,7 @@ describe("pirate and defender", () => {
     }, 30000);
 
     describe("paying for a field deposit", () => {
-      function projectWorld(extra: Partial<typeof SOLO> = {}): Sim {
+      function projectWorld(extra: Partial<typeof SOLO & Home> = {}): Sim {
         const sim = shopWorld({
           depositFree: false,
           depositPrice: 1000,
@@ -1443,7 +1444,7 @@ describe("pirate and defender", () => {
   describe("cargo bays", () => {
     const looseOre = (sim: Sim, x: number, y: number) => ({ x, y, px: x, py: y, vx: 0, vy: 0, kind: 0, amount: 1, from: sim.ship });
 
-    function bayWorld(extra: Partial<typeof SOLO> = {}): Sim {
+    function bayWorld(extra: Partial<typeof SOLO & Home> = {}): Sim {
       return arena({ tractorRange: 500, ...extra });
     }
 
@@ -1522,7 +1523,7 @@ describe("pirate and defender", () => {
   });
 
   describe("turrets", () => {
-    function guardWorld(extra: Partial<typeof SOLO> = {}): Sim {
+    function guardWorld(extra: Partial<typeof SOLO & Home> = {}): Sim {
       const sim = arena({
         pirates: 1,
         pirateLimit: 1,
@@ -1653,7 +1654,7 @@ describe("pirate and defender", () => {
     });
 
     describe("as projects", () => {
-      function projectWorld(extra: Partial<typeof SOLO> = {}): Sim {
+      function projectWorld(extra: Partial<typeof SOLO & Home> = {}): Sim {
         const sim = arena({
           stationUnlocks: true,
           haulers: false,
@@ -1729,7 +1730,7 @@ describe("pirate and defender", () => {
   });
 
   describe("field deposit", () => {
-    function depositWorld(extra: Partial<typeof SOLO> = {}): Sim {
+    function depositWorld(extra: Partial<typeof SOLO & Home> = {}): Sim {
       const sim = arena({
         haulers: false,
         depositFree: true,
@@ -1932,7 +1933,7 @@ describe("pirate and defender", () => {
   });
 
   describe("haulers", () => {
-    function haulerWorld(extra: Partial<typeof SOLO> = {}): Sim {
+    function haulerWorld(extra: Partial<typeof SOLO & Home> = {}): Sim {
       return arena({
         haulers: true,
         haulerFirst: 10,
@@ -2096,7 +2097,7 @@ describe("pirate and defender", () => {
       });
     }
 
-    function traffic(extra: Partial<typeof SOLO> = {}): Sim {
+    function traffic(extra: Partial<typeof SOLO & Home> = {}): Sim {
       return arena({ trafficRacers: 1, rebuildCost: 300, ...extra });
     }
 
@@ -2438,7 +2439,7 @@ describe("pirate and defender", () => {
       });
 
       it("a damaged ship doesn't wait in the dock for ore that may never come", () => {
-        const sim = new Sim(1, { ...SOLO, ...STOCK, testDrones: 0, trafficRacers: 1, repairCost: 2 });
+        const sim = homeSim(1, { ...SOLO, ...STOCK, testDrones: 0, trafficRacers: 1, repairCost: 2 });
         const pilot = sim.traffic[0];
         placeInDock(sim, pilot.ship);
         pilot.ship.hull = 10;

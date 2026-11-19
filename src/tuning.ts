@@ -26,15 +26,11 @@ export const DEFAULTS = {
   flingChance: 0.3,
   flingOreAmount: 3,
 
-  rockCount: 520,
-  fieldRadius: 5200,
   /**
    * For each POI: within the first distance of its edge, the nearest POI carries things
    * fully. Beyond it, its share falls off evenly to nothing at the second. Infinity is the
    * old way: the nearest POI carries everything, everywhere. Set by the system designer.
    */
-  fieldCarryFull: 2000,
-  fieldCarryNone: 8000,
   stationCarryFull: 2000,
   stationCarryNone: 6000,
   pirateCarryFull: 2000,
@@ -42,13 +38,7 @@ export const DEFAULTS = {
   showPoiZones: false,
   /** Loose ore this far from every POI's edge and every ship is gone for good. */
   oreForgetDistance: 6000,
-  rockDrift: 12,
-  rockInflow: 1,
-  fieldOrbitRadius: 20000,
-  fieldOrbitPeriod: 3600,
-  fieldRotationPeriod: 1800,
   /** The turn, in radians, each of these has at time 0. */
-  fieldSpinPhase: 0,
   stationSpinPhase: 0,
   pirateSpinPhase: 0,
 
@@ -62,8 +52,6 @@ export const DEFAULTS = {
    * from its parent to the closest point, in radians. Set by the system designer. The station's
    * and pirate base's distances above are their semi-major axes, less the field's radius.
    */
-  fieldEccentricity: 0,
-  fieldPeriapsis: 0,
   stationEccentricity: 0,
   stationPeriapsis: 0,
   pirateEccentricity: 0,

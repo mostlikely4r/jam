@@ -26,7 +26,7 @@ import {
 } from "./world";
 import { clampEccentricity, orbitEllipse, phaseToward } from "../kepler";
 import { ITEMS } from "../items";
-import { linkSummary, linkedNodes, readGame, useLayout, type GameLink, type ShipMarkKind } from "./link";
+import { linkSummary, linkedNodes, useLayout, type GameLink, type ShipMarkKind } from "./link";
 import { shippedWorld } from "./shipped";
 import { type Route } from "../route";
 import { FLIGHTS, tripBetween } from "./trips";
@@ -310,8 +310,6 @@ export class Designer {
   }
 
   open(): void {
-    // Time has moved the places on since, and this shows the game as it is.
-    readGame(this.world, this.game.phases());
     this.t = this.game.clock();
     const { ship, field } = this.game.where();
     this.shipFix = { x: ship.x - field.x, y: ship.y - field.y, clock: this.t };
@@ -334,9 +332,9 @@ export class Designer {
     return stringifyWorld(this.world);
   }
 
-  /** Hands the game this layout. `keep`: the places stay where they are on their orbits. */
-  linkToGame(keep = false): void {
-    useLayout(this.world, this.game, keep);
+  /** Hands the game this layout. */
+  linkToGame(): void {
+    useLayout(this.world, this.game);
     try {
       localStorage.setItem(DRAFT_KEY, stringifyWorld(this.world));
     } catch {

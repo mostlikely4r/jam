@@ -164,7 +164,7 @@ function world(
     blueprints: ["tractorAll"],
     ...outpost,
   };
-  sim.applyLayout({}, homeFields(sim, field), homeStations(sim, spec));
+  sim.applyLayout(homeFields(sim, field), homeStations(sim, spec));
   return { sim, outpost: sim.bases[1].poi, field };
 }
 

@@ -61,7 +61,7 @@ function world(apart: number, tuning: Partial<typeof WORLD> = {}): { sim: Sim; p
     rotationPeriod: 0,
     orbits: [{ radius: 60000, period: 10800, phase: home + apart, sign: 1 }],
   };
-  sim.applyLayout({}, homeFields(sim, second));
+  sim.applyLayout(homeFields(sim, second));
   return { sim, pilot: sim.traffic[0] };
 }
 
@@ -181,7 +181,7 @@ describe("traffic between fields", () => {
         rotationPeriod: 0,
         orbits: [{ radius: 90000, period: 10800, phase, sign: 1, eccentricity: 0.4, periapsis: 0.5 }],
       };
-      sim.applyLayout({}, homeFields(sim, second));
+      sim.applyLayout(homeFields(sim, second));
       const pilot = sim.traffic[0];
       const { ship } = pilot;
       const { poi } = sim.extraFields[1];

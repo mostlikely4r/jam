@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { bodyAt, orbitsAt } from "../sim";
 import { DEFAULTS } from "../tuning";
 import shipped from "./world.json";
-import { anchorsFor, bodiesFor, fieldsFor, linkSummary, linkedNodes, phasesFromWorld, readGame, spawnsFor, stationsFor, writeGame } from "./link";
+import { anchorsFor, bodiesFor, fieldsFor, layoutFor, linkSummary, linkedNodes, pirateBaseFor, spawnsFor, stationsFor } from "./link";
 import { limitCarrying, makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk } from "./world";
 
 describe("the link between the designer and the game", () => {
@@ -11,40 +11,37 @@ describe("the link between the designer and the game", () => {
     expect([planet?.id, field?.id, station?.id, pirates?.id]).toEqual(["planet", "field", "station", "pirates"]);
   });
 
-  it("hands the game the first field and station as a field and station like any other, and the pirate base's orbit through the tuning", () => {
+  it("hands the game the first field, station and pirate base as specs like any other, with nothing through the tuning", () => {
     const world = seedWorld();
     const tuning = { ...DEFAULTS };
-    writeGame(world, tuning);
+    const before = JSON.stringify(tuning);
+    layoutFor(world);
+    expect(JSON.stringify(tuning)).toBe(before);
     const [first] = fieldsFor(world);
     expect(first.id).toBe("field:0");
     expect(first.orbits).toEqual([expect.objectContaining({ radius: 60000, period: 10800 })]);
     const [station] = stationsFor(world);
     expect(station).toMatchObject({ id: "station:0", field: "field:0", projects: true, radio: true });
     expect(station.orbits.map((orbit) => orbit.radius)).toEqual([60000, 10200]);
-    // Measured from the field's edge in the game, from its centre in the designer.
-    expect(first.radius + tuning.pirateBaseDistance).toBe(9200);
+    expect(pirateBaseFor(world)!.orbits.map((orbit) => orbit.radius)).toEqual([60000, 9200]);
   });
 
-  it("writes the field's, station's and pirate base's spin start angles into the tuning, in radians", () => {
+  it("hands over the field's, station's and pirate base's spin start angles, in radians", () => {
     const world = seedWorld();
     const { field, station, pirates } = linkedNodes(world);
     Object.assign(field!, { spinPhase: 90 });
     Object.assign(station!, { spinPhase: 180 });
     Object.assign(pirates!, { spinPhase: 45 });
-    const tuning = { ...DEFAULTS };
-    writeGame(world, tuning);
     expect(fieldsFor(world)[0].spinPhase).toBeCloseTo(Math.PI / 2, 9);
     expect(stationsFor(world)[0].spinPhase).toBeCloseTo(Math.PI, 9);
-    expect(tuning.pirateSpinPhase).toBeCloseTo(Math.PI / 4, 9);
+    expect(pirateBaseFor(world)!.spinPhase).toBeCloseTo(Math.PI / 4, 9);
   });
 
-  it("writes each place's rocks and carrying, no outer edge meaning everywhere", () => {
+  it("hands over each place's rocks and carrying, no outer edge meaning everywhere", () => {
     const world = seedWorld();
     const { field, station } = linkedNodes(world);
     Object.assign(field!, { rocks: 300, rockDrift: 5, rockInflow: 2, carryFull: 1000, carryNone: 9000 });
     Object.assign(station!, { carryFull: 0, carryNone: 0 });
-    const tuning = { ...DEFAULTS };
-    writeGame(world, tuning);
     const [first] = fieldsFor(world);
     expect([first.rocks, first.rockDrift, first.rockInflow]).toEqual([300, 5, 2]);
     expect([first.carryFull, first.carryNone]).toEqual([1000, 9000]);
@@ -79,23 +76,13 @@ describe("the link between the designer and the game", () => {
     expect(linkSummary(world)).toContain("racer: by the field, floater: Start");
   });
 
-  it("only takes the places' angles from the game, keeping its own numbers", () => {
+  it("puts a place where its own orbit and the clock say, so the game has no angle to give back", () => {
     const world = seedWorld();
-    readGame(world, { field: 1 });
-    expect(linkedNodes(world).field?.orbitRadius).toBe(60000);
-  });
-
-  it("shows the game's real place on the orbit, as a tidy angle", () => {
-    const world = seedWorld();
-    readGame(world, { field: -Math.PI / 2, station: 3 * Math.PI, "pirate base": -Math.PI / 2 });
-    const { field, station, pirates } = linkedNodes(world);
-    // A field's and a station's place come with their orbits: the game has no angle of its own to give back.
-    expect(field?.orbitPhase).toBe(0);
-    expect(station?.orbitPhase).toBe(180);
-    expect(pirates?.orbitPhase).toBe(270);
-    expect(phasesFromWorld(world).field).toBeUndefined();
-    expect(phasesFromWorld(world).station).toBeUndefined();
-    expect(phasesFromWorld(world)["pirate base"]).toBeCloseTo((3 * Math.PI) / 2, 9);
+    const { pirates } = linkedNodes(world);
+    pirates!.orbitPhase = 90;
+    const at = orbitsAt(pirateBaseFor(world)!.orbits, 0);
+    const field = orbitsAt(fieldsFor(world)[0].orbits, 0);
+    expect(Math.atan2(at.y - field.y, at.x - field.x)).toBeCloseTo(Math.PI / 2, 9);
   });
 
   it("hands over every body, placed round what the field orbits", () => {

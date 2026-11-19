@@ -60,7 +60,7 @@ function world(tuning: Partial<typeof WORLD> = {}, outpost: Partial<StationSpec>
     blueprints: [],
     ...outpost,
   };
-  sim.applyLayout({}, homeFields(sim, second), homeStations(sim, spec));
+  sim.applyLayout(homeFields(sim, second), homeStations(sim, spec));
   return { sim, outpost: sim.bases[1].poi };
 }
 
@@ -222,9 +222,9 @@ describe("a second base", () => {
     sim.step();
     const spec = sim.bases[1].spec!;
     const moved: StationSpec = { ...spec, orbits: [{ ...spec.orbits[0], phase: spec.orbits[0].phase + 0.05 }] };
-    sim.applyLayout({}, undefined, homeStations(sim, moved));
+    sim.applyLayout(undefined, homeStations(sim, moved));
     expect(sim.dockedAt(ship)).toBe(outpost);
-    sim.applyLayout({}, undefined, homeStations(sim));
+    sim.applyLayout(undefined, homeStations(sim));
     expect(sim.docks).toEqual([sim.station]);
   });
 });

@@ -4,7 +4,7 @@
  * layout instead; this is the same kind of thing made in code, as specs, so the game runs the
  * one path either way and nothing about this home is special once it's in.
  */
-import { Sim, type FieldSpec, type StationSpec } from "./sim";
+import { Sim, type FieldSpec, type PirateBaseSpec, type StationSpec } from "./sim";
 import { DEFAULTS, type Tuning } from "./tuning";
 
 /** The home field's and station's ids. The designer's go by their own ids. */
@@ -41,6 +41,16 @@ export interface Home {
   stationSpinPhase: number;
   stationCarryFull: number;
   stationCarryNone: number;
+  /** The pirate base's orbit round the field: how far beyond the field's edge, its period, and where it is at clock 0. */
+  pirateBaseDistance: number;
+  pirateOrbitPeriod: number;
+  piratePhase: number;
+  pirateEccentricity: number;
+  piratePeriapsis: number;
+  pirateRotationPeriod: number;
+  pirateSpinPhase: number;
+  pirateCarryFull: number;
+  pirateCarryNone: number;
 }
 
 export const HOME: Home = {
@@ -67,6 +77,16 @@ export const HOME: Home = {
   stationSpinPhase: 0,
   stationCarryFull: 2000,
   stationCarryNone: 6000,
+  // On the far side of the field from the station, at the same pace, so it stays there.
+  pirateBaseDistance: 4000,
+  pirateOrbitPeriod: 900,
+  piratePhase: 0,
+  pirateEccentricity: 0,
+  piratePeriapsis: 0,
+  pirateRotationPeriod: 0,
+  pirateSpinPhase: 0,
+  pirateCarryFull: 2000,
+  pirateCarryNone: 6000,
 };
 
 /** The field's orbit round the middle of the world. */
@@ -130,6 +150,28 @@ export function homeStation(home: Home = HOME): StationSpec {
   };
 }
 
+/** The home's pirate base, round the field. A world only has it while the tuning has pirates. */
+export function homePirateBase(home: Home = HOME): PirateBaseSpec {
+  const field = fieldOrbit(home);
+  const own = {
+    radius: home.fieldRadius + home.pirateBaseDistance,
+    period: home.pirateOrbitPeriod,
+    phase: home.piratePhase,
+    sign: 1 as const,
+    eccentricity: home.pirateEccentricity,
+    periapsis: home.piratePeriapsis,
+  };
+  return {
+    name: "Pirate base",
+    rotationPeriod: home.pirateRotationPeriod,
+    spinPhase: home.pirateSpinPhase,
+    orbits: [field, own],
+    rings: [{ center: [field], radius: own.radius, eccentricity: own.eccentricity, periapsis: own.periapsis }],
+    carryFull: home.pirateCarryFull,
+    carryNone: home.pirateCarryNone,
+  };
+}
+
 /** Each sim's home, for changing it later. */
 const homes = new WeakMap<Sim, Home>();
 
@@ -153,7 +195,7 @@ export function homeSim(seed: number, settings: Tuning & Partial<Home> = { ...DE
   }
   const sim = new Sim(seed, tuning);
   homes.set(sim, { ...HOME, ...changes });
-  sim.applyLayout({}, homeFields(sim), homeStations(sim));
+  sim.applyLayout(homeFields(sim), homeStations(sim), homePirateBase(homeOf(sim)));
   sim.reset(seed);
   return sim;
 }
@@ -170,11 +212,11 @@ export function homeStations(sim: Sim, ...more: StationSpec[]): StationSpec[] {
 
 /**
  * Changes a sim's home as the designer changes a layout: the places go where the change puts
- * them, and everything near them comes along. Its other fields stay as they are.
+ * them, and everything near them comes along. Its other fields and stations stay as they are.
  */
 export function rehome(sim: Sim, changes: Partial<Home>): void {
   homes.set(sim, { ...homeOf(sim), ...changes });
   const fields = sim.extraFields.filter((extra) => extra.spec.id !== FIRST_FIELD).map((extra) => extra.spec);
   const stations = sim.bases.filter((base) => base.id !== FIRST_BASE).map((base) => base.spec);
-  sim.applyLayout({}, homeFields(sim, ...fields), homeStations(sim, ...stations));
+  sim.applyLayout(homeFields(sim, ...fields), homeStations(sim, ...stations), homePirateBase(homeOf(sim)));
 }

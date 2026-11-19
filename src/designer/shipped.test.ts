@@ -2,25 +2,17 @@ import { describe, expect, it } from "vitest";
 import { Sim, bodyAt } from "../sim";
 import { DEFAULTS } from "../tuning";
 import file from "./world.json";
-import { shipMarks, useLayout, type GameLink } from "./link";
+import { applyTo, shipMarks, useLayout, type GameLink } from "./link";
 import { shippedWorld } from "./shipped";
 import { parseWorld } from "./world";
 
 /** The game's side of the link, as main sets it up, without the page. */
 function linkTo(sim: Sim): GameLink {
   return {
-    tuning: sim.tuning,
     clock: () => sim.now,
-    phases: () => sim.orbitPhases(),
     where: () => ({ ship: sim.ship, field: sim.field }),
     ships: () => [],
-    apply(phases, bodies, spawns, fields, stations, keep = false, anchors = []) {
-      sim.bodies = bodies;
-      sim.anchors = anchors;
-      sim.spawns = spawns;
-      sim.startPhases = phases;
-      sim.applyLayout(keep ? {} : phases, fields, stations);
-    },
+    apply: (layout) => applyTo(sim, layout),
   };
 }
 

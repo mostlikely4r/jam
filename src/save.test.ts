@@ -89,7 +89,7 @@ describe("a warmed start", () => {
     useShippedWorld(sim, 1, 5);
     expect(loadStart(sim, file, "another layout")).toBe(false);
     expect(loadStart(sim, file, key)).toBe(true);
-    useLayout(shippedWorld(), linkTo(sim), true);
+    useLayout(shippedWorld(), linkTo(sim));
     sim.startPlayer();
     expect(sim.now).toBeCloseTo(warm.now, 5);
     expect(sim.traffic.length).toBe(warm.traffic.length);
@@ -111,7 +111,7 @@ describe("the shipped start", () => {
     const sim = new Sim(1, { ...DEFAULTS, chatter: false });
     useShippedWorld(sim, 1, 1);
     expect(loadStart(sim, file, layoutKey(stringifyWorld(shippedWorld())))).toBe(true);
-    useLayout(shippedWorld(), linkTo(sim), true);
+    useLayout(shippedWorld(), linkTo(sim));
     sim.startPlayer();
     expect(sim.bases[0].board.some((report) => report.item === "tractorAll")).toBe(true);
     for (let i = 0; i < Math.round(5 / TICK); i++) sim.step();

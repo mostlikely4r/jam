@@ -5,7 +5,7 @@ import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountTak
 import { ClickPilot, DronePilot, FighterPilot, LOW_HULL } from "./pilot";
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
-import { clampEccentricity, orbitState } from "./kepler";
+import { orbitState } from "./kepler";
 import { autoPlace, canPlace, floatsAfterRemoval, footprint, reachable, reachableCells, sticks, usedCells, type Cell, type GridSpec, type Placed } from "./grid";
 import { pilotKind, type StepProfile } from "./profile/step";
 import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
@@ -338,37 +338,41 @@ export interface Battery {
   partsUsed: number;
 }
 
+/** A place from the layout: where it is comes from its chain of orbits and the clock, never added up. */
 export interface Poi {
   name: "field" | "station" | "pirate base";
-  parent: Poi | null;
   x: number;
   y: number;
   px: number;
   py: number;
-  /** Where it is on its orbit now (the mean longitude: the angle itself, for a circle). Worked out from the clock each tick, never added up. */
-  orbitAngle: number;
-  /** The semi-major axis: the radius, for a circle. */
-  orbitRadius: number;
-  /** 0 is a circle; the parent is at a focus of an ellipse. */
-  orbitEccentricity: number;
-  /** Direction from the parent to the closest point, in radians. */
-  orbitPeriapsis: number;
-  /** The orbit angle at clock 0, so the angle at any time is phase + rate × time. */
-  orbitPhase: number;
-  /** The period the phase was worked out for. A change of period moves the phase, not the POI. */
-  orbitPeriod: number;
   rotation: number;
   prevRotation: number;
   /** Size used when working out which POI is nearest. */
   reach: number;
   /** Rotation made on the current tick. */
   turn: number;
-  /** A place from the designer: placed by its chain of orbits instead. */
+  /** Its chain of orbits. None: it stands still where it is. */
   orbits?: Orbit[];
   /** Its own true orbit for the chart, when `orbits` can't show it. */
   rings?: OrbitRing[];
-  /** Its own carrying ranges, instead of the tuning's. */
-  carry?: { full: number; none: number };
+  /** Within `full` of its edge it carries things fully, fading out by `none`. */
+  carry: { full: number; none: number };
+}
+
+/**
+ * The pirate base: where pirates dock, sell and buy, and the black market calls. Where it is
+ * comes from the layout each time; what it holds (ore, money, pirates) is the world's, and saved.
+ */
+export interface PirateBaseSpec {
+  name: string;
+  rotationPeriod: number;
+  /** Its spin at clock 0, in radians. */
+  spinPhase?: number;
+  orbits: Orbit[];
+  /** Its own true orbit for the chart: the first's `center` is what it goes round. */
+  rings?: OrbitRing[];
+  carryFull: number;
+  carryNone: number;
 }
 
 /**
@@ -852,25 +856,7 @@ interface Carriers {
 }
 
 /** Where "the field" is in a world without any: a still spot at the middle, carrying nothing. */
-const NOWHERE: Poi = {
-  name: "field",
-  parent: null,
-  x: 0,
-  y: 0,
-  px: 0,
-  py: 0,
-  orbitAngle: 0,
-  orbitRadius: 0,
-  orbitEccentricity: 0,
-  orbitPeriapsis: 0,
-  orbitPhase: 0,
-  orbitPeriod: 0,
-  rotation: 0,
-  prevRotation: 0,
-  reach: 0,
-  turn: 0,
-  carry: { full: 0, none: 0 },
-};
+const NOWHERE: Poi = { name: "field", x: 0, y: 0, px: 0, py: 0, rotation: 0, prevRotation: 0, reach: 0, turn: 0, carry: { full: 0, none: 0 } };
 
 export class Sim {
   tuning: Tuning;
@@ -888,8 +874,10 @@ export class Sim {
   /** Other people's ships, going about their own business. The player has no readout of them. */
   traffic: DronePilot[] = [];
   fighters: FighterPilot[] = [];
-  /** Where pirates dock. Only exists in a game with pirates. */
+  /** Where pirates dock: the layout's pirate base, in a game with pirates. */
   pirateBase: Poi | null = null;
+  /** The layout's pirate base, if it has one. Not saved: the layout hands it over each time. */
+  pirateSpec: PirateBaseSpec | null = null;
   /** Every station with a dock, from the layout, in its order. */
   bases: Base[] = [];
   /** The player's lockers, by base id: what was left at each base stays there. */
@@ -936,8 +924,7 @@ export class Sim {
   screen = { halfWidth: 1200, halfHeight: 675 };
   /** Where new games start, by ship. Several for one ship: one is picked at random. None: by the field. */
   spawns: Spawn[] = [];
-  /** Each POI's angle at clock 0 for new games, from the designer. Missing: the game's own start. */
-  startPhases: Partial<Record<Poi["name"], number>> = {};
+
   /** Every field, from the layout, in its order. Rocks only: no station, deposit or traffic of their own. */
   extraFields: ExtraField[] = [];
   private miningCache: { clock: number; extras: ExtraField[]; fields: MiningField[] } | null = null;
@@ -1014,7 +1001,7 @@ export class Sim {
       traffic: this.traffic.map(pilot),
       fighters: this.fighters.map((each) => each.ship),
       fighterRecords: this.fighters.map((each) => each.record),
-      pirateBase: this.pirateBase,
+
       bases: this.bases.map(
         ({ id, account, ore, parts, stock, hauler, haulerTimer, lostTraffic, blueprints, blueprintPaid, blueprintsOrdered, board }): BaseState => ({
           id, account, ore, parts, stock, hauler, haulerTimer, lostTraffic, blueprints, blueprintPaid, blueprintsOrdered, board,
@@ -1079,7 +1066,7 @@ export class Sim {
     this.fighters.forEach((pilot, i) => (pilot.record = fighterRecords[i] ?? null));
     for (const battery of data.batteries as Battery[]) for (const guard of battery.guns) fill(guard.gun);
     const plain = [
-      "pirateBase", "deposits", "batteries", "pirateOre",
+      "deposits", "batteries", "pirateOre",
       "pirateCredits", "pirateCap", "blackMarket", "blackMarketTimer", "distress", "clock", "rocks",
       "shots", "ores", "loot", "down", "stats", "randomState", "lookState", "seed",
     ] as const;
@@ -1121,7 +1108,7 @@ export class Sim {
       this.fitExtraField(extra);
       extra.inflowTimer = 1;
     }
-    this.placePois();
+    this.placePirateBase();
     // Every base starts out as a starter base.
     this.bases = this.bases.map((base) => this.makeBase(base.id, base.spec, base.poi));
     for (const base of this.bases) this.fitBase(base);
@@ -1137,9 +1124,9 @@ export class Sim {
     this.blackMarket = null;
     this.blackMarketTimer = this.tuning.blackMarketFirst;
     this.fighters = [];
-    for (let i = 0; i < this.tuning.pirates; i++) {
-      const start = this.homeOf(null, "pirate");
-      this.addFighter(start.x, start.y, "pirate");
+    // Pirates start at their base, so a world without one has none.
+    if (this.pirateBase) {
+      for (let i = 0; i < this.tuning.pirates; i++) this.addFighter(this.pirateBase.x, this.pirateBase.y, "pirate");
     }
     for (const base of this.bases) this.addDefenders(base);
     this.traffic = [];
@@ -1278,14 +1265,8 @@ export class Sim {
 
   /** Puts an extra field where its orbits say now, with its spec's size and carrying. */
   private fitExtraField(extra: ExtraField): void {
-    const { spec, poi } = extra;
-    const at = orbitsAt(spec.orbits, this.clock);
-    poi.orbits = spec.orbits;
-    poi.rings = spec.rings;
-    poi.reach = spec.radius;
-    poi.carry = { full: spec.carryFull, none: Math.max(spec.carryFull, spec.carryNone) };
-    poi.x = poi.px = at.x;
-    poi.y = poi.py = at.y;
+    extra.poi.reach = extra.spec.radius;
+    this.fitPlace(extra.poi, extra.spec);
   }
 
   /** A base as it starts out: the starter base's money and store, and its first hauler on the way. */
@@ -1383,13 +1364,29 @@ export class Sim {
   }
 
   private fitBase(base: Base): void {
-    const { spec, poi } = base;
+    this.fitPlace(base.poi, base.spec);
+  }
+
+  /** Puts a place where its orbits say now, with its spec's carrying. */
+  private fitPlace(poi: Poi, spec: { orbits: Orbit[]; rings?: OrbitRing[]; carryFull: number; carryNone: number }): void {
     const at = orbitsAt(spec.orbits, this.clock);
     poi.orbits = spec.orbits;
     poi.rings = spec.rings;
     poi.carry = { full: spec.carryFull, none: Math.max(spec.carryFull, spec.carryNone) };
     poi.x = poi.px = at.x;
     poi.y = poi.py = at.y;
+  }
+
+  /** Moves a place along its orbits to the clock, and turns it, for one tick. */
+  private movePlace(poi: Poi, spec: { orbits: Orbit[]; rotationPeriod: number }, dt: number): void {
+    poi.px = poi.x;
+    poi.py = poi.y;
+    poi.prevRotation = poi.rotation;
+    const at = orbitsAt(spec.orbits, this.clock);
+    poi.x = at.x;
+    poi.y = at.y;
+    poi.turn = orbitRate(spec.rotationPeriod) * dt;
+    poi.rotation += poi.turn;
   }
 
   /** Every field with its size. */
@@ -1507,76 +1504,21 @@ export class Sim {
     return best;
   }
 
-  private placePois(): void {
-    const { tuning } = this;
-    // The designer's angles, as they stand now. Without them, the game's own start.
-    const angle = (name: Poi["name"], own: number, period: number) => {
-      const phase = this.startPhases[name];
-      return phase === undefined ? own : phase + orbitRate(period) * this.clock;
-    };
-    const home = this.homeField();
-    this.pirateBase =
-      tuning.pirates > 0
-        ? this.makePoi(
-            "pirate base",
-            home?.poi ?? null,
-            (home?.spec.radius ?? 0) + tuning.pirateBaseDistance,
-            angle("pirate base", 0, tuning.pirateOrbitPeriod),
-            tuning.pirateOrbitPeriod,
-            PIRATE_BASE_RADIUS,
-            tuning.pirateEccentricity,
-            tuning.piratePeriapsis,
-          )
-        : null;
-    this.spinPois();
+  /** The pirate base where the layout puts it, if the layout has one and the world has pirates. */
+  private placePirateBase(): void {
+    const spec = this.pirateSpec;
+    if (!spec || this.tuning.pirates <= 0) {
+      this.pirateBase = null;
+      return;
+    }
+    const poi = this.makePoi("pirate base", PIRATE_BASE_RADIUS, (spec.spinPhase ?? 0) + orbitRate(spec.rotationPeriod) * this.clock);
+    this.fitPlace(poi, spec);
+    this.pirateBase = poi;
   }
 
-  /**
-   * The first field, which the pirate base goes round until it has a spec of its own
-   * (docs/home-pair-plan.md, step 3).
-   */
-  private homeField(): ExtraField | null {
-    return this.extraFields[0] ?? null;
-  }
-
-  /** Sets the pirate base to the turn the tuning says it has at the clock. */
-  private spinPois(): void {
-    const { tuning, pirateBase } = this;
-    if (pirateBase) pirateBase.rotation = pirateBase.prevRotation = tuning.pirateSpinPhase + orbitRate(tuning.pirateRotationPeriod) * this.clock;
-  }
-
-  private makePoi(
-    name: Poi["name"],
-    parent: Poi | null,
-    orbitRadius: number,
-    orbitAngle: number,
-    orbitPeriod: number,
-    reach: number,
-    orbitEccentricity = 0,
-    orbitPeriapsis = 0,
-  ): Poi {
-    const at = orbitState({ radius: orbitRadius, eccentricity: orbitEccentricity, periapsis: orbitPeriapsis, phase: orbitAngle, period: 0 }, 0);
-    const x = (parent?.x ?? 0) + at.x;
-    const y = (parent?.y ?? 0) + at.y;
-    return {
-      name,
-      parent,
-      x,
-      y,
-      px: x,
-      py: y,
-      orbitAngle,
-      orbitRadius,
-      orbitEccentricity,
-      orbitPeriapsis,
-      // The clock keeps running through a restart, so the phase counts back from now.
-      orbitPhase: orbitAngle - orbitRate(orbitPeriod) * this.clock,
-      orbitPeriod,
-      rotation: 0,
-      prevRotation: 0,
-      reach,
-      turn: 0,
-    };
+  /** A place at the middle, turned to `rotation`, until its spec puts it where it goes. */
+  private makePoi(name: Poi["name"], reach: number, rotation = 0): Poi {
+    return { name, x: 0, y: 0, px: 0, py: 0, rotation, prevRotation: rotation, reach, turn: 0, carry: { full: 0, none: 0 } };
   }
 
   private makePilot(x: number, y: number, model: ShipModel = "racer"): DronePilot {
@@ -3812,87 +3754,29 @@ export class Sim {
 
   /** Each POI follows a fixed circle or ellipse around its parent, or the system's center. */
   private movePois(dt: number): void {
-    const { tuning } = this;
-    // The fields first: the pirate base goes round the first.
-    for (const { spec, poi } of this.extraFields) {
-      poi.px = poi.x;
-      poi.py = poi.y;
-      poi.prevRotation = poi.rotation;
-      const at = orbitsAt(spec.orbits, this.clock);
-      poi.x = at.x;
-      poi.y = at.y;
-      poi.turn = orbitRate(spec.rotationPeriod) * dt;
-      poi.rotation += poi.turn;
-    }
-    if (this.pirateBase) this.movePoi(this.pirateBase, tuning.pirateOrbitPeriod, tuning.pirateRotationPeriod, dt, tuning.pirateEccentricity, tuning.piratePeriapsis);
-    for (const { spec, poi } of this.bases) {
-      poi.px = poi.x;
-      poi.py = poi.y;
-      poi.prevRotation = poi.rotation;
-      const at = orbitsAt(spec.orbits, this.clock);
-      poi.x = at.x;
-      poi.y = at.y;
-      poi.turn = orbitRate(spec.rotationPeriod) * dt;
-      poi.rotation += poi.turn;
-    }
-  }
-
-  private movePoi(poi: Poi, orbitPeriod: number, rotationPeriod: number, dt: number, eccentricity: number, periapsis: number): void {
-    poi.px = poi.x;
-    poi.py = poi.y;
-    poi.prevRotation = poi.rotation;
-    // A new period (a tuning change, or a save from before phases) carries on from where it
-    // was a tick ago at the new pace, rather than jumping to where the new pace would put it.
-    if (poi.orbitPeriod !== orbitPeriod || !Number.isFinite(poi.orbitPhase)) {
-      poi.orbitPhase = poi.orbitAngle - orbitRate(orbitPeriod) * (this.clock - dt);
-      poi.orbitPeriod = orbitPeriod;
-    }
-    poi.orbitEccentricity = clampEccentricity(eccentricity);
-    poi.orbitPeriapsis = periapsis;
-    poi.orbitAngle = poi.orbitPhase + orbitRate(orbitPeriod) * this.clock;
-    poi.turn = orbitRate(rotationPeriod) * dt;
-    poi.rotation += poi.turn;
-    const at = this.poiOffset(poi, this.clock);
-    poi.x = (poi.parent?.x ?? 0) + at.x;
-    poi.y = (poi.parent?.y ?? 0) + at.y;
-  }
-
-  /** Where a POI is from its parent at a time on the clock, by its own orbit. */
-  private poiOffset(poi: Poi, time: number): { x: number; y: number } {
-    return orbitState(
-      { radius: poi.orbitRadius, eccentricity: poi.orbitEccentricity, periapsis: poi.orbitPeriapsis, phase: poi.orbitPhase, period: poi.orbitPeriod },
-      time,
-    );
+    for (const { spec, poi } of this.extraFields) this.movePlace(poi, spec, dt);
+    if (this.pirateBase && this.pirateSpec) this.movePlace(this.pirateBase, this.pirateSpec, dt);
+    for (const { spec, poi } of this.bases) this.movePlace(poi, spec, dt);
   }
 
   /**
-   * Where a POI's centre will be at a given time on the clock (see `now`), if no tuning
-   * changes before then. Lets a pilot aim at where a place will be on arrival.
+   * Where a POI's centre will be at a given time on the clock (see `now`). Lets a pilot aim
+   * at where a place will be on arrival.
    */
   poiAt(poi: Poi, time: number): { x: number; y: number } {
-    if (poi.orbits) {
-      const { x, y } = orbitsAt(poi.orbits, time);
-      return { x, y };
-    }
-    const parent = poi.parent ? this.poiAt(poi.parent, time) : { x: 0, y: 0 };
-    const at = this.poiOffset(poi, time);
-    return { x: parent.x + at.x, y: parent.y + at.y };
-  }
-
-  /** The pirate base's orbit angle at clock 0, which the tuning places. The others' come with their orbits. */
-  orbitPhases(): Partial<Record<Poi["name"], number>> {
-    const { pirateBase } = this;
-    return pirateBase ? { [pirateBase.name]: pirateBase.orbitPhase } : {};
+    if (!poi.orbits) return { x: poi.x, y: poi.y };
+    const { x, y } = orbitsAt(poi.orbits, time);
+    return { x, y };
   }
 
   /**
-   * Moves the POIs to where the tuning now says, for a layout changed from outside the game.
-   * Everything comes along: what's at the station or pirate base moves with that, and the
-   * rest of the scene with the field, so nobody is left behind in empty space. A POI given
-   * a phase goes exactly there. Without one it carries on from the angle it's at.
+   * Takes a layout changed from outside the game: what's given replaces what was, and what's
+   * left out stays. Everything comes along: what's at a station or the pirate base moves with
+   * that, and the rest of the scene with the field it's in, so nobody is left behind in empty
+   * space. `pirates` null takes the pirate base away.
    */
-  applyLayout(phases: Partial<Record<Poi["name"], number>> = {}, fields?: FieldSpec[], stationSpecs?: StationSpec[]): void {
-    const { pirateBase, tuning, clock } = this;
+  applyLayout(fields?: FieldSpec[], stationSpecs?: StationSpec[], pirates?: PirateBaseSpec | null): void {
+    const { pirateBase } = this;
     // What's at a station goes where that station goes, every base's included.
     const stations = [...this.docks, ...(pirateBase ? [pirateBase] : [])];
     const before = new Map(this.pois.map((poi) => [poi, { x: poi.x, y: poi.y }]));
@@ -3903,9 +3787,8 @@ export class Sim {
       const kept = new Map(this.extraFields.map((extra) => [extra.spec.id, extra]));
       const next = fields.map((spec) => {
         const old = kept.get(spec.id);
-        const extra = old ?? { spec, poi: this.makePoi("field", null, 0, 0, 0, spec.radius), inflowTimer: 1 };
+        const extra = old ?? { spec, poi: this.makePoi("field", spec.radius, (spec.spinPhase ?? 0) + orbitRate(spec.rotationPeriod) * this.clock), inflowTimer: 1 };
         extra.spec = spec;
-        if (!old) extra.poi.rotation = extra.poi.prevRotation = (spec.spinPhase ?? 0) + orbitRate(spec.rotationPeriod) * this.clock;
         this.fitExtraField(extra);
         if (!old) added.push(extra);
         return extra;
@@ -3926,8 +3809,7 @@ export class Sim {
       this.bases = stationSpecs.map((spec) => {
         let base = kept.get(spec.id);
         if (!base) {
-          base = this.makeBase(spec.id, spec, this.makePoi("station", null, 0, 0, 0, STATION_REACH));
-          base.poi.rotation = base.poi.prevRotation = (spec.spinPhase ?? 0) + orbitRate(spec.rotationPeriod) * this.clock;
+          base = this.makeBase(spec.id, spec, this.makePoi("station", STATION_REACH, (spec.spinPhase ?? 0) + orbitRate(spec.rotationPeriod) * this.clock));
           this.fitBase(base);
           // A new base comes with its defenders. One from a save has them in the save already.
           if (!this.takeSaved(base)) this.addDefenders(base);
@@ -3941,24 +3823,12 @@ export class Sim {
       this.deposits = this.deposits.filter((deposit) => ids.has(deposit.base));
       this.batteries = this.batteries.filter((battery) => ids.has(battery.base));
     }
-    const place = (poi: Poi, orbitRadius: number, orbitPeriod: number, eccentricity: number, periapsis: number) => {
-      const rate = orbitRate(orbitPeriod);
-      poi.orbitRadius = orbitRadius;
-      poi.orbitPeriod = orbitPeriod;
-      poi.orbitEccentricity = clampEccentricity(eccentricity);
-      poi.orbitPeriapsis = periapsis;
-      poi.orbitPhase = phases[poi.name] ?? poi.orbitAngle - rate * clock;
-      poi.orbitAngle = poi.orbitPhase + rate * clock;
-      const at = this.poiOffset(poi, clock);
-      poi.x = poi.px = (poi.parent?.x ?? 0) + at.x;
-      poi.y = poi.py = (poi.parent?.y ?? 0) + at.y;
-    };
-    this.spinPois();
-    // The pirate base goes round the first field, whichever that is now.
-    const home = this.homeField();
-    const homeRadius = home?.spec.radius ?? 0;
-    if (pirateBase) pirateBase.parent = home?.poi ?? null;
-    if (pirateBase) place(pirateBase, homeRadius + tuning.pirateBaseDistance, tuning.pirateOrbitPeriod, tuning.pirateEccentricity, tuning.piratePeriapsis);
+    if (pirates !== undefined) {
+      this.pirateSpec = pirates;
+      if (!pirates || this.tuning.pirates <= 0) this.pirateBase = null;
+      else if (this.pirateBase) this.fitPlace(this.pirateBase, pirates);
+      else this.placePirateBase();
+    }
 
     const moved = (poi: Poi) => {
       const was = before.get(poi);
@@ -3966,7 +3836,8 @@ export class Sim {
       const removed =
         poi.orbits !== undefined &&
         !this.extraFields.some((extra) => extra.poi === poi) &&
-        !this.bases.some((base) => base.poi === poi);
+        !this.bases.some((base) => base.poi === poi) &&
+        poi !== this.pirateBase;
       if (!was || removed) return { x: 0, y: 0 };
       return { x: poi.x - was.x, y: poi.y - was.y };
     };
@@ -4066,9 +3937,7 @@ export class Sim {
 
   /** How far from its edge a POI carries things fully, and where it stops carrying at all. */
   carryRange(poi: Poi): { full: number; none: number } {
-    if (poi.carry) return poi.carry;
-    const { pirateCarryFull: full, pirateCarryNone: none } = this.tuning;
-    return { full, none: Math.max(full, none) };
+    return poi.carry;
   }
 
   /**
@@ -5776,7 +5645,8 @@ export class Sim {
   private blackMarketLane(): { x: number; y: number; dx: number; dy: number } | null {
     const base = this.pirateBase;
     if (!base) return null;
-    const from = base.parent ?? NOWHERE;
+    const ring = this.pirateSpec?.rings?.[0];
+    const from = ring ? orbitsAt(ring.center, this.clock) : { x: 0, y: 0 };
     const away = Math.hypot(base.x - from.x, base.y - from.y) || 1;
     const dx = (base.x - from.x) / away;
     const dy = (base.y - from.y) / away;

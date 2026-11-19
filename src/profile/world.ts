@@ -2,24 +2,16 @@
  * The shipped world for profiling, with the first field copied `fields` times.
  */
 import { Sim } from "../sim";
-import { linkedNodes, useLayout, type GameLink } from "../designer/link";
+import { applyTo, linkedNodes, useLayout, type GameLink } from "../designer/link";
 import { shippedWorld } from "../designer/shipped";
 import type { World } from "../designer/world";
 
 export function linkTo(sim: Sim): GameLink {
   return {
-    tuning: sim.tuning,
     clock: () => sim.now,
-    phases: () => sim.orbitPhases(),
     where: () => ({ ship: sim.ship, field: sim.field }),
     ships: () => [],
-    apply(phases, bodies, spawns, fields, stations, keep = false, anchors = []) {
-      sim.bodies = bodies;
-      sim.anchors = anchors;
-      sim.spawns = spawns;
-      sim.startPhases = phases;
-      sim.applyLayout(keep ? {} : phases, fields, stations);
-    },
+    apply: (layout) => applyTo(sim, layout),
   };
 }
 

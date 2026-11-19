@@ -1,24 +1,26 @@
 /**
- * What the game flies from the designer's layout. The game's frame is centred on whatever the
- * first field orbits. Every field and every station goes over as a spec, the first ones
- * included. Only the pirate base on the first field still goes over through the tuning, which
- * the designer writes into and reads back from, so whichever was changed last wins
- * (docs/home-pair-plan.md).
+ * What the game flies from the designer's layout: every body, field, station, anchor and
+ * start, and the pirate base, each as a spec with its own chain of orbits. The game's frame is
+ * centred on whatever the first field orbits. Nothing goes through the tuning: the layout is
+ * the one place a place is described (docs/home-pair-plan.md).
  */
-import { TICK, type AnchorSpec, type FieldSpec, type Orbit, type OrbitRing, type Poi, type Sim, type SolidBody, type Spawn, type StationSpec } from "../sim";
-import type { Tuning } from "../tuning";
+import { TICK, type AnchorSpec, type FieldSpec, type Orbit, type OrbitRing, type PirateBaseSpec, type Sim, type SolidBody, type Spawn, type StationSpec } from "../sim";
 import { SHIP_CHOICES, copiesOf, isBody, parentOf, pathTo, walk, type Copy, type NodeKind, type World, type WorldNode } from "./world";
 
-/** Each POI's orbit angle at clock 0, in radians. */
-export type Phases = Partial<Record<Poi["name"], number>>;
+/** A whole layout as the game takes it. */
+export interface Layout {
+  bodies: SolidBody[];
+  spawns: Spawn[];
+  fields: FieldSpec[];
+  stations: StationSpec[];
+  pirates: PirateBaseSpec | null;
+  anchors: AnchorSpec[];
+}
 
 /** The designer's way into the running game. */
 export interface GameLink {
-  tuning: Tuning;
   clock(): number;
-  phases(): Phases;
-  /** `keep`: the places carry on from where they are, as after loading a save, rather than jump to `phases`. */
-  apply(phases: Phases, bodies: SolidBody[], spawns: Spawn[], fields: FieldSpec[], stations: StationSpec[], keep?: boolean, anchors?: AnchorSpec[]): void;
+  apply(layout: Layout): void;
   /** Where the player's ship and the field are now, in the game's own frame. */
   where(): { ship: { x: number; y: number }; field: { x: number; y: number } };
   /** Every other ship in the world now, the player's left out, in the game's frame. */
@@ -239,24 +241,50 @@ function placer(world: World): (node: WorldNode, copy: Copy | null) => Orbit[] {
   };
 }
 
-/** Hands the game a whole layout: the tuning it flies by, and every body, place and start. */
-export function useLayout(world: World, game: GameLink, keep = false): void {
-  writeGame(world, game.tuning);
-  game.apply(phasesFromWorld(world), bodiesFor(world), spawnsFor(world), fieldsFor(world), stationsFor(world), keep, anchorsFor(world));
+/** Every body, place and start in a layout, as the game takes them. */
+export function layoutFor(world: World): Layout {
+  return {
+    bodies: bodiesFor(world),
+    spawns: spawnsFor(world),
+    fields: fieldsFor(world),
+    stations: stationsFor(world),
+    pirates: pirateBaseFor(world),
+    anchors: anchorsFor(world),
+  };
 }
 
-export function writeGame(world: World, tuning: Tuning): void {
-  const { field, pirates } = linkedNodes(world);
-  if (!field) return;
-  if (pirates) {
-    tuning.pirateBaseDistance = pirates.orbitRadius - field.radius;
-    tuning.pirateOrbitPeriod = pirates.orbitPeriod;
-    tuning.pirateEccentricity = pirates.eccentricity;
-    tuning.piratePeriapsis = toRadians(pirates.periapsisAngle);
-    tuning.pirateRotationPeriod = pirates.spinPeriod;
-    tuning.pirateSpinPhase = toRadians(pirates.spinPhase);
-    [tuning.pirateCarryFull, tuning.pirateCarryNone] = carrying(pirates);
-  }
+/** Hands the game a whole layout. */
+export function useLayout(world: World, game: GameLink): void {
+  game.apply(layoutFor(world));
+}
+
+/** Puts a layout into a sim: its bodies, anchors and starts, then its places. */
+export function applyTo(sim: Sim, layout: Layout): void {
+  sim.bodies = layout.bodies;
+  sim.anchors = layout.anchors;
+  sim.spawns = layout.spawns;
+  sim.applyLayout(layout.fields, layout.stations, layout.pirates);
+}
+
+/** The first pirate base in the tree, as the game's one pirate base. Any others are map only. */
+export function pirateBaseFor(world: World): PirateBaseSpec | null {
+  const node = firstPirateBase(world);
+  if (!node) return null;
+  const place = placer(world);
+  const [carryFull, carryNone] = carrying(node);
+  return {
+    name: node.name,
+    rotationPeriod: node.spinPeriod,
+    spinPhase: toRadians(node.spinPhase),
+    orbits: place(node, null),
+    rings: ringsOf(world, place, node, null),
+    carryFull,
+    carryNone,
+  };
+}
+
+function firstPirateBase(world: World): WorldNode | null {
+  return walk(world).find((entry) => entry.node.kind === "pirate base" && entry.node !== world.root)?.node ?? null;
 }
 
 /** A place's carrying in the game's terms: no outer edge means it carries everywhere. */
@@ -264,36 +292,12 @@ function carrying(node: WorldNode): [number, number] {
   return node.carryNone > 0 ? [node.carryFull, node.carryNone] : [Infinity, Infinity];
 }
 
-/** Degrees, kept to a sensible length: at the field's distance, 0.001 is about a unit. */
-function degrees(radians: number): number {
-  const turned = (((radians * 180) / Math.PI) % 360) + 360;
-  return Math.round((turned % 360) * 1000) / 1000;
-}
-
-/**
- * Brings the designer up to date with where the game's places are on their orbits: time
- * has moved them on since. Everything else about them is the designer's own.
- */
-export function readGame(world: World, phases: Phases): void {
-  const { pirates } = linkedNodes(world);
-  if (pirates && phases["pirate base"] !== undefined) pirates.orbitPhase = degrees(phases["pirate base"]);
-}
-
-export function phasesFromWorld(world: World): Phases {
-  const { pirates } = linkedNodes(world);
-  const radians = (node: WorldNode) => (node.orbitPhase * Math.PI) / 180;
-  return {
-    ...(pirates && { "pirate base": radians(pirates) }),
-  };
-}
-
 /** A few lines for the designer's side panel: what the game will use. */
 export function linkSummary(world: World): string {
-  const { field, station, pirates } = linkedNodes(world);
-  const linkedPlaces = [field, station, pirates];
+  const pirates = firstPirateBase(world);
   const nodes = walk(world).map((entry) => entry.node);
-  // Every body and field is real. Of the other places, only the ones the game has.
-  const real = nodes.filter((node) => isBody(node.kind) || node.kind === "field" || node.kind === "station" || node.kind === "anchor" || linkedPlaces.includes(node));
+  // Every body, field, station and anchor is real, and the first pirate base.
+  const real = nodes.filter((node) => isBody(node.kind) || node.kind === "field" || node.kind === "station" || node.kind === "anchor" || node === pirates);
   const places = nodes.filter((node) => !real.includes(node));
   const lines: string[] = [];
   if (places.length > 0) lines.push(`Map only: ${places.map((node) => node.name).join(", ")}`);

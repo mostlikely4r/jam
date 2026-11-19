@@ -349,7 +349,7 @@ describe("station", () => {
     }
     function withSecond(extra: Partial<FieldSpec> = {}, tuning: Partial<typeof DEFAULTS & Home> = {}): Sim {
       const sim = homeSim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800, ...tuning });
-      sim.applyLayout({}, homeFields(sim, second(extra)));
+      sim.applyLayout(homeFields(sim, second(extra)));
       return sim;
     }
 
@@ -394,7 +394,7 @@ describe("station", () => {
       const sim = homeSim(1, { ...DEFAULTS, rockCount: 50, testDrones: 0, fieldOrbitRadius: 60000, fieldOrbitPeriod: 10800 });
       sim.ship.x = sim.ship.px = Math.cos(Math.PI) * 90000;
       sim.ship.y = sim.ship.py = 0;
-      sim.applyLayout({}, homeFields(sim, second({ orbits: [{ radius: 90000, period: 0, phase: Math.PI, sign: 1 }] })));
+      sim.applyLayout(homeFields(sim, second({ orbits: [{ radius: 90000, period: 0, phase: Math.PI, sign: 1 }] })));
       expect(sim.sleeping.has("second:0")).toBe(false);
       expect(inSecond(sim).length).toBeGreaterThan(90);
     });
@@ -437,7 +437,7 @@ describe("station", () => {
 
     it("takes its rocks with it when it's taken away", () => {
       const sim = withSecond();
-      sim.applyLayout({}, homeFields(sim));
+      sim.applyLayout(homeFields(sim));
       expect(sim.extraFields.length).toBe(1);
       expect(sim.rocks.length).toBe(50);
     });
@@ -466,7 +466,7 @@ describe("station", () => {
       run(sim, 5);
       expect(sim.sleeping.has("second:0")).toBe(true);
       const loaded = homeSim(1, { ...sim.tuning, ...homeOf(sim) });
-      loaded.applyLayout({}, homeFields(loaded, second()));
+      loaded.applyLayout(homeFields(loaded, second()));
       roundTrip(sim, loaded);
       expect(loaded.sleeping.get("second:0")?.rocks.length).toBe(100);
       visitSecond(loaded);
@@ -476,7 +476,7 @@ describe("station", () => {
     it("keeps a never-seen field a seed through a save, and lays the same rocks after", () => {
       const sim = withSecond();
       const loaded = homeSim(1, { ...sim.tuning, ...homeOf(sim) });
-      loaded.applyLayout({}, homeFields(loaded, second()));
+      loaded.applyLayout(homeFields(loaded, second()));
       roundTrip(sim, loaded);
       expect(loaded.sleeping.get("second:0")?.fresh).toBe(sim.sleeping.get("second:0")?.fresh);
       visitSecond(sim);
@@ -514,7 +514,7 @@ describe("station", () => {
       const firstAt = { x: firstRock.x, y: firstRock.y };
       const rock = inSecond(sim)[0];
       const offset = { x: rock.x - sim.extraFields[1].poi.x, y: rock.y - sim.extraFields[1].poi.y };
-      sim.applyLayout({}, homeFields(sim, second({ orbits: [{ radius: 120000, period: 7200, phase: 2, sign: 1 }] })));
+      sim.applyLayout(homeFields(sim, second({ orbits: [{ radius: 120000, period: 7200, phase: 2, sign: 1 }] })));
       const { poi } = sim.extraFields[1];
       expect(rock.x - poi.x).toBeCloseTo(offset.x, 6);
       expect(rock.y - poi.y).toBeCloseTo(offset.y, 6);
@@ -684,15 +684,6 @@ describe("station", () => {
       expect(at.x).toBeCloseTo(sim.field.x, 6);
     });
 
-    it("keeps the tuned pirate base where it is on its orbit when given no phase", () => {
-      const sim = linkedSim();
-      run(sim, 20);
-      const angle = sim.pirateBase!.orbitAngle;
-      sim.tuning.pirateOrbitPeriod = 1200;
-      sim.applyLayout();
-      expect(sim.pirateBase!.orbitAngle).toBeCloseTo(angle, 9);
-    });
-
     it("orbits the other way for a negative period, and the pirate base at its own pace", () => {
       const sim = homeSim(1, { ...DEFAULTS, rockCount: 0, testDrones: 0, pirates: 1, fieldOrbitPeriod: -600, orbitPeriod: 300, pirateOrbitPeriod: 600 });
       const round = (poi: Poi) => Math.atan2(poi.y - sim.field.y, poi.x - sim.field.x);
@@ -731,24 +722,6 @@ describe("station", () => {
       expect(sim.station.y).toBeCloseTo(ahead.y, 4);
     });
 
-    it("changes the tuned pirate base's pace smoothly when its period is tuned mid-orbit", () => {
-      const sim = orbiting();
-      run(sim, 100);
-      const pirates = sim.pirateBase!;
-      const radius = pirates.orbitRadius;
-      sim.tuning.pirateOrbitPeriod = 120;
-      let biggest = 0;
-      for (let i = 0; i < 240; i++) {
-        const { x, y } = pirates;
-        const fx = sim.field.x;
-        const fy = sim.field.y;
-        sim.step();
-        // Only the base's own motion around the field.
-        biggest = Math.max(biggest, Math.hypot(pirates.x - sim.field.x - (x - fx), pirates.y - sim.field.y - (y - fy)));
-      }
-      expect(biggest).toBeCloseTo(((2 * Math.PI * radius) / 120) * TICK, 3);
-    });
-
     it("starts a restarted world's field and station where their orbits put them at the clock, which runs on", () => {
       const ran = orbiting();
       const sim = orbiting();
@@ -762,19 +735,6 @@ describe("station", () => {
         expect(poi.y).toBeCloseTo(there.y, 6);
       }
     }, 30000);
-
-    it("carries the tuned pirate base on smoothly from a save made before orbits had a phase", () => {
-      const sim = orbiting();
-      run(sim, 200);
-      const pirates = sim.pirateBase!;
-      const { x, y } = pirates;
-      delete (pirates as Partial<Poi>).orbitPhase;
-      delete (pirates as Partial<Poi>).orbitPeriod;
-      sim.step();
-      const step = Math.hypot(pirates.x - x, pirates.y - y);
-      expect(step).toBeLessThan(5);
-      expect(pirates.orbitPhase).toBeTypeOf("number");
-    });
   });
 
   it("does not let a very fast ship pass through the solid box", () => {

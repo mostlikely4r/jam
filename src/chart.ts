@@ -298,15 +298,8 @@ export class Chart {
     for (const poi of sim.allPois()) {
       if (!sim.chartSeenPoi(poi)) continue;
       ctx.strokeStyle = "rgba(160, 140, 120, 0.14)";
-      if (poi.orbits) {
-        // The designer's places: their one true orbit, as the designer draws it.
-        drawRings(poi.rings, poi);
-        continue;
-      }
-      if (poi.orbitRadius <= 0) continue;
-      const parent = poi.parent ? { x: poi.parent.x, y: poi.parent.y } : { x: 0, y: 0 };
-      const angle = Math.atan2(poi.y - parent.y, poi.x - parent.x);
-      ring(parent, poi.orbitRadius, angle, this.ringFound(sim, parent), poi.orbitEccentricity, poi.orbitPeriapsis);
+      // Every place's one true orbit, as the designer draws it.
+      if (poi.orbits) drawRings(poi.rings, poi);
     }
 
     // The bodies. Unfound ones stay dark: only their orbit arcs hint at them.

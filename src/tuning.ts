@@ -26,31 +26,11 @@ export const DEFAULTS = {
   flingChance: 0.3,
   flingOreAmount: 3,
 
-  /**
-   * For the pirate base: within the first distance of its edge, the nearest POI carries things
-   * fully. Beyond it, its share falls off evenly to nothing at the second. Infinity is the
-   * old way: the nearest POI carries everything, everywhere. Set by the system designer. Every
-   * other place has its own, in its spec.
-   */
-  pirateCarryFull: 2000,
-  pirateCarryNone: 6000,
+  /** Draws each place's carrying zones. Every place's own ranges are in its spec, from the layout. */
   showPoiZones: false,
   /** Loose ore this far from every POI's edge and every ship is gone for good. */
   oreForgetDistance: 6000,
-  /** The pirate base's turn, in radians, at time 0. */
-  pirateSpinPhase: 0,
 
-  /** How far beyond the first field's edge the pirate base sits. */
-  pirateBaseDistance: 4000,
-  pirateOrbitPeriod: 900,
-  /**
-   * How far the pirate base's orbit is from a circle (0 to 0.9), and the direction from its
-   * parent to the closest point, in radians. Set by the system designer. Its distance above is
-   * its semi-major axis, less the field's radius.
-   */
-  pirateEccentricity: 0,
-  piratePeriapsis: 0,
-  pirateRotationPeriod: 0,
   /** Whether a station rebuilds wrecked ships, when its spec doesn't say. A wreck goes to the nearest station that does. */
   stationShipyard: true,
   /** Cells of storage at a base whose spec doesn't say. The player's lockers and its store of whole modules come out of it. */

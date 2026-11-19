@@ -2,7 +2,7 @@ import { ShipDemo } from "./demo";
 import { Chart } from "./chart";
 import { HullDesigner } from "./designer/hulls";
 import { Designer } from "./designer/designer";
-import { shipMarks, useLayout, type GameLink } from "./designer/link";
+import { applyTo, shipMarks, useLayout, type GameLink } from "./designer/link";
 import { shippedWorld } from "./designer/shipped";
 import { layoutKey, loadGame, loadStart, saveGame, saveInfo, type SaveSlot, type StartFile } from "./save";
 import { stringifyWorld } from "./designer/world";
@@ -78,20 +78,10 @@ hud.hidden = !dev;
 const pauseBox = document.querySelector("#pause .box") as HTMLDivElement;
 /** The game's side of the layout: the designer writes through this, and so does the shipped world. */
 const gameLink: GameLink = {
-  tuning,
   clock: () => sim.now,
-  phases: () => sim.orbitPhases(),
   where: () => ({ ship: { x: sim.ship.x, y: sim.ship.y }, field: { x: sim.field.x, y: sim.field.y } }),
   ships: () => shipMarks(sim),
-  apply(phases, bodies, spawns, fields, stations, keep = false, anchors = []) {
-    sim.bodies = bodies;
-    sim.anchors = anchors;
-    sim.spawns = spawns;
-    sim.startPhases = phases;
-    sim.applyLayout(keep ? {} : phases, fields, stations);
-    saveTuning();
-    buildPanel();
-  },
+  apply: (layout) => applyTo(sim, layout),
 };
 /** Dev only: the hull designer, for moving, turning and sizing each hull's mounts. */
 const hullDesigner = dev
@@ -119,13 +109,10 @@ const designer = dev
     }, gameLink)
   : null;
 
-/**
- * Puts the layout into the game: the designer's in dev, the shipped one otherwise.
- * `keep`: the places carry on from where they are, as after loading a save.
- */
-function layOut(keep = false): void {
-  if (designer) designer.linkToGame(keep);
-  else useLayout(shippedWorld(), gameLink, keep);
+/** Puts the layout into the game: the designer's in dev, the shipped one otherwise. */
+function layOut(): void {
+  if (designer) designer.linkToGame();
+  else useLayout(shippedWorld(), gameLink);
 }
 
 function openDesigner(): void {
@@ -170,7 +157,7 @@ function ago(savedAt: number): string {
 function resumeFrom(slot: SaveSlot): boolean {
   if (!loadGame(sim, slot)) return false;
   // A save keeps its own tuning, but the places are laid out as the world is now.
-  layOut(true);
+  layOut();
   keys.clear();
   buildPanel();
   demos = [];
@@ -300,7 +287,7 @@ function restart(): void {
   const layout = layoutKey(designer ? designer.layoutText() : stringifyWorld(shippedWorld()));
   if (loadStart(sim, START, layout)) {
     // The places as they are at the start's clock, then a new ship for the player.
-    layOut(true);
+    layOut();
     sim.startPlayer();
   }
   buildPanel();

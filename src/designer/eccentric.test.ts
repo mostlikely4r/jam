@@ -4,7 +4,7 @@ import { homeSim } from "../home";
 import { linkTo } from "../profile/world";
 import { DOCK_OFFSET, Sim, TICK, bodyAt, orbitsAt } from "../sim";
 import { DEFAULTS } from "../tuning";
-import { anchorsFor, bodiesFor, fieldsFor, linkedNodes, stationsFor, spawnsFor, useLayout, writeGame } from "./link";
+import { anchorsFor, bodiesFor, fieldsFor, linkedNodes, pirateBaseFor, stationsFor, spawnsFor, useLayout } from "./link";
 import { closestApproach, copiesOf, copyPositions, makeChild, orbitShape, orbitSpeed, parseWorld, positions, seedWorld, stringifyWorld, walk, type World, type WorldNode } from "./world";
 
 /** The seeded system with an eccentric moon, field, station and anchor round the planet, and copies of the field. */
@@ -169,16 +169,17 @@ describe("eccentric orbits in the game", () => {
     }
   });
 
-  it("flies the first field and station on their ellipses like any, and the pirate base on its own by the tuning", () => {
+  it("flies the first field, station and pirate base on their ellipses, as their own orbits", () => {
     const world = seedWorld();
     const { field, station, pirates } = linkedNodes(world);
     Object.assign(field!, { eccentricity: 0.3, periapsisAngle: 40, rocks: 0 });
     Object.assign(station!, { eccentricity: 0.2, periapsisAngle: 100 });
     Object.assign(pirates!, { eccentricity: 0.1, periapsisAngle: 200 });
     const tuning = { ...DEFAULTS, testDrones: 0, pirates: 1 };
-    writeGame(world, tuning);
-    expect(tuning).toMatchObject({ pirateEccentricity: 0.1 });
-    // The field's and station's own ellipses come as their orbits, like any field's and station's.
+    // Each one's own ellipse comes as the last of its orbits.
+    const lair = pirateBaseFor(world)!.orbits.at(-1)!;
+    expect(lair.eccentricity).toBe(0.1);
+    expect(lair.periapsis).toBeCloseTo((200 * Math.PI) / 180, 9);
     const own = fieldsFor(world)[0].orbits.at(-1)!;
     expect(own.eccentricity).toBe(0.3);
     expect(own.periapsis).toBeCloseTo((40 * Math.PI) / 180, 9);

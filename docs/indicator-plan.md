@@ -157,9 +157,9 @@ unchanged while keeping them out of `ship.news`. They age with the same `newsLif
 
 ## Open (proposal, not decided)
 
-- **The hover tooltip on a canvas label.** `tooltip.ts` takes an `HTMLElement`. Either cache the
-  two arrow positions each frame and hit-test the mouse, or give the tooltip a rectangle to hang
-  off. Small, but it is the only part of "the full name on hover" that doesn't already exist.
+- ~~**The hover tooltip on a canvas label.**~~ **Built** (see *Built*): the renderer keeps the two
+  arrows' geometry for the frame it draws them in and hit-tests the mouse against the nose and
+  the word, then hands the point and the text to `canvasTip`.
 - **Which neutral colour `space` takes**, out of the ones already in `render.ts`.
 
 ## Tests
@@ -208,3 +208,17 @@ pass. Nothing in the layout changed, so `start.json` needed no re-warm.
   layout). So a loaded game keeps a pinned home, which is a base id, but not a destination:
   it reads as gone and the slot is empty. The plan's "no version bump" holds either way;
   re-linking a saved destination would need ids on places, which this change didn't take on.
+
+### The hover tooltip (asked for after the build, `d0b7e0f`)
+
+The open item at the top of this plan. `tooltip.ts` gained `canvasTip(anchor, content)`,
+called by the renderer every frame with the point the tip hangs off or null; it keeps the shared
+tip's state so an element tip and a canvas one never both show, and a frame that changes neither
+the words nor the point doesn't touch the page. The renderer's `drawPointer` now answers where an
+arrow's nose is and how wide its word is, and `arrowTip` hit-tests the mouse against those: on
+the arrow, or anywhere along the word. The mouse it tests is the one main.ts already tracks for
+the turret, passed into `draw` and withheld while the pause menu or the chart covers the view.
+
+`Pointer` gained `name`, the full name of what it points at (null for a spot in space, which has
+none, so nothing hovers off it), and `Sim.placeName` took over the chart's own `placeLabel` so
+the chart, the arrows and the news board use one set of names.

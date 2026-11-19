@@ -48,6 +48,12 @@ const WRECK_ORE_SPEED = 15;
 export const DOCK_OFFSET = STATION_HALF * 2;
 /** Far enough from the station's center to clear both boxes at any rotation. */
 export const STATION_REACH = 450;
+/** A deposit's size, for pointing at it and picking it: its ring around the middle. */
+export const DEPOSIT_REACH = 150;
+/** How many screens out the tutorial pair's arrows reach. A set indicator has no such limit. */
+const POINTER_SCREENS = 2;
+/** The items that are ore, until items have a type flag of their own (docs/items-plan.md). */
+const ORE_ITEMS: readonly string[] = ["oreB"];
 /** The station and dock together, along the station's own x axis. */
 const STATION_SHAPE_CENTER = DOCK_OFFSET / 2;
 const STATION_SHAPE_HALF = STATION_HALF + DOCK_OFFSET / 2;
@@ -86,6 +92,28 @@ export interface Body {
 }
 
 export type Faction = "pirate" | "defender";
+
+/**
+ * Something a pointer or the chart holds on to: a place, a deposit, a body, or a spot in space.
+ * The handles are live, so an arrow follows what it names round its orbit; a point never moves.
+ * A handle to something gone reads as nothing at all.
+ */
+export interface Target {
+  poi?: Poi;
+  deposit?: Deposit;
+  body?: SolidBody;
+  point?: { x: number; y: number };
+}
+
+/** Whether two targets are the same thing: one handle, or the same spot in space. */
+function sameTarget(a: Target | null, b: Target | null): boolean {
+  if (!a || !b) return false;
+  if (a.poi && b.poi) return a.poi === b.poi;
+  if (a.deposit && b.deposit) return a.deposit === b.deposit;
+  if (a.body && b.body) return a.body === b.body;
+  if (a.point && b.point) return a.point.x === b.point.x && a.point.y === b.point.y;
+  return false;
+}
 
 export interface Ship extends Body, Fitting {
   model: ShipModel;
@@ -145,8 +173,16 @@ export interface Ship extends Body, Fitting {
   pirateKilledAt: number | null;
   /** The field it was nearest when that happened: a `MiningField` id. */
   pirateKilledIn: string | null;
-  /** The base a defender belongs to, by id: it guards near there and is paid from there. Null: the first. */
+  /**
+   * The base a ship belongs to, by id: a defender guards near there and is paid from there, and
+   * the player's home arrow points there. Null: the nearest, which is the tutorial pair's station
+   * until the player sets an indicator, and no arrow at all once they have.
+   */
   home: string | null;
+  /** What the destination arrow points at, or null. A live handle: it follows what it names. */
+  destination: Target | null;
+  /** The field the ore aboard was mined in, for the news a sale puts up. Null: not mined. */
+  oreField: string | null;
   /** Seconds left before it explodes, once its hull has given out: out of control meanwhile. 0 while it's whole. */
   critical: number;
 }
@@ -463,6 +499,13 @@ export interface Report {
   item: PartId;
   price: number;
   seen: number;
+  /** The field ore news names, when this is news of ore rather than of a price. */
+  field?: string;
+}
+
+/** What makes two reports the same line: the base, the item, and for ore news the field. */
+function newsKey(report: Report): string {
+  return `${report.base} ${report.item} ${report.field ?? ""}`;
 }
 
 /**
@@ -667,6 +710,28 @@ export interface PoiReading {
   distance: number;
   /** Positive when the distance is shrinking. */
   closing: number;
+}
+
+/**
+ * What a target looks like when measuring how far it is outside the view: a circle round it, or
+ * a station's box, which is its solid part and its dock together along the station's own x axis.
+ */
+interface Outline {
+  x: number;
+  y: number;
+  /** How far it sticks out all round. Zero for a box, which `box` measures instead. */
+  radius: number;
+  /** Its own turn, which a box is measured in. */
+  rotation: number;
+  box?: { center: number; halfLength: number; halfWidth: number };
+}
+
+/** One arrow for something off screen: which slot it is, what it says, and what it points at. */
+export interface Pointer {
+  slot: "home" | "destination";
+  /** What the arrow says: `home`, or the kind of what the destination holds. */
+  label: string;
+  reading: PoiReading;
 }
 
 export interface Shot extends Body {
@@ -897,6 +962,11 @@ export class Sim {
   blackMarketTimer = 0;
   /** The ship most recently hit by a shot, if that was recent. */
   distress: { ship: Ship; age: number } | null = null;
+  /**
+   * Whether the player has set an indicator by hand. One bit for both slots: the first set takes
+   * the tutorial pair away for good, and clearing a slot later doesn't bring it back.
+   */
+  pointersManual = false;
   /** Seconds since the world began, for things that fade. */
   private clock = 0;
   /** How long the world ran before the player joined (see `warmUp`). */
@@ -996,6 +1066,7 @@ export class Sim {
     return {
       tuning: this.tuning,
       controls: this.controls,
+      pointersManual: this.pointersManual,
       ship: this.ship,
       drones: this.drones.map(pilot),
       traffic: this.traffic.map(pilot),
@@ -1066,7 +1137,7 @@ export class Sim {
     this.fighters.forEach((pilot, i) => (pilot.record = fighterRecords[i] ?? null));
     for (const battery of data.batteries as Battery[]) for (const guard of battery.guns) fill(guard.gun);
     const plain = [
-      "deposits", "batteries", "pirateOre",
+      "pointersManual", "deposits", "batteries", "pirateOre",
       "pirateCredits", "pirateCap", "blackMarket", "blackMarketTimer", "distress", "clock", "rocks",
       "shots", "ores", "loot", "down", "stats", "randomState", "lookState", "seed",
     ] as const;
@@ -1091,6 +1162,8 @@ export class Sim {
     this.randomState = { a: seed >>> 0 };
     this.lookState = { a: (seed ^ 0x5bd1e995) >>> 0 };
     this.chatter = new Chatter(seed);
+    // A new game starts on the tutorial pair.
+    this.pointersManual = false;
     this.rocks = [];
     this.sleeping = new Map();
     this.shots = [];
@@ -2195,6 +2268,8 @@ export class Sim {
       pirateKilledAt: null,
       pirateKilledIn: null,
       home: null,
+      destination: null,
+      oreField: null,
       critical: 0,
     };
   }
@@ -2827,6 +2902,7 @@ export class Sim {
     ship.earned += credits;
     if (ship.ore === 0) ship.trips++;
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
+    this.postOreNews(ship, this.projectBase(deposit));
     return amount;
   }
 
@@ -2837,6 +2913,7 @@ export class Sim {
     const credits = amount * this.tuning.depositSells;
     deposit.ore -= amount;
     ship.ore += amount;
+    ship.oreField = null;
     this.accountOf(ship).credits -= credits;
     const base = this.projectBase(deposit);
     if (base) base.account.credits += credits;
@@ -4072,38 +4149,134 @@ export class Sim {
   }
 
   /**
-   * Where a POI's marker should lead, how far until the POI's edge enters a view of
-   * the given half size in world units, and how fast that distance is closing.
+   * Where a target's marker should lead, how far until it enters a view of the given half size
+   * in world units, and how fast that distance is closing. Null when what it names is gone.
    * Closing speed comes from real positions, so it includes all carrying by POIs.
    */
-  readPoi(poi: Poi, viewHalfWidth: number, viewHalfHeight: number): PoiReading {
-    const { ship, tuning } = this;
-    const isStation = this.docks.includes(poi);
-    const gapToView = (shipX: number, shipY: number, x: number, y: number, rotation: number) => {
-      const cos = Math.cos(rotation);
-      const sin = Math.sin(rotation);
-      // A field is a circle. A station and its dock are a box, measured by its current extents.
-      const centerX = isStation ? x + cos * STATION_SHAPE_CENTER : x;
-      const centerY = isStation ? y + sin * STATION_SHAPE_CENTER : y;
-      const extentX = isStation ? Math.abs(cos) * STATION_SHAPE_HALF + Math.abs(sin) * STATION_HALF : 0;
-      const extentY = isStation ? Math.abs(sin) * STATION_SHAPE_HALF + Math.abs(cos) * STATION_HALF : 0;
-      const radius = isStation ? 0 : poi.reach;
-      const viewX = shipX + ship.vx * tuning.lookahead;
-      const viewY = shipY + ship.vy * tuning.lookahead;
-      const outX = Math.max(0, Math.abs(centerX - viewX) - viewHalfWidth - extentX);
-      const outY = Math.max(0, Math.abs(centerY - viewY) - viewHalfHeight - extentY);
-      return Math.hypot(outX, outY) - radius;
-    };
-    const gap = gapToView(ship.x, ship.y, poi.x, poi.y, poi.rotation);
-    const previousGap = gapToView(ship.px, ship.py, poi.px, poi.py, poi.prevRotation);
-    const leadX = isStation ? Math.cos(poi.rotation) * DOCK_OFFSET : 0;
-    const leadY = isStation ? Math.sin(poi.rotation) * DOCK_OFFSET : 0;
+  readTarget(target: Target, viewHalfWidth: number, viewHalfHeight: number): PoiReading | null {
+    const now = this.outlineOf(target, false);
+    const before = this.outlineOf(target, true);
+    if (!now || !before) return null;
+    const { ship } = this;
+    const gap = this.gapToView(now, ship.x, ship.y, viewHalfWidth, viewHalfHeight);
+    const previousGap = this.gapToView(before, ship.px, ship.py, viewHalfWidth, viewHalfHeight);
+    // A station's arrow points at its dock side, not at its middle.
+    const lead = now.box ? DOCK_OFFSET : 0;
     return {
-      dx: poi.x + leadX - ship.x,
-      dy: poi.y + leadY - ship.y,
+      dx: now.x + Math.cos(now.rotation) * lead - ship.x,
+      dy: now.y + Math.sin(now.rotation) * lead - ship.y,
       distance: Math.max(0, gap),
       closing: (previousGap - gap) / TICK,
     };
+  }
+
+  /**
+   * What a target looks like, now or on the tick before. A field is a circle its reach across, a
+   * deposit its ring, a body its radius, a point nothing at all, and a station the box of its
+   * solid part and its dock. Null when what it names is no longer in the world.
+   */
+  private outlineOf(target: Target, previous: boolean): Outline | null {
+    const { poi, deposit, body, point } = target;
+    if (point) return { x: point.x, y: point.y, radius: 0, rotation: 0 };
+    if (deposit) {
+      if (!this.deposits.includes(deposit)) return null;
+      return { x: previous ? deposit.px : deposit.x, y: previous ? deposit.py : deposit.y, radius: DEPOSIT_REACH, rotation: 0 };
+    }
+    if (body) {
+      if (!this.bodies.includes(body)) return null;
+      const at = bodyAt(body, previous ? this.clock - TICK : this.clock);
+      return { x: at.x, y: at.y, radius: body.radius, rotation: 0 };
+    }
+    if (!poi || !this.allPois().includes(poi)) return null;
+    const box = this.baseOf(poi) ? { center: STATION_SHAPE_CENTER, halfLength: STATION_SHAPE_HALF, halfWidth: STATION_HALF } : undefined;
+    return {
+      x: previous ? poi.px : poi.x,
+      y: previous ? poi.py : poi.y,
+      radius: box ? 0 : poi.reach,
+      rotation: previous ? poi.prevRotation : poi.rotation,
+      box,
+    };
+  }
+
+  /** How far an outline is outside the view, from where the ship is looking now or a tick ago. */
+  private gapToView(outline: Outline, shipX: number, shipY: number, viewHalfWidth: number, viewHalfHeight: number): number {
+    const { ship, tuning } = this;
+    const cos = Math.cos(outline.rotation);
+    const sin = Math.sin(outline.rotation);
+    const box = outline.box;
+    const centerX = box ? outline.x + cos * box.center : outline.x;
+    const centerY = box ? outline.y + sin * box.center : outline.y;
+    const extentX = box ? Math.abs(cos) * box.halfLength + Math.abs(sin) * box.halfWidth : 0;
+    const extentY = box ? Math.abs(sin) * box.halfLength + Math.abs(cos) * box.halfWidth : 0;
+    const viewX = shipX + ship.vx * tuning.lookahead;
+    const viewY = shipY + ship.vy * tuning.lookahead;
+    const outX = Math.max(0, Math.abs(centerX - viewX) - viewHalfWidth - extentX);
+    const outY = Math.max(0, Math.abs(centerY - viewY) - viewHalfHeight - extentY);
+    return Math.hypot(outX, outY) - outline.radius;
+  }
+
+  /**
+   * At most two arrows, for what the player has pointed at. Before any manual set they are the
+   * nearest field and the nearest station, worked out afresh so they move with the ship. After
+   * it they are the pins, and a slot that's been cleared has no arrow at all. Nothing already on
+   * screen is pointed at, and a destination in front hides a home pinned to the same place.
+   */
+  pointers(viewHalfWidth: number, viewHalfHeight: number): Pointer[] {
+    const { ship } = this;
+    const pointers: Pointer[] = [];
+    // Only the big places anyone knows about, and only once they're close. Manual arrows aren't
+    // held to that: a destination twenty minutes out is exactly when the arrow is wanted.
+    const limit = this.pointersManual ? Infinity : viewHalfWidth * 2 * POINTER_SCREENS;
+    const add = (slot: Pointer["slot"], target: Target, label: string): void => {
+      const reading = this.readTarget(target, viewHalfWidth, viewHalfHeight);
+      if (!reading || reading.distance <= 0 || reading.distance >= limit) return;
+      pointers.push({ slot, label, reading });
+    };
+    // The nearest field and station, so there's always somewhere to mine and to sell.
+    const destination: Target | null = this.pointersManual ? ship.destination : { poi: this.miningFieldAt(ship.x, ship.y).poi };
+    const home: Target | null = this.pointersManual ? this.homeTarget() : { poi: this.nearestDock(ship.x, ship.y) };
+    if (destination) add("destination", destination, this.kindOf(destination));
+    if (home && !sameTarget(home, destination)) add("home", home, "home");
+    return pointers;
+  }
+
+  /** The base the player has pinned as home, or null. A base that's gone leaves no arrow. */
+  private homeTarget(): Target | null {
+    const base = this.bases.find((each) => each.id === this.ship.home);
+    return base ? { poi: base.poi } : null;
+  }
+
+  /** What a target is, in the words the game uses for it: a destination arrow's label. */
+  kindOf(target: Target): string {
+    if (target.point) return "space";
+    if (target.deposit) return "deposit";
+    if (target.body) return target.body.kind;
+    return target.poi ? target.poi.name : "space";
+  }
+
+  /** Whether the destination is this thing. */
+  holdsDestination(target: Target | null): boolean {
+    return sameTarget(this.ship.destination, target);
+  }
+
+  /**
+   * Points the destination at something, or at nothing. Either way the tutorial pair is gone:
+   * the player aims these now.
+   */
+  setDestination(target: Target | null): void {
+    this.ship.destination = target;
+    this.pointersManual = true;
+  }
+
+  /** Points the destination at a target, or clears it when it already holds it. */
+  toggleDestination(target: Target): void {
+    this.setDestination(this.holdsDestination(target) ? null : target);
+  }
+
+  /** Pins a base as home, or clears it when it's already home. Either way the tutorial pair is gone. */
+  toggleHome(baseId: string): void {
+    this.ship.home = this.ship.home === baseId ? null : baseId;
+    this.pointersManual = true;
   }
 
   /** Direction to another ship, how far until it comes into view, and how fast that's closing. */
@@ -4371,7 +4544,7 @@ export class Sim {
     if (record.goal === "field") {
       // A pirate's load is mined.
       const want = Math.max(0, this.deliveryLoad(ship) - ship.ore);
-      ship.ore += Math.min(want, Math.floor(this.takeOre(record.target, want) + 1e-9));
+      ship.ore += Math.min(want, Math.floor(this.takeOre(ship, record.target, want) + 1e-9));
       this.nextLegAfter(pilot, due, ship.ore > 0);
       return;
     }
@@ -4413,7 +4586,7 @@ export class Sim {
     const { ship } = pilot;
     if (record.stage === "mining" && ship.faction === "pirate") {
       const want = this.mined(pilot);
-      if (want > 0) ship.ore += Math.min(want, Math.floor(this.takeOre(record.target, want) + 1e-9));
+      if (want > 0) ship.ore += Math.min(want, Math.floor(this.takeOre(ship, record.target, want) + 1e-9));
     }
     pilot.record = null;
     pilot.wake();
@@ -4535,7 +4708,7 @@ export class Sim {
     }
     if (record.goal === "field") {
       const want = Math.max(0, this.deliveryLoad(ship) - ship.ore);
-      ship.ore += Math.min(want, Math.floor(this.takeOre(record.target, want) + 1e-9));
+      ship.ore += Math.min(want, Math.floor(this.takeOre(ship, record.target, want) + 1e-9));
       // Mined out before the hold was full: home with what it has, or with nothing, back to the field by its own base.
       if (ship.ore === 0) pilot.working = this.ownField(ship).id;
       else if (ship.ore < this.deliveryLoad(ship)) pilot.startHauling();
@@ -4599,7 +4772,7 @@ export class Sim {
    * Breaks rocks in a field until they've given about `want` ore on average, as mining
    * them would, and returns how much they gave. Fewer if the field runs out.
    */
-  private takeOre(fieldId: string, want: number): number {
+  private takeOre(ship: Ship, fieldId: string, want: number): number {
     const sleeping = this.sleeping.get(fieldId);
     if (sleeping) this.freshen(sleeping);
     const rocks = sleeping ? sleeping.rocks : this.rocks;
@@ -4626,6 +4799,8 @@ export class Sim {
         rocks.push(this.makeRock(rock.tier - 1, rock.x + Math.cos(dir) * offset, rock.y + Math.sin(dir) * offset, rock.vx, rock.vy));
       }
     }
+    // The ore aboard comes from this field, for the news a sale puts up.
+    if (given > 0) ship.oreField = fieldId;
     return given;
   }
 
@@ -4681,7 +4856,7 @@ export class Sim {
       const span = record.arrive - record.depart;
       const share = span > 0 && Number.isFinite(span) ? Math.max(0, (this.clock - record.depart) / span) : 0;
       const want = Math.floor(share * Math.max(0, this.deliveryLoad(ship) - ship.ore));
-      if (want > 0) ship.ore += Math.min(want, Math.floor(this.takeOre(record.target, want) + 1e-9));
+      if (want > 0) ship.ore += Math.min(want, Math.floor(this.takeOre(ship, record.target, want) + 1e-9));
     }
     pilot.record = null;
     ship.px = ship.x;
@@ -5833,6 +6008,7 @@ export class Sim {
     const credits = amount * this.tuning.depositSells;
     this.pirateOre -= amount;
     ship.ore += amount;
+    ship.oreField = null;
     this.accountOf(ship).credits -= credits;
     this.pirateCredits += credits;
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
@@ -6175,6 +6351,11 @@ export class Sim {
     return base?.spec.name ?? id;
   }
 
+  /** A field's name, as the news board and the chart show it. */
+  fieldName(id: string): string {
+    return this.extraFields.find((extra) => extra.spec.id === id)?.spec.name || "Field";
+  }
+
   /**
    * Once per stay in a dock, a ship and the dock's board tell each other what they know:
    * each keeps the newest word on every base and item, and both drop what's too old. The
@@ -6198,25 +6379,25 @@ export class Sim {
     }));
     const newest = new Map<string, Report>();
     const oldest = this.clock - this.tuning.newsLife;
-    const keyOf = (report: Report) => `${report.base} ${report.item}`;
-    const known = new Set(base.board.filter((report) => report.seen >= oldest).map(keyOf));
-    const heard = new Set(ship.news.filter((report) => report.seen >= oldest).map(keyOf));
+    const known = new Set(base.board.filter((report) => report.seen >= oldest).map(newsKey));
+    const heard = new Set(ship.news.filter((report) => report.seen >= oldest).map(newsKey));
     for (const report of [...base.board, ...ship.news, ...own]) {
       if (report.seen < oldest) continue;
-      const key = keyOf(report);
+      const key = newsKey(report);
       const before = newest.get(key);
       if (!before || report.seen > before.seen) newest.set(key, report);
     }
     // Word of a base that's gone goes with it.
     const merged = [...newest.values()].filter((report) => this.bases.some((each) => each.id === report.base));
     // Word the board had none of, from another base: whoever brought it says so on the radio.
-    const brought = merged.filter((report) => report.base !== base.id && !known.has(keyOf(report)));
+    const brought = merged.filter((report) => report.base !== base.id && !known.has(newsKey(report)));
     if (brought.length > 0 && ship !== this.ship && this.tuning.chatter) this.chatter.newsBrought(this, ship, base, brought);
     // Word the player hadn't heard, from another base: the station tells them as they dock.
-    const told = merged.filter((report) => report.base !== base.id && !heard.has(keyOf(report)));
+    const told = merged.filter((report) => report.base !== base.id && !heard.has(newsKey(report)));
     if (told.length > 0 && ship === this.ship && this.tuning.chatter) this.chatter.newsForPlayer(this, base, told);
     base.board = merged;
-    ship.news = [...merged];
+    // Ore news stays where it was sold: it's the board's, never a ship's to carry on.
+    ship.news = merged.filter((report) => !report.field);
   }
 
   /** Ore turns into credits one piece at a time while in the dock. */
@@ -6228,9 +6409,11 @@ export class Sim {
       return;
     }
     ship.unloadTimer += dt;
+    let sold = false;
     while (ship.unloadTimer >= UNLOAD_SECONDS && ship.ore > keep) {
       ship.unloadTimer -= UNLOAD_SECONDS;
       ship.ore--;
+      sold = true;
       if (ship.oreBlocks.length > 0) this.trimBlocks(ship);
       if (ship.faction === "pirate") {
         this.pirateOre++;
@@ -6244,6 +6427,25 @@ export class Sim {
       ship.earned += this.tuning.creditsPerOre;
       this.events.push({ type: "sale", x: ship.x, y: ship.y });
       if (ship.ore === 0) ship.trips++;
+    }
+    if (sold) this.postOreNews(ship, this.serviceBase(ship));
+  }
+
+  /**
+   * A sale puts up word of the field the ore was mined in, one line per ore that field drops:
+   * the same line however often the ore comes in. Other ships' sales only: a player's own
+   * mining isn't news.
+   */
+  private postOreNews(ship: Ship, base: Base | null): void {
+    const { oreField } = ship;
+    if (!base || !oreField || !this.traffic.some((pilot) => pilot.ship === ship)) return;
+    const drops = this.extraFields.find((extra) => extra.spec.id === oreField)?.spec.drops ?? [];
+    for (const { item } of drops) {
+      if (!ORE_ITEMS.includes(item)) continue;
+      const report: Report = { base: base.id, item: item as PartId, price: 0, seen: this.clock, field: oreField };
+      const at = base.board.findIndex((each) => newsKey(each) === newsKey(report));
+      if (at >= 0) base.board[at] = report;
+      else base.board.push(report);
     }
   }
 
@@ -6369,6 +6571,8 @@ export class Sim {
       if (segment === null) return true;
       const taken = Math.min(ore.amount, room);
       ship.ore += taken;
+      // The ore aboard comes from the field it was picked up in, for the news a sale puts up.
+      if (taken > 0) ship.oreField = this.miningFieldAt(ship.x, ship.y).id;
       if (taken < ore.amount) {
         // What doesn't fit stays out there.
         ore.amount -= taken;

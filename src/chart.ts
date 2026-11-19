@@ -1,17 +1,14 @@
 import { orbitEllipse } from "./kepler";
-import { bodyAt, orbitsAt, type Deposit, type OrbitRing, type Poi, type Sim, type SolidBody } from "./sim";
+import { bodyAt, DEPOSIT_REACH, orbitsAt, type OrbitRing, type Poi, type Sim, type Target } from "./sim";
 
 /**
  * The system chart, the starmap part's view of the whole world at once. A top-down map of
  * bodies on their orbits and every place, live: it redraws each frame while it's open, and
- * the world keeps running behind it. Wheel zooms, drag pans, a click picks, and with the
- * autopilot fitted Enter sets a course for the pick.
+ * the world keeps running behind it. Wheel zooms, drag pans, a click picks, and a right click
+ * opens a short menu: a course, or one of the player's two indicators.
  */
 
-export interface ChartPick {
-  poi?: Poi;
-  deposit?: Deposit;
-  body?: SolidBody;
+export interface ChartPick extends Target {
   /** What it is, in the words the game uses. */
   kind: string;
   /** What it's called on the chart. */
@@ -20,6 +17,12 @@ export interface ChartPick {
   place: boolean;
   /** Rough world size, for the pick ring. */
   radius: number;
+}
+
+/** A line of the right-click menu, and what it sets going. */
+interface MenuRow {
+  text: string;
+  run: () => void;
 }
 
 export class Chart {
@@ -32,6 +35,8 @@ export class Chart {
   isOpen = false;
   private pick: ChartPick | null = null;
   private drag: { x: number; y: number; moved: boolean } | null = null;
+  /** The right-click menu, when one is open. */
+  private menu: HTMLDivElement | null = null;
 
   constructor(private readonly sim: Sim) {}
 
@@ -49,6 +54,7 @@ export class Chart {
 
   close(): void {
     this.isOpen = false;
+    this.closeMenu();
     if (this.canvas) this.canvas.style.display = "none";
   }
 
@@ -93,6 +99,8 @@ export class Chart {
       this.zoomAt(event.clientX, event.clientY, zoom);
     });
     canvas.addEventListener("pointerdown", (event) => {
+      // A click anywhere on the chart shuts a menu that's open.
+      this.closeMenu();
       if (event.button !== 0) return;
       canvas.setPointerCapture(event.pointerId);
       this.drag = { x: event.clientX, y: event.clientY, moved: false };
@@ -114,12 +122,7 @@ export class Chart {
     });
     canvas.addEventListener("contextmenu", (event) => {
       event.preventDefault();
-      // Click to move: a straight line to the spot, with no avoiding anything on the way.
-      const { cx, cy, scale } = this.view;
-      this.sim.orderMoveStraight(
-        cx + (event.clientX - window.innerWidth / 2) / scale,
-        cy + (event.clientY - window.innerHeight / 2) / scale,
-      );
+      this.openMenu(event.clientX, event.clientY);
     });
     window.addEventListener("resize", () => this.resize());
   }
@@ -150,16 +153,15 @@ export class Chart {
     const picks: ChartPick[] = [];
     for (const poi of sim.allPois()) {
       if (!sim.chartSeenPoi(poi)) continue;
-      picks.push({ poi, kind: poi.name, label: this.placeLabel(sim, poi), place: true, radius: poi.reach });
-    }
+      picks.push({ poi, kind: sim.kindOf({ poi }), label: this.placeLabel(sim, poi), place: true, radius: poi.reach });    }
     if (sim.discovered.has("deposit")) {
       for (const deposit of sim.deposits) {
-        picks.push({ deposit, kind: "field deposit", label: "Deposit", place: true, radius: 150 });
+        picks.push({ deposit, kind: sim.kindOf({ deposit }), label: "Deposit", place: true, radius: DEPOSIT_REACH });
       }
     }
     for (const body of sim.bodies) {
       if (!sim.chartSeenBody(body)) continue;
-      picks.push({ body, kind: body.kind, label: body.name, place: false, radius: body.radius });
+      picks.push({ body, kind: sim.kindOf({ body }), label: body.name, place: false, radius: body.radius });
     }
     return picks;
   }
@@ -197,8 +199,8 @@ export class Chart {
     return bodyAt(pick.body!, this.sim.now);
   }
 
-  /** Picks whatever's nearest the click, in screen pixels. Nothing: let go of the pick. */
-  private pickAt(clientX: number, clientY: number): void {
+  /** What's nearest the click, in screen pixels, or nothing at all. */
+  private pickNear(clientX: number, clientY: number): ChartPick | null {
     const { cx, cy, scale } = this.view;
     const { innerWidth: width, innerHeight: height } = window;
     const at = (x: number, y: number): { x: number; y: number } => ({
@@ -216,7 +218,84 @@ export class Chart {
         bestPixels = pixels;
       }
     }
-    this.pick = best;
+    return best;
+  }
+
+  /** Picks whatever's nearest the click. Nothing: let go of the pick. */
+  private pickAt(clientX: number, clientY: number): void {
+    this.pick = this.pickNear(clientX, clientY);
+  }
+
+  /** The world point under the cursor. */
+  private worldAt(clientX: number, clientY: number): { x: number; y: number } {
+    const { cx, cy, scale } = this.view;
+    return { x: cx + (clientX - window.innerWidth / 2) / scale, y: cy + (clientY - window.innerHeight / 2) / scale };
+  }
+
+  /**
+   * The right click: a short menu for what it landed on, or, with nothing there to pick, the
+   * destination set to that spot in space. Left click keeps picking, so looking around the
+   * system costs nothing.
+   */
+  private openMenu(clientX: number, clientY: number): void {
+    this.closeMenu();
+    const pick = this.pickNear(clientX, clientY);
+    const at = this.worldAt(clientX, clientY);
+    if (!pick) {
+      this.sim.toggleDestination({ point: at });
+      return;
+    }
+    const menu = document.createElement("div");
+    menu.id = "chartmenu";
+    for (const row of this.menuRows(pick, at)) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = row.text;
+      button.addEventListener("click", () => {
+        this.closeMenu();
+        row.run();
+      });
+      menu.append(button);
+    }
+    document.body.append(menu);
+    // Keeps the whole menu on the screen, wherever the click was.
+    const box = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - box.width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(clientY, window.innerHeight - box.height - 8))}px`;
+    this.menu = menu;
+  }
+
+  private closeMenu(): void {
+    this.menu?.remove();
+    this.menu = null;
+  }
+
+  /** What a right click can do here: fly the spot, or point one of the player's indicators at what was picked. */
+  private menuRows(pick: ChartPick, at: { x: number; y: number }): MenuRow[] {
+    const { sim } = this;
+    const target = this.targetOf(pick);
+    const base = pick.poi ? sim.baseOf(pick.poi) : null;
+    const rows: MenuRow[] = [];
+    // Click to move: a straight line to the spot, with no avoiding anything on the way.
+    if (sim.ship.parts.has("clickMove")) rows.push({ text: "Move here", run: () => sim.orderMoveStraight(at.x, at.y) });
+    rows.push({
+      text: sim.holdsDestination(target) ? "Clear destination" : "Set destination",
+      run: () => sim.toggleDestination(target),
+    });
+    if (base) {
+      rows.push({
+        text: sim.ship.home === base.id ? "Clear home" : "Set home",
+        run: () => sim.toggleHome(base.id),
+      });
+    }
+    return rows;
+  }
+
+  /** The pick as the thing an indicator holds: one handle, and nothing else. */
+  private targetOf(pick: ChartPick): Target {
+    if (pick.poi) return { poi: pick.poi };
+    if (pick.deposit) return { deposit: pick.deposit };
+    return { body: pick.body };
   }
 
   draw(sim: Sim): void {
@@ -453,7 +532,7 @@ export class Chart {
     };
     const { innerHeight: height } = window;
     const left = 14;
-    line("System chart - wheel: zoom, drag: pan, click: pick, right click: fly there, C or Esc: close", left, height - 14, "rgba(150, 158, 170, 0.9)");
+    line("System chart - wheel: zoom, drag: pan, click: pick, right click: menu, C or Esc: close", left, height - 14, "rgba(150, 158, 170, 0.9)");
     const pick = this.pick;
     if (!pick) return;
     const at = this.positionOf(pick);

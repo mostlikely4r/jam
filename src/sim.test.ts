@@ -1239,14 +1239,17 @@ describe("overlapping rocks", () => {
 });
 
 describe("POI readings", () => {
+  /** The reading for a place: these tests only read places that are in the world. */
+  const reading = (sim: Sim, poi: Poi, viewHalfWidth: number, viewHalfHeight: number) => sim.readTarget({ poi }, viewHalfWidth, viewHalfHeight)!;
+
   it("measures the field until its edge enters the view", () => {
     const sim = emptySim();
     sim.ship.x = HOME.fieldRadius + 400 + 1000;
-    expect(sim.readPoi(sim.field, 400, 300).distance).toBeCloseTo(1000, 5);
+    expect(reading(sim, sim.field, 400, 300).distance).toBeCloseTo(1000, 5);
     sim.ship.x = HOME.fieldRadius + 400;
-    expect(sim.readPoi(sim.field, 400, 300).distance).toBe(0);
+    expect(reading(sim, sim.field, 400, 300).distance).toBe(0);
     sim.ship.x = 100;
-    expect(sim.readPoi(sim.field, 400, 300).distance).toBe(0);
+    expect(reading(sim, sim.field, 400, 300).distance).toBe(0);
   });
 
   it("measures the station until its nearest side enters the view", () => {
@@ -1254,11 +1257,11 @@ describe("POI readings", () => {
     const dockSide = DOCK_OFFSET + STATION_HALF;
     sim.ship.y = sim.station.y;
     sim.ship.x = sim.station.x + dockSide + 400 + 1000;
-    expect(sim.readPoi(sim.station, 400, 300).distance).toBeCloseTo(1000, 5);
+    expect(reading(sim, sim.station, 400, 300).distance).toBeCloseTo(1000, 5);
     sim.ship.x = sim.station.x + dockSide + 400;
-    expect(sim.readPoi(sim.station, 400, 300).distance).toBe(0);
+    expect(reading(sim, sim.station, 400, 300).distance).toBe(0);
     sim.ship.x = sim.station.x - STATION_HALF - 400 - 1000;
-    expect(sim.readPoi(sim.station, 400, 300).distance).toBeCloseTo(1000, 5);
+    expect(reading(sim, sim.station, 400, 300).distance).toBeCloseTo(1000, 5);
   });
 
   it("follows the station's rotation when measuring its sides", () => {
@@ -1266,22 +1269,22 @@ describe("POI readings", () => {
     sim.station.rotation = Math.PI / 2;
     sim.ship.x = sim.station.x;
     sim.ship.y = sim.station.y + DOCK_OFFSET + STATION_HALF + 300 + 500;
-    expect(sim.readPoi(sim.station, 400, 300).distance).toBeCloseTo(500, 5);
+    expect(reading(sim, sim.station, 400, 300).distance).toBeCloseTo(500, 5);
   });
 
   it("measures zero once docked", () => {
     const sim = emptySim();
     sim.ship.x = sim.station.x + DOCK_OFFSET;
     sim.ship.y = sim.station.y;
-    expect(sim.readPoi(sim.station, 400, 300).distance).toBe(0);
+    expect(reading(sim, sim.station, 400, 300).distance).toBe(0);
   });
 
   it("uses the width and height of the view", () => {
     const sim = emptySim();
     sim.ship.x = sim.station.x;
     sim.ship.y = sim.station.y + STATION_HALF + 700;
-    expect(sim.readPoi(sim.station, 400, 300).distance).toBeCloseTo(400, 5);
-    expect(sim.readPoi(sim.station, 300, 700).distance).toBe(0);
+    expect(reading(sim, sim.station, 400, 300).distance).toBeCloseTo(400, 5);
+    expect(reading(sim, sim.station, 300, 700).distance).toBe(0);
   });
 
   it("reports closing speed as positive when approaching", () => {
@@ -1290,10 +1293,10 @@ describe("POI readings", () => {
     sim.ship.x = 3000;
     sim.ship.vx = -100;
     sim.step();
-    expect(sim.readPoi(sim.field, 0, 0).closing).toBeCloseTo(100, 3);
+    expect(reading(sim, sim.field, 0, 0).closing).toBeCloseTo(100, 3);
     sim.ship.vx = 100;
     sim.step();
-    expect(sim.readPoi(sim.field, 0, 0).closing).toBeCloseTo(-100, 3);
+    expect(reading(sim, sim.field, 0, 0).closing).toBeCloseTo(-100, 3);
   });
 
   it("reads no closing speed while carried by that POI", () => {
@@ -1301,7 +1304,7 @@ describe("POI readings", () => {
     sim.ship.x = sim.station.x + DOCK_OFFSET;
     sim.ship.y = sim.station.y;
     run(sim, 5);
-    expect(sim.readPoi(sim.station, 0, 0).closing).toBeCloseTo(0, 3);
+    expect(reading(sim, sim.station, 0, 0).closing).toBeCloseTo(0, 3);
   });
 
   it("includes the POI's own motion in closing speed", () => {
@@ -1312,8 +1315,8 @@ describe("POI readings", () => {
     sim.ship.y = 0;
     sim.step();
     const stationSpeed = (2 * Math.PI * (homeOf(sim).fieldRadius + homeOf(sim).stationDistance)) / 60;
-    expect(Math.abs(sim.readPoi(sim.station, 0, 0).closing)).toBeGreaterThan(0);
-    expect(Math.abs(sim.readPoi(sim.station, 0, 0).closing)).toBeLessThan(stationSpeed);
+    expect(Math.abs(reading(sim, sim.station, 0, 0).closing)).toBeGreaterThan(0);
+    expect(Math.abs(reading(sim, sim.station, 0, 0).closing)).toBeLessThan(stationSpeed);
   });
 });
 

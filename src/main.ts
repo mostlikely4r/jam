@@ -341,7 +341,8 @@ const HELP: [string, HelpLine[]][] = [
     [
       ["C", "The chart: what you've found so far", has("starmap")],
       ["C: wheel / drag", "Zoom / pan the chart", has("starmap")],
-      ["C: right click", "Fly a straight line there", has("starmap") && has("clickMove")],
+      ["C: right click", "Menu: move there, or point home or the destination at what you picked", has("starmap")],
+      ["C: right click space", "Point the destination at that spot", has("starmap")],
       ["C: pick a place, Enter", "Autopilot flies the course", has("autopilot")],
       ["Flight keys", "Take over from the autopilot; it resumes when you let go", has("autopilot")],
     ],
@@ -753,7 +754,7 @@ function updateShop(): void {
   }
   if (!docked) shopOpen = false;
   const locker = base ? sim.lockerAt(base) : null;
-  const state = `${shopOpen} ${sim.buyRefused} ${ship.ore} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${sim.hub.size} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()}`;
+  const state = `${shopOpen} ${sim.buyRefused} ${ship.ore} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.home} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${sim.hub.size} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked || !shopOpen;
@@ -775,6 +776,16 @@ function updateShop(): void {
     open.blur();
   });
   shop.append(open);
+  // The one way to set an indicator from the dock: press again at the base it names to clear it.
+  const pinned = ship.home === base.id;
+  const pin = document.createElement("button");
+  pin.className = "small";
+  pin.textContent = pinned ? "Unpin as home" : "Pin as home";
+  pin.addEventListener("click", () => {
+    sim.toggleHome(base.id);
+    pin.blur();
+  });
+  shop.append(pin);
 
   // The grid: one cell per item, no text, under category headers in the plan's order.
   const grid = document.createElement("div");
@@ -833,24 +844,31 @@ function stationCells(): HTMLButtonElement[] {
   ];
 }
 
+/** One line of the dock's board: what it says, and the field an ore line names for the click. */
+interface NewsLine {
+  text: string;
+  field?: string;
+}
+
 /** The dock's news board, newest first: what's sold where, at what price, and how long ago it was seen. */
-function newsLines(): string[] {
+function newsLines(): NewsLine[] {
   const base = sim.baseAt();
   if (!base) return [];
   return [...base.board]
     .sort((a, b) => b.seen - a.seen)
     .map((report) => {
       const item = PARTS.find((part) => part.id === report.item)?.label ?? report.item;
+      if (report.field) return { text: `${item} mined in ${sim.fieldName(report.field)}`, field: report.field };
       const where = report.base === base.id ? "here" : `at ${sim.baseName(report.base)}`;
       const minutes = Math.floor((sim.now - report.seen) / 60);
       const age = minutes < 1 ? "just now" : minutes < 120 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ago`;
-      return `${item} ${where}, ${report.price} credits, seen ${age}`;
+      return { text: `${item} ${where}, ${report.price} credits, seen ${age}` };
     });
 }
 
 /** Changes when the board does, or a minute passes, so the ages stay right. */
 function newsState(): string {
-  return `${newsLines().join("|")}`;
+  return newsLines().map((line) => line.text).join("|");
 }
 
 function appendNews(): void {
@@ -867,10 +885,26 @@ function appendNews(): void {
     return;
   }
   for (const line of lines) {
-    const item = document.createElement("p");
-    item.className = "news";
-    item.textContent = line;
-    shop.append(item);
+    if (!line.field) {
+      const item = document.createElement("p");
+      item.className = "news";
+      item.textContent = line.text;
+      shop.append(item);
+      continue;
+    }
+    // An ore line is a button: it points the destination at the field it names.
+    const ore = document.createElement("button");
+    ore.type = "button";
+    ore.className = "ore";
+    ore.textContent = line.text;
+    const field = sim.miningFields().find((each) => each.id === line.field);
+    if (field) {
+      ore.addEventListener("click", () => {
+        sim.toggleDestination({ poi: field.poi });
+        ore.blur();
+      });
+    } else ore.disabled = true;
+    shop.append(ore);
   }
 }
 

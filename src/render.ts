@@ -33,9 +33,20 @@ const PING_SECONDS = 1.4;
 /** After a wreck the view stays on it, fades to black, and fades back in on the rebuilt ship. */
 const WRECK_WATCH_SECONDS = 2;
 const WRECK_FADE_SECONDS = 0.4;
-/** Cargo lumps drawn on a ship when its hold is full. */
-/** A pointer to a place only shows within this many screen widths of it. */
-const POINTER_SCREENS = 2;
+/** The colour of a destination arrow, by the kind of thing pinned. `space` is the neutral one. */
+const POINTER_COLORS: Record<string, string> = {
+  field: "#8fb4ff",
+  station: "#8fe3a1",
+  "pirate base": "#d06a5a",
+  deposit: "#d8a860",
+  planet: "#6a90c8",
+  star: "#e8c860",
+  space: "#a8adb8",
+};
+const POINTER_NEUTRAL = "#a8adb8";
+/** The full-hold flash: the station arrow saying come and sell. */
+const POINTER_HOME_FLASH = "#f4fff6";
+const POINTER_HOME = "#8fe3a1";
 /** A ping from off screen: how long it shows, how deep it reaches in and how much of the edge it covers, as shares of the screen, and how far off its direction may be. */
 const EDGE_PING_SECONDS = 2;
 const EDGE_PING_DEPTH = 0.1;
@@ -1392,24 +1403,17 @@ export class Renderer {
     ctx.fill();
   }
 
-  /** A marker for each POI, until it comes into view. */
+  /** The two indicators, home and destination, and then a marker for each of the dev's own. */
   private drawPointers(sim: Sim, width: number, height: number, scale: number, dpr: number): void {
     const viewHalfWidth = width / 2 / scale;
     const viewHalfHeight = height / 2 / scale;
     const meters = sim.ship.parts.has("meters");
-    // Only the big places anyone knows about, and only once they're close.
-    const near = viewHalfWidth * 2 * POINTER_SCREENS;
-    // The nearest field and station, so there's always somewhere to mine and to sell.
-    const field = sim.readPoi(sim.miningFieldAt(sim.ship.x, sim.ship.y).poi, viewHalfWidth, viewHalfHeight);
-    if (field.distance > 0 && (field.distance < near || this.dev)) {
-      this.drawPointer(field, "#8fb4ff", "field", 0.34, meters, width, height, dpr);
-    }
-    const station = sim.readPoi(sim.nearestDock(sim.ship.x, sim.ship.y), viewHalfWidth, viewHalfHeight);
-    if (station.distance > 0 && (station.distance < near || this.dev)) {
-      // It flashes once the hold is full: time to go and sell.
-      const full = sim.ship.ore >= sim.cargoSpace(sim.ship);
+    for (const { slot, label, reading } of sim.pointers(viewHalfWidth, viewHalfHeight)) {
+      // Home flashes once the hold is full: the arrow saying come and sell, home or far from it.
+      const full = slot === "home" && sim.ship.ore >= sim.cargoSpace(sim.ship);
       const lit = full && Math.floor(performance.now() / 350) % 2 === 0;
-      this.drawPointer(station, lit ? "#f4fff6" : "#8fe3a1", "station", 0.22, meters, width, height, dpr);
+      const color = slot === "home" ? (lit ? POINTER_HOME_FLASH : POINTER_HOME) : (POINTER_COLORS[label] ?? POINTER_NEUTRAL);
+      this.drawPointer(reading, color, label, slot === "home" ? 0.22 : 0.34, meters, width, height, dpr);
     }
     if (!this.dev) return;
     for (let i = 0; i < sim.drones.length; i++) {

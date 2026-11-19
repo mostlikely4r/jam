@@ -5,7 +5,7 @@
  * what it says it does. Each reports what it did, with trip times where they matter.
  *
  * Run with: npm run layout -- <recipe>             report only
- *           npm run layout -- <recipe> --ship      write the shipped world (src/designer/world.json)
+ *           npm run layout -- <recipe> --ship      write the shipped world (src/designer/world.json) and re-warm the start
  *           npm run layout -- <recipe> --save name write src/designer/layouts/name.json
  */
 import { linkedNodes } from "./link";

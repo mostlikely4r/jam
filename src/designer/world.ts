@@ -435,12 +435,37 @@ export function parseWorld(text: string): World | null {
   }
 }
 
+/**
+ * The order a node's keys are written in: the order `parseWorld` reads them. Fixed, so saving
+ * a layout changes only the lines that changed, however the node was made.
+ */
+const NODE_KEYS: (keyof WorldNode)[] = [
+  "id", "name", "kind", "radius", "surface", "pull", "pullFull", "pullAccel", "atmosphere", "burnSpeed",
+  "rocks", "rockDrift", "rockInflow", "carryFull", "carryNone", "spawns", "shipyard", "storage", "blueprints", "drops", "items",
+  "count", "angleVariance", "orbitVariance", "orbitRadius", "eccentricity", "periapsisAngle", "orbitPeriod", "orbitPhase",
+  "spinPeriod", "spinPhase", "children",
+];
+
+/** A node's keys in the fixed order, then anything else it carries, as it came. */
+function ordered(node: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of NODE_KEYS) if (key in node) out[key] = node[key];
+  for (const key of Object.keys(node)) if (!(key in out)) out[key] = node[key];
+  return out;
+}
+
 export function stringifyWorld(world: World): string {
   // A spin start angle of 0, and a circular orbit, are left out, so layouts from before they existed read and save the same.
   const left = ["spinPhase", "eccentricity", "periapsisAngle"];
   // So are no drops and no starting items, for the same reason.
   const lists = ["drops", "items"];
-  return JSON.stringify(world, (key, value) => ((left.includes(key) && value === 0) || (lists.includes(key) && Array.isArray(value) && value.length === 0) ? undefined : value), 2) + "\n";
+  const isNode = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value) && "kind" in value && "children" in value;
+  const replacer = (key: string, value: unknown) => {
+    if ((left.includes(key) && value === 0) || (lists.includes(key) && Array.isArray(value) && value.length === 0)) return undefined;
+    return isNode(value) ? ordered(value) : value;
+  };
+  return JSON.stringify(world, replacer, 2) + "\n";
 }
 
 /** The chain from the root down to a node, both included. */

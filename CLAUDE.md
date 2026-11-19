@@ -11,6 +11,8 @@ parked ideas into tracked files unless asked. Those live in private memory.
 - `npm run test:fast`: the pure-logic suites only, about 1.5 s. Use it while iterating.
 - `npm run build`: typecheck, the editor-boundary check, then build. Must pass too.
 - `npm run layout -- <recipe>`: make sectors from recipes in `src/designer/recipes.ts`
+- `npm run world`: rewrite `src/designer/world.json` in its fixed key order and re-warm `src/start.json`.
+  Run it after editing the world file by hand or by script.
 - `npm run parity` and the other `src/profile` scripts are slow checks. Run them in the
   background; they log results and never gate done.
 

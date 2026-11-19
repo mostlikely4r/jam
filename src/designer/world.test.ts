@@ -33,6 +33,19 @@ describe("world layout", () => {
     expect(parseWorld(stringifyWorld(world))).toEqual(world);
   });
 
+  it("writes every node's keys in one order, however the node was made", () => {
+    const world = seedWorld();
+    const text = stringifyWorld(world);
+    const shuffle = (node: World["root"]): World["root"] => {
+      const keys = Object.keys(node).reverse() as (keyof World["root"])[];
+      const out = Object.fromEntries(keys.map((key) => [key, key === "children" ? node.children.map(shuffle) : node[key]]));
+      return out as unknown as World["root"];
+    };
+    expect(stringifyWorld({ ...world, root: shuffle(world.root) })).toBe(text);
+    // The shipped file is already in that order: saving it unchanged changes nothing.
+    expect(stringifyWorld(parseWorld(text)!)).toBe(text);
+  });
+
   it("refuses something that isn't a world", () => {
     expect(parseWorld("{}")).toBeNull();
     expect(parseWorld("not json")).toBeNull();

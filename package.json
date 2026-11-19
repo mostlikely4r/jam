@@ -15,6 +15,7 @@
     "parity": "vite-node src/profile/parity.ts",
     "news": "vite-node src/profile/news.ts",
     "warm": "vite-node src/profile/warm.ts",
+    "world": "vite-node src/designer/save-world.ts",
     "layout": "vite-node src/designer/layout.ts"
   },
   "devDependencies": {

@@ -4,6 +4,7 @@
  */
 import { writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { warmStart } from "../profile/start";
 import { RECIPES } from "./recipes";
 import { shippedWorld } from "./shipped";
 import { seedWorld, stringifyWorld } from "./world";
@@ -21,6 +22,8 @@ const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 if (flag === "--ship") {
   writeFileSync(here("./world.json"), stringifyWorld(world));
   console.log("Wrote the shipped world: src/designer/world.json");
+  // The start new games begin in is keyed to the layout: a new one needs a new start.
+  for (const line of warmStart(60, 1, true)) console.log(line);
 } else if (flag === "--save" && saveName) {
   mkdirSync(here("./layouts"), { recursive: true });
   writeFileSync(here(`./layouts/${saveName}.json`), stringifyWorld(world));

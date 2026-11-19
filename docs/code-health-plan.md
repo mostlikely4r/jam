@@ -1,6 +1,7 @@
 # Code health: what's strong, what will hurt, and the order to fix it
 
-**Status: the audit is a record; the work is specced in `docs/home-pair-plan.md`.** Findings below
+**Status: the audit is a record. F7 (the home pair) and 0.3 (key order, `npm run world`) are
+built: see "Built" in `docs/home-pair-plan.md` for what changed from the plan.** Findings below
 are proposal unless marked *decided*. The five decisions that were open here are now decided and
 moved into that plan; this file keeps the measurements and the council memo, and stays as the
 record of why.
@@ -190,11 +191,11 @@ My first draft got these wrong; the council caught them, and I verified each aga
 |---|---|---|---|
 | 0.1 | **done** — `npm run test:fast`: 13 files, 170 tests, 1.47 s | ~15 min | 146 s → 1.5 s, measured |
 | 0.2 | `docs/architecture.md`: module map, tick order, content flow, "where do I add a part / ship / station" | ~1 h | nothing explains where things live |
-| 0.3 | Fixed key order in `stringifyWorld` (`designer/world.ts:438`) + one `npm run world` writing `world.json` **and** re-warming `start.json`. **Blocked:** `layoutKey` hashes the layout *text* (`save.ts:143-148`), so any key-order change invalidates `start.json` and needs a re-warm — do it after the current `world.json` edit lands, not on top of it | ~1 h + a warm | kills the 602-line churn; removes a manual step known to go red |
+| 0.3 | **done**: fixed key order in `stringifyWorld` (`designer/world.ts:438`) + one `npm run world` writing `world.json` **and** re-warming `start.json`. **Blocked:** `layoutKey` hashes the layout *text* (`save.ts:143-148`), so any key-order change invalidates `start.json` and needs a re-warm — do it after the current `world.json` edit lands, not on top of it | ~1 h + a warm | kills the 602-line churn; removes a manual step known to go red |
 | 0.4 | **done** — no eslint needed: `scripts/boundaries.mjs` runs in `npm run build` and allows `designer/hulls`/`designer/designer` only from `main.ts` | ~1 h | gets F4's real goal for zero dependencies |
 | 0.5 | Dedupe `CLAUDE.md`/`AGENTS.md`; prettier | ~15 min | trivia |
 
-**Step 1 — remove the home pair, fields first.** Fields are the cheaper half (no capabilities hang
+**Step 1 — remove the home pair, fields first.** *Built 2026-11-19, the pirate base included.* Fields are the cheaper half (no capabilities hang
 off `this.field`): stop filtering in `fieldsFor`, hand the linked field to `applyLayout`, make
 `this.field` a lookup into `extraFields`, collapse `layRocks`, `firstFieldDrops`, the radius branch
 (`4227`), the sleep set (`4122`) and `pilot.working`'s default (`pilot.ts:557`) onto the generic

@@ -1,6 +1,6 @@
 # Home pair plan: one representation, in the world file
 
-*2026-11-18.* Line numbers below are from `7bdf86b` plus the in-flight edit to `world.json` and
+*2026-11-18. **Built 2026-11-19**: see "Built" at the end.* Line numbers below are from `7bdf86b` plus the in-flight edit to `world.json` and
 `sim.ts`; if one has moved, find the site by name. Status markers: **decided** means the owner's
 call. This plan is the brief for a fresh `/build` thread; `docs/code-health-plan.md` is the audit
 behind it, and stays as the record of why.
@@ -171,4 +171,94 @@ shows only what you changed.
 
 ## Built
 
-*(nothing yet — `/build` fills this in)*
+*2026-11-19, all three steps.* Commits: `9fa5964` (prerequisite 3), `aaa535f` (step 1, field),
+`e575b88` (step 2, base, `SAVE_VERSION` 7 → 8), `da331f3` (a fix to step 2, below), `8cfd793`
+(step 3, pirate base). `npm test` (595) and `npm run build` pass at each; `start.json` re-warmed
+in each.
+
+### Prerequisites
+
+1. **Clean tree**: *decided*, the in-flight edit was **dropped**, not landed (a patch was kept
+   outside the repo). It made the suite red: the planet's radius went to 1 and a station lost its
+   three part B. The ore B drop it gave the home field can now be set in the designer like any
+   field's drop.
+2. Was done.
+3. **Built.** `stringifyWorld` writes every node's keys in the order `parseWorld` reads them,
+   whatever order the node was made in. `npm run world` (`src/designer/save-world.ts`) rewrites
+   `world.json` in that order and re-warms `start.json`; `npm run layout -- <recipe> --ship`
+   re-warms too; both share `src/profile/start.ts` with `npm run warm`. The shipped file took the
+   order once (552 lines); since then the step 2 flags changed it by 2 lines.
+
+### What changed from the plan
+
+- **Tests were edited**: *decided* during the build. The plan asked to delete the home keys from
+  `Tuning` *and* keep six suites green without edits, but those suites built their worlds from
+  exactly those keys (`new Sim(1, { ...DEFAULTS, rockCount: 0, orbitPeriod: 300 })`, live
+  `sim.tuning.stationDistance += 3000`). They now build a plain home through **`src/home.ts`**:
+  `homeSim(seed, settings)` takes the tuning plus the old key names (`rockCount`, `fieldRadius`,
+  `orbitPeriod`, `stationDistance`, `pirateBaseDistance`, ...) and hands them over as a field,
+  station and pirate-base spec; `rehome(sim, changes)` changes them as the designer would;
+  `homeFields` and `homeStations` add to them. Most test edits were `new Sim(` → `homeSim(`. The
+  title demo plays in the same home. Assertions that changed meaning:
+  - Dropped, because the mechanism is gone: a tuned place keeping its angle when its period
+    changes, a smooth change of pace, a save from before orbit phases, a pre-planet save keeping
+    its angles, an older save's blueprints going to the first base (the version gate refuses
+    those).
+  - "A restarted world's POIs start where a new world's do" became: where their orbits put them at
+    the clock, which runs on through a restart (as designer places always did).
+  - "Traffic starts docked at its base, for every base but the first" became: every base's
+    traffic starts at work in the field by it, out of the player's sight (the first base's old
+    rule, now for all).
+  - The shipped world's ship-marks test now resets after laying out, as the game does; it leaned
+    on traffic left over from the tuning-built world.
+- **Per-station settings live in the designer**: *decided*. A station node has "Builds projects",
+  "On the radio", and its turrets' count, arc and distance. They're written to the file only when
+  they differ from the kind's default; `world.json` turns projects and radio on for today's home
+  station. Deposits and turret batteries carry the id of the base that ordered them and stand at
+  its station and field; the testing switches give one to every base that builds projects.
+- **Step 3 went further** than "its orbit from its own parent": the pirate base is a
+  `PirateBaseSpec` (the first pirate base in the tree; any others are map only), so no place is on
+  a tuned orbit any more, and that machinery went with it: the POI orbit fields and `parent`,
+  `movePoi`, the phases (`GameLink.phases`, `readGame`, `phasesFromWorld`, `startPhases`,
+  `orbitPhases`), `writeGame`, `GameLink.tuning` and the `keep` flag. `GameLink.apply` takes one
+  `Layout`; `applyTo(sim, layout)` puts it in; `Sim.applyLayout(fields?, stations?, pirates?)`.
+  The black market's lane runs out from the centre of the base's ring (what it goes round). A
+  pirate base exists while the layout has one and the tuning has pirates; pirates only start at
+  one. No second save bump: the pirate base's POI is no longer saved, and an old save's copy is
+  ignored.
+- **The `home` accessors** are `Sim.field` and `Sim.station`: the first field and station in the
+  layout's order, worked out each time, a still spot at the middle when there's none. Not from
+  spawn data as suggested: spawns may name no place. Sim logic doesn't branch on them; they place
+  a new game's ship and test drones when no spawn is given, and serve the UI and tests.
+- **Hauler source per spec**: `StationSpec.field`, set by the link to the field a station sits on.
+  A station on a planet (Planet base) has none and uses the nearest field, as before. The same
+  field is where its traffic works by default (`Sim.ownField`), replacing `FIRST_FIELD`.
+- **Unknown base (rule 1)** is `nearestBase(x, y, shipyard)`: a ship whose base is gone (and the
+  player) belongs to the nearest base; a trip record goes to the base nearest where it was going;
+  a pod to the nearest yard; traffic wrecked with no yard anywhere is gone.
+- **Station spec defaults** (edge case): `shipyard` → `tuning.stationShipyard` (true), `storage` →
+  `tuning.stationStorage` (200), `guards` → `stationGuardCount`/`Arc`/`Distance` (4, 60°, 450).
+- **No-station message**: "This layout has no station. A game needs at least one, to dock at,
+  sell to and be rebuilt at." (thrown by `applyLayout`).
+- **A bug step 2 made, fixed in `da331f3`**: fields and stations aren't saved any more, but a
+  deposit's field and station and a station battery's host were saved references to them, so a
+  loaded game's deposit stopped following its field. They're found again from their base each
+  tick.
+- Every station line on the radio names the station that says it (`from` is required now).
+
+### Counts after (outside tests)
+
+`bases[0]`: 0 (was 48). `this.station`: 0 (was 18). `this.field`: 7, all in `sim.ts` and all the
+derived first field: a new game's start spot, test drones, a pirate-less `homeOf`, a new ship's
+frame, `nearestPoi`'s starting guess, the black market's fallback. `FIRST_FIELD`: only in
+`home.ts`, as the plain home's own id (with `FIRST_BASE`). Tuning keeps no place's geometry; the
+station keys left are economy and defaults (`stationStart*`, `stationCashBuffer`,
+`stationPartsTarget`, `stationReserveParts`, `stationShipyard`, `stationStorage`,
+`stationGuard*`).
+
+### Still to do
+
+- `npm run parity` on `8cfd793` was started in `../space-game-parity`; its entry in
+  `docs/parity-log.md` is to be compared with the last one.
+- By hand: `npm run dev`, `?dev`, move and resize the home field and station in the designer,
+  save, reload; and try the new station settings.

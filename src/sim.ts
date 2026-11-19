@@ -2467,6 +2467,12 @@ export class Sim {
     }
     if (!this.tuning.depositFree) this.deposits = this.deposits.filter((deposit) => !deposit.fromSwitch);
     for (const deposit of this.deposits) {
+      // The places come from the layout and aren't saved, so a loaded deposit finds its own again.
+      const base = this.projectBase(deposit);
+      if (base && this.extraFields.length > 0) {
+        deposit.at = this.baseField(base).poi;
+        deposit.toward = base.poi;
+      }
       deposit.px = deposit.x;
       deposit.py = deposit.y;
       Object.assign(deposit, this.depositSpot(deposit.at, deposit.toward));
@@ -2555,7 +2561,12 @@ export class Sim {
       this.projectBase(battery)?.blueprintsOrdered.delete(battery.id);
       return false;
     });
-    for (const battery of this.batteries) this.placeGuards(battery);
+    for (const battery of this.batteries) {
+      // A station's turrets stand on its station as the layout has it now, a loaded game's too.
+      const base = this.projectBase(battery);
+      if (battery.id === "stationGuards" && base) battery.host = base.poi;
+      this.placeGuards(battery);
+    }
   }
 
   private finishBattery(battery: Battery): void {

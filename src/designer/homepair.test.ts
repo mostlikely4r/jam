@@ -140,6 +140,23 @@ describe("a base that's gone or can't do the job", () => {
 });
 
 describe("saves", () => {
+  it("keep a loaded deposit and turrets with their field and station as these move on", async () => {
+    const { homeSim } = await import("../home");
+    const { roundTrip } = await import("../save");
+    const settings = { ...DEFAULTS, chatter: false, depositFree: true, guardsStationFree: true, rockCount: 0, fieldOrbitPeriod: 600, orbitPeriod: 300 };
+    const sim = homeSim(1, settings);
+    sim.step();
+    const into = homeSim(2, settings);
+    roundTrip(sim, into);
+    for (let i = 0; i < Math.round(30 / TICK); i++) into.step();
+    const [deposit] = into.deposits;
+    expect(deposit.at).toBe(into.field);
+    expect(deposit.toward).toBe(into.station);
+    const guns = into.batteries.find((battery) => battery.id === "stationGuards")!;
+    expect(guns.host).toBe(into.station);
+    expect(Math.hypot(guns.guns[0].x - into.station.x, guns.guns[0].y - into.station.y)).toBeCloseTo(DEFAULTS.stationGuardDistance, 3);
+  });
+
   it("turn away a save from before the field and station were the layout's own", () => {
     expect(SAVE_VERSION).toBe(8);
     const sim = play(seedWorld());

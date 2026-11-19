@@ -188,10 +188,10 @@ My first draft got these wrong; the council caught them, and I verified each aga
 
 | # | Item | Effort | Why now |
 |---|---|---|---|
-| 0.1 | `npm run test:fast`: 11 pure-logic files, measured 1.55 s | ~15 min | 146 s → 1.55 s; measured, not estimated |
+| 0.1 | **done** — `npm run test:fast`: 13 files, 170 tests, 1.47 s | ~15 min | 146 s → 1.5 s, measured |
 | 0.2 | `docs/architecture.md`: module map, tick order, content flow, "where do I add a part / ship / station" | ~1 h | nothing explains where things live |
-| 0.3 | Fixed key order in `stringifyWorld` (`designer/world.ts:438`) + one `npm run world` writing `world.json` **and** re-warming `start.json` | ~1 h | kills the 602-line churn; removes a manual step known to go red |
-| 0.4 | eslint with a **boundary rule**: `designer/hulls`/`designer/designer` only from `main.ts` | ~1 h | gets F4's real goal free; skip the code-split |
+| 0.3 | Fixed key order in `stringifyWorld` (`designer/world.ts:438`) + one `npm run world` writing `world.json` **and** re-warming `start.json`. **Blocked:** `layoutKey` hashes the layout *text* (`save.ts:143-148`), so any key-order change invalidates `start.json` and needs a re-warm — do it after the current `world.json` edit lands, not on top of it | ~1 h + a warm | kills the 602-line churn; removes a manual step known to go red |
+| 0.4 | **done** — no eslint needed: `scripts/boundaries.mjs` runs in `npm run build` and allows `designer/hulls`/`designer/designer` only from `main.ts` | ~1 h | gets F4's real goal for zero dependencies |
 | 0.5 | Dedupe `CLAUDE.md`/`AGENTS.md`; prettier | ~15 min | trivia |
 
 **Step 1 — remove the home pair, fields first.** Fields are the cheaper half (no capabilities hang

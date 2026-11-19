@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --open",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && node scripts/boundaries.mjs && vite build",
     "test": "vitest run",
+    "test:fast": "vitest run --exclude \"**/{pilot,items,records,sim,chart,save,fields,stations,eccentric,recipes}.test.ts\"",
+    "check:boundaries": "node scripts/boundaries.mjs",
     "economy": "vite-node src/economy/run.ts",
     "profile": "vite-node src/profile/run.ts",
     "census": "vite-node src/profile/census.ts",

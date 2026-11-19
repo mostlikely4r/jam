@@ -50,9 +50,8 @@ After this there is one of each, and no second copy:
 1. **A clean tree.** The in-flight edit to `world.json` and `sim.ts` must land or be dropped first:
    `firstFieldDrops` adds the very branch step 1 deletes, and the suite is red until that edit is
    resolved. Do not build on top of it.
-2. **`npm run test:fast`** — the 11 pure-logic files, measured at 1.55 s. Add it before touching
-   anything; steps 1–2 are judged by the slow suites, and you will want the fast lane while
-   editing `grid`/`fitting`-adjacent code.
+2. **`npm run test:fast`** — *done.* 13 pure-logic files, 170 tests, 1.47 s. Use it while
+   iterating; steps 1–2 are judged by the slow suites, so run `npm test` before you call it done.
 3. **Fixed key order in `stringifyWorld`** (`src/designer/world.ts:438`) and one `npm run world`
    that writes `world.json` **and** re-warms `start.json`. Without this, the migration's own layout
    edits arrive as 600-line diffs and `start.json` goes stale silently.

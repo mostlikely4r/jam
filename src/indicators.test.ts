@@ -111,6 +111,22 @@ describe("the two indicators", () => {
     expect(showing(sim)).toEqual(["station"]);
   });
 
+  it("names what each arrow points at, for its tooltip, and has no name for a spot in space", () => {
+    const sim = indicatorSim();
+    const named = (): string[] => sim.pointers(400, 300).map((each) => `${each.label}: ${each.name}`);
+    // The tutorial pair, with the names of what they happened to pick.
+    expect(named()).toEqual(["field: Field", "home: Station"]);
+    sim.setDestination({ deposit: sim.deposits[0] });
+    expect(named()).toEqual(["deposit: Deposit"]);
+    sim.setDestination({ body: sim.bodies[0] });
+    expect(named()).toEqual(["planet: Test planet"]);
+    sim.setDestination({ point: { x: 9000, y: 0 } });
+    expect(named()).toEqual(["space: null"]);
+    // A pinned home names its base, whatever the base is called.
+    sim.toggleHome(sim.bases[0].id);
+    expect(named()).toEqual(["space: null", "home: Station"]);
+  });
+
   it("follows a handle round its orbit, and leaves a point where it was put", () => {
     const sim = indicatorSim();
     const deposit = sim.deposits[0];

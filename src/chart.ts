@@ -1,5 +1,5 @@
 import { orbitEllipse } from "./kepler";
-import { bodyAt, DEPOSIT_REACH, orbitsAt, type OrbitRing, type Poi, type Sim, type Target } from "./sim";
+import { bodyAt, DEPOSIT_REACH, orbitsAt, type OrbitRing, type Sim, type Target } from "./sim";
 
 /**
  * The system chart, the starmap part's view of the whole world at once. A top-down map of
@@ -153,7 +153,8 @@ export class Chart {
     const picks: ChartPick[] = [];
     for (const poi of sim.allPois()) {
       if (!sim.chartSeenPoi(poi)) continue;
-      picks.push({ poi, kind: sim.kindOf({ poi }), label: this.placeLabel(sim, poi), place: true, radius: poi.reach });    }
+      picks.push({ poi, kind: sim.kindOf({ poi }), label: sim.placeName(poi), place: true, radius: poi.reach });
+    }
     if (sim.discovered.has("deposit")) {
       for (const deposit of sim.deposits) {
         picks.push({ deposit, kind: sim.kindOf({ deposit }), label: "Deposit", place: true, radius: DEPOSIT_REACH });
@@ -164,16 +165,6 @@ export class Chart {
       picks.push({ body, kind: sim.kindOf({ body }), label: body.name, place: false, radius: body.radius });
     }
     return picks;
-  }
-
-  /** What a place is called: the designer's name for its own stations and fields. */
-  private placeLabel(sim: Sim, poi: Poi): string {
-    if (poi === sim.pirateBase) return "Pirate base";
-    const base = sim.baseOf(poi);
-    if (base) return base.spec.name || "Station";
-    const extra = sim.extraFields.find(({ poi: at }) => at === poi);
-    if (extra) return extra.spec.name || "Field";
-    return poi.name;
   }
 
   /** Whether what a ring's centre belongs to has been found: a body, an anchor or a place there. */
@@ -436,7 +427,7 @@ export class Chart {
       ctx.beginPath();
       ctx.arc(x, y, Math.max(3, Math.min(8, poi.reach * view.scale * dpr)), 0, Math.PI * 2);
       ctx.fill();
-      label(poi.x, poi.y, this.placeLabel(sim, poi));
+      label(poi.x, poi.y, sim.placeName(poi));
     }
     if (sim.discovered.has("deposit")) for (const deposit of sim.deposits) {
       const { x, y } = to(deposit.x, deposit.y);

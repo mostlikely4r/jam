@@ -1383,7 +1383,9 @@ function frame(now: number): void {
     dragged: Math.hypot(drag.toX - drag.fromX, drag.toY - drag.fromY) >= DRAG_PIXELS,
   };
   sim.screen = { halfWidth: window.innerWidth / 2 / tuning.zoom, halfHeight: window.innerHeight / 2 / tuning.zoom };
-  renderer.draw(sim, paused ? 1 : accumulator / TICK, paused ? 0 : seconds);
+  // The mouse is passed along for the arrows' tooltips, which are drawn and so can't be hit
+  // any other way: only while the game's own view is what's under the pointer.
+  renderer.draw(sim, paused ? 1 : accumulator / TICK, paused ? 0 : seconds, paused || chart.isOpen ? null : mouse);
   chart.draw(sim);
 
   hudTimer -= seconds;

@@ -5,6 +5,7 @@ import { drawBin, gridRect, newBin, stepBin, type Bin, type Rect } from "./cargo
 import { cellsOf, footprint, reachable } from "./grid";
 import { isItem, partOf } from "./parts";
 import { bayBox, drawVectorShip } from "./shipArt";
+import { canvasTip } from "./tooltip";
 import {
   BLACK_MARKET_LENGTH,
   BLACK_MARKET_WIDTH,
@@ -47,6 +48,8 @@ const POINTER_NEUTRAL = "#a8adb8";
 /** The full-hold flash: the station arrow saying come and sell. */
 const POINTER_HOME_FLASH = "#f4fff6";
 const POINTER_HOME = "#8fe3a1";
+/** How near an arrow the mouse has to be, in screen pixels, for its tooltip. Its word counts too. */
+const POINTER_HOVER = 22;
 /** A ping from off screen: how long it shows, how deep it reaches in and how much of the edge it covers, as shares of the screen, and how far off its direction may be. */
 const EDGE_PING_SECONDS = 2;
 const EDGE_PING_DEPTH = 0.1;
@@ -125,6 +128,21 @@ function lerp(a: number, b: number, t: number): number {
 
 function mod(value: number, size: number): number {
   return ((value % size) + size) % size;
+}
+
+/** Where an arrow's nose is on the screen, and the word it says beside it. */
+interface Arrow {
+  nose: { x: number; y: number };
+  /** The word's middle, and how far it reaches each side of it. */
+  word: { x: number; y: number; halfWidth: number };
+}
+
+/** An arrow with something to name, which is what a tooltip needs: the two indicators. */
+interface NamedArrow extends Arrow {
+  /** What the arrow says. */
+  label: string;
+  /** The name of what it points at. */
+  name: string;
 }
 
 export class Renderer {
@@ -281,7 +299,7 @@ export class Renderer {
   }
 
   /** `alpha` is how far the display sits between the last two simulation ticks. */
-  draw(sim: Sim, alpha: number, frameSeconds: number): void {
+  draw(sim: Sim, alpha: number, frameSeconds: number, pointer: { x: number; y: number } | null = null): void {
     const { ctx, canvas } = this;
     const dpr = window.devicePixelRatio || 1;
     const width = Math.round(canvas.clientWidth * dpr);
@@ -355,7 +373,7 @@ export class Renderer {
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.drawEdgePings(alpha);
-    this.drawPointers(sim, width, height, scale, dpr);
+    this.drawPointers(sim, width, height, scale, dpr, pointer);
     this.drawDrag(sim, scale, dpr, shipX, shipY, alpha);
     if (this.wreck) {
       // Black at the switch from the wreck to the rebuilt ship, fading either side of it.
@@ -1404,17 +1422,21 @@ export class Renderer {
   }
 
   /** The two indicators, home and destination, and then a marker for each of the dev's own. */
-  private drawPointers(sim: Sim, width: number, height: number, scale: number, dpr: number): void {
+  private drawPointers(sim: Sim, width: number, height: number, scale: number, dpr: number, pointer: { x: number; y: number } | null): void {
     const viewHalfWidth = width / 2 / scale;
     const viewHalfHeight = height / 2 / scale;
     const meters = sim.ship.parts.has("meters");
-    for (const { slot, label, reading } of sim.pointers(viewHalfWidth, viewHalfHeight)) {
+    // Where the two arrows came out, so a tooltip can hang off whichever one the mouse is on.
+    const arrows: NamedArrow[] = [];
+    for (const { slot, label, name, reading } of sim.pointers(viewHalfWidth, viewHalfHeight)) {
       // Home flashes once the hold is full: the arrow saying come and sell, home or far from it.
       const full = slot === "home" && sim.ship.ore >= sim.cargoSpace(sim.ship);
       const lit = full && Math.floor(performance.now() / 350) % 2 === 0;
       const color = slot === "home" ? (lit ? POINTER_HOME_FLASH : POINTER_HOME) : (POINTER_COLORS[label] ?? POINTER_NEUTRAL);
-      this.drawPointer(reading, color, label, slot === "home" ? 0.22 : 0.34, meters, width, height, dpr);
+      const arrow = this.drawPointer(reading, color, label, slot === "home" ? 0.22 : 0.34, meters, width, height, dpr);
+      if (name) arrows.push({ ...arrow, label, name });
     }
+    this.arrowTip(arrows, pointer, dpr);
     if (!this.dev) return;
     for (let i = 0; i < sim.drones.length; i++) {
       const drone = sim.drones[i];
@@ -1463,6 +1485,7 @@ export class Renderer {
    * distance, and reaches the tip as the POI comes into view. The hollow marker is the distance
    * a few seconds ahead: inside the solid one when closing, outside when not.
    * Those marks and the numbers need the meters part. The arrow and name don't.
+   * Answers where the arrow's nose is, so a tooltip can hang off it.
    */
   private drawPointer(
     reading: PoiReading,
@@ -1473,7 +1496,7 @@ export class Renderer {
     width: number,
     height: number,
     dpr: number,
-  ): void {
+  ): Arrow {
     const { ctx } = this;
     const dir = Math.atan2(reading.dy, reading.dx);
     const radius = Math.min(width, height) * ring;
@@ -1481,9 +1504,10 @@ export class Renderer {
     const offset = (distance: number) =>
       Math.min(MARKER_MAX_OFFSET, MARKER_SCALE * Math.log1p(distance / 100)) * dpr;
     const ahead = Math.max(0, reading.distance - reading.closing * MARKER_LOOK_SECONDS);
+    const nose = { x: width / 2 + Math.cos(dir) * radius, y: height / 2 + Math.sin(dir) * radius };
 
     ctx.save();
-    ctx.translate(width / 2 + Math.cos(dir) * radius, height / 2 + Math.sin(dir) * radius);
+    ctx.translate(nose.x, nose.y);
     ctx.rotate(dir);
     ctx.fillStyle = color;
     ctx.strokeStyle = color;
@@ -1505,14 +1529,48 @@ export class Renderer {
 
     const speed = Math.round(Math.abs(reading.closing));
     const trend = speed === 0 ? "" : ` ${reading.closing > 0 ? "\u2193" : "\u2191"}${speed}`;
+    const text = meters ? `${name} ${Math.round(reading.distance)}${trend}` : name;
+    const word = { x: width / 2 + Math.cos(dir) * (radius - 52 * dpr), y: height / 2 + Math.sin(dir) * (radius - 52 * dpr) };
     ctx.fillStyle = color;
     ctx.font = `${12 * dpr}px Consolas, monospace`;
     ctx.textAlign = "center";
-    ctx.fillText(
-      meters ? `${name} ${Math.round(reading.distance)}${trend}` : name,
-      width / 2 + Math.cos(dir) * (radius - 52 * dpr),
-      height / 2 + Math.sin(dir) * (radius - 52 * dpr),
-    );
+    ctx.fillText(text, word.x, word.y);
+    // Measured after the transform is back, so the width is in the same pixels as the drawing.
+    return { nose, word: { ...word, halfWidth: ctx.measureText(text).width / 2 } };
+  }
+
+  /**
+   * The tooltip for whichever of the two arrows the mouse is over: the word the arrow says,
+   * then the name of the thing it points at. Called every frame, so it goes when the pointer
+   * does, and it stays off while something's being dragged.
+   */
+  private arrowTip(arrows: NamedArrow[], pointer: { x: number; y: number } | null, dpr: number): void {
+    if (!pointer) {
+      canvasTip(null, () => "");
+      return;
+    }
+    const x = pointer.x * dpr;
+    const y = pointer.y * dpr;
+    let best: NamedArrow | null = null;
+    let closest = Infinity;
+    for (const arrow of arrows) {
+      const { nose, word } = arrow;
+      // On the arrow itself, or anywhere along the word it says.
+      const toNose = Math.hypot(x - nose.x, y - nose.y);
+      const onWord = Math.abs(x - word.x) <= word.halfWidth && Math.abs(y - word.y) <= 8 * dpr;
+      const gap = onWord ? 0 : toNose;
+      if (gap < closest && (onWord || toNose <= POINTER_HOVER * dpr)) {
+        closest = gap;
+        best = arrow;
+      }
+    }
+    if (!best) {
+      canvasTip(null, () => "");
+      return;
+    }
+    // Kept in a const of its own, so the tooltip's content reads it without a narrowing.
+    const arrow = best;
+    canvasTip({ x: arrow.nose.x / dpr, y: arrow.nose.y / dpr }, () => `${arrow.label}\n${arrow.name}`);
   }
 
   private tracePointerMark(x: number, dpr: number): void {

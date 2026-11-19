@@ -731,6 +731,8 @@ export interface Pointer {
   slot: "home" | "destination";
   /** What the arrow says: `home`, or the kind of what the destination holds. */
   label: string;
+  /** What it points at, for the tooltip: the place's own name, or null for a spot in space. */
+  name: string | null;
   reading: PoiReading;
 }
 
@@ -4230,7 +4232,7 @@ export class Sim {
     const add = (slot: Pointer["slot"], target: Target, label: string): void => {
       const reading = this.readTarget(target, viewHalfWidth, viewHalfHeight);
       if (!reading || reading.distance <= 0 || reading.distance >= limit) return;
-      pointers.push({ slot, label, reading });
+      pointers.push({ slot, label, name: this.nameOf(target), reading });
     };
     // The nearest field and station, so there's always somewhere to mine and to sell.
     const destination: Target | null = this.pointersManual ? ship.destination : { poi: this.miningFieldAt(ship.x, ship.y).poi };
@@ -4252,6 +4254,24 @@ export class Sim {
     if (target.deposit) return "deposit";
     if (target.body) return target.body.kind;
     return target.poi ? target.poi.name : "space";
+  }
+
+  /** What a target is called, for the tooltip of an arrow pointing at it. Null: a spot in space. */
+  nameOf(target: Target): string | null {
+    if (target.point) return null;
+    if (target.deposit) return "Deposit";
+    if (target.body) return target.body.name;
+    return target.poi ? this.placeName(target.poi) : null;
+  }
+
+  /** What a place is called, as the chart and the arrows' tooltips show it. */
+  placeName(poi: Poi): string {
+    if (poi === this.pirateBase) return "Pirate base";
+    const base = this.baseOf(poi);
+    if (base) return base.spec.name || "Station";
+    const extra = this.extraFields.find((each) => each.poi === poi);
+    if (extra) return extra.spec.name || "Field";
+    return poi.name;
   }
 
   /** Whether the destination is this thing. */
@@ -6351,9 +6371,10 @@ export class Sim {
     return base?.spec.name ?? id;
   }
 
-  /** A field's name, as the news board and the chart show it. */
+  /** A field's name, by its id, as the news board shows it. */
   fieldName(id: string): string {
-    return this.extraFields.find((extra) => extra.spec.id === id)?.spec.name || "Field";
+    const extra = this.extraFields.find((each) => each.spec.id === id);
+    return extra ? this.placeName(extra.poi) : "Field";
   }
 
   /**

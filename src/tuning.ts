@@ -27,40 +27,33 @@ export const DEFAULTS = {
   flingOreAmount: 3,
 
   /**
-   * For each POI: within the first distance of its edge, the nearest POI carries things
+   * For the pirate base: within the first distance of its edge, the nearest POI carries things
    * fully. Beyond it, its share falls off evenly to nothing at the second. Infinity is the
-   * old way: the nearest POI carries everything, everywhere. Set by the system designer.
+   * old way: the nearest POI carries everything, everywhere. Set by the system designer. Every
+   * other place has its own, in its spec.
    */
-  stationCarryFull: 2000,
-  stationCarryNone: 6000,
   pirateCarryFull: 2000,
   pirateCarryNone: 6000,
   showPoiZones: false,
   /** Loose ore this far from every POI's edge and every ship is gone for good. */
   oreForgetDistance: 6000,
-  /** The turn, in radians, each of these has at time 0. */
-  stationSpinPhase: 0,
+  /** The pirate base's turn, in radians, at time 0. */
   pirateSpinPhase: 0,
 
-  stationDistance: 5000,
-  /** How far beyond the field's edge the pirate base sits, on the far side from the station. */
+  /** How far beyond the first field's edge the pirate base sits. */
   pirateBaseDistance: 4000,
-  orbitPeriod: 900,
   pirateOrbitPeriod: 900,
   /**
-   * How far each of the three places' orbits is from a circle (0 to 0.9), and the direction
-   * from its parent to the closest point, in radians. Set by the system designer. The station's
-   * and pirate base's distances above are their semi-major axes, less the field's radius.
+   * How far the pirate base's orbit is from a circle (0 to 0.9), and the direction from its
+   * parent to the closest point, in radians. Set by the system designer. Its distance above is
+   * its semi-major axis, less the field's radius.
    */
-  stationEccentricity: 0,
-  stationPeriapsis: 0,
   pirateEccentricity: 0,
   piratePeriapsis: 0,
   pirateRotationPeriod: 0,
-  stationRotationPeriod: 300,
-  /** Whether the station rebuilds wrecked ships. A wreck goes to the nearest station that does. */
+  /** Whether a station rebuilds wrecked ships, when its spec doesn't say. A wreck goes to the nearest station that does. */
   stationShipyard: true,
-  /** Cells of storage at the first base. The player's lockers and its store of whole modules come out of it. */
+  /** Cells of storage at a base whose spec doesn't say. The player's lockers and its store of whole modules come out of it. */
   stationStorage: 200,
   /** How many cells across a locker is. */
   lockerWidth: 6,

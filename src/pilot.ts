@@ -617,7 +617,7 @@ export class DronePilot extends ShipPilot {
     // Repairs come before shopping, so it never spends its repair money on parts.
     if (ship.ore === 0 && sim.canRepair(ship)) {
       this.task = "repairing";
-      const dock = sim.dockedAt(ship) ?? sim.station;
+      const dock = sim.dockedAt(ship) ?? sim.homeBaseOf(ship).poi;
       this.hold(sim, sim.dockPoint(false, dock), sim.dockPoint(true, dock));
       return;
     }
@@ -687,7 +687,7 @@ export class DronePilot extends ShipPilot {
     }
     const lately = ship.pirateKilledAt !== null && sim.now - ship.pirateKilledAt < tuning.fieldFearSeconds;
     const feared = lately && sim.roll() < tuning.fieldFearChance ? ship.pirateKilledIn : null;
-    const here = sim.dockedAt(ship) ?? sim.station;
+    const here = sim.dockedAt(ship) ?? sim.homeBaseOf(ship).poi;
     let best = fields[0];
     let bestCost = Infinity;
     for (const field of fields) {

@@ -54,6 +54,7 @@ describe("the designer's ship marks", () => {
   it("lists every other ship with its speed, cargo ships included", () => {
     const sim = new Sim(1, { ...DEFAULTS });
     useLayout(shippedWorld(), linkTo(sim));
+    sim.reset(1);
     for (let i = 0; i < 240; i++) sim.step();
     const marks = shipMarks(sim);
     expect(marks.length).toBe(sim.traffic.length + sim.fighters.length + sim.drones.length + sim.bases.filter((base) => base.hauler).length + (sim.blackMarket ? 1 : 0));

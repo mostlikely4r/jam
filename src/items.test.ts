@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { homeFields, homeSim } from "./home";
+import { homeFields, homeSim, homeStations } from "./home";
 import { itemDef, ITEM_RECIPES, ITEMS, itemsFileNow, SHIPPED_ITEMS, thingOf, useItemsFile, type ItemsFile } from "./items";
 import { isItem, partOf, PARTS, volumeOf, type PartId } from "./parts";
 import { roundTrip } from "./save";
@@ -164,7 +164,7 @@ function world(
     blueprints: ["tractorAll"],
     ...outpost,
   };
-  sim.applyLayout({}, homeFields(sim, field), [spec]);
+  sim.applyLayout({}, homeFields(sim, field), homeStations(sim, spec));
   return { sim, outpost: sim.bases[1].poi, field };
 }
 

@@ -52,7 +52,7 @@ describe("chart", () => {
   it("a place visited later joins the chart", () => {
     const sim = homeSim(1, { ...ALONE });
     run(sim, 1);
-    const dock = sim.dockPoint();
+    const dock = sim.dockPoint(false, sim.station);
     sim.ship.x = dock.x;
     sim.ship.y = dock.y;
     sim.ship.px = dock.x;
@@ -131,7 +131,7 @@ describe("chart", () => {
     expect(sim.clickPilot.active).toBe(true);
     run(sim, 20);
     const target = sim.clickPilot.target()!;
-    const dock = sim.dockPoint();
+    const dock = sim.dockPoint(false, sim.station);
     expect(Math.hypot(target.x - dock.x, target.y - dock.y)).toBeLessThan(1);
   });
 

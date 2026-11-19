@@ -116,8 +116,8 @@ export class Chatter {
   private cooldowns = new WeakMap<Ship, Map<string, number>>();
   private stationCooldowns = new Map<string, number>();
   private nextFieldTalk = new WeakMap<Ship, number>();
-  /** Station lines still to come, and which station says each: the first base's if none. */
-  private replies: { at: number; text: string; from?: Poi }[] = [];
+  /** Station lines still to come, and which station says each. */
+  private replies: { at: number; text: string; from: Poi }[] = [];
   /** Ships that asked for the dock on this trip home. */
   private approached = new WeakSet<Ship>();
   private playerFar = true;
@@ -154,7 +154,9 @@ export class Chatter {
       const before = this.tasks.get(ship);
       this.tasks.set(ship, task);
       const name = this.nameOf(sim, ship);
-      const dock = sim.dockPoint();
+      // Its own base answers it.
+      const home = sim.homeBaseOf(ship).poi;
+      const dock = sim.dockPoint(false, sim.nearestDock(ship.x, ship.y));
       const nearDock = Math.hypot(ship.x - dock.x, ship.y - dock.y) < APPROACH_DISTANCE;
       if (task !== "to station") this.approached.delete(ship);
       if (task === "to station" && ship.ore > 0 && nearDock && !this.approached.has(ship)) {
@@ -162,7 +164,7 @@ export class Chatter {
         this.approached.add(ship);
         if (this.ready(ship, "approach", DOCKING_COOLDOWN)) {
           this.say(sim, ship, this.pick(APPROACH));
-          this.reply(`Roger, ${name}, cleared to dock.`);
+          this.reply(`Roger, ${name}, cleared to dock.`, STATION_REPLY_DELAY, sim.nearestDock(ship.x, ship.y));
         }
       } else if (task !== before && task === "to station" && ship.ore > 0) {
         // Turning for home, out in the field. Nobody needs to answer that.
@@ -172,18 +174,18 @@ export class Chatter {
         if (this.ready(ship, "outbound", OUTBOUND_COOLDOWN)) {
           const pirates = pilot.trading === "pirate base";
           this.say(sim, ship, pirates ? this.pick(TO_PIRATES) : this.pick(TO_DEPOSIT));
-          this.reply((pirates ? this.pick(PIRATE_WARNING) : this.pick(SEE_OFF)).replace("{name}", name));
+          this.reply((pirates ? this.pick(PIRATE_WARNING) : this.pick(SEE_OFF)).replace("{name}", name), STATION_REPLY_DELAY, home);
         }
       } else if (task !== before && before !== undefined && AT_STATION.has(before) && FIELD_TASKS.has(task)) {
         // Leaving the station for the field. Once there are other places, this says which.
         if (this.ready(ship, "outbound", OUTBOUND_COOLDOWN)) {
           this.say(sim, ship, this.pick(before === "sheltering" ? ALL_CLEAR : OUTBOUND));
-          this.reply(this.pick(SEE_OFF).replace("{name}", name));
+          this.reply(this.pick(SEE_OFF).replace("{name}", name), STATION_REPLY_DELAY, home);
         }
       } else if (task !== before && task === "fleeing") {
         if (this.ready(ship, "fleeing", FLEEING_COOLDOWN)) {
           this.say(sim, ship, this.pick(FLEEING));
-          this.reply(`${name}, the dock is clear. Come on in.`);
+          this.reply(`${name}, the dock is clear. Come on in.`, STATION_REPLY_DELAY, home);
         }
       } else if (FIELD_TASKS.has(task)) {
         this.fieldTalk(sim, ship);
@@ -287,7 +289,7 @@ export class Chatter {
       attacker === sim.ship
         ? `${this.nameOf(sim, victim)} reports you fired on them. You're wanted.${law}`
         : `All ships, ${who} attacked ${this.nameOf(sim, victim)} and is wanted.${law}`;
-    this.stationSays(sim, text, true);
+    this.stationSays(sim, text, true, sim.nearestDock(victim.x, victim.y));
   }
 
   /** A ship docked with word the board didn't have: it tells the station, which posts it. */
@@ -315,21 +317,21 @@ export class Chatter {
   bought(sim: Sim, ship: Ship, part: string): void {
     const name = this.nameOf(sim, ship);
     this.say(sim, ship, this.pick(ship.owner ? BOUGHT_OWNED : BOUGHT).replace("{part}", part));
-    if (!ship.owner) this.reply(this.pick(BOUGHT_REPLY).replace("{part}", part).replace("{name}", name));
+    if (!ship.owner) this.reply(this.pick(BOUGHT_REPLY).replace("{part}", part).replace("{name}", name), STATION_REPLY_DELAY, sim.baseAt(ship)?.poi ?? sim.homeBaseOf(ship).poi);
   }
 
   /** News that matters out in the field goes out to everyone, not just those near the station. */
-  depositBuilt(sim: Sim): void {
-    this.stationSays(sim, "The field deposit is up. Drop your ore there or haul it in.", true);
+  depositBuilt(sim: Sim, from: Poi): void {
+    this.stationSays(sim, "The field deposit is up. Drop your ore there or haul it in.", true, from);
   }
 
-  guardsBuilt(sim: Sim, atStation: boolean): void {
-    this.stationSays(sim, atStation ? "Station turrets are online." : "Turrets are up at the field deposit.", true);
+  guardsBuilt(sim: Sim, from: Poi, atStation: boolean): void {
+    this.stationSays(sim, atStation ? "Station turrets are online." : "Turrets are up at the field deposit.", true, from);
   }
 
-  unlocked(sim: Sim, names: string[]): void {
+  unlocked(sim: Sim, from: Poi, names: string[]): void {
     const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
-    this.stationSays(sim, `New blueprint${names.length > 1 ? "s" : ""} in. The shop now stocks ${list}.`, true);
+    this.stationSays(sim, `New blueprint${names.length > 1 ? "s" : ""} in. The shop now stocks ${list}.`, true, from);
   }
 
   defenderLaunched(sim: Sim, from: Poi): void {
@@ -371,12 +373,12 @@ export class Chatter {
     sim.events.push({ type: "chatter", speaker: null, name, text, x, y, mayday: false, broadcast: false });
   }
 
-  private stationSays(sim: Sim, text: string, broadcast = false, from?: Poi): void {
+  private stationSays(sim: Sim, text: string, broadcast: boolean, from: Poi): void {
     const dock = sim.dockPoint(false, from);
     sim.events.push({ type: "chatter", speaker: null, name: "Station", text, x: dock.x, y: dock.y, mayday: false, broadcast });
   }
 
-  private reply(text: string, delay = STATION_REPLY_DELAY, from?: Poi): void {
+  private reply(text: string, delay: number, from: Poi): void {
     this.replies.push({ at: this.time + delay, text, from });
   }
 

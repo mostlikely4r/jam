@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { homeFields, homeSim } from "./home";
+import { homeFields, homeSim, homeStations } from "./home";
 import { DEFAULTS } from "./tuning";
 import { roundTrip } from "./save";
 import { type FieldSpec, MAX_HULL, type Poi, type Ship, Sim, type StationSpec, TICK } from "./sim";
@@ -60,7 +60,7 @@ function world(tuning: Partial<typeof WORLD> = {}, outpost: Partial<StationSpec>
     blueprints: [],
     ...outpost,
   };
-  sim.applyLayout({}, homeFields(sim, second), [spec]);
+  sim.applyLayout({}, homeFields(sim, second), homeStations(sim, spec));
   return { sim, outpost: sim.bases[1].poi };
 }
 
@@ -222,9 +222,9 @@ describe("a second base", () => {
     sim.step();
     const spec = sim.bases[1].spec!;
     const moved: StationSpec = { ...spec, orbits: [{ ...spec.orbits[0], phase: spec.orbits[0].phase + 0.05 }] };
-    sim.applyLayout({}, undefined, [moved]);
+    sim.applyLayout({}, undefined, homeStations(sim, moved));
     expect(sim.dockedAt(ship)).toBe(outpost);
-    sim.applyLayout({}, undefined, []);
+    sim.applyLayout({}, undefined, homeStations(sim));
     expect(sim.docks).toEqual([sim.station]);
   });
 });
@@ -313,7 +313,7 @@ describe("blueprints per base", () => {
     expect(sim.unlocked("reverse", first)).toBe(false);
   });
 
-  it("only lets the first base order projects", () => {
+  it("only lets a base that builds projects order them", () => {
     const { sim, outpost } = world({ stationUnlocks: true, stationCashBuffer: 1e9 });
     const { ship } = sim;
     ship.credits = 100000;
@@ -323,7 +323,7 @@ describe("blueprints per base", () => {
     expect(sim.blueprintQueue(sim.bases[0])).toContain("deposit");
   });
 
-  it("keeps each base's blueprints through a save, and an older save's go to the first base", () => {
+  it("keeps each base's blueprints through a save", () => {
     const { sim } = world({}, { blueprints: ["tractorAll"] });
     sim.bases[0].blueprints.add("strafe");
     sim.bases[1].blueprintPaid.set("reverse", 40);
@@ -332,28 +332,21 @@ describe("blueprints per base", () => {
     expect([...into.bases[0].blueprints]).toEqual(["strafe"]);
     expect([...into.bases[1].blueprints]).toEqual(["tractorAll"]);
     expect(into.bases[1].blueprintPaid.get("reverse")).toBe(40);
-
-    const old = sim.snapshot() as Record<string, unknown>;
-    const bases = old.bases as Record<string, unknown>[];
-    old.bases = bases.map(({ blueprints, blueprintPaid, blueprintsOrdered, ...rest }) => rest);
-    old.blueprints = new Set(["retro"]);
-    old.blueprintPaid = new Map();
-    old.blueprintsOrdered = new Set();
-    const { sim: older } = world();
-    older.restore(old);
-    expect([...older.bases[0].blueprints]).toEqual(["retro"]);
-    expect(older.bases[1].blueprints.size).toBe(0);
   });
 });
 
 describe("traffic of each base", () => {
-  it("starts docked at its own base, working the field by it, for every base but the first", () => {
-    const { sim, outpost } = world({ trafficRacers: 1, trafficFloaters: 1 });
+  it("starts at work in the field by its own base, for every base alike", () => {
+    const { sim } = world({ trafficRacers: 1, trafficFloaters: 1 });
     sim.reset(1);
     expect(sim.traffic).toHaveLength(4);
-    const theirs = sim.traffic.filter((pilot) => sim.dockedAt(pilot.ship) === outpost);
-    expect(theirs.map((pilot) => pilot.ship.model).sort()).toEqual(["floater", "racer"]);
-    expect(theirs.every((pilot) => pilot.working === "second:0")).toBe(true);
+    for (const base of sim.bases) {
+      const theirs = sim.traffic.filter((pilot) => pilot.ship.home === base.id);
+      const field = sim.baseField(base);
+      expect(theirs.map((pilot) => pilot.ship.model).sort()).toEqual(["floater", "racer"]);
+      expect(theirs.every((pilot) => pilot.working === field.id)).toBe(true);
+      expect(theirs.every((pilot) => Math.hypot(pilot.ship.x - field.poi.x, pilot.ship.y - field.poi.y) < field.radius)).toBe(true);
+    }
   });
 });
 
@@ -361,7 +354,7 @@ describe("traffic away from its base", () => {
   it("goes back to the field by its own base after selling at another", () => {
     const { sim, outpost } = world({ trafficRacers: 1, fieldWanderChance: 0, trafficRecords: false });
     sim.reset(1);
-    const theirs = sim.traffic.find((pilot) => sim.dockedAt(pilot.ship) === outpost)!;
+    const theirs = sim.traffic.find((pilot) => pilot.ship.home === sim.bases[1].id)!;
     const ours = sim.traffic.find((pilot) => pilot !== theirs)!;
     expect(theirs.ship.home).toBe(sim.bases[1].id);
     for (const [pilot, at] of [[theirs, sim.station], [ours, outpost]] as const) {
@@ -423,7 +416,7 @@ describe("the news board", () => {
   it("is said on the radio by a ship that brings word the board didn't have, but not by the player", () => {
     const { sim, outpost } = world({ trafficRacers: 1, trafficRecords: false, chatter: true }, { blueprints: ["tractorAll"] });
     sim.reset(1);
-    const theirs = sim.traffic.find((pilot) => sim.dockedAt(pilot.ship) === outpost)!.ship;
+    const theirs = sim.traffic.find((pilot) => pilot.ship.home === sim.bases[1].id)!.ship;
     const said = () => {
       const lines = sim.events.flatMap((event) => (event.type === "chatter" ? [event.text] : []));
       sim.events.length = 0;

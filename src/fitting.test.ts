@@ -694,7 +694,7 @@ describe("hulls, defaults and decals", () => {
     expect(sim.ship.hold).toEqual([]);
     expect(sim.ship.decals!.cockpit).toBe(look);
     // The shop's blueprints are only real gear.
-    expect(sim.blueprintQueue().some((id) => String(id).startsWith("cockpit"))).toBe(false);
+    expect(sim.blueprintQueue(sim.bases[0]).some((id) => String(id).startsWith("cockpit"))).toBe(false);
   });
 
   it("draws every hull, with its decals, without trouble", () => {

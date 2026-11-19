@@ -1368,6 +1368,8 @@ function frame(now: number): void {
   hudTimer -= seconds;
   if (dev && hudTimer <= 0) {
     hudTimer = 0.1;
+    // The base the player is docked at, or the nearest.
+    const base = sim.shopBase();
     const speed = Math.hypot(sim.ship.vx, sim.ship.vy);
     const hullBars = Math.max(0, Math.ceil((sim.ship.hull / hullMax(sim.ship.model)) * 10));
     hud.textContent = [
@@ -1399,7 +1401,7 @@ function frame(now: number): void {
           )
         : []),
       ...(tuning.showTraffic
-        ? [`Station balance ${sim.stationAccount.credits}  Ore held ${Math.floor(sim.stationOre)}  Parts held ${Math.floor(sim.stationParts)}  Next blueprint ${sim.blueprintQueue()[0] ?? "none"}${sim.deposits.some((deposit) => deposit.partsLeft > 0) ? "  Building deposit" : ""}  Lost traffic ${sim.lostTraffic.length}  Pirate base ore ${Math.floor(sim.pirateOre)} credits ${Math.floor(sim.pirateCredits)} pirates ${sim.fighters.filter((pilot) => pilot.ship.faction === "pirate").length}/${sim.pirateCap}${sim.blackMarket ? `  Black market ${sim.blackMarket.stage}` : ""}`]
+        ? [`${sim.baseName(base.id)} balance ${base.account.credits}  Ore held ${Math.floor(base.ore)}  Parts held ${Math.floor(base.parts)}  Next blueprint ${sim.blueprintQueue(base)[0] ?? "none"}${sim.deposits.some((deposit) => deposit.base === base.id && deposit.partsLeft > 0) ? "  Building deposit" : ""}  Lost traffic ${base.lostTraffic.length}  Pirate base ore ${Math.floor(sim.pirateOre)} credits ${Math.floor(sim.pirateCredits)} pirates ${sim.fighters.filter((pilot) => pilot.ship.faction === "pirate").length}/${sim.pirateCap}${sim.blackMarket ? `  Black market ${sim.blackMarket.stage}` : ""}`]
         : []),
       `FPS   ${Math.round(fps)}${paused ? "  PAUSED" : ""}`,
     ].join("\n");

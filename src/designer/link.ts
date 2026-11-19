@@ -1,8 +1,9 @@
 /**
  * What the game flies from the designer's layout. The game's frame is centred on whatever the
- * first field orbits. Every field, the first included, goes over as a field spec. The station
- * and pirate base on the first field still go over through the tuning, which the designer
- * writes into and reads back from, so whichever was changed last wins (docs/home-pair-plan.md).
+ * first field orbits. Every field and every station goes over as a spec, the first ones
+ * included. Only the pirate base on the first field still goes over through the tuning, which
+ * the designer writes into and reads back from, so whichever was changed last wins
+ * (docs/home-pair-plan.md).
  */
 import { TICK, type AnchorSpec, type FieldSpec, type Orbit, type OrbitRing, type Poi, type Sim, type SolidBody, type Spawn, type StationSpec } from "../sim";
 import type { Tuning } from "../tuning";
@@ -141,37 +142,40 @@ export function fieldsFor(world: World): FieldSpec[] {
 }
 
 /**
- * Every station beyond the first, and every copy of any station, as docks that buy ore,
- * repair, and rebuild wrecks if they have a shipyard.
+ * Every station, and every copy of any station, as docks that buy ore, repair, and rebuild
+ * wrecks if they have a shipyard, in the tree's order. One on a field sits by that field.
  */
 export function stationsFor(world: World): StationSpec[] {
-  const { station: first } = linkedNodes(world);
   const place = placer(world);
   return walk(world)
     .map((entry) => entry.node)
     .filter((node) => node.kind === "station")
-    .flatMap((node) =>
-      [null, ...copiesOf(node)]
-        .map((copy, index) => ({ copy, index }))
-        .filter(({ copy }) => node !== first || copy !== null)
-        .map(({ copy, index }) => {
-          const [carryFull, carryNone] = carrying(node);
-          return {
-            id: `${node.id}:${index}`,
-            name: index === 0 ? node.name : `${node.name} ${index + 1}`,
-            rotationPeriod: node.spinPeriod,
-            spinPhase: toRadians(node.spinPhase),
-            orbits: place(node, copy),
-            rings: ringsOf(world, place, node, copy),
-            carryFull,
-            carryNone,
-            shipyard: node.shipyard,
-            storage: node.storage,
-            blueprints: node.blueprints,
-            ...(node.items.length > 0 ? { items: node.items.map((each) => ({ ...each })) } : {}),
-          };
-        }),
-    );
+    .flatMap((node) => {
+      const parent = parentOf(world, node);
+      // A copy of a field has no children, so a station on a field is on its first.
+      const field = parent?.kind === "field" ? `${parent.id}:0` : undefined;
+      return [null, ...copiesOf(node)].map((copy, index) => {
+        const [carryFull, carryNone] = carrying(node);
+        return {
+          id: `${node.id}:${index}`,
+          name: index === 0 ? node.name : `${node.name} ${index + 1}`,
+          rotationPeriod: node.spinPeriod,
+          spinPhase: toRadians(node.spinPhase),
+          orbits: place(node, copy),
+          rings: ringsOf(world, place, node, copy),
+          carryFull,
+          carryNone,
+          shipyard: node.shipyard,
+          storage: node.storage,
+          blueprints: node.blueprints,
+          ...(field !== undefined ? { field } : {}),
+          projects: node.projects,
+          radio: node.radio,
+          guards: { count: node.guardCount, arc: node.guardArc, distance: node.guardDistance },
+          ...(node.items.length > 0 ? { items: node.items.map((each) => ({ ...each })) } : {}),
+        };
+      });
+    });
 }
 
 /** Every anchor in the tree and its copies, for the game to find and chart. */
@@ -242,18 +246,8 @@ export function useLayout(world: World, game: GameLink, keep = false): void {
 }
 
 export function writeGame(world: World, tuning: Tuning): void {
-  const { field, station, pirates } = linkedNodes(world);
+  const { field, pirates } = linkedNodes(world);
   if (!field) return;
-  if (station) {
-    tuning.stationSpinPhase = toRadians(station.spinPhase);
-    tuning.stationShipyard = station.shipyard;
-    tuning.stationStorage = station.storage;
-    tuning.stationDistance = station.orbitRadius - field.radius;
-    tuning.orbitPeriod = station.orbitPeriod;
-    tuning.stationEccentricity = station.eccentricity;
-    tuning.stationPeriapsis = toRadians(station.periapsisAngle);
-    tuning.stationRotationPeriod = station.spinPeriod;
-  }
   if (pirates) {
     tuning.pirateBaseDistance = pirates.orbitRadius - field.radius;
     tuning.pirateOrbitPeriod = pirates.orbitPeriod;
@@ -261,9 +255,8 @@ export function writeGame(world: World, tuning: Tuning): void {
     tuning.piratePeriapsis = toRadians(pirates.periapsisAngle);
     tuning.pirateRotationPeriod = pirates.spinPeriod;
     tuning.pirateSpinPhase = toRadians(pirates.spinPhase);
+    [tuning.pirateCarryFull, tuning.pirateCarryNone] = carrying(pirates);
   }
-  if (station) [tuning.stationCarryFull, tuning.stationCarryNone] = carrying(station);
-  if (pirates) [tuning.pirateCarryFull, tuning.pirateCarryNone] = carrying(pirates);
 }
 
 /** A place's carrying in the game's terms: no outer edge means it carries everywhere. */
@@ -282,16 +275,14 @@ function degrees(radians: number): number {
  * has moved them on since. Everything else about them is the designer's own.
  */
 export function readGame(world: World, phases: Phases): void {
-  const { station, pirates } = linkedNodes(world);
-  if (station && phases.station !== undefined) station.orbitPhase = degrees(phases.station);
+  const { pirates } = linkedNodes(world);
   if (pirates && phases["pirate base"] !== undefined) pirates.orbitPhase = degrees(phases["pirate base"]);
 }
 
 export function phasesFromWorld(world: World): Phases {
-  const { station, pirates } = linkedNodes(world);
+  const { pirates } = linkedNodes(world);
   const radians = (node: WorldNode) => (node.orbitPhase * Math.PI) / 180;
   return {
-    ...(station && { station: radians(station) }),
     ...(pirates && { "pirate base": radians(pirates) }),
   };
 }

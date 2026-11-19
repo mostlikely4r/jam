@@ -166,10 +166,9 @@ export class Chart {
 
   /** What a place is called: the designer's name for its own stations and fields. */
   private placeLabel(sim: Sim, poi: Poi): string {
-    if (poi === sim.station) return "Station";
     if (poi === sim.pirateBase) return "Pirate base";
     const base = sim.baseOf(poi);
-    if (base?.spec) return base.spec.name || "Station";
+    if (base) return base.spec.name || "Station";
     const extra = sim.extraFields.find(({ poi: at }) => at === poi);
     if (extra) return extra.spec.name || "Field";
     return poi.name;

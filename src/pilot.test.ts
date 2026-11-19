@@ -532,7 +532,7 @@ describe("pirate and defender", () => {
     const sim = arena({ pirates: 1, defenders: 0 });
     const pilot = sim.fighters[0];
     placeInDock(sim, sim.ship);
-    const dock = sim.dockPoint();
+    const dock = sim.dockPoint(false, sim.station);
     pin(pilot.ship, dock.x - 900, dock.y + 900);
     pilot.ship.angle = Math.atan2(-900, 900);
     sim.step();
@@ -989,7 +989,7 @@ describe("pirate and defender", () => {
     it("a few hits close together get you reported once the victim reaches the station", () => {
       const sim = arena({ trafficRacers: 1, defenders: 1, shotDamage: 0 });
       const pilot = sim.traffic[0];
-      const dock = sim.dockPoint();
+      const dock = sim.dockPoint(false, sim.station);
       pin(pilot.ship, dock.x + 1200, dock.y);
       pin(sim.ship, dock.x + 5000, dock.y);
       let said: string[] = [];
@@ -1152,7 +1152,7 @@ describe("pirate and defender", () => {
       const sim = arena({ trafficRacers: 1 });
       const pilot = sim.traffic[0];
       const name = sim.chatter.nameOf(sim, pilot.ship);
-      const dock = sim.dockPoint();
+      const dock = sim.dockPoint(false, sim.station);
       pin(pilot.ship, dock.x + 2500, dock.y);
       pilot.ship.ore = LOAD;
       const far = listen(sim, 3, () => pin(pilot.ship, dock.x + 2500, dock.y));
@@ -1167,7 +1167,7 @@ describe("pirate and defender", () => {
       const sim = arena({ trafficRacers: 1 });
       const pilot = sim.traffic[0];
       const name = sim.chatter.nameOf(sim, pilot.ship);
-      const dock = sim.dockPoint();
+      const dock = sim.dockPoint(false, sim.station);
       pin(pilot.ship, dock.x, dock.y);
       pilot.ship.ore = LOAD;
       const heard = listen(sim, 60);
@@ -1179,7 +1179,7 @@ describe("pirate and defender", () => {
     it("traffic buying a part says what it bought, and the station answers", () => {
       const sim = arena({ trafficRacers: 1 });
       const pilot = sim.traffic[0];
-      const dock = sim.dockPoint();
+      const dock = sim.dockPoint(false, sim.station);
       pin(pilot.ship, dock.x, dock.y);
       pilot.ship.credits = 100000;
       expect(sim.buyPart(pilot.ship, "reverse")).toBe(true);
@@ -1193,7 +1193,7 @@ describe("pirate and defender", () => {
     it("station news goes out to everyone, other station talk only nearby", () => {
       const sim = arena({});
       pin(sim.ship, sim.station.x + 50000, sim.station.y);
-      sim.chatter.depositBuilt(sim);
+      sim.chatter.depositBuilt(sim, sim.station);
       const news = sim.events.find((event) => event.type === "chatter");
       expect(news && sim.hears(news)).toBe(true);
       expect(news && sim.hears({ ...news, broadcast: false })).toBe(false);
@@ -1226,22 +1226,22 @@ describe("pirate and defender", () => {
 
     it("the station buys the next blueprint only from credits beyond its buffer, and announces it", () => {
       const sim = shopWorld();
-      const first = sim.blueprintQueue()[0];
+      const first = sim.blueprintQueue(sim.bases[0])[0];
       expect(first).toBe("reverse");
       const price = sim.blueprintPrice(first);
-      sim.stationAccount.credits = 300 + price - 1;
+      sim.bases[0].account.credits = 300 + price - 1;
       sim.step();
       expect(sim.unlocked(first)).toBe(false);
-      sim.stationAccount.credits = 300 + price;
+      sim.bases[0].account.credits = 300 + price;
       sim.step();
       expect(sim.unlocked(first)).toBe(true);
-      expect(sim.stationAccount.credits).toBe(300);
+      expect(sim.bases[0].account.credits).toBe(300);
       expect(sim.events.some((event) => event.type === "chatter" && event.text.includes("reverse thruster"))).toBe(true);
     });
 
     it("goes through the tiers in order, cheapest first", () => {
       const sim = shopWorld();
-      const queue = sim.blueprintQueue();
+      const queue = sim.blueprintQueue(sim.bases[0]);
       const tiers = queue.map((id) => PARTS.find((part) => part.id === id)?.tier ?? (id === "drone" ? 2 : 3));
       expect(tiers).toEqual([...tiers].sort());
       expect(queue).toContain("drone");
@@ -1254,7 +1254,7 @@ describe("pirate and defender", () => {
       sim.ship.credits = 100;
       expect(sim.fundBlueprint(sim.ship, "tractor")).toBe(true);
       expect(sim.ship.credits).toBe(0);
-      expect(sim.blueprintQueue()[0]).toBe("tractor");
+      expect(sim.blueprintQueue(sim.bases[0])[0]).toBe("tractor");
       expect(sim.blueprintLeft("tractor")).toBe(price - 100);
       expect(sim.fundBlueprint(sim.ship, "tractor")).toBe(false);
       sim.ship.credits = 100000;
@@ -1268,10 +1268,10 @@ describe("pirate and defender", () => {
       const sim = shopWorld();
       sim.ship.credits = 100;
       sim.fundBlueprint(sim.ship, "tractor");
-      sim.stationAccount.credits = 300 + sim.blueprintLeft("tractor");
+      sim.bases[0].account.credits = 300 + sim.blueprintLeft("tractor");
       sim.step();
       expect(sim.unlocked("tractor")).toBe(true);
-      expect(sim.stationAccount.credits).toBe(300);
+      expect(sim.bases[0].account.credits).toBe(300);
     });
 
     it("a paid blueprint waits for the next hauler to berth, and only then stocks", () => {
@@ -1280,33 +1280,33 @@ describe("pirate and defender", () => {
       expect(sim.fundBlueprint(sim.ship, "tractor")).toBe(true);
       const paid = sim.ship.credits;
       expect(sim.unlocked("tractor")).toBe(false);
-      expect(sim.blueprintsOrdered.has("tractor")).toBe(true);
-      expect(sim.blueprintQueue()).not.toContain("tractor");
+      expect(sim.bases[0].blueprintsOrdered.has("tractor")).toBe(true);
+      expect(sim.blueprintQueue(sim.bases[0])).not.toContain("tractor");
       expect(sim.buyPart(sim.ship, "tractor")).toBe(false);
       expect(sim.fundBlueprint(sim.ship, "tractor")).toBe(false);
       expect(sim.ship.credits).toBe(paid);
 
       let announced = false;
-      for (let seconds = 0; sim.hauler?.stage !== "loading" && seconds < 300; seconds += TICK) {
+      for (let seconds = 0; sim.bases[0].hauler?.stage !== "loading" && seconds < 300; seconds += TICK) {
         expect(sim.unlocked("tractor")).toBe(false);
         sim.step();
         announced ||= sim.events.some((event) => event.type === "chatter" && event.text.includes("tractor"));
         sim.events.length = 0;
       }
-      expect(sim.hauler?.stage).toBe("loading");
+      expect(sim.bases[0].hauler?.stage).toBe("loading");
       expect(sim.unlocked("tractor")).toBe(true);
-      expect(sim.blueprintsOrdered.size).toBe(0);
+      expect(sim.bases[0].blueprintsOrdered.size).toBe(0);
       expect(announced).toBe(true);
     }, 30000);
 
     it("a blueprint paid while a hauler sits at the berth waits for the one after", () => {
       const sim = shopWorld({ haulers: true, haulerFirst: 1, haulerPartsLoad: 0 });
-      for (let seconds = 0; sim.hauler?.stage !== "loading" && seconds < 300; seconds += TICK) sim.step();
+      for (let seconds = 0; sim.bases[0].hauler?.stage !== "loading" && seconds < 300; seconds += TICK) sim.step();
       sim.ship.credits = 100000;
       sim.fundBlueprint(sim.ship, "tractor");
       for (let seconds = 0; seconds < 5; seconds += TICK) sim.step();
       expect(sim.unlocked("tractor")).toBe(false);
-      expect(sim.blueprintsOrdered.has("tractor")).toBe(true);
+      expect(sim.bases[0].blueprintsOrdered.has("tractor")).toBe(true);
     }, 30000);
 
     describe("paying for a field deposit", () => {
@@ -1335,11 +1335,11 @@ describe("pirate and defender", () => {
 
       it("takes part payments, and moves to the front of the queue for them", () => {
         const sim = projectWorld();
-        expect(sim.blueprintQueue()[0]).not.toBe("deposit");
+        expect(sim.blueprintQueue(sim.bases[0])[0]).not.toBe("deposit");
         sim.ship.credits = 400;
         expect(sim.fundBlueprint(sim.ship, "deposit")).toBe(true);
         expect(sim.blueprintLeft("deposit")).toBe(600);
-        expect(sim.blueprintQueue()[0]).toBe("deposit");
+        expect(sim.blueprintQueue(sim.bases[0])[0]).toBe("deposit");
         expect(sim.deposits).toHaveLength(0);
       });
 
@@ -1350,20 +1350,20 @@ describe("pirate and defender", () => {
         expect(sim.ship.credits).toBe(0);
         expect(sim.deposits).toHaveLength(1);
         expect(sim.unlocked("deposit")).toBe(false);
-        expect(sim.blueprintsOrdered.has("deposit")).toBe(true);
-        expect(sim.blueprintQueue()).not.toContain("deposit");
+        expect(sim.bases[0].blueprintsOrdered.has("deposit")).toBe(true);
+        expect(sim.blueprintQueue(sim.bases[0])).not.toContain("deposit");
         const deposit = sim.deposits[0];
         sim.ship.x = deposit.x;
         sim.ship.y = deposit.y;
         sim.ship.px = deposit.x;
         sim.ship.py = deposit.y;
         expect(sim.depositAt()).toBeNull();
-        const partsBefore = sim.stationParts;
+        const partsBefore = sim.bases[0].parts;
         run(sim, 3);
         expect(sim.unlocked("deposit")).toBe(true);
-        expect(sim.blueprintsOrdered.has("deposit")).toBe(false);
+        expect(sim.bases[0].blueprintsOrdered.has("deposit")).toBe(false);
         expect(deposit.partsUsed).toBeCloseTo(10, 6);
-        expect(sim.stationParts).toBeCloseTo(partsBefore - 10, 6);
+        expect(sim.bases[0].parts).toBeCloseTo(partsBefore - 10, 6);
       });
 
       it("doesn't carry anything until it opens", () => {
@@ -1384,33 +1384,33 @@ describe("pirate and defender", () => {
         sim.ship.credits = 1000;
         sim.fundBlueprint(sim.ship, "deposit");
         run(sim, 20);
-        expect(sim.stationParts).toBeCloseTo(20, 6);
+        expect(sim.bases[0].parts).toBeCloseTo(20, 6);
         expect(sim.deposits[0].partsLeft).toBeCloseTo(45, 6);
-        sim.stationParts = 100;
+        sim.bases[0].parts = 100;
         run(sim, 20);
         expect(sim.unlocked("deposit")).toBe(true);
       });
 
       it("the station pays for it itself out of what it can spare", () => {
         const sim = projectWorld();
-        sim.blueprintPaid.set("deposit", 999);
-        sim.stationAccount.credits = 300;
+        sim.bases[0].blueprintPaid.set("deposit", 999);
+        sim.bases[0].account.credits = 300;
         run(sim, 1);
         expect(sim.blueprintLeft("deposit")).toBe(1);
         expect(sim.deposits).toHaveLength(0);
-        sim.stationAccount.credits = 301;
+        sim.bases[0].account.credits = 301;
         run(sim, 1);
         expect(sim.deposits).toHaveLength(1);
-        expect(sim.stationAccount.credits).toBe(300);
+        expect(sim.bases[0].account.credits).toBe(300);
       });
 
       it("doesn't wait for a hauler, and isn't delivered by one", () => {
         const sim = projectWorld({ haulers: true, haulerFirst: 1, haulerPartsLoad: 0, depositBuildRate: 0.1, depositParts: 1000 });
         sim.ship.credits = 1000;
         sim.fundBlueprint(sim.ship, "deposit");
-        for (let seconds = 0; sim.hauler?.stage !== "loading" && seconds < 300; seconds += TICK) sim.step();
+        for (let seconds = 0; sim.bases[0].hauler?.stage !== "loading" && seconds < 300; seconds += TICK) sim.step();
         expect(sim.unlocked("deposit")).toBe(false);
-        expect(sim.blueprintsOrdered.has("deposit")).toBe(true);
+        expect(sim.bases[0].blueprintsOrdered.has("deposit")).toBe(true);
       }, 30000);
 
       it("the testing switch finishes one being built", () => {
@@ -1680,28 +1680,28 @@ describe("pirate and defender", () => {
         const sim = projectWorld();
         expect(sim.fundBlueprint(sim.ship, "stationGuards")).toBe(true);
         expect(sim.unlocked("stationGuards")).toBe(false);
-        expect(sim.blueprintsOrdered.has("stationGuards")).toBe(true);
+        expect(sim.bases[0].blueprintsOrdered.has("stationGuards")).toBe(true);
         expect(sim.inGuardRange(sim.station.x, sim.station.y)).toBe(false);
-        const before = sim.stationParts;
+        const before = sim.bases[0].parts;
         for (let i = 0; i < Math.round(3 / TICK); i++) {
           placeInDock(sim, sim.ship);
           sim.step();
           sim.events.length = 0;
         }
         expect(sim.unlocked("stationGuards")).toBe(true);
-        expect(sim.blueprintsOrdered.has("stationGuards")).toBe(false);
-        expect(sim.stationParts).toBeCloseTo(before - 10, 6);
+        expect(sim.bases[0].blueprintsOrdered.has("stationGuards")).toBe(false);
+        expect(sim.bases[0].parts).toBeCloseTo(before - 10, 6);
         expect(sim.batteries[0].guns).toHaveLength(4);
         expect(sim.inGuardRange(sim.station.x, sim.station.y)).toBe(true);
       });
 
       it("deposit turrets wait for a deposit to stand on", () => {
         const sim = projectWorld();
-        expect(sim.blueprintQueue()).not.toContain("depositGuards");
+        expect(sim.blueprintQueue(sim.bases[0])).not.toContain("depositGuards");
         expect(sim.fundBlueprint(sim.ship, "depositGuards")).toBe(false);
         sim.tuning.depositFree = true;
         sim.step();
-        expect(sim.blueprintQueue()).toContain("depositGuards");
+        expect(sim.blueprintQueue(sim.bases[0])).toContain("depositGuards");
         expect(sim.fundBlueprint(sim.ship, "depositGuards")).toBe(true);
         expect(sim.batteries[0].host).toBe(sim.deposits[0]);
       });
@@ -1852,16 +1852,16 @@ describe("pirate and defender", () => {
       moveTo(sim.ship, deposit.x, deposit.y);
       sim.ship.ore = 10;
       sim.ship.credits = 100;
-      const stationBefore = sim.stationAccount.credits;
+      const stationBefore = sim.bases[0].account.credits;
       expect(sim.sellToDeposit(sim.ship, deposit)).toBe(10);
       expect(sim.ship.credits).toBe(130);
       expect(deposit.ore).toBe(10);
-      expect(sim.stationAccount.credits).toBe(stationBefore - 30);
+      expect(sim.bases[0].account.credits).toBe(stationBefore - 30);
       expect(sim.buyFromDeposit(sim.ship, deposit)).toBe(10);
       expect(sim.ship.ore).toBe(10);
       expect(sim.ship.credits).toBe(60);
       expect(deposit.ore).toBe(0);
-      expect(sim.stationAccount.credits).toBe(stationBefore + 40);
+      expect(sim.bases[0].account.credits).toBe(stationBefore + 40);
     });
 
     it("only takes what fits, only sells what you can pay for, and only in reach", () => {
@@ -1955,7 +1955,7 @@ describe("pirate and defender", () => {
     /** Runs until the hauler reaches a stage, or the time runs out. Returns the seconds taken. */
     function until(sim: Sim, stage: string, limit: number): number {
       let seconds = 0;
-      while (sim.hauler?.stage !== stage && seconds < limit) {
+      while (sim.bases[0].hauler?.stage !== stage && seconds < limit) {
         sim.step();
         sim.events.length = 0;
         seconds += TICK;
@@ -1966,67 +1966,68 @@ describe("pirate and defender", () => {
     it("comes in from away from the field, slowing all the way, then locks on beside the station", () => {
       const sim = haulerWorld();
       until(sim, "arriving", 20);
-      const start = sim.haulerSpot()!;
+      const start = sim.haulerSpot(false, sim.bases[0])!;
       const fromField = Math.hypot(start.x - sim.field.x, start.y - sim.field.y);
       expect(fromField).toBeGreaterThan(Math.hypot(sim.station.x - sim.field.x, sim.station.y - sim.field.y));
       const speeds: number[] = [];
       let seconds = 0;
-      while (sim.hauler?.stage === "arriving" && seconds < 400) {
+      while (sim.bases[0].hauler?.stage === "arriving" && seconds < 400) {
         sim.step();
         sim.events.length = 0;
         seconds += TICK;
-        const now = sim.haulerSpot()!;
-        const before = sim.haulerSpot(true)!;
+        const now = sim.haulerSpot(false, sim.bases[0])!;
+        const before = sim.haulerSpot(true, sim.bases[0])!;
         speeds.push(Math.hypot(now.x - before.x, now.y - before.y) / TICK);
       }
-      expect(sim.hauler?.stage).toBe("docking");
+      expect(sim.bases[0].hauler?.stage).toBe("docking");
       expect(speeds[10]).toBeGreaterThan(speeds[Math.floor(speeds.length / 2)]);
       until(sim, "loading", 40);
-      const spot = sim.haulerSpot()!;
-      const berth = sim.haulerBerth();
+      const spot = sim.haulerSpot(false, sim.bases[0])!;
+      const berth = sim.haulerBerth(false, sim.bases[0]);
       expect(Math.hypot(spot.x - berth.x, spot.y - berth.y)).toBeLessThan(1);
-      const dock = sim.dockPoint();
+      const dock = sim.dockPoint(false, sim.station);
       expect(Math.hypot(spot.x - dock.x, spot.y - dock.y)).toBeGreaterThan(400);
     }, 30000);
 
     it("tells roughly when it'll be at the berth", () => {
       const sim = haulerWorld();
-      const promised = sim.haulerEta()!;
+      const promised = sim.haulerEta(sim.bases[0])!;
       const taken = until(sim, "loading", 400);
       expect(Math.abs(promised - taken)).toBeLessThan(15);
-      expect(sim.haulerEta()).toBe(0);
-      expect(haulerWorld({ haulers: false }).haulerEta()).toBeNull();
+      expect(sim.haulerEta(sim.bases[0])).toBe(0);
+      const none = haulerWorld({ haulers: false });
+      expect(none.haulerEta(none.bases[0])).toBeNull();
 
       until(sim, "leaving", 200);
-      const left = sim.haulerEta()!;
+      const left = sim.haulerEta(sim.bases[0])!;
       expect(left).toBeGreaterThan(600);
       let seconds = 0;
-      while (sim.hauler && seconds < 400) {
+      while (sim.bases[0].hauler && seconds < 400) {
         sim.step();
         sim.events.length = 0;
         seconds += TICK;
       }
-      expect(sim.hauler).toBeNull();
-      expect(Math.abs(left - seconds - sim.haulerEta()!)).toBeLessThan(40);
+      expect(sim.bases[0].hauler).toBeNull();
+      expect(Math.abs(left - seconds - sim.haulerEta(sim.bases[0])!)).toBeLessThan(40);
     }, 30000);
 
     it("clears the station's ore, pays for it, then leaves and is gone", () => {
       const sim = haulerWorld();
       until(sim, "loading", 400);
       until(sim, "undocking", 60);
-      expect(sim.stationOre).toBe(0);
-      expect(sim.stationParts).toBe(100);
-      expect(sim.hauler?.parts).toBe(100);
-      expect(sim.hauler?.cargo).toBe(40);
-      expect(sim.stationAccount.credits).toBe(40 * 15);
+      expect(sim.bases[0].ore).toBe(0);
+      expect(sim.bases[0].parts).toBe(100);
+      expect(sim.bases[0].hauler?.parts).toBe(100);
+      expect(sim.bases[0].hauler?.cargo).toBe(40);
+      expect(sim.bases[0].account.credits).toBe(40 * 15);
       until(sim, "leaving", 40);
       let seconds = 0;
-      while (sim.hauler && seconds < 400) {
+      while (sim.bases[0].hauler && seconds < 400) {
         sim.step();
         sim.events.length = 0;
         seconds += TICK;
       }
-      expect(sim.hauler).toBeNull();
+      expect(sim.bases[0].hauler).toBeNull();
     }, 30000);
 
     it("sells parts as far as this visit's ore pays for them, even to a station in debt", () => {
@@ -2034,10 +2035,10 @@ describe("pirate and defender", () => {
         const sim = haulerWorld({ stationStartParts: 40, stationStartCredits: start });
         until(sim, "loading", 400);
         until(sim, "undocking", 60);
-        expect(sim.hauler?.cargo).toBe(40);
-        expect(sim.stationParts).toBe(40 + 37);
-        expect(sim.hauler?.parts).toBe(100 - 37);
-        expect(sim.stationAccount.credits).toBe(start + 40 * 15 - 37 * 16);
+        expect(sim.bases[0].hauler?.cargo).toBe(40);
+        expect(sim.bases[0].parts).toBe(40 + 37);
+        expect(sim.bases[0].hauler?.parts).toBe(100 - 37);
+        expect(sim.bases[0].account.credits).toBe(start + 40 * 15 - 37 * 16);
       }
     }, 30000);
 
@@ -2045,17 +2046,17 @@ describe("pirate and defender", () => {
       const sim = haulerWorld({ stationStartOre: 0, stationStartParts: 70, stationStartCredits: 1000 });
       until(sim, "loading", 400);
       until(sim, "undocking", 60);
-      expect(sim.stationParts).toBe(100);
-      expect(sim.hauler?.parts).toBe(70);
-      expect(sim.stationAccount.credits).toBe(1000 - 30 * 16);
+      expect(sim.bases[0].parts).toBe(100);
+      expect(sim.bases[0].hauler?.parts).toBe(70);
+      expect(sim.bases[0].account.credits).toBe(1000 - 30 * 16);
     }, 30000);
 
     it("once it unlocks, the station's turning no longer carries it", () => {
       const sim = haulerWorld();
       until(sim, "undocking", 500);
       sim.step();
-      const spot = sim.haulerSpot()!;
-      const before = sim.haulerSpot(true)!;
+      const spot = sim.haulerSpot(false, sim.bases[0])!;
+      const before = sim.haulerSpot(true, sim.bases[0])!;
       // Undocking: its turn stopped the moment it unlocked.
       expect(spot.angle).toBeCloseTo(before.angle, 6);
     }, 30000);
@@ -2064,7 +2065,7 @@ describe("pirate and defender", () => {
       const sim = haulerWorld({ stationStartOre: 1000 });
       until(sim, "loading", 400);
       const seconds = until(sim, "undocking", 60);
-      expect(sim.hauler?.cargo).toBe(50);
+      expect(sim.bases[0].hauler?.cargo).toBe(50);
       expect(seconds).toBeLessThan(6);
     }, 30000);
 
@@ -2234,7 +2235,7 @@ describe("pirate and defender", () => {
       expect(sim.canRepair(pilot.ship)).toBe(true);
       run(sim, 0.5);
       expect(sim.pirateCredits).toBeLessThan(2);
-      expect(sim.stationParts).toBe(7);
+      expect(sim.bases[0].parts).toBe(7);
     });
 
     it("a pirate with nothing to hunt mines rocks and takes the ore to its base", () => {
@@ -2280,8 +2281,8 @@ describe("pirate and defender", () => {
       }
       expect(sim.pirateOre).toBe(1);
       expect(ship.credits).toBe(0);
-      expect(sim.stationParts).toBe(SOLO.stationStartParts);
-      expect(sim.stationAccount.credits).toBe(DEFAULTS.stationStartCredits);
+      expect(sim.bases[0].parts).toBe(SOLO.stationStartParts);
+      expect(sim.bases[0].account.credits).toBe(DEFAULTS.stationStartCredits);
     }, 30000);
 
     it("a defender brings ore home to the station's pile, at no cost to the station", () => {
@@ -2289,12 +2290,12 @@ describe("pirate and defender", () => {
       const { ship } = sim.fighters[0];
       sim.ores.push(ore(ship.x + 800, ship.y + 800));
       let ticks = 0;
-      while (sim.stationOre === 0 && ticks < Math.round(120 / TICK)) {
+      while (sim.bases[0].ore === 0 && ticks < Math.round(120 / TICK)) {
         sim.step();
         ticks++;
       }
-      expect(sim.stationOre).toBe(1);
-      expect(sim.stationAccount.credits).toBe(0);
+      expect(sim.bases[0].ore).toBe(1);
+      expect(sim.bases[0].account.credits).toBe(0);
       expect(ship.credits).toBe(0);
     }, 30000);
 
@@ -2304,9 +2305,9 @@ describe("pirate and defender", () => {
       placeInDock(sim, ship);
       ship.ore = 3;
       run(sim, 1);
-      expect(sim.stationOre).toBe(3);
+      expect(sim.bases[0].ore).toBe(3);
       expect(ship.credits).toBe(3 * DEFAULTS.creditsPerOre);
-      expect(sim.stationAccount.credits).toBe(-3 * DEFAULTS.creditsPerOre);
+      expect(sim.bases[0].account.credits).toBe(-3 * DEFAULTS.creditsPerOre);
     });
 
     describe("the station's ore", () => {
@@ -2354,13 +2355,13 @@ describe("pirate and defender", () => {
         ship.credits = 1000;
         wreck(sim, ship);
         expect(sim.traffic.length).toBe(0);
-        expect(sim.lostTraffic).toEqual(["racer"]);
+        expect(sim.bases[0].lostTraffic).toEqual(["racer"]);
         sim.ship.hull = 1;
         shoot(sim, sim.ship, { ...sim.ship });
         run(sim, 0.2);
         expect(sim.ship.wrecks).toBe(1);
         expect(sim.ship.credits).toBe(-300);
-        expect(sim.stationParts).toBe(0);
+        expect(sim.bases[0].parts).toBe(0);
       });
 
       it("parts bring a dead system back: a defender first, then the lost traffic", () => {
@@ -2371,17 +2372,17 @@ describe("pirate and defender", () => {
         expect(sim.traffic.length).toBe(0);
 
         // Enough for one thing, and the defender comes first.
-        sim.stationParts = 45;
+        sim.bases[0].parts = 45;
         sim.step();
         expect(sim.fighters.length).toBe(1);
         expect(sim.traffic.length).toBe(0);
 
-        sim.stationParts = 35;
+        sim.bases[0].parts = 35;
         sim.step();
         expect(sim.traffic.map((pilot) => pilot.ship.model)).toEqual(["racer"]);
         expect(sim.isDocked(sim.traffic[0].ship)).toBe(true);
-        expect(sim.lostTraffic).toEqual([]);
-        expect(sim.stationParts).toBe(20);
+        expect(sim.bases[0].lostTraffic).toEqual([]);
+        expect(sim.bases[0].parts).toBe(20);
       });
 
       it("a delivery of ore revives a dead station once the next hauler has traded it for parts", () => {
@@ -2402,10 +2403,10 @@ describe("pirate and defender", () => {
         sim.ship.ore = 60;
         run(sim, 30, () => placeInDock(sim, sim.ship));
         expect(sim.ship.ore).toBe(0);
-        expect(sim.stationOre).toBe(60);
+        expect(sim.bases[0].ore).toBe(60);
         expect(sim.fighters.length).toBe(0);
         run(sim, 400, () => placeInDock(sim, sim.ship));
-        expect(sim.stationOre).toBe(0);
+        expect(sim.bases[0].ore).toBe(0);
         expect(sim.fighters.length).toBe(1);
       }, 30000);
 
@@ -2418,7 +2419,7 @@ describe("pirate and defender", () => {
         expect(sim.ship.hull).toBeGreaterThanOrEqual(59);
         expect(sim.ship.hull).toBeLessThanOrEqual(60);
         expect(sim.canRepair(sim.ship)).toBe(false);
-        sim.stationParts = 100;
+        sim.bases[0].parts = 100;
         run(sim, 2, () => placeInDock(sim, sim.ship));
         expect(sim.ship.hull).toBe(100);
       });
@@ -2430,11 +2431,11 @@ describe("pirate and defender", () => {
         const id = "reverse";
         expect(sim.buyPart(sim.ship, id)).toBe(false);
         const ore = sim.stockFor(sim.partPrice(id));
-        sim.stationParts = ore;
+        sim.bases[0].parts = ore;
         expect(sim.buyPart(sim.ship, id)).toBe(true);
-        expect(sim.stationParts).toBe(0);
+        expect(sim.bases[0].parts).toBe(0);
         expect(sim.sellPart(sim.ship, id)).toBe(true);
-        expect(sim.stationParts).toBe(0);
+        expect(sim.bases[0].parts).toBe(0);
         expect(sim.stockOf(sim.bases[0], id)).toBe(1);
       });
 

@@ -45,8 +45,8 @@ describe("save and load", () => {
   it("remembers the places found, which a new game forgets", () => {
     const sim = homeSim(1, { ...DEFAULTS });
     expect(sim.discovered.has("dock")).toBe(false);
-    sim.ship.x = sim.dockPoint().x;
-    sim.ship.y = sim.dockPoint().y;
+    sim.ship.x = sim.dockPoint(false, sim.station).x;
+    sim.ship.y = sim.dockPoint(false, sim.station).y;
     sim.step();
     expect(sim.discovered.has("dock")).toBe(true);
     const into = homeSim(2, { ...DEFAULTS });

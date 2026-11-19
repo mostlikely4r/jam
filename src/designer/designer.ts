@@ -701,15 +701,18 @@ Layouts: ${layouts.join(", ")}`, "");
       );
     }
     if (node.kind === "station") {
-      const toggle = document.createElement("label");
-      const box = document.createElement("input");
-      box.type = "checkbox";
-      box.checked = node.shipyard;
-      box.addEventListener("change", () => {
-        node.shipyard = box.checked;
-        this.changed();
-      });
-      toggle.append(box, " Shipyard");
+      const flag = (key: "shipyard" | "projects" | "radio", text: string) => {
+        const toggle = document.createElement("label");
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = node[key];
+        box.addEventListener("change", () => {
+          node[key] = box.checked;
+          this.changed();
+        });
+        toggle.append(box, ` ${text}`);
+        return toggle;
+      };
       const storage = this.number(node, "storage", "Storage (cells)", (v) => `${Math.max(0, Math.floor(v))} cells for lockers and spare modules`);
       const storageInput = storage.querySelector("input")!;
       storageInput.min = "0";
@@ -729,9 +732,17 @@ Layouts: ${layouts.join(", ")}`, "");
       parts.push(
         ...this.group("Station", [
           this.text("Every station is a base with its own shop. Wrecked ships are rebuilt at the nearest station with a shipyard. Nobody sells a held blueprint: only a station that holds one sells that part."),
-          toggle,
+          flag("shipyard", "Shipyard"),
           storage,
           ...held,
+        ]),
+        ...this.group("Projects and radio", [
+          this.text("A station that builds projects can fund a deposit by its field and turrets for itself and the deposit, from its own money and parts. One on the radio announces new blueprints and finished projects."),
+          flag("projects", "Builds projects"),
+          flag("radio", "On the radio"),
+          this.number(node, "guardCount", "Turrets, once built", (v) => `${Math.max(0, Math.floor(v))} turrets in front of the station`),
+          this.number(node, "guardArc", "Turrets' arc (degrees)", (v) => `spread over ${v}° facing its field`),
+          this.number(node, "guardDistance", "Turrets' distance", (v) => `${readableDistance(v)} out from the station`),
         ]),
         ...this.group("Starting items", this.itemRows(node.items, "n", (item) => ({ item, n: 1 }), (next) => (node.items = next), "Items in this station's store when a new game begins. They come from nowhere.")),
       );
@@ -926,7 +937,10 @@ Layouts: ${layouts.join(", ")}`, "");
       | "rockInflow"
       | "carryFull"
       | "carryNone"
-      | "storage",
+      | "storage"
+      | "guardCount"
+      | "guardArc"
+      | "guardDistance",
     text: string,
     hint: (value: number) => string,
   ): HTMLLabelElement {

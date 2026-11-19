@@ -11,15 +11,17 @@ describe("the link between the designer and the game", () => {
     expect([planet?.id, field?.id, station?.id, pirates?.id]).toEqual(["planet", "field", "station", "pirates"]);
   });
 
-  it("hands the game the first field as a field like any other, and the station's orbit through the tuning", () => {
+  it("hands the game the first field and station as a field and station like any other, and the pirate base's orbit through the tuning", () => {
     const world = seedWorld();
     const tuning = { ...DEFAULTS };
     writeGame(world, tuning);
     const [first] = fieldsFor(world);
     expect(first.id).toBe("field:0");
     expect(first.orbits).toEqual([expect.objectContaining({ radius: 60000, period: 10800 })]);
+    const [station] = stationsFor(world);
+    expect(station).toMatchObject({ id: "station:0", field: "field:0", projects: true, radio: true });
+    expect(station.orbits.map((orbit) => orbit.radius)).toEqual([60000, 10200]);
     // Measured from the field's edge in the game, from its centre in the designer.
-    expect(first.radius + tuning.stationDistance).toBe(10200);
     expect(first.radius + tuning.pirateBaseDistance).toBe(9200);
   });
 
@@ -32,7 +34,7 @@ describe("the link between the designer and the game", () => {
     const tuning = { ...DEFAULTS };
     writeGame(world, tuning);
     expect(fieldsFor(world)[0].spinPhase).toBeCloseTo(Math.PI / 2, 9);
-    expect(tuning.stationSpinPhase).toBeCloseTo(Math.PI, 9);
+    expect(stationsFor(world)[0].spinPhase).toBeCloseTo(Math.PI, 9);
     expect(tuning.pirateSpinPhase).toBeCloseTo(Math.PI / 4, 9);
   });
 
@@ -46,7 +48,8 @@ describe("the link between the designer and the game", () => {
     const [first] = fieldsFor(world);
     expect([first.rocks, first.rockDrift, first.rockInflow]).toEqual([300, 5, 2]);
     expect([first.carryFull, first.carryNone]).toEqual([1000, 9000]);
-    expect([tuning.stationCarryFull, tuning.stationCarryNone]).toEqual([Infinity, Infinity]);
+    const [dock] = stationsFor(world);
+    expect([dock.carryFull, dock.carryNone]).toEqual([Infinity, Infinity]);
   });
 
   it("starts each place carrying only what's near it, and brings old drafts carrying everywhere into line", () => {
@@ -84,13 +87,15 @@ describe("the link between the designer and the game", () => {
 
   it("shows the game's real place on the orbit, as a tidy angle", () => {
     const world = seedWorld();
-    readGame(world, { field: -Math.PI / 2, station: 3 * Math.PI });
-    const { field, station } = linkedNodes(world);
-    // A field's place comes with its orbit, so the game has no angle of its own to give back.
+    readGame(world, { field: -Math.PI / 2, station: 3 * Math.PI, "pirate base": -Math.PI / 2 });
+    const { field, station, pirates } = linkedNodes(world);
+    // A field's and a station's place come with their orbits: the game has no angle of its own to give back.
     expect(field?.orbitPhase).toBe(0);
     expect(station?.orbitPhase).toBe(180);
+    expect(pirates?.orbitPhase).toBe(270);
     expect(phasesFromWorld(world).field).toBeUndefined();
-    expect(phasesFromWorld(world).station).toBeCloseTo(Math.PI, 9);
+    expect(phasesFromWorld(world).station).toBeUndefined();
+    expect(phasesFromWorld(world)["pirate base"]).toBeCloseTo((3 * Math.PI) / 2, 9);
   });
 
   it("hands over every body, placed round what the field orbits", () => {
@@ -171,13 +176,13 @@ describe("the link between the designer and the game", () => {
     Object.assign(outpost, { name: "Outpost", blueprints: ["tractorAll"] });
     extra.children.push(outpost);
     planet!.children.push(extra);
-    expect(stationsFor(world)[0].blueprints).toEqual(["tractorAll"]);
+    expect(stationsFor(world).find((each) => each.name === "Outpost")!.blueprints).toEqual(["tractorAll"]);
     const text = stringifyWorld(world).replace('"tractorAll"', '"tractorAll", "reverse", "nonsense"');
     const back = walk(parseWorld(text)!).find((entry) => entry.node.name === "Outpost")!.node;
     expect(back.blueprints).toEqual(["tractorAll"]);
   });
 
-  it("hands every station but the first over as a dock, with its shipyard, copies included", () => {
+  it("hands every station over as a dock, with its shipyard, copies included", () => {
     const world = seedWorld();
     const { planet, station } = linkedNodes(world);
     const extra = makeChild(world, planet!, "field");
@@ -185,21 +190,19 @@ describe("the link between the designer and the game", () => {
     Object.assign(outpost, { name: "Outpost", shipyard: false, count: 2 });
     extra.children.push(outpost);
     planet!.children.push(extra);
+    station!.shipyard = false;
     const stations = stationsFor(world);
-    expect(stations.map((each) => [each.name, each.shipyard])).toEqual([["Outpost", false], ["Outpost 2", false]]);
+    expect(stations.map((each) => [each.name, each.shipyard])).toEqual([["Station", false], ["Outpost", false], ["Outpost 2", false]]);
     const t = 300;
     const at = positions(world, t);
-    const there = orbitsAt(stations[0].orbits, t);
+    const there = orbitsAt(stations[1].orbits, t);
     expect(there.x).toBeCloseTo(at.get(outpost)!.x - at.get(planet!)!.x, 3);
     expect(there.y).toBeCloseTo(at.get(outpost)!.y - at.get(planet!)!.y, 3);
-    // The first station is the game's own: its shipyard goes through the tuning.
-    station!.shipyard = false;
-    const tuning = { ...DEFAULTS };
-    writeGame(world, tuning);
-    expect(tuning.stationShipyard).toBe(false);
+    // Each sits by the field it's on.
+    expect(stations.map((each) => each.field)).toEqual(["field:0", `${extra.id}:0`, `${extra.id}:0`]);
   });
 
-  it("hands each station's storage to the game: the first's through the tuning", () => {
+  it("hands each station's storage to the game, the first's included", () => {
     const world = seedWorld();
     const { planet, station } = linkedNodes(world);
     const outpost = makeChild(world, planet!, "station");
@@ -207,11 +210,8 @@ describe("the link between the designer and the game", () => {
     expect(outpost.storage).toBe(200);
     outpost.storage = 80;
     planet!.children.push(outpost);
-    expect(stationsFor(world).map((each) => each.storage)).toEqual([80]);
     station!.storage = 120;
-    const tuning = { ...DEFAULTS };
-    writeGame(world, tuning);
-    expect(tuning.stationStorage).toBe(120);
+    expect(stationsFor(world).map((each) => each.storage)).toEqual([120, 80]);
     // A world saved before storage gets the default; a saved storage reads back.
     const text = stringifyWorld(world);
     expect(linkedNodes(parseWorld(text)!).station!.storage).toBe(120);

@@ -1,23 +1,42 @@
 /**
  * The designer's first field and station are ordinary places in the game: what the designer
- * says about them is what the game plays, with nothing copied through the tuning
- * (docs/home-pair-plan.md).
+ * says about them is what the game plays, with nothing copied through the tuning, and a
+ * layout without them plays too (docs/home-pair-plan.md).
  */
 import { describe, expect, it } from "vitest";
 import { linkTo } from "../profile/world";
-import { Sim } from "../sim";
+import { layoutKey, loadStart, makeStart, SAVE_VERSION } from "../save";
+import { Sim, TICK } from "../sim";
 import { DEFAULTS } from "../tuning";
-import { fieldsFor, linkedNodes, useLayout } from "./link";
-import { seedWorld } from "./world";
+import { fieldsFor, linkedNodes, stationsFor, useLayout } from "./link";
+import { makeChild, seedWorld, type World } from "./world";
+
+function play(world: World): Sim {
+  const sim = new Sim(1, { ...DEFAULTS, chatter: false });
+  useLayout(world, linkTo(sim));
+  sim.reset(1);
+  return sim;
+}
+
+/** The seeded world with a second field round the planet, and a station on it. */
+function withOutpost(): { world: World; outpost: ReturnType<typeof makeChild> } {
+  const world = seedWorld();
+  const { planet } = linkedNodes(world);
+  const far = makeChild(world, planet!, "field");
+  Object.assign(far, { name: "Far", orbitRadius: 150000, rocks: 30 });
+  planet!.children.push(far);
+  const outpost = makeChild(world, far, "station");
+  Object.assign(outpost, { name: "Outpost", orbitRadius: 6000 });
+  far.children.push(outpost);
+  return { world, outpost };
+}
 
 describe("the designer's first field", () => {
   it("plays with the designer's own size, rocks and carrying", () => {
     const world = seedWorld();
     const { field } = linkedNodes(world);
     Object.assign(field!, { radius: 3100, rocks: 77, rockDrift: 3, rockInflow: 0, carryFull: 900, carryNone: 4000 });
-    const sim = new Sim(1, { ...DEFAULTS, chatter: false });
-    useLayout(world, linkTo(sim));
-    sim.reset(1);
+    const sim = play(world);
     const [first] = sim.miningFields();
     expect(first.id).toBe(fieldsFor(world)[0].id);
     expect(first.radius).toBe(3100);
@@ -29,5 +48,104 @@ describe("the designer's first field", () => {
     expect(near.length).toBe(sim.rocks.length);
     expect(near.length).toBeGreaterThan(60);
     expect(near.length).toBeLessThanOrEqual(77);
+  });
+});
+
+describe("the designer's first station", () => {
+  it("plays with the designer's own orbit, shipyard, storage, carrying and settings", () => {
+    const world = seedWorld();
+    const { station } = linkedNodes(world);
+    Object.assign(station!, { orbitRadius: 11000, shipyard: false, storage: 120, carryFull: 500, carryNone: 3000, radio: false, guardCount: 2 });
+    const sim = play(world);
+    const [base] = sim.bases;
+    expect(base.id).toBe(stationsFor(world)[0].id);
+    expect(Math.hypot(base.poi.x - sim.field.x, base.poi.y - sim.field.y)).toBeCloseTo(11000, 3);
+    expect(sim.hasShipyard(base.poi)).toBe(false);
+    expect(sim.storageOf(base)).toBe(120);
+    expect(sim.carryRange(base.poi)).toEqual({ full: 500, none: 3000 });
+    expect(base.spec).toMatchObject({ projects: true, radio: false, guards: { count: 2 } });
+  });
+
+  it("falls back to the tuning's shipyard and storage for a station spec that leaves them out", () => {
+    const world = seedWorld();
+    const sim = play(world);
+    const [base] = sim.bases;
+    delete base.spec.shipyard;
+    delete base.spec.storage;
+    sim.tuning.stationShipyard = false;
+    sim.tuning.stationStorage = 77;
+    expect(sim.hasShipyard(base.poi)).toBe(false);
+    expect(sim.storageOf(base)).toBe(77);
+  });
+});
+
+describe("a layout without the first field and station", () => {
+  it("loads, starts the player, and docks at another base", () => {
+    const { world } = withOutpost();
+    const { planet, field } = linkedNodes(world);
+    planet!.children = planet!.children.filter((child) => child !== field);
+    const sim = play(world);
+    expect(sim.bases.map((base) => base.spec.name)).toEqual(["Outpost"]);
+    expect(sim.miningFields().map((each) => each.id)).not.toContain("field:0");
+    expect(Number.isFinite(sim.ship.x)).toBe(true);
+    const [base] = sim.bases;
+    const dock = sim.dockPoint(false, base.poi);
+    Object.assign(sim.ship, { x: dock.x, y: dock.y, px: dock.x, py: dock.y, vx: 0, vy: 0 });
+    sim.step();
+    expect(sim.dockedAt(sim.ship)).toBe(base.poi);
+    for (let i = 0; i < Math.round(5 / TICK); i++) sim.step();
+    expect(sim.ship.hull).toBeGreaterThan(0);
+  });
+
+  it("refuses a layout with no station at all, saying why", () => {
+    const world = seedWorld();
+    const { field } = linkedNodes(world);
+    field!.children = field!.children.filter((child) => child.kind !== "station");
+    expect(() => play(world)).toThrow(/no station/);
+  });
+});
+
+describe("a base that's gone or can't do the job", () => {
+  it("leaves a ship whose base is gone to the nearest base", () => {
+    const { world } = withOutpost();
+    const sim = play(world);
+    const [home, outpost] = sim.bases;
+    const { ship } = sim.traffic.find((pilot) => pilot.ship.home === home.id)!;
+    ship.home = "gone:0";
+    Object.assign(ship, { x: outpost.poi.x + 500, y: outpost.poi.y });
+    expect(sim.homeBaseOf(ship)).toBe(outpost);
+  });
+
+  it("brings a trip record bound for a base that's gone to the nearest base to where it was going", () => {
+    const { world } = withOutpost();
+    const sim = play(world);
+    const [, outpost] = sim.bases;
+    // The camera far from everything, so traffic runs as records.
+    Object.assign(sim.ship, { x: 1e7, y: 1e7, px: 1e7, py: 1e7 });
+    for (let i = 0; i < 4; i++) sim.step();
+    const pilot = sim.traffic.find((each) => each.record)!;
+    const aim = { x: outpost.poi.x, y: outpost.poi.y };
+    pilot.record = { goal: "dock", target: "gone:0", stage: "travel", depart: sim.now, arrive: sim.now, path: [aim], aim };
+    sim.step();
+    expect(sim.dockedAt(pilot.ship)).toBe(outpost.poi);
+  });
+
+  it("sends a wreck by a base without a shipyard to the nearest that has one", () => {
+    const { world, outpost } = withOutpost();
+    outpost.shipyard = false;
+    const sim = play(world);
+    const [home, far] = sim.bases;
+    expect(sim.nearestBase(far.poi.x, far.poi.y, true)).toBe(home);
+  });
+});
+
+describe("saves", () => {
+  it("turn away a save from before the field and station were the layout's own", () => {
+    expect(SAVE_VERSION).toBe(8);
+    const sim = play(seedWorld());
+    const layout = layoutKey("any");
+    const start = makeStart(sim, layout);
+    expect(loadStart(new Sim(2, { ...DEFAULTS }), { ...start, version: 7 }, layout)).toBe(false);
+    expect(loadStart(new Sim(2, { ...DEFAULTS }), start, layout)).toBe(true);
   });
 });

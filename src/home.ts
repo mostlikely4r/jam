@@ -1,14 +1,15 @@
 /**
- * A plain home: one field going round the middle of the world, with the game's station and
- * pirate base round it. The title demo and the tests play in it. A game plays the designer's
+ * A plain home: one field going round the middle of the world, with a station and the pirate
+ * base round it. The title demo and the tests play in it. A game plays the designer's
  * layout instead; this is the same kind of thing made in code, as specs, so the game runs the
  * one path either way and nothing about this home is special once it's in.
  */
-import { Sim, type FieldSpec } from "./sim";
+import { Sim, type FieldSpec, type StationSpec } from "./sim";
 import { DEFAULTS, type Tuning } from "./tuning";
 
-/** The home field's id. The designer's fields go by their own ids. */
+/** The home field's and station's ids. The designer's go by their own ids. */
 export const FIRST_FIELD = "first";
+export const FIRST_BASE = "station";
 
 /** What the home is like. Angles in radians, times in seconds. */
 export interface Home {
@@ -30,6 +31,16 @@ export interface Home {
   fieldRotationPeriod: number;
   /** Its turn at clock 0. */
   fieldSpinPhase: number;
+  /** The station's orbit round the field: how far beyond the field's edge, its period, and where it is at clock 0. */
+  stationDistance: number;
+  orbitPeriod: number;
+  stationPhase: number;
+  stationEccentricity: number;
+  stationPeriapsis: number;
+  stationRotationPeriod: number;
+  stationSpinPhase: number;
+  stationCarryFull: number;
+  stationCarryNone: number;
 }
 
 export const HOME: Home = {
@@ -46,11 +57,21 @@ export const HOME: Home = {
   fieldPeriapsis: 0,
   fieldRotationPeriod: 1800,
   fieldSpinPhase: 0,
+  stationDistance: 5000,
+  orbitPeriod: 900,
+  // Behind the ship's starting point, on the far side of the field from the rocks it starts by.
+  stationPhase: Math.PI,
+  stationEccentricity: 0,
+  stationPeriapsis: 0,
+  stationRotationPeriod: 300,
+  stationSpinPhase: 0,
+  stationCarryFull: 2000,
+  stationCarryNone: 6000,
 };
 
-/** The home's field as the game takes any field. */
-export function homeField(home: Home = HOME): FieldSpec {
-  const orbit = {
+/** The field's orbit round the middle of the world. */
+function fieldOrbit(home: Home) {
+  return {
     radius: home.fieldOrbitRadius,
     period: home.fieldOrbitPeriod,
     phase: home.fieldPhase,
@@ -58,6 +79,11 @@ export function homeField(home: Home = HOME): FieldSpec {
     eccentricity: home.fieldEccentricity,
     periapsis: home.fieldPeriapsis,
   };
+}
+
+/** The home's field as the game takes any field. */
+export function homeField(home: Home = HOME): FieldSpec {
+  const orbit = fieldOrbit(home);
   return {
     id: FIRST_FIELD,
     name: "Field",
@@ -71,6 +97,36 @@ export function homeField(home: Home = HOME): FieldSpec {
     spinPhase: home.fieldSpinPhase,
     orbits: [orbit],
     rings: [{ center: [], radius: orbit.radius, eccentricity: orbit.eccentricity, periapsis: orbit.periapsis }],
+  };
+}
+
+/**
+ * The home's station as the game takes any station: by the field, building projects and on
+ * the radio. Its shipyard, storage and turrets are the tuning's defaults for a station.
+ */
+export function homeStation(home: Home = HOME): StationSpec {
+  const field = fieldOrbit(home);
+  const own = {
+    radius: home.fieldRadius + home.stationDistance,
+    period: home.orbitPeriod,
+    phase: home.stationPhase,
+    sign: 1 as const,
+    eccentricity: home.stationEccentricity,
+    periapsis: home.stationPeriapsis,
+  };
+  return {
+    id: FIRST_BASE,
+    name: "Station",
+    rotationPeriod: home.stationRotationPeriod,
+    spinPhase: home.stationSpinPhase,
+    orbits: [field, own],
+    rings: [{ center: [field], radius: own.radius, eccentricity: own.eccentricity, periapsis: own.periapsis }],
+    carryFull: home.stationCarryFull,
+    carryNone: home.stationCarryNone,
+    blueprints: [],
+    field: FIRST_FIELD,
+    projects: true,
+    radio: true,
   };
 }
 
@@ -97,7 +153,7 @@ export function homeSim(seed: number, settings: Tuning & Partial<Home> = { ...DE
   }
   const sim = new Sim(seed, tuning);
   homes.set(sim, { ...HOME, ...changes });
-  sim.applyLayout({}, homeFields(sim));
+  sim.applyLayout({}, homeFields(sim), homeStations(sim));
   sim.reset(seed);
   return sim;
 }
@@ -107,12 +163,18 @@ export function homeFields(sim: Sim, ...more: FieldSpec[]): FieldSpec[] {
   return [homeField(homeOf(sim)), ...more];
 }
 
+/** The home's station with `more` after it, to hand a sim as its whole set of stations. */
+export function homeStations(sim: Sim, ...more: StationSpec[]): StationSpec[] {
+  return [homeStation(homeOf(sim)), ...more];
+}
+
 /**
  * Changes a sim's home as the designer changes a layout: the places go where the change puts
  * them, and everything near them comes along. Its other fields stay as they are.
  */
 export function rehome(sim: Sim, changes: Partial<Home>): void {
   homes.set(sim, { ...homeOf(sim), ...changes });
-  const others = sim.extraFields.filter((extra) => extra.spec.id !== FIRST_FIELD).map((extra) => extra.spec);
-  sim.applyLayout({}, homeFields(sim, ...others));
+  const fields = sim.extraFields.filter((extra) => extra.spec.id !== FIRST_FIELD).map((extra) => extra.spec);
+  const stations = sim.bases.filter((base) => base.id !== FIRST_BASE).map((base) => base.spec);
+  sim.applyLayout({}, homeFields(sim, ...fields), homeStations(sim, ...stations));
 }

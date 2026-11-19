@@ -8,6 +8,7 @@
 
 import { clampEccentricity, orbitSpeeds, orbitState, type OrbitShape } from "../kepler";
 import { PARTS, type PartId } from "../parts";
+import { DEFAULTS } from "../tuning";
 
 export const WORLD_VERSION = 1;
 
@@ -79,6 +80,14 @@ export interface WorldNode {
   drops: { item: string; chance: number }[];
   /** Stations only: the items in its store when the game starts (they come from nowhere). */
   items: { item: string; n: number }[];
+  /** Stations only: whether it builds projects: a deposit by its field, and turrets for itself and the deposit. */
+  projects: boolean;
+  /** Stations only: whether its news (new blueprints, projects built) goes out on the radio. */
+  radio: boolean;
+  /** Stations only: its own turrets, once built: how many, the arc they stand in (degrees), and how far out. */
+  guardCount: number;
+  guardArc: number;
+  guardDistance: number;
   /** How many go round in this orbit, itself included. Copies are the same thing without children. */
   count: number;
   /** How far each copy may wander from even spacing, as a % of half the gap between them. */
@@ -181,13 +190,23 @@ export function bodyDefaults(
  * open space between them carries nothing: a spinning station carrying everything would
  * sweep a ship far out sideways faster than it can fly.
  */
-export function placeDefaults(kind: NodeKind): Pick<WorldNode, "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "blueprints" | "drops" | "items"> {
-  const none = { blueprints: [], drops: [], items: [] };
+export function placeDefaults(kind: NodeKind): Pick<WorldNode, PlaceKey> {
+  const none = { blueprints: [], drops: [], items: [], ...NOT_A_BASE };
   if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, shipyard: false, storage: 0, ...none };
-  if (kind === "station") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true, storage: 200, ...none };
+  if (kind === "station") {
+    // A new station builds nothing and keeps quiet until the designer says; its turrets, once it has them, are the game's usual.
+    const guards = { guardCount: DEFAULTS.stationGuardCount, guardArc: DEFAULTS.stationGuardArc, guardDistance: DEFAULTS.stationGuardDistance };
+    return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true, storage: 200, ...none, ...guards };
+  }
   if (kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: false, storage: 0, ...none };
   return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, shipyard: false, storage: 0, ...none };
 }
+
+type PlaceKey = "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "blueprints" | "drops" | "items" | BaseKey;
+type BaseKey = "projects" | "radio" | "guardCount" | "guardArc" | "guardDistance";
+
+/** What a place that isn't a station has for a station's own settings. */
+const NOT_A_BASE: Pick<WorldNode, BaseKey> = { projects: false, radio: false, guardCount: 0, guardArc: 0, guardDistance: 0 };
 
 /** Default carrying, from each place's edge: full out to the first, fading to nothing by the second. */
 export const CARRY = {
@@ -343,7 +362,7 @@ export function seedWorld(): World {
     orbitPeriod: 10800,
     spinPeriod: 1800,
     children: [
-      node({ id: "station", name: "Station", kind: "station", radius: 300, orbitRadius: 10200, orbitPeriod: 900, orbitPhase: 180, spinPeriod: 300 }),
+      node({ id: "station", name: "Station", kind: "station", radius: 300, orbitRadius: 10200, orbitPeriod: 900, orbitPhase: 180, spinPeriod: 300, projects: true, radio: true }),
       node({ id: "pirates", name: "Pirate base", kind: "pirate base", radius: 200, orbitRadius: 9200, orbitPeriod: 900 }),
     ],
   });
@@ -415,6 +434,11 @@ export function parseWorld(text: string): World | null {
         blueprints: Array.isArray(raw.blueprints) ? HELD_PARTS.filter((id) => (raw.blueprints as unknown[]).includes(id)) : [],
         drops: readDrops(raw.drops),
         items: readItems(raw.items),
+        projects: typeof raw.projects === "boolean" ? raw.projects : places.projects,
+        radio: typeof raw.radio === "boolean" ? raw.radio : places.radio,
+        guardCount: Math.max(0, Math.floor(num("guardCount", places.guardCount))),
+        guardArc: num("guardArc", places.guardArc),
+        guardDistance: num("guardDistance", places.guardDistance),
         count: Math.max(1, Math.floor(num("count", 1))),
         angleVariance: num("angleVariance"),
         orbitVariance: num("orbitVariance"),
@@ -442,15 +466,23 @@ export function parseWorld(text: string): World | null {
 const NODE_KEYS: (keyof WorldNode)[] = [
   "id", "name", "kind", "radius", "surface", "pull", "pullFull", "pullAccel", "atmosphere", "burnSpeed",
   "rocks", "rockDrift", "rockInflow", "carryFull", "carryNone", "spawns", "shipyard", "storage", "blueprints", "drops", "items",
-  "count", "angleVariance", "orbitVariance", "orbitRadius", "eccentricity", "periapsisAngle", "orbitPeriod", "orbitPhase",
+  "projects", "radio", "guardCount", "guardArc", "guardDistance", "count", "angleVariance", "orbitVariance", "orbitRadius", "eccentricity", "periapsisAngle", "orbitPeriod", "orbitPhase",
   "spinPeriod", "spinPhase", "children",
 ];
+
+/** A station's own settings, left out where they're the kind's default, so only a station that differs says so. */
+const BASE_KEYS: BaseKey[] = ["projects", "radio", "guardCount", "guardArc", "guardDistance"];
 
 /** A node's keys in the fixed order, then anything else it carries, as it came. */
 function ordered(node: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const key of NODE_KEYS) if (key in node) out[key] = node[key];
-  for (const key of Object.keys(node)) if (!(key in out)) out[key] = node[key];
+  const usual = placeDefaults(node.kind as NodeKind);
+  for (const key of NODE_KEYS) {
+    if (!(key in node)) continue;
+    if ((BASE_KEYS as string[]).includes(key) && node[key] === usual[key as BaseKey]) continue;
+    out[key] = node[key];
+  }
+  for (const key of Object.keys(node)) if (!(NODE_KEYS as string[]).includes(key)) out[key] = node[key];
   return out;
 }
 

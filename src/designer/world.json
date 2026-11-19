@@ -160,6 +160,8 @@
                         "shipyard": true,
                         "storage": 200,
                         "blueprints": [],
+                        "projects": true,
+                        "radio": true,
                         "count": 1,
                         "angleVariance": 0,
                         "orbitVariance": 0,

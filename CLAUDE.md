@@ -1,7 +1,10 @@
 # JAM
 
-Browser game, TypeScript + Vite. This repo is public: don't write unreleased features or
-parked ideas into tracked files unless asked. Those live in private memory.
+Browser game, TypeScript + Vite. Read `docs/vision.md` first: the pillars and the experience
+targets that decide what comes next. Parked ideas live in `docs/maybe-later.md`.
+
+The repo is public and may hold plans and parked ideas; whoever reads it chooses to be spoiled.
+Only the README and what a new player sees in the game stay free of later features.
 
 ## Commands
 

@@ -45,8 +45,23 @@ at a time is pushed past 2.
 
 ### Floating idle mining: 3 (revisit next)
 
-**Moment.** A slow, massive ship drifting beside a rock. Choose, click, look away, come back to a
-fuller hold. The trip home is effortless.
+**Moment.** A slow, massive ship drifting through a belt or hovering beside a big rock, mining
+lasers cutting ore free while drones or a tractor bring it into the hold. Choose, click, look
+away, come back to a fuller hold. The trip home is effortless.
+
+**Place in the game** (*decided* 2026-11-20). Not the opening: a life you settle into about an
+hour in and could live for days, reached through upgrades. Today it is the only loop; later it is
+one of several, and the one you leave when the world opens up.
+
+**Rhythm** (*decided*). A major decision (next rock, drift direction, go home) every 10+ minutes
+once reached. In between, small optional moments (a rock coming in, a rare ore to put first);
+missing one costs little. Early versions have shorter gaps and more frequent inputs.
+
+**Earnings** (*decided*). Against equal credits and time invested in an active ship and its
+upgrades (a pilot who, say, hunts only rare ore): idle earns 10 to 30% of the active potential per
+hour early, 50 to 75% once reached. Always far more per input, and the only one that earns while
+you look away. Both are measurable in no-player runs: minutes between decisions, and credits per
+hour idle against active.
 
 **Chain.** Easy ship, mouse orders, ore keeps the rock's velocity, hover and shoot, hold filling,
 click the map to go home, automatic docking.
@@ -57,6 +72,9 @@ click the map to go home, automatic docking.
 dreamed about"), but "not exceptional". A long retest from a new game hasn't happened, and items,
 inventory, cargo bays, the full system and map flight have all changed underneath it since.
 See `docs/shopping-trip-test.md` for the tractor split it also depends on.
+
+**Road.** Refined 2026-11-20 (moment, place, rhythm, earnings above). The features, bundles and
+order toward it are in `docs/idle-mining-road.md`; next to spec: auto-fire with measurement.
 
 ### Shopping journey: 2
 

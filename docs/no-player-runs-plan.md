@@ -1,6 +1,9 @@
 # No-player runs plan: a bot that plays
 
-Written 2026-11-20, talked through with the user the same day. Nothing here is built yet.
+*2026-11-20. Built the same day: the floater track, the report, the watch switch and the tests.
+Several things landed differently from the proposal, and the first runs found the snag the
+plan was for. Both are at the end, under "Built". The plan itself is left as it was written.*
+
 
 ## Why
 
@@ -203,3 +206,98 @@ hands control back. Game speed stays whatever the game offers; no new fast-forwa
 - No fleeing or fighting in the first bot.
 - No new player feature or fast-forward for players: the bot and its switch are dev tools.
 - Not new traffic. Turning bots into traffic is a separate decision, weighed on cost later.
+
+## Built
+
+`src/bot/`, and the one thing that reaches the game, the dev switch in `main.ts`.
+
+- **`plan.ts`** — the journey as data: six steps (bay, turret, tractor, targeting, large bay,
+  and route planner + system chart + autopilot as one step, as in the table above). `working()`
+  is `ship.parts.has`, so a program only counts when it is loaded *and running*.
+- **`bot.ts`** — the bot. `step(sim)` once a tick before `sim.step()`, as the plan said. It keeps
+  to a documented surface: `BOT_CALLS` lists every method it may call, split into the inputs a
+  player's hands can give and the screens a player can read. A test wraps the sim in a proxy that
+  throws on anything else.
+- **`log.ts`** — the session log and the report: timestamped events, every input, then the
+  `Steps: / Snags: / Inputs: / Per hour: / Setbacks:` lines and `--json` as one line of flat keys.
+- **`run.ts`** — `npm run bot -- [track] [game hours] [seed] [--json]`. Shipped world, no chatter,
+  the floater start, and the loop above.
+- **`?dev` key G** — the same bot plays the ship you are watching, printing the log to the console
+  and the current step in the status lines. Press again for the ship back. No panel: the log is
+  the console, and one key is enough. The bot is loaded on demand as its own chunk, so it never
+  reaches the shipped bundle, unlike the two editors.
+- **`bot.test.ts`** — the five checks the plan listed, and one more that a step's part is bought
+  and called done. In the slow list of `test:fast`.
+- **`scripts/boundaries.mjs`** — the bot joins the editors: only `main.ts` may import it.
+
+### What landed differently
+
+- **The seed starts a game from scratch, not from the warmed start a player gets.** The warmed
+  start in `src/start.json` carries the world's dice with it (`snapshot` saves `randomState`), so
+  restoring it hands every seed the same world and the same rolls: seed 1 and seed 2 played the
+  same session, line for line. A run therefore reset the shipped world from its seed instead. It
+  is worth settling once runs want to start in a warmed world on purpose: the game's own new games
+  have the same thing to think about.
+
+- **The dock sells the ore itself.** There is no click that sells ore at a station: `unloadOre`
+  turns it into credits a piece at a time while the ship is docked, at each item's own price. So
+  the bot waits in the dock until the hold is empty and then shops; it never calls `sellItem`, and
+  one sale is not an input (the dock did it, not the player).
+- **The hull is turned by hand, not by `orderFace`.** The click pilot's facing order never settled
+  for a hull with no spin stabilizer: nothing damps a spin, the order changes every tick for a rock
+  that drifts, and the ship ended up tumbling, unable to fire. `controls.turn` with the spin held
+  in its own correction, as the Q/E keys do, comes to rest pointing at the rock. `orderFace` is not
+  in the bot's surface at all.
+- **It dodges rocks on a long click order** (`clearRun`): a straight click crosses a field at
+  several hundred units a second and the first rock it meets is a wreck. The plan didn't say how
+  the bot should fly; a player sees the rock coming, so the bot looks along the line and slips past
+  the first one on it.
+- **It fires only from a near standstill**, aiming where the rock will be, since a shot carries the
+  ship's own drift. With a turret it can fire while still settling; with the hull's own gun it turns
+  the nose on to the rock first, which costs time (see below).
+- **Ore is only fetched close by** (250 units, and 200 before anything else). Drifting ore a floater
+  with no tractor chases for ever: the give-up rule was added after the first run spent 28 minutes
+  on one piece.
+- **The refusal the run exercises is the program slot.** The shop's own line is dead for what the
+  ship can't pay for, so an unaffordable buy isn't something a player can do, and the bot doesn't
+  either. A program bought with no free slot is the refusal a run can hit, and the test covers it,
+  with the game's own numbers in the reason.
+- **A sale, a buy and a held turn are one input each**, as a burst of fire is: the report's gaps are
+  between decisions, not between ticks. A loop of clicks is capped at one a second so a stuck run
+  can't flood the log.
+
+### The first runs, and what they found
+
+Seed 1, shipped world, six game hours asked for (`npm run bot -- floater 6 1`):
+
+```
+0:00  new game, floater, 0 cr
+0:00  step 1: bay
+0:03  heading home: the hold is full, 10 ore aboard
+0:12  docked at Station, sold 10 ore for 100 cr, 96 in hand
+0:18  heading home: the hold is full, 10 ore aboard
+0:25  docked at Station, sold 10 ore for 100 cr, 172 in hand
+0:28  heading home: the hold is full, 10 ore aboard
+0:40  stuck on step 1, bay: nothing bought and nothing earned for 15 game minutes
+      at -10793, -9969, -946 past the edge of Field
+      credits 172, 10 ore aboard
+      last inputs: move home to Station at -10135, -11358 | ... | ...
+Inputs: 1,676 total, median gap 0 s, longest gap 45 s
+```
+
+Other seeds of the same build filled the hold and sold four times in twenty minutes (100 credits a
+trip, the bay bought at 0:20, 16 ore a trip once it was on), then stalled on the way home. Mining
+is fine: a big rock, broken and stripped, gives 10 ore in a minute or two.
+
+**Coming home is the snag.** A click order to a dock that is going round its orbit is a chase: the
+ship arrives where the dock was, the dock has moved on, and the order is given again. In some runs
+it closes and docks in seconds; in others it stalls a few thousand units short and the run ends
+stuck with a full hold. The vision says the trip home is effortless for a floater; at step 1 it
+isn't, and the thing that fixes it — the autopilot — is the last step of the journey, priced at
+800 credits that this loop can only earn by docking. That is the first thing the no-player run
+found, and it is a designer's question, not the bot's: it is not worked around here.
+
+Two more, smaller: a floater without a turret spends most of its time turning its hull on to the
+next rock (the plan's step 2 is the fix, and the log's input gaps show the cost before it), and a
+click order that has arrived settles on its spot for a long while, tumbling as it trims the last
+of its speed, so the bot clicks the ship to stop before it turns by hand.

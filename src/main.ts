@@ -1,5 +1,6 @@
 import { ShipDemo } from "./demo";
 import { Chart } from "./chart";
+import type { Bot } from "./bot/bot";
 import { HullDesigner } from "./designer/hulls";
 import { Designer } from "./designer/designer";
 import { applyTo, shipMarks, useLayout, type GameLink } from "./designer/link";
@@ -123,9 +124,37 @@ function openDesigner(): void {
   pauseOverlay.hidden = true;
   designer.open();
 }
+
+/**
+ * Dev only: the no-player bot at the controls, playing the journey for this ship. The same bot
+ * `npm run bot` runs headless, so what it does here is what a run reports. Press again for the ship.
+ */
+let botPlay: Bot | null = null;
+
+async function toggleBot(): Promise<void> {
+  if (botPlay) {
+    botPlay = null;
+    console.log("bot: hands off, the ship is yours");
+    return;
+  }
+  // Loaded only when it's asked for, so the bot and its log never reach the shipped game.
+  const [{ Bot }, { BotLog }, { planFor }] = await Promise.all([
+    import("./bot/bot"),
+    import("./bot/log"),
+    import("./bot/plan"),
+  ]);
+  const plan = planFor(sim.ship.model);
+  if (!plan) {
+    console.log(`bot: no journey written for the ${sim.ship.model} yet`);
+    return;
+  }
+  // Every input and every snag goes to the console as it happens: that's the log to read.
+  botPlay = new Bot({ plan, log: new BotLog((line) => console.log(line)), fresh: false });
+  console.log(`bot: playing the ${sim.ship.model}, ${plan.name}`);
+  keys.clear();
+}
 /** The system chart, for whoever has the starmap part. It lives over the game, which keeps running. */
-const chart = new Chart(sim);
-const startOverlay = document.getElementById("start") as HTMLDivElement;
+const chart = new Chart(sim);const startOverlay = document.getElementById("start") as HTMLDivElement;
 const startBox = document.querySelector("#start .box") as HTMLDivElement;
 /** The live demos behind the start menu's ship cards, while it's open. */
 let demos: ShipDemo[] = [];
@@ -1127,6 +1156,8 @@ function updateThrottle(seconds: number): void {
 
 function readControls(seconds: number): void {
   updateThrottle(seconds);
+  // The bot has the controls: the keys wait until it hands them back.
+  if (botPlay) return;
   // Watching the wreck, or riding in the pod: there's nothing to fly.
   if (renderer.watchingWreck || sim.down) {
     Object.assign(sim.controls, { thrust: 0, strafe: 0, turn: 0, fire: false });
@@ -1150,6 +1181,10 @@ window.addEventListener("keydown", (event) => {
   if (!startOverlay.hidden) return;
   // The designer has its own keys, and the game holds still behind it.
   if (designer?.isOpen || hullDesigner?.isOpen) return;
+  if (event.code === "KeyG" && dev && !event.repeat) {
+    void toggleBot();
+    return;
+  }
   if (hullDesigner && event.code === "KeyH" && !event.repeat) {
     openHulls();
     return;
@@ -1410,10 +1445,18 @@ function frame(now: number): void {
     autosave();
   }
   readControls(paused ? 0 : seconds);
-  sim.ship.aim = mouse ? renderer.screenToWorld(mouse.x, mouse.y) : null;
+  if (!botPlay) sim.ship.aim = mouse ? renderer.screenToWorld(mouse.x, mouse.y) : null;
   if (!paused) {
     accumulator += seconds * timeScale;
     while (accumulator >= TICK) {
+      // The bot plays the ship before each step, where the game reads its own input.
+      if (botPlay) {
+        botPlay.step(sim);
+        if (botPlay.end) {
+          console.log(`bot: run over, ${botPlay.end}`);
+          botPlay = null;
+        }
+      }
       sim.step();
       accumulator -= TICK;
     }
@@ -1461,7 +1504,7 @@ function frame(now: number): void {
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
       `Ore   ${sim.oreIn(sim.ship)}/${cargoText(sim.ship)}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
       `Parts ${partList(sim.ship)}  Weight ${sim.shipWeight(sim.ship).toFixed(2)}`,
-      `${frameText()}${sim.isDocked() ? "  DOCKED" : ""}${sim.ship.marked ? "  MARKED by pirates" : ""}${sim.ship.wanted ? "  WANTED by the station" : ""}${sim.clickPilot.active ? `  ${sim.clickPilot.isCourse ? "Course" : "Click order"}: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < hullMax(sim.ship.model) && !sim.hasPartsFor(tuning.repairCost) ? "  No repairs: the station is out of parts" : ""}`,
+      `${frameText()}${sim.isDocked() ? "  DOCKED" : ""}${botPlay ? `  BOT: ${botPlay.where}` : ""}${sim.ship.marked ? "  MARKED by pirates" : ""}${sim.ship.wanted ? "  WANTED by the station" : ""}${sim.clickPilot.active ? `  ${sim.clickPilot.isCourse ? "Course" : "Click order"}: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < hullMax(sim.ship.model) && !sim.hasPartsFor(tuning.repairCost) ? "  No repairs: the station is out of parts" : ""}`,
       `Rocks ${sim.rocks.length}  Wrecks ${sim.ship.wrecks}`,
       ...sim.drones.flatMap((drone, index) => {
         const { ship } = drone;

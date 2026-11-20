@@ -268,6 +268,10 @@ hands control back. Game speed stays whatever the game offers; no new fast-forwa
 
 ### The first runs, and what they found
 
+The findings are written out on their own, for the designer, in
+`docs/no-player-runs-findings.md`: what each run showed, what would settle it, and where the bot
+is too dumb to be evidence. The short of it is below.
+
 Seed 1, shipped world, six game hours asked for (`npm run bot -- floater 6 1`):
 
 ```

@@ -160,13 +160,14 @@ describe("the link between the designer and the game", () => {
     const { planet } = linkedNodes(world);
     const extra = makeChild(world, planet!, "field");
     const outpost = makeChild(world, extra, "station");
-    Object.assign(outpost, { name: "Outpost", blueprints: ["tractorAll"] });
+    Object.assign(outpost, { name: "Outpost", unlocked: ["tractorAll"] });
     extra.children.push(outpost);
     planet!.children.push(extra);
-    expect(stationsFor(world).find((each) => each.name === "Outpost")!.blueprints).toEqual(["tractorAll"]);
-    const text = stringifyWorld(world).replace('"tractorAll"', '"tractorAll", "reverse", "nonsense"');
+    expect(stationsFor(world).find((each) => each.name === "Outpost")!.unlocked).toEqual(["tractorAll"]);
+    // Only module items are a list's to hold: a decal or something that isn't an item at all is dropped.
+    const text = stringifyWorld(world).replace('"tractorAll"', '"tractorAll", "reverse", "nonsense", "cockpitKite"');
     const back = walk(parseWorld(text)!).find((entry) => entry.node.name === "Outpost")!.node;
-    expect(back.blueprints).toEqual(["tractorAll"]);
+    expect(back.unlocked).toEqual(["tractorAll", "reverse"]);
   });
 
   it("hands every station over as a dock, with its shipyard, copies included", () => {
@@ -194,7 +195,7 @@ describe("the link between the designer and the game", () => {
     const { planet, station } = linkedNodes(world);
     const outpost = makeChild(world, planet!, "station");
     // A new station starts with the default storage.
-    expect(outpost.storage).toBe(200);
+    expect(outpost.storage).toBe(DEFAULTS.stationStorage);
     outpost.storage = 80;
     planet!.children.push(outpost);
     station!.storage = 120;
@@ -208,7 +209,7 @@ describe("the link between the designer and the game", () => {
       node.children.forEach((child) => strip(child as typeof node));
     };
     strip(old.root);
-    expect(linkedNodes(parseWorld(JSON.stringify(old))!).station!.storage).toBe(200);
+    expect(linkedNodes(parseWorld(JSON.stringify(old))!).station!.storage).toBe(DEFAULTS.stationStorage);
   });
 
   it("gives a world saved before ground and full pull its kind's defaults", () => {

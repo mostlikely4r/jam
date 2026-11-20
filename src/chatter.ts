@@ -159,14 +159,14 @@ export class Chatter {
       const dock = sim.dockPoint(false, sim.nearestDock(ship.x, ship.y));
       const nearDock = Math.hypot(ship.x - dock.x, ship.y - dock.y) < APPROACH_DISTANCE;
       if (task !== "to station") this.approached.delete(ship);
-      if (task === "to station" && ship.ore > 0 && nearDock && !this.approached.has(ship)) {
+      if (task === "to station" && sim.oreIn(ship) > 0 && nearDock && !this.approached.has(ship)) {
         // Close in: it asks for the dock, and the station clears it.
         this.approached.add(ship);
         if (this.ready(ship, "approach", DOCKING_COOLDOWN)) {
           this.say(sim, ship, this.pick(APPROACH));
           this.reply(`Roger, ${name}, cleared to dock.`, STATION_REPLY_DELAY, sim.nearestDock(ship.x, ship.y));
         }
-      } else if (task !== before && task === "to station" && ship.ore > 0) {
+      } else if (task !== before && task === "to station" && sim.oreIn(ship) > 0) {
         // Turning for home, out in the field. Nobody needs to answer that.
         if (this.ready(ship, "heading back", DOCKING_COOLDOWN)) this.say(sim, ship, this.pick(HEADING_BACK));
       } else if (task !== before && task === "to buy" && pilot.trading) {

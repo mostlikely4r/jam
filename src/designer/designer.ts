@@ -15,7 +15,6 @@ import {
   limitCarrying,
   spinAngle,
   stringifyWorld,
-  HELD_PARTS,
   SHIP_CHOICES,
   SURFACES,
   walk,
@@ -25,12 +24,12 @@ import {
   type WorldNode,
 } from "./world";
 import { clampEccentricity, orbitEllipse, phaseToward } from "../kepler";
-import { ITEMS } from "../items";
+import { ITEMS, moduleItems } from "../items";
 import { linkSummary, linkedNodes, useLayout, type GameLink, type ShipMarkKind } from "./link";
 import { shippedWorld } from "./shipped";
 import { type Route } from "../route";
 import { FLIGHTS, tripBetween } from "./trips";
-import { PARTS } from "../parts";
+import { type PartId } from "../parts";
 
 /** The game's zoom limits, for the screen boxes. */
 const DEFAULT_ZOOM = 0.8;
@@ -715,24 +714,24 @@ Layouts: ${layouts.join(", ")}`, "");
       const storageInput = storage.querySelector("input")!;
       storageInput.min = "0";
       storageInput.step = "10";
-      const held = HELD_PARTS.map((id) => {
-        const label = document.createElement("label");
-        const check = document.createElement("input");
-        check.type = "checkbox";
-        check.checked = node.blueprints.includes(id);
-        check.addEventListener("change", () => {
-          node.blueprints = check.checked ? [...node.blueprints, id] : node.blueprints.filter((each) => each !== id);
-          this.changed();
-        });
-        label.append(check, ` Holds the ${PARTS.find((part) => part.id === id)!.label.toLowerCase()} blueprint`);
-        return label;
-      });
+      // The modules it sells, and the ones it would buy the blueprint for: two lists of module items.
       parts.push(
         ...this.group("Station", [
-          this.text("Every station is a base with its own shop. Wrecked ships are rebuilt at the nearest station with a shipyard. Nobody sells a held blueprint: only a station that holds one sells that part."),
+          this.text("Every station is a base with its own shop. Wrecked ships are rebuilt at the nearest station with a shipyard."),
           flag("shipyard", "Shipyard"),
           storage,
-          ...held,
+        ]),
+        ...this.group("Blueprints", [
+          this.text("Unlocked: the modules it has from the start, and sells. A module in no station's list is sold nowhere."),
+          this.moduleList(
+            (id) => node.unlocked.includes(id as PartId),
+            (id, on) => (node.unlocked = on ? [...node.unlocked, id as PartId] : node.unlocked.filter((each) => each !== id)),
+          ),
+          this.text("Wanted: the modules it buys the blueprint for when it can afford them, and what a player may pay toward."),
+          this.moduleList(
+            (id) => node.wanted.includes(id as PartId),
+            (id, on) => (node.wanted = on ? [...node.wanted, id as PartId] : node.wanted.filter((each) => each !== id)),
+          ),
         ]),
         ...this.group("Projects and radio", [
           this.text("A station that builds projects can fund a deposit by its field and turrets for itself and the deposit, from its own money and parts. One on the radio announces new blueprints and finished projects."),
@@ -865,6 +864,27 @@ Layouts: ${layouts.join(", ")}`, "");
     });
     rows.push(this.button("+ item", () => (set([...list, make(ITEMS[0].id)]), this.changed(), this.rebuild())));
     return rows;
+  }
+
+  /** Ticks for every module item, for a station's two lists of them. */
+  private moduleList(has: (id: string) => boolean, toggle: (id: string, on: boolean) => void): HTMLElement {
+    const box = document.createElement("div");
+    box.className = "checks";
+    const modules = moduleItems();
+    if (modules.length === 0) box.textContent = "No module items yet: add some on the hull designer's Items page (H).";
+    for (const item of modules) {
+      const label = document.createElement("label");
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.checked = has(item.id);
+      check.addEventListener("change", () => {
+        toggle(item.id, check.checked);
+        this.changed();
+      });
+      label.append(check, ` ${item.name}`);
+      box.append(label);
+    }
+    return box;
   }
 
   private group(title: string, fields: HTMLElement[]): HTMLElement[] {

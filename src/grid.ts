@@ -3,6 +3,33 @@ import { shapeOf, type Cell, type Shape } from "./parts";
 
 export type { Cell, Shape };
 
+/** The bay's box in the ship's frame, in world units: its middle, its turn, its size. */
+export interface Box {
+  x: number;
+  y: number;
+  angle: number;
+  w: number;
+  h: number;
+}
+
+/** An area of that box, in the box's own frame (centred on its middle): `x`, `y` is its low corner. */
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Where an area of the bay's grid sits in its box. The grid is front up, as on the ship
+ * screen: across it is across the ship, and its top row is the end nearest the nose.
+ */
+export function gridRect(box: Box, grid: { w: number; h: number }, x: number, y: number, w: number, h: number): Rect {
+  const along = box.w / grid.h;
+  const across = box.h / grid.w;
+  return { x: box.w / 2 - (y + h) * along, y: -box.h / 2 + x * across, w: h * along, h: w * across };
+}
+
 /**
  * A grid: a bay has an entry on its edge (and the sticking rule); a locker has none. The entry
  * is `size` cells (1 without one) from its cell along the edge it sits on: across on the top or
@@ -122,7 +149,7 @@ export function reachable(grid: GridSpec, items: Placed[]): Set<number> {
 }
 
 /** Finds a spot for a new item: in a bay the one that keeps the most room reachable, in a locker the first free one. */
-export function autoPlace(grid: GridSpec, items: Placed[], module: Module): Placed | null {
+export function autoPlace(grid: GridSpec, items: Placed[], module: Module, allowEntry = false): Placed | null {
   const { w, h } = shapeOf(module.part);
   const entry = entryCells(grid);
   let best: Placed | null = null;
@@ -135,7 +162,8 @@ export function autoPlace(grid: GridSpec, items: Placed[], module: Module): Plac
         if (!canPlace(grid, items, spot)) continue;
         const cells = cellsOf(spot);
         if (entry.length === 0) return spot;
-        if (cells.some((c) => entry.some((e) => c.x === e.x && c.y === e.y))) continue;
+        // Nothing sits on the way in, except a piece of ore, which is small enough to come and go.
+        if (!allowEntry && cells.some((c) => entry.some((e) => c.x === e.x && c.y === e.y))) continue;
         const reach = reachableCells(grid, [...items, spot]);
         const far = Math.min(...cells.flatMap((c) => entry.map((e) => Math.abs(c.x - e.x) + Math.abs(c.y - e.y))));
         // Scan order is already y, x, unturned first, so only a strict improvement replaces the best.

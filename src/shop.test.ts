@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PARTS } from "./parts";
+import { PROGRAM_PARTS } from "./programs";
 import { partCategory, SHOP_CATEGORIES, shopCellState } from "./shop";
 
 describe("the shop grid", () => {
@@ -20,14 +21,14 @@ describe("the shop grid", () => {
   });
 
   it("the category of every part is known: none falls outside a header", () => {
-    for (const part of PARTS) {
+    for (const part of [...PARTS, ...PROGRAM_PARTS]) {
       const category = partCategory(part);
       expect(SHOP_CATEGORIES, `${part.id} has no header`).toContain(category);
     }
     expect(partCategory(PARTS.find((part) => part.id === "gun2")!)).toBe("Weapons");
     expect(partCategory(PARTS.find((part) => part.id === "reverse")!)).toBe("Engines and thrusters");
     expect(partCategory(PARTS.find((part) => part.id === "bay")!)).toBe("Cargo bays");
-    expect(partCategory(PARTS.find((part) => part.id === "spinStabilizer")!)).toBe("Programs");
+    expect(partCategory(PROGRAM_PARTS.find((part) => part.id === "spinStabilizer")!)).toBe("Programs");
     expect(partCategory(PARTS.find((part) => part.id === "cockpitKite")!)).toBe("Cockpits");
     // The order the headers show in.
     expect(SHOP_CATEGORIES).toEqual([

@@ -603,27 +603,27 @@ export class DronePilot extends ShipPilot {
     }
 
     // Empty means delivered or wrecked. Either way, this load is over.
-    if (ship.ore === 0) {
+    if (sim.oreIn(ship) === 0) {
       this.hauling = false;
       this.dropsThisLoad = false;
     }
-    if (ship.ore >= sim.deliveryLoad(ship) && !this.hauling) {
+    if (sim.oreIn(ship) >= sim.deliveryLoad(ship) && !this.hauling) {
       this.hauling = true;
       this.dropsThisLoad = sim.deposits.length > 0 && sim.roll() < sim.tuning.depositDropChance;
     }
-    const canAffordRepair = ship.ore > 0 || sim.canPayRepair(ship);
+    const canAffordRepair = sim.oreIn(ship) > 0 || sim.canPayRepair(ship);
     if ((ship.hull < LOW_HULL || sim.crippled(ship)) && canAffordRepair) this.hauling = true;
 
     // Repairs come before shopping, so it never spends its repair money on parts.
-    if (ship.ore === 0 && sim.canRepair(ship)) {
+    if (sim.oreIn(ship) === 0 && sim.canRepair(ship)) {
       this.task = "repairing";
       const dock = sim.dockedAt(ship) ?? sim.homeBaseOf(ship).poi;
       this.hold(sim, sim.dockPoint(false, dock), sim.dockPoint(true, dock));
       return;
     }
-    if (ship.ore === 0 && sim.atShop(ship)) this.shop(sim);
+    if (sim.oreIn(ship) === 0 && sim.atShop(ship)) this.shop(sim);
 
-    if (!this.hauling && ship.ore === 0) {
+    if (!this.hauling && sim.oreIn(ship) === 0) {
       this.chooseField(sim);
       this.chooseTrade(sim);
       if (this.trading) {
@@ -726,7 +726,7 @@ export class DronePilot extends ShipPilot {
     this.task = "to buy";
     if (source === "pirate base") {
       const base = sim.pirateBase;
-      if (!base || sim.pirateOre < sim.cargoSpace(ship)) {
+      if (!base || sim.oreCount(sim.pirateOre) < sim.cargoSpace(ship)) {
         this.trading = null;
         return;
       }
@@ -734,7 +734,7 @@ export class DronePilot extends ShipPilot {
       else this.travel(sim, base, sim.tuning.pirateBaseReach / 2, 0, null);
       return;
     }
-    if (!sim.deposits.includes(source) || source.ore < sim.cargoSpace(ship)) {
+    if (!sim.deposits.includes(source) || sim.oreCount(source.ore) < sim.cargoSpace(ship)) {
       this.trading = null;
       return;
     }
@@ -832,7 +832,7 @@ export class DronePilot extends ShipPilot {
   /** Takes its ore to a deposit nearer than the dock, if there is one. Returns whether it's doing that. */
   private dropLoad(sim: Sim): boolean {
     const { ship } = this;
-    if (ship.ore === 0) return false;
+    if (sim.oreIn(ship) === 0) return false;
     const deposit = sim.depositFor(ship);
     if (!deposit) return false;
     this.task = "to deposit";
@@ -869,7 +869,7 @@ export class DronePilot extends ShipPilot {
       (sim.miningFieldAt(ship.x, ship.y).id !== field.id ||
         sim.sleeping.has(field.id) ||
         sim.cornerToward(ship.x, ship.y, field.poi.x, field.poi.y) !== null);
-    if (away && ship.ore === 0) {
+    if (away && sim.oreIn(ship) === 0) {
       this.task = field.id === sim.ownField(ship).id ? "to field" : "to far field";
       this.travel(sim, field.poi, field.radius * FIELD_ARRIVAL_SHARE, 0, null);
       return;
@@ -886,7 +886,7 @@ export class DronePilot extends ShipPilot {
       this.task = this.attack(sim, this.rock);
       return;
     }
-    if (ship.ore > 0) {
+    if (sim.oreIn(ship) > 0) {
       this.hauling = true;
       return;
     }
@@ -1576,7 +1576,7 @@ export class FighterPilot extends ShipPilot {
     if (this.goHome(sim)) return;
     if (this.gather(sim)) return;
     if (ship.faction === "pirate" && this.mine(sim)) return;
-    if (ship.ore > 0) {
+    if (sim.oreIn(ship) > 0) {
       this.headingHome = true;
       this.goHome(sim);
       return;
@@ -1592,7 +1592,7 @@ export class FighterPilot extends ShipPilot {
   private shouldRetreat(sim: Sim): boolean {
     const { ship } = this;
     if (!this.isPirate || !sim.tuning.pirateRetreats || (ship.hull >= LOW_HULL && !sim.crippled(ship))) return false;
-    return ship.ore > 0 || sim.canPayRepair(ship);
+    return sim.oreIn(ship) > 0 || sim.canPayRepair(ship);
   }
 
   /** Whether a pirate should stay clear of a spot: it only goes under the guns on a chase. */
@@ -1603,11 +1603,11 @@ export class FighterPilot extends ShipPilot {
   /** Goes home to sell a full load or repair a low hull. Returns whether it's doing that. */
   private goHome(sim: Sim): boolean {
     const { ship } = this;
-    const canPay = ship.ore > 0 || sim.canPayRepair(ship);
-    if (ship.ore >= sim.deliveryLoad(ship) || ((ship.hull < LOW_HULL || sim.crippled(ship)) && canPay)) {
+    const canPay = sim.oreIn(ship) > 0 || sim.canPayRepair(ship);
+    if (sim.oreIn(ship) >= sim.deliveryLoad(ship) || ((ship.hull < LOW_HULL || sim.crippled(ship)) && canPay)) {
       this.headingHome = true;
     }
-    const busy = ship.ore > 0 || sim.canRepair(ship);
+    const busy = sim.oreIn(ship) > 0 || sim.canRepair(ship);
     if (sim.isHome(ship) && busy) {
       this.task = "at home";
       this.hold(sim, sim.homeOf(ship), sim.homeOf(ship, ship.faction, true));

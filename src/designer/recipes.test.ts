@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { moduleIds } from "../items";
 import { stationsFor } from "./link";
 import { RECIPES } from "./recipes";
 import { shippedWorld } from "./shipped";
@@ -16,7 +17,8 @@ describe("layout recipes", () => {
     expect(fields).toHaveLength(1);
     expect(fields[0].parent?.kind).toBe("planet");
     const spec = stationsFor(world).find((station) => station.name === "Planet base")!;
-    expect(spec.blueprints).toEqual(["tractorAll"]);
+    expect(spec.unlocked).toEqual(moduleIds());
+    expect(spec.wanted).toEqual([]);
     expect(spec.shipyard).toBe(true);
     expect(lines.some((line) => line.includes("Racer"))).toBe(true);
   });

@@ -17,7 +17,7 @@ describe("save and load", () => {
     run(sim, 30);
     sim.ship.credits = 1234;
     sim.ship.marked = true;
-    sim.ores.push({ x: 1, y: 2, px: 1, py: 2, vx: 0, vy: 0, kind: 0, amount: 1, from: sim.ship });
+    sim.ores.push({ x: 1, y: 2, px: 1, py: 2, vx: 0, vy: 0, kind: 0, item: "ore", wear: 0, count: 1, from: sim.ship });
     const into = homeSim(99, { ...DEFAULTS });
     roundTrip(sim, into);
 
@@ -113,7 +113,8 @@ describe("the shipped start", () => {
     expect(loadStart(sim, file, layoutKey(stringifyWorld(shippedWorld())))).toBe(true);
     useLayout(shippedWorld(), linkTo(sim));
     sim.startPlayer();
-    expect(sim.bases[0].board.some((report) => report.item === "tractorAll")).toBe(true);
+    // The world has run: the base that sells the all-round tractor has put up word of it.
+    expect(sim.bases.some((base) => base.board.some((report) => report.item === "tractorAll"))).toBe(true);
     for (let i = 0; i < Math.round(5 / TICK); i++) sim.step();
   });
 });

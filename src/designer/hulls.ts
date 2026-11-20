@@ -17,9 +17,13 @@
  *   picked from the glyph set, with three colours and a mark, kept the same way. A decal part is
  *   looks only, and only for decal mounts. "Show on hull" can be none, to show just the part.
  * - Mount types: the list both pick from.
- * - Items: goods that aren't parts (ore, and parts made from it): name, shape, volume, price,
- *   an icon with a glow for when it floats loose, and the recipes that make an item or a part
- *   from items. Kept in src/items.json, saved with its own button.
+ * - Items: one generic list of goods: each is an ore, a part made from ore, or a module. A type,
+ *   a shape, a volume, a price, a blueprint price, an icon with a glow for when it floats loose,
+ *   and the recipe that makes it, kept on the item. A module is an item and a part at once, with
+ *   the same id: the item owns what shows and what it costs. Kept in src/items.json.
+ * - Programs: what a pilot buys and loads into a computer. Their own records, because they need
+ *   different stats: a flat price, a tier and an icon, and nothing a station's stock provides.
+ *   Kept in src/programs.json, saved with its own button.
  * Changes are in the game at once; Save writes them all to src/hulls.json, which the game ships with.
  */
 import {
@@ -46,9 +50,11 @@ import {
   type Mount,
   type MountId,
   type ShipFile,
+  itemOwned,
 } from "../fitting";
 import { partFits, partOf, PARTS, SHIP_MODELS, type PartIcon, type PartId, type ShipModel, type ThrusterRole } from "../parts";
-import { itemDef, ITEM_RECIPES, ITEMS, itemsFileNow, SHIPPED_ITEMS, useItemsFile, type ItemDef } from "../items";
+import { ITEMS, ITEM_TYPES, itemDef, itemsFileNow, SHIPPED_ITEMS, useItemsFile, type ItemDef, type ItemType } from "../items";
+import { PROGRAMS, PROGRAM_PARTS, programDef, programsFileNow, SHIPPED_PROGRAMS, useProgramsFile, type ProgramDef } from "../programs";
 import type { GlyphId } from "../glyphs";
 import { EVERY_GLYPH, glyphIcon, iconEl } from "../icons";
 import { DEFAULTS } from "../tuning";
@@ -57,6 +63,7 @@ import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPart } from "../s
 const R = 12;
 const DRAFT_KEY = "jam-ships-draft";
 const ITEMS_DRAFT_KEY = "jam-items-draft";
+const PROGRAMS_DRAFT_KEY = "jam-programs-draft";
 const MODEL_NAMES: Record<ShipModel, string> = { racer: "Racer", floater: "Floater", defender: "Defender", drone: "Drone", pirate: "Pirate" };
 const byName = (a: string, b: string) => a.localeCompare(b);
 /** Every hull, alphabetically by name: the order of the drop down lists. */
@@ -77,11 +84,11 @@ const MIRROR_ROLE: Partial<Record<ThrusterRole, ThrusterRole>> = {
   thrusterStrafeRight: "thrusterStrafeLeft",
 };
 /** The parts that go on mounts (or show as decals), alphabetically by label: the parts page's order. */
-const FITTED = PARTS.filter((part) => part.kind !== "program").sort((a, b) => byName(a.label, b.label));
+const FITTED = [...PARTS].sort((a, b) => byName(a.label, b.label));
 /** The programs a hull's computer can come with, alphabetically. */
-const PROGRAMS = PARTS.filter((part) => part.kind === "program").sort((a, b) => byName(a.label, b.label));
+const PROGRAM_LIST = [...PROGRAM_PARTS].sort((a, b) => byName(a.label, b.label));
 
-type Page = "hulls" | "parts" | "types" | "items";
+type Page = "hulls" | "parts" | "types" | "items" | "programs";
 
 const STYLE = `
 #hulls { position: fixed; inset: 0; z-index: 50; background: #05070d; display: flex; font: 13px system-ui, sans-serif; color: #cfd8e6; }
@@ -184,6 +191,8 @@ export class HullDesigner {
       if (draft) useShipFile(JSON.parse(draft) as ShipFile);
       const items = localStorage.getItem(ITEMS_DRAFT_KEY);
       if (items) useItemsFile(JSON.parse(items));
+      const programs = localStorage.getItem(PROGRAMS_DRAFT_KEY);
+      if (programs) useProgramsFile(JSON.parse(programs));
     } catch {
       /* no draft */
     }
@@ -319,21 +328,39 @@ export class HullDesigner {
     const title = document.createElement("h1");
     title.textContent = "HULL DESIGNER";
     const pages = document.createElement("div");
-    for (const [page, name] of [["hulls", "Hulls"], ["parts", "Parts"], ["types", "Mount types"], ["items", "Items"]] as [Page, string][]) {
+    for (const [page, name] of [
+      ["hulls", "Hulls"],
+      ["parts", "Parts"],
+      ["types", "Mount types"],
+      ["items", "Items"],
+      ["programs", "Programs"],
+    ] as [Page, string][]) {
       pages.append(this.button(name, () => ((this.page = page), this.rebuild()), page === this.page ? "on" : ""));
     }
-    const body = this.page === "hulls" ? this.hullsPage() : this.page === "parts" ? this.partsPage() : this.page === "items" ? this.itemsPage() : this.typesPage();
+    const body =
+      this.page === "hulls"
+        ? this.hullsPage()
+        : this.page === "parts"
+          ? this.partsPage()
+          : this.page === "items"
+            ? this.itemsPage()
+            : this.page === "programs"
+              ? this.programsPage()
+              : this.typesPage();
 
     const file = this.section(
       "file",
       "File",
       this.button("Save to src/hulls.json", () => void this.save()),
-      this.button("Save items to src/items.json", () => void this.saveItems()),
+      this.button("Save items to src/items.json", () => void this.saveFile("items")),
+      this.button("Save programs to src/programs.json", () => void this.saveFile("programs")),
       this.button("Throw away changes", () => {
         useShipFile(SHIPPED_SHIPS);
         useItemsFile(SHIPPED_ITEMS);
+        useProgramsFile(SHIPPED_PROGRAMS);
         try {
           localStorage.removeItem(ITEMS_DRAFT_KEY);
+          localStorage.removeItem(PROGRAMS_DRAFT_KEY);
           localStorage.removeItem(DRAFT_KEY);
         } catch {
           /* nothing kept */
@@ -384,7 +411,7 @@ export class HullDesigner {
       (id, on) => {
         info.programs = on ? [...info.programs, id as PartId] : info.programs.filter((each) => each !== id);
       },
-      PROGRAMS.map((part) => [part.id, part.label]),
+      PROGRAM_LIST.map((part) => [part.id, part.label]),
     );
     const programsNote = document.createElement("p");
     programsNote.textContent = "Loaded into its computer as far as it has slots, and the pilot owns them.";
@@ -761,13 +788,15 @@ export class HullDesigner {
       ),
     );
     const statsNote = document.createElement("p");
-    statsNote.textContent = "Kept in src/hulls.json over the parts' own values in parts.ts, and in the game at once.";
+    statsNote.textContent = itemOwned(part.id)
+      ? "Kept in src/hulls.json, and in the game at once. This module's shape, price, blueprint price and icon are its item's: edit them on the Items page."
+      : "Kept in src/hulls.json over the parts' own values in parts.ts, and in the game at once.";
     const stats = this.section(
       `stats:${part.id}`,
       "Stats",
-      stat("price", "Price", 10),
+      ...(itemOwned(part.id) ? [] : [stat("price", "Price", 10)]),
       stat("weight", "Weight", 0.01),
-      ...(part.shape !== undefined
+      ...(!itemOwned(part.id) && part.shape !== undefined
         ? [cells("Cells it takes across", part.shape.w, 1, (value) => (part.shape!.w = value)), cells("Cells it takes down", part.shape.h, 1, (value) => (part.shape!.h = value))]
         : []),
       ...(part.bay !== undefined
@@ -793,7 +822,7 @@ export class HullDesigner {
       intro,
       this.section("part", "Part", list, decal),
       stats,
-      this.section(`icon:${part.id}`, "Icon", ...this.iconPicker(part)),
+      ...(itemOwned(part.id) ? [] : [this.section(`icon:${part.id}`, "Icon", ...this.iconPicker(part))]),
       this.section(`fits:${part.id}`, `${part.label} fits`, fits, set),
       this.section("goes", "Goes on", where, models),
     ];
@@ -881,7 +910,7 @@ export class HullDesigner {
   /** The item the Items page is on. */
   private itemId: string | null = null;
 
-  /** An item or recipe edit is in: puts it back through the file reader (which tidies it) so the game plays with it, then keeps the draft. */
+  /** An item edit is in: puts it back through the file reader (which tidies it) so the game plays with it, then keeps the draft. */
   private itemsChanged(rebuild = true): void {
     useItemsFile(itemsFileNow());
     try {
@@ -899,19 +928,21 @@ export class HullDesigner {
   }
 
   /**
-   * The Items page: goods that aren't parts. An item has a name, a shape on the grid, a volume
-   * for everywhere else, a price and an icon with a glow for when it floats loose; recipes
-   * make an item or a part from items. Kept in src/items.json, in the game at once.
+   * The Items page: every good in the game. An item has a type (an ore, a part or a module), a
+   * name, a shape on the grid, a volume for everywhere else, a price, a blueprint price and an
+   * icon with a glow for when it floats loose. What it's made from is its own recipe: a part is
+   * made at the hub, a module at the station that sells it. Kept in src/items.json.
    */
   private itemsPage(): HTMLElement[] {
     const intro = document.createElement("p");
-    intro.textContent = "Items: ore and parts as the game now sees them. Name them, give them a shape, volume, price and icon, and say what they're made into.";
+    intro.textContent =
+      "Every good: ore, the parts made from it, and the modules made from those. A module is an item and a part at once, with the same id: the item owns what shows and what it costs. Where a recipe runs follows the type: a part is made at the hub, a module at the station that sells it.";
     if (this.itemId === null || !itemDef(this.itemId)) this.itemId = ITEMS[0]?.id ?? null;
     const id = this.itemId;
     const list = this.labelled(
       "Item",
       this.dropdown(
-        ITEMS.map((each): [string, string] => [each.id, each.name]),
+        ITEMS.map((each): [string, string] => [each.id, `${each.name} (${each.type})`]),
         id ?? "",
         (value) => {
           this.itemId = value;
@@ -924,6 +955,12 @@ export class HullDesigner {
     const newBox = document.createElement("input");
     newBox.type = "text";
     newBox.placeholder = "id of a new item";
+    let newType: ItemType = "part";
+    const typeBox = this.dropdown(
+      ITEM_TYPES.filter((type) => type !== "module").map((type): [string, string] => [type, type]),
+      newType,
+      (value) => (newType = value as ItemType),
+    );
     const addItem = () => {
       const name = newBox.value.trim();
       if (!name || ITEMS.some((each) => each.id === name) || PARTS.some((part) => part.id === name)) {
@@ -931,16 +968,27 @@ export class HullDesigner {
         this.rebuild();
         return;
       }
-      ITEMS.push({ id: name, name, description: "", shape: { w: 1, h: 1 }, price: 10, icon: { glyph: "crate", primary: "#566274", secondary: "#c8d4e8", border: "#f0d86a" } });
+      ITEMS.push({
+        id: name,
+        name,
+        type: newType,
+        description: "",
+        shape: { w: 1, h: 1 },
+        price: 10,
+        blueprintPrice: 0,
+        icon: { glyph: "crate", primary: "#566274", secondary: "#c8d4e8", border: "#f0d86a" },
+      });
       this.itemId = name;
       this.itemsChanged();
     };
     newBox.addEventListener("keydown", (event) => {
       if (event.key === "Enter") addItem();
     });
-    newRow.append(newBox, this.button("Add", addItem));
+    newRow.append(newBox, typeBox, this.button("Add", addItem));
+    const moduleNote = document.createElement("p");
+    moduleNote.textContent = "A module's item is its module's, so it can't be added or deleted here: pick the module to set what it costs and how it looks.";
 
-    const body: HTMLElement[] = [intro, this.section("itemlist", "Items", list, newRow)];
+    const body: HTMLElement[] = [intro, this.section("itemlist", "Items", list, newRow, moduleNote)];
     if (id !== null) {
       const item = this.liveItem(id);
       const text = (label: string, value: string, set: (def: ItemDef, value: string) => void, area = false) => {
@@ -976,18 +1024,52 @@ export class HullDesigner {
           "Item",
           text("Name", item.name, (def, value) => (def.name = value.trim() || def.id)),
           text("Description", item.description, (def, value) => (def.description = value), true),
+          this.labelled(
+            "Type",
+            this.dropdown(
+              ITEM_TYPES.map((type): [string, string] => [type, type]),
+              item.type,
+              (value) => {
+                // A module is a module because a module names it: its item's type is the module's.
+                if (value === "module" && item.type !== "module") {
+                  this.status = "Only a module can be a module item";
+                  this.rebuild();
+                  return;
+                }
+                this.liveItem(id).type = value as ItemType;
+                this.itemsChanged();
+              },
+            ),
+          ),
           number("Price", item.price, 0, 5, (def, value) => (def.price = value ?? 0)),
+          number("Blueprint price", item.blueprintPrice, 0, 5, (def, value) => (def.blueprintPrice = value ?? 0)),
           number("Cells across", item.shape.w, 1, 1, (def, value) => (def.shape = { ...def.shape, w: Math.max(1, Math.round(value ?? 1)) })),
           number("Cells down", item.shape.h, 1, 1, (def, value) => (def.shape = { ...def.shape, h: Math.max(1, Math.round(value ?? 1)) })),
-          number("Volume (blank: the shape's area, " + area + ")", item.volume, 0.1, 0.5, (def, value) => {
-            if (value === undefined || value <= 0) delete def.volume;
-            else def.volume = value;
-          }, String(area)),
-          this.button("Delete this item", () => {
-            ITEMS.splice(ITEMS.findIndex((each) => each.id === id), 1);
-            this.itemId = null;
-            this.itemsChanged();
-          }, "danger"),
+          number(
+            `Volume (blank: the shape's area, ${area})`,
+            item.volume,
+            0.1,
+            0.5,
+            (def, value) => {
+              if (value === undefined || value <= 0) delete def.volume;
+              else def.volume = value;
+            },
+            String(area),
+          ),
+          this.button(
+            "Delete this item",
+            () => {
+              if (this.liveItem(id).type === "module") {
+                this.status = "A module's item goes with the module: it can't be deleted here";
+                this.rebuild();
+                return;
+              }
+              ITEMS.splice(ITEMS.findIndex((each) => each.id === id), 1);
+              this.itemId = null;
+              this.itemsChanged();
+            },
+            "danger",
+          ),
         ),
       );
       const owner = {
@@ -999,85 +1081,101 @@ export class HullDesigner {
         },
       };
       body.push(this.section(`itemicon:${id}`, "Icon and glow", ...this.iconPicker(owner, (rebuild = true) => this.itemsChanged(rebuild), true)));
+      body.push(this.section(`recipe:${id}`, "Recipe", ...this.recipeRows(id)));
     }
-    body.push(this.section("recipes", "Recipes", ...this.recipeRows()));
     return body;
   }
 
-  /** The recipe list: what each makes, how many, and from which items. */
-  private recipeRows(): HTMLElement[] {
-    const makers: [string, string][] = [
-      ...ITEMS.map((each): [string, string] => [each.id, `${each.name} (item)`]),
-      ...FITTED.filter((part) => !isDecal(part.id)).map((part): [string, string] => [part.id, part.label]),
-    ];
-    const itemOptions = ITEMS.map((each): [string, string] => [each.id, each.name]);
-    const number = (value: number, min: number, set: (value: number) => void) => {
+  /** What an item is made from, on the item itself: the items it takes in, and how many it makes. */
+  private recipeRows(id: string): HTMLElement[] {
+    const live = () => this.liveItem(id);
+    const rows: HTMLElement[] = [];
+    const note = document.createElement("p");
+    note.textContent =
+      live().type === "ore"
+        ? "An ore is mined, not made: it has no recipe, and is picked in a field as a drop chance."
+        : live().type === "part"
+          ? "A part is made at the hub, off-screen, when haulers bring its inputs."
+          : "A module is made at the station that sells it, at the moment of sale.";
+    rows.push(note);
+    if (live().type === "ore") return rows;
+    const recipe = live().recipe;
+    if (!recipe) {
+      rows.push(
+        this.button("+ recipe", () => {
+          const other = ITEMS.find((each) => each.id !== id);
+          if (!other) return;
+          live().recipe = { from: [{ item: other.id, n: 1 }] };
+          this.itemsChanged();
+        }),
+      );
+      return rows;
+    }
+    const options = (): [string, string][] => ITEMS.filter((each) => each.id !== id).map((each): [string, string] => [each.id, `${each.name} (${each.type})`]);
+    const count = (value: number, set: (value: number) => void) => {
       const input = document.createElement("input");
       input.type = "number";
-      input.min = String(min);
+      input.min = "1";
       input.step = "1";
       input.value = String(value);
       input.style.width = "56px";
       input.addEventListener("change", () => {
         const read = Number(input.value);
-        if (!Number.isInteger(read) || read < min) return;
+        if (!Number.isInteger(read) || read < 1) return;
         set(read);
         this.itemsChanged();
       });
       return input;
     };
-    const rows: HTMLElement[] = [];
-    const note = document.createElement("p");
-    note.textContent = "A recipe that makes an item runs in the hub, off-screen, when haulers bring its inputs. One that makes a part runs at a station that sells it, at the moment of sale.";
-    rows.push(note);
-    ITEM_RECIPES.forEach((recipe, index) => {
-      const box = document.createElement("div");
-      box.className = "recipe";
-      box.style.cssText = "border-top:1px solid #222a3a;padding-top:6px;margin-top:6px";
-      const head = document.createElement("div");
-      head.className = "row";
-      const makes = this.dropdown(makers, recipe.makes, (value) => {
-        ITEM_RECIPES[index].makes = value;
-        this.itemsChanged();
-      });
-      head.append(makes, document.createTextNode("×"), number(recipe.yields ?? 1, 1, (value) => (ITEM_RECIPES[index].yields = value)));
-      head.append(this.button("×", () => (ITEM_RECIPES.splice(index, 1), this.itemsChanged()), "danger"));
-      box.append(head);
-      recipe.from.forEach((ingredient, at) => {
-        const row = document.createElement("div");
-        row.className = "row";
-        row.append(
-          document.createTextNode("from"),
-          number(ingredient.n, 1, (value) => (ITEM_RECIPES[index].from[at].n = value)),
-          this.dropdown(itemOptions, ingredient.item, (value) => {
-            ITEM_RECIPES[index].from[at].item = value;
-            this.itemsChanged();
-          }),
-          this.button("×", () => {
-            ITEM_RECIPES[index].from.splice(at, 1);
+    const head = document.createElement("div");
+    head.className = "row";
+    head.append(
+      document.createTextNode("makes ×"),
+      count(recipe.yields ?? 1, (value) => (live().recipe!.yields = value)),
+      this.button(
+        "×",
+        () => {
+          delete live().recipe;
+          this.itemsChanged();
+        },
+        "danger",
+      ),
+    );
+    rows.push(head);
+    recipe.from.forEach((ingredient, at) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const choices = options();
+      const shown = choices.some(([value]) => value === ingredient.item) ? choices : ([[ingredient.item, ingredient.item], ...choices] as [string, string][]);
+      row.append(
+        document.createTextNode("from"),
+        count(ingredient.n, (value) => (live().recipe!.from[at].n = value)),
+        this.dropdown(shown, ingredient.item, (value) => {
+          live().recipe!.from[at].item = value;
+          this.itemsChanged();
+        }),
+        this.button(
+          "×",
+          () => {
+            live().recipe!.from.splice(at, 1);
             // A recipe with nothing to take in is no recipe.
-            if (ITEM_RECIPES[index].from.length === 0) ITEM_RECIPES.splice(index, 1);
+            if (live().recipe!.from.length === 0) delete live().recipe;
             this.itemsChanged();
-          }, "danger"),
-        );
-        box.append(row);
-      });
-      box.append(
+          },
+          "danger",
+        ),
+      );
+      rows.push(row);
+    });
+    const first = options()[0];
+    if (first) {
+      rows.push(
         this.button("+ input", () => {
-          if (ITEMS.length === 0) return;
-          ITEM_RECIPES[index].from.push({ item: ITEMS[0].id, n: 1 });
+          live().recipe!.from.push({ item: first[0], n: 1 });
           this.itemsChanged();
         }),
       );
-      rows.push(box);
-    });
-    rows.push(
-      this.button("+ recipe", () => {
-        if (ITEMS.length < 1) return;
-        ITEM_RECIPES.push({ makes: ITEMS[0].id, from: [{ item: ITEMS[0].id, n: 1 }] });
-        this.itemsChanged();
-      }),
-    );
+    }
     return rows;
   }
 
@@ -1117,7 +1215,140 @@ export class HullDesigner {
     ctx.arc(this.cx, this.cy + cell * 2, cell * 0.5, 0, Math.PI * 2);
     ctx.stroke();
     ctx.fillStyle = "#7f8ba0";
-    ctx.fillText(`${item.name}: on the grid (above) and loose in space (below). Volume ${item.volume ?? item.shape.w * item.shape.h}.`, 14, height - 14);
+    ctx.fillText(`${item.name} (${item.type}): on the grid (above) and loose in space (below). Volume ${item.volume ?? item.shape.w * item.shape.h}.`, 14, height - 14);
+  }
+
+  // ---------- programs ----------
+
+  /** The program the Programs page is on. */
+  private programId: string | null = null;
+
+  /** A program edit is in: puts it back through the file reader (which tidies it) so the game plays with it, then keeps the draft. */
+  private programsChanged(rebuild = true): void {
+    useProgramsFile(programsFileNow());
+    try {
+      localStorage.setItem(PROGRAMS_DRAFT_KEY, JSON.stringify(programsFileNow()));
+    } catch {
+      /* storage blocked: the change still holds until reload */
+    }
+    this.status = "Not saved";
+    this.changed(rebuild);
+  }
+
+  private liveProgram(id: string): ProgramDef {
+    return PROGRAMS.find((program) => program.id === id)!;
+  }
+
+  /**
+   * The Programs page: what a pilot buys and loads into a computer. Not items and not modules:
+   * a program has a flat price, takes nothing from a station's stock, and stays with the pilot
+   * through death. Kept in src/programs.json.
+   */
+  private programsPage(): HTMLElement[] {
+    const intro = document.createElement("p");
+    intro.textContent = "Programs: bought and owned by the pilot, and loaded into a computer's slots. They cost credits and nothing else, and a pilot keeps them through death. A hull comes with its own list of them.";
+    if (this.programId === null || !programDef(this.programId)) this.programId = PROGRAMS[0]?.id ?? null;
+    const id = this.programId;
+    const list = this.labelled(
+      "Program",
+      this.dropdown(
+        PROGRAMS.map((each): [string, string] => [each.id, each.name]),
+        id ?? "",
+        (value) => {
+          this.programId = value;
+          this.rebuild();
+        },
+      ),
+    );
+    const newRow = document.createElement("div");
+    newRow.className = "row";
+    const newBox = document.createElement("input");
+    newBox.type = "text";
+    newBox.placeholder = "id of a new program";
+    const add = () => {
+      const name = newBox.value.trim();
+      if (!name || PROGRAMS.some((each) => each.id === name) || PARTS.some((part) => part.id === name) || ITEMS.some((each) => each.id === name)) {
+        this.status = "A program's id must be new, and not a part's or an item's";
+        this.rebuild();
+        return;
+      }
+      PROGRAMS.push({ id: name, name, short: name, description: "", price: 100, tier: 0, icon: { glyph: "chip", primary: "#2f6e74", secondary: "#7fdfe6", border: "#c4a4f0" } });
+      this.programId = name;
+      this.programsChanged();
+    };
+    newBox.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") add();
+    });
+    newRow.append(newBox, this.button("Add", add));
+    const body: HTMLElement[] = [intro, this.section("programlist", "Programs", list, newRow)];
+    if (id !== null) {
+      const program = this.liveProgram(id);
+      const text = (label: string, value: string, set: (def: ProgramDef, value: string) => void, area = false) => {
+        const input = area ? document.createElement("textarea") : document.createElement("input");
+        if (input instanceof HTMLInputElement) input.type = "text";
+        input.value = value;
+        input.addEventListener("change", () => {
+          set(this.liveProgram(id), input.value);
+          this.programsChanged();
+        });
+        return this.labelled(label, input);
+      };
+      const price = document.createElement("input");
+      price.type = "number";
+      price.min = "0";
+      price.step = "10";
+      price.value = String(program.price);
+      price.addEventListener("change", () => {
+        const value = Number(price.value);
+        if (!Number.isFinite(value) || value < 0) return;
+        this.liveProgram(id).price = value;
+        this.programsChanged();
+      });
+      body.push(
+        this.section(
+          `program:${id}`,
+          "Program",
+          text("Name", program.name, (def, value) => (def.name = value.trim() || def.id)),
+          text("Short name", program.short, (def, value) => (def.short = value.trim() || def.name.slice(0, 5))),
+          text("Description", program.description, (def, value) => (def.description = value), true),
+          this.labelled("Price", price),
+          this.labelled(
+            "Sold",
+            this.dropdown(
+              [
+                ["0", "from the start"],
+                ["1", "after a little ore is sold"],
+                ["2", "after much more ore is sold"],
+              ],
+              String(program.tier),
+              (value) => {
+                this.liveProgram(id).tier = value === "2" ? 2 : value === "1" ? 1 : 0;
+                this.programsChanged();
+              },
+            ),
+          ),
+          this.button(
+            "Delete this program",
+            () => {
+              PROGRAMS.splice(PROGRAMS.findIndex((each) => each.id === id), 1);
+              this.programId = null;
+              this.programsChanged();
+            },
+            "danger",
+          ),
+        ),
+      );
+      const owner = {
+        get icon(): PartIcon {
+          return PROGRAMS.find((each) => each.id === id)!.icon;
+        },
+        set icon(value: PartIcon) {
+          PROGRAMS.find((each) => each.id === id)!.icon = value;
+        },
+      };
+      body.push(this.section(`programicon:${id}`, "Icon", ...this.iconPicker(owner, (rebuild = true) => this.programsChanged(rebuild))));
+    }
+    return body;
   }
 
   private typesPage(): HTMLElement[] {
@@ -1268,14 +1499,18 @@ export class HullDesigner {
     return lines.join("\n");
   }
 
-  private async saveItems(): Promise<void> {
+  /** Writes one of the designer's own files out: the items, or the programs. */
+  private async saveFile(which: "items" | "programs"): Promise<void> {
+    const [url, name, file, shipped, draft] =
+      which === "items"
+        ? ["/__items", "src/items.json", itemsFileNow(), SHIPPED_ITEMS, ITEMS_DRAFT_KEY]
+        : ["/__programs", "src/programs.json", programsFileNow(), SHIPPED_PROGRAMS, PROGRAMS_DRAFT_KEY];
     try {
-      const file = itemsFileNow();
-      const response = await fetch("/__items", { method: "POST", body: JSON.stringify(file, null, 2) + "\n" });
-      this.status = response.ok ? "Saved to src/items.json" : `Couldn't save (${response.status})`;
+      const response = await fetch(url, { method: "POST", body: JSON.stringify(file, null, 2) + "\n" });
+      this.status = response.ok ? `Saved to ${name}` : `Couldn't save (${response.status})`;
       if (response.ok) {
-        Object.assign(SHIPPED_ITEMS, file);
-        localStorage.removeItem(ITEMS_DRAFT_KEY);
+        Object.assign(shipped, file);
+        localStorage.removeItem(draft);
       }
     } catch (error) {
       this.status = `Couldn't save: ${String(error)}`;

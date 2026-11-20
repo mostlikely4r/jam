@@ -1,24 +1,527 @@
 {
   "items": [
     {
+      "id": "ore",
+      "name": "Ore",
+      "type": "ore",
+      "description": "Plain ore, mined from any rock. Haulers carry it off, and the hub makes parts from it",
+      "shape": {
+        "w": 1,
+        "h": 1
+      },
+      "price": 10,
+      "blueprintPrice": 0,
+      "icon": {
+        "glyph": "diamond",
+        "primary": "#6b6152",
+        "secondary": "#d8cbb0",
+        "border": "#c8a868",
+        "glow": "#c8a868"
+      }
+    },
+    {
       "id": "oreB",
       "name": "Ore B",
+      "type": "ore",
       "description": "A heavy ore that only drops in far fields. Haulers carry it off to be made into parts",
-      "shape": { "w": 1, "h": 2 },
+      "shape": {
+        "w": 1,
+        "h": 2
+      },
       "price": 30,
-      "icon": { "glyph": "diamond", "primary": "#6aa0d8", "secondary": "#d8ecff", "border": "#7fdfe6", "mark": "B", "glow": "#7fdfe6" }
+      "blueprintPrice": 0,
+      "icon": {
+        "glyph": "diamond",
+        "primary": "#6aa0d8",
+        "secondary": "#d8ecff",
+        "border": "#7fdfe6",
+        "mark": "B",
+        "glow": "#7fdfe6"
+      }
+    },
+    {
+      "id": "partA",
+      "name": "Part A",
+      "type": "part",
+      "description": "Made from plain ore off-screen. Every module is built from parts A, and repairs use them",
+      "shape": {
+        "w": 1,
+        "h": 1
+      },
+      "price": 16,
+      "blueprintPrice": 0,
+      "icon": {
+        "glyph": "board",
+        "primary": "#4a5a4a",
+        "secondary": "#c8e0c0",
+        "border": "#f0d86a",
+        "mark": "A",
+        "glow": "#f0d86a"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "ore",
+            "n": 2
+          }
+        ]
+      }
     },
     {
       "id": "partB",
       "name": "Part B",
+      "type": "part",
       "description": "Made from ore B off-screen. The 360 tractor is built from one",
-      "shape": { "w": 1, "h": 1 },
+      "shape": {
+        "w": 1,
+        "h": 1
+      },
       "price": 90,
-      "icon": { "glyph": "board", "primary": "#4a6a8a", "secondary": "#bfe0ff", "border": "#f0d86a", "mark": "B", "glow": "#f0d86a" }
+      "blueprintPrice": 0,
+      "icon": {
+        "glyph": "board",
+        "primary": "#4a6a8a",
+        "secondary": "#bfe0ff",
+        "border": "#f0d86a",
+        "mark": "B",
+        "glow": "#f0d86a"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "oreB",
+            "n": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "reverse",
+      "name": "Reverse thruster",
+      "type": "module",
+      "description": "Brake without flipping",
+      "shape": {
+        "w": 1,
+        "h": 2
+      },
+      "price": 200,
+      "blueprintPrice": 150,
+      "icon": {
+        "glyph": "reverse",
+        "primary": "#8c9bb2",
+        "secondary": "#bec8d8",
+        "border": "#f0a868"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 10
+          }
+        ]
+      }
+    },
+    {
+      "id": "strafe",
+      "name": "Strafe thrusters",
+      "type": "module",
+      "description": "Move sideways",
+      "shape": {
+        "w": 1,
+        "h": 2
+      },
+      "price": 300,
+      "blueprintPrice": 225,
+      "icon": {
+        "glyph": "strafe",
+        "primary": "#8c9bb2",
+        "secondary": "#bec8d8",
+        "border": "#f0a868"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 15
+          }
+        ]
+      }
+    },
+    {
+      "id": "gun2",
+      "name": "Gun 2",
+      "type": "module",
+      "description": "A slower gun that hits free ore that stays with the rock. No flung ore",
+      "shape": {
+        "w": 1,
+        "h": 2
+      },
+      "price": 250,
+      "blueprintPrice": 188,
+      "icon": {
+        "glyph": "gun",
+        "primary": "#5a6272",
+        "secondary": "#bec8d8",
+        "border": "#e88a8a",
+        "mark": "2"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 13
+          }
+        ]
+      }
+    },
+    {
+      "id": "tractor",
+      "name": "Tractor beam",
+      "type": "module",
+      "description": "Catches loose ore ahead and pulls it in",
+      "shape": {
+        "w": 2,
+        "h": 2
+      },
+      "price": 300,
+      "blueprintPrice": 225,
+      "icon": {
+        "glyph": "coneBeam",
+        "primary": "#467870",
+        "secondary": "#96e6d2",
+        "border": "#7fdfe6"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 15
+          }
+        ]
+      }
+    },
+    {
+      "id": "tractorAll",
+      "name": "All-round tractor",
+      "type": "module",
+      "description": "Catches loose ore all round, not just ahead",
+      "shape": {
+        "w": 2,
+        "h": 2
+      },
+      "price": 600,
+      "blueprintPrice": 450,
+      "icon": {
+        "glyph": "ringBeam",
+        "primary": "#467870",
+        "secondary": "#96e6d2",
+        "border": "#7fdfe6",
+        "mark": "360"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 30
+          },
+          {
+            "item": "partB",
+            "n": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "turret",
+      "name": "Turret mount",
+      "type": "module",
+      "description": "Your gun turns to follow the mouse, with a third of its range",
+      "shape": {
+        "w": 2,
+        "h": 2
+      },
+      "price": 300,
+      "blueprintPrice": 225,
+      "icon": {
+        "glyph": "turret",
+        "primary": "#5a6272",
+        "secondary": "#bec8d8",
+        "border": "#e88a8a"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 15
+          }
+        ]
+      }
+    },
+    {
+      "id": "bay",
+      "name": "Cargo bay",
+      "type": "module",
+      "description": "Room for 20 more ore, for a little more weight",
+      "shape": {
+        "w": 2,
+        "h": 3
+      },
+      "price": 250,
+      "blueprintPrice": 188,
+      "icon": {
+        "glyph": "crate",
+        "primary": "#566274",
+        "secondary": "#c8d4e8",
+        "border": "#f0d86a"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 13
+          }
+        ]
+      }
+    },
+    {
+      "id": "largeBay",
+      "name": "Large cargo bay",
+      "type": "module",
+      "description": "Room for 50 more ore, and you'll feel the weight",
+      "shape": {
+        "w": 3,
+        "h": 4
+      },
+      "price": 600,
+      "blueprintPrice": 450,
+      "icon": {
+        "glyph": "openCrate",
+        "primary": "#566274",
+        "secondary": "#c8d4e8",
+        "border": "#f0d86a",
+        "mark": "+"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "smallBay",
+      "name": "Small cargo bay",
+      "type": "module",
+      "description": "The bay a bare hull comes with. Room for 10 ore",
+      "shape": {
+        "w": 2,
+        "h": 2
+      },
+      "price": 100,
+      "blueprintPrice": 75,
+      "icon": {
+        "glyph": "crate",
+        "primary": "#566274",
+        "secondary": "#c8d4e8",
+        "border": "#f0d86a",
+        "mark": "-"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 5
+          }
+        ]
+      }
+    },
+    {
+      "id": "flightComputer",
+      "name": "Flight computer",
+      "type": "module",
+      "description": "Runs 4 programs at once",
+      "shape": {
+        "w": 1,
+        "h": 1
+      },
+      "price": 500,
+      "blueprintPrice": 375,
+      "icon": {
+        "glyph": "chip",
+        "primary": "#2e3d59",
+        "secondary": "#8fb4ff",
+        "border": "#8fb4ff",
+        "mark": "4"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 25
+          }
+        ]
+      }
+    },
+    {
+      "id": "navComputer",
+      "name": "Navigation computer",
+      "type": "module",
+      "description": "Runs 6 programs at once",
+      "shape": {
+        "w": 1,
+        "h": 1
+      },
+      "price": 1200,
+      "blueprintPrice": 900,
+      "icon": {
+        "glyph": "chip",
+        "primary": "#2e3d59",
+        "secondary": "#8fb4ff",
+        "border": "#8fb4ff",
+        "mark": "6"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 60
+          }
+        ]
+      }
+    },
+    {
+      "id": "gun1",
+      "name": "Gun 1",
+      "type": "module",
+      "description": "A quick gun. Breaks rocks and sometimes flings ore off, worth more",
+      "shape": {
+        "w": 1,
+        "h": 2
+      },
+      "price": 100,
+      "blueprintPrice": 75,
+      "icon": {
+        "glyph": "gun",
+        "primary": "#5a6272",
+        "secondary": "#bec8d8",
+        "border": "#e88a8a",
+        "mark": "1"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 5
+          }
+        ]
+      }
+    },
+    {
+      "id": "racerMain",
+      "name": "Racer main thruster",
+      "type": "module",
+      "description": "Full power for every thruster on the ship",
+      "shape": {
+        "w": 2,
+        "h": 2
+      },
+      "price": 300,
+      "blueprintPrice": 225,
+      "icon": {
+        "glyph": "engineLarge",
+        "primary": "#8c9bb2",
+        "secondary": "#bec8d8",
+        "border": "#f0a868"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 15
+          }
+        ]
+      }
+    },
+    {
+      "id": "floaterMain",
+      "name": "Floater main thruster",
+      "type": "module",
+      "description": "Gentle power for every thruster on the ship",
+      "shape": {
+        "w": 2,
+        "h": 2
+      },
+      "price": 200,
+      "blueprintPrice": 150,
+      "icon": {
+        "glyph": "engineSmall",
+        "primary": "#8c9bb2",
+        "secondary": "#bec8d8",
+        "border": "#f0a868"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 10
+          }
+        ]
+      }
+    },
+    {
+      "id": "turnThrusters",
+      "name": "Turning thrusters",
+      "type": "module",
+      "description": "Turn the ship",
+      "shape": {
+        "w": 1,
+        "h": 1
+      },
+      "price": 100,
+      "blueprintPrice": 75,
+      "icon": {
+        "glyph": "turn",
+        "primary": "#8c9bb2",
+        "secondary": "#bec8d8",
+        "border": "#f0a868"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 5
+          }
+        ]
+      }
+    },
+    {
+      "id": "basicComputer",
+      "name": "Basic computer",
+      "type": "module",
+      "description": "Runs 2 programs at once",
+      "shape": {
+        "w": 1,
+        "h": 1
+      },
+      "price": 150,
+      "blueprintPrice": 113,
+      "icon": {
+        "glyph": "chip",
+        "primary": "#2e3d59",
+        "secondary": "#8fb4ff",
+        "border": "#8fb4ff",
+        "mark": "2"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 8
+          }
+        ]
+      }
     }
-  ],
-  "recipes": [
-    { "makes": "partB", "from": [{ "item": "oreB", "n": 2 }] },
-    { "makes": "tractorAll", "from": [{ "item": "partB", "n": 1 }] }
   ]
 }

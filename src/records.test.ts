@@ -42,7 +42,7 @@ function run(sim: Sim, seconds: number, each?: () => void): void {
 }
 
 /** Ore traffic has sold at the station, all told. */
-const sold = (sim: Sim) => sim.traffic.reduce((sum, pilot) => sum + pilot.ship.earned, 0) / sim.tuning.creditsPerOre;
+const sold = (sim: Sim) => sim.traffic.reduce((sum, pilot) => sum + pilot.ship.earned, 0) / sim.plainOrePrice();
 
 describe("traffic out of view", () => {
   it("becomes a trip record, flown by nobody, and a ship again when the camera comes near", () => {
@@ -68,7 +68,7 @@ describe("traffic out of view", () => {
     expect(sim.traffic.every((pilot) => pilot.record)).toBe(true);
     expect(sim.traffic.every((pilot) => pilot.ship.trips > 0)).toBe(true);
     expect(sold(sim)).toBeGreaterThan(100);
-    expect(sim.bases[0].ore).toBeGreaterThan(0);
+    expect(sim.oreCount(sim.bases[0].ore)).toBeGreaterThan(0);
     // The field is mined, as it would be: broken rocks leave smaller ones.
     expect(rocks()).not.toBe(HOME.rockCount);
   }, 120000);
@@ -128,7 +128,7 @@ describe("pirates and defenders out of view", () => {
     const sim = homeSim(1, { ...ALONE, defenders: 0 });
     run(sim, 900, () => parkAway(sim));
     expect(sim.fighters[0].record).not.toBeNull();
-    expect(sim.pirateOre).toBeGreaterThan(0);
+    expect(sim.oreCount(sim.pirateOre)).toBeGreaterThan(0);
   }, 120000);
 
   it("a pirate as a record spots laden traffic in its field: both are ships again, and it attacks", () => {

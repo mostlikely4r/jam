@@ -35,37 +35,37 @@ describe("glyphs and part icons", () => {
   });
 
   it("an icon override round-trips through the ship file, and a reset puts the code's back", () => {
-    const coded = { ...partOf("gun2").icon };
+    const coded = { ...partOf("cockpitKite").icon };
     withFile(
-      () => (partOf("gun2").icon = { ...coded, glyph: "star", mark: "test mark" }),
+      () => (partOf("cockpitKite").icon = { ...coded, glyph: "star", mark: "test mark" }),
       () => {
-        expect(partOf("gun2").icon.glyph).toBe("star");
+        expect(partOf("cockpitKite").icon.glyph).toBe("star");
         const file = shipFileNow();
-        expect(file.partStats!.gun2).toEqual({ icon: { glyph: "star", primary: coded.primary, secondary: coded.secondary, border: coded.border, mark: "test mark" } });
+        expect(file.partStats!.cockpitKite).toEqual({ icon: { glyph: "star", primary: coded.primary, secondary: coded.secondary, border: coded.border, mark: "test mark" } });
         // Putting the file in play keeps the change.
         useShipFile(file);
-        expect(partOf("gun2").icon.glyph).toBe("star");
-        expect(partOf("gun2").icon.mark).toBe("test mark");
+        expect(partOf("cockpitKite").icon.glyph).toBe("star");
+        expect(partOf("cockpitKite").icon.mark).toBe("test mark");
         // Resetting the part puts the code's own icon back, and the diff is gone.
-        resetPartStats("gun2");
-        expect(partOf("gun2").icon).toEqual(coded);
-        expect(shipFileNow().partStats!.gun2).toBeUndefined();
+        resetPartStats("cockpitKite");
+        expect(partOf("cockpitKite").icon).toEqual(coded);
+        expect(shipFileNow().partStats!.cockpitKite).toBeUndefined();
       },
     );
   });
 
   it("a file's icon is only sat over the code's when its glyph and colours are valid", () => {
-    const coded = { ...partOf("bay").icon };
+    const coded = { ...partOf("cockpitBar").icon };
     const file = (): ShipFile => shipFileNow();
     withFile(
       () => {},
       () => {
-        const bad: ShipFile = { ...file(), partStats: { ...file().partStats, bay: { icon: { ...coded, glyph: "no such glyph" } } } };
+        const bad: ShipFile = { ...file(), partStats: { ...file().partStats, cockpitBar: { icon: { ...coded, glyph: "no such glyph" } } } };
         useShipFile(bad);
-        expect(partOf("bay").icon.glyph).toBe(coded.glyph);
-        const colourless: ShipFile = { ...file(), partStats: { ...file().partStats, bay: { icon: { ...coded, border: "" } } } };
+        expect(partOf("cockpitBar").icon.glyph).toBe(coded.glyph);
+        const colourless: ShipFile = { ...file(), partStats: { ...file().partStats, cockpitBar: { icon: { ...coded, border: "" } } } };
         useShipFile(colourless);
-        expect(partOf("bay").icon.border).toBe(coded.border);
+        expect(partOf("cockpitBar").icon.border).toBe(coded.border);
       },
     );
   });

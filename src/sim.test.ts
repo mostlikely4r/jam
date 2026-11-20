@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { FIRST_FIELD, HOME, type Home, homeFields, homeOf, homeSim, rehome } from "./home";
-import { PARTS, partFits } from "./parts";
+import { PARTS, partFits, type PartId } from "./parts";
 import { roundTrip } from "./save";
 import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
 import { bodyAt, DOCK_OFFSET, type FieldSpec, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, type SolidBody, STATION_HALF, TICK } from "./sim";
 import { partOf as partInfo } from "./parts";
+import { PROGRAM_PARTS } from "./programs";
 
 // Written for wrecks that happen at once, with a bare hull straight away: critical, the pod
 // and the choice at the yard have their own tests in fitting.test.ts.
@@ -37,6 +38,7 @@ const DEFAULTS = {
   pirates: 0,
   defenders: 0,
   stationStartParts: 100000,
+  stationStorage: 1000000,
   stationReserveParts: Infinity,
   stationUnlocks: false,
 };
@@ -44,7 +46,7 @@ const DEFAULTS = {
 function fitAll(sim: Sim): Sim {
   sim.tuning.partWeightScale = 0;
   // Gun 2 replaces the gun rather than adding to it, so the shooting tests keep the first one.
-  for (const part of PARTS) {
+  for (const part of [...PARTS, ...PROGRAM_PARTS]) {
     if (part.builtIn || part.id === "gun2" || part.id === "tractor" || part.id === "tractorAll") continue;
     // The turret only fits the floater's gun mount.
     if (part.id !== "turret") sim.devSet(sim.ship, part.id, true);
@@ -127,10 +129,11 @@ describe("thrusters", () => {
     expect(degrees(spinning.ship.spin)).toBeCloseTo(DEFAULTS.rotationThrust / 4, 3);
   });
 
-  it("does nothing when a commanded thruster is disabled", () => {
+  it("does nothing when the thruster a command needs isn't fitted", () => {
     const sim = emptySim();
-    sim.tuning.thrusterMain = false;
-    sim.controls.thrust = 1;
+    // No reverse thruster fitted: backing up does nothing at all.
+    sim.devSet(sim.ship, "reverse", false);
+    sim.controls.thrust = -1;
     run(sim, 1);
     expect(sim.ship.vx).toBe(0);
     expect(sim.ship.firing.size).toBe(0);
@@ -157,10 +160,10 @@ describe("thrusters", () => {
     expect(sim.ship.vx).toBeCloseTo(DEFAULTS.thrust, 3);
   });
 
-  it("retro can't stop motion that needs a disabled thruster", () => {
+  it("retro can't stop motion that needs a thruster it hasn't got", () => {
     const sim = emptySim();
     sim.tuning.retro = true;
-    sim.tuning.thrusterReverse = false;
+    sim.devSet(sim.ship, "reverse", false);
     sim.ship.vx = 100;
     run(sim, 2);
     expect(sim.ship.vx).toBe(100);
@@ -238,13 +241,13 @@ describe("impacts", () => {
 
   it("wrecks the ship and loses cargo at zero hull", () => {
     const sim = emptySim();
-    sim.ship.ore = 5;
+    sim.setOre(sim.ship, 5);
     sim.ship.hull = 1;
     sim.rocks.push(sim.makeRock(2, 100, 0, 0, 0));
     sim.ship.vx = 1000;
     run(sim, 0.2);
     expect(sim.ship.wrecks).toBe(1);
-    expect(sim.ship.ore).toBe(0);
+    expect(sim.oreIn(sim.ship)).toBe(0);
     expect(sim.ship.hull).toBe(MAX_HULL);
   });
 });
@@ -600,7 +603,7 @@ describe("station", () => {
 
     it("pulls loose ore too, and ore that lands is gone", () => {
       const sim = near(planet({ pullStart: 30000, pullFull: 15000, pullAccel: 150 }), 50000);
-      sim.ores.push({ x: 13000, y: 0, px: 13000, py: 0, vx: 0, vy: 0, kind: 0, amount: 1 });
+      sim.ores.push({ x: 13000, y: 0, px: 13000, py: 0, vx: 0, vy: 0, kind: 0, item: "ore" as PartId, wear: 0, count: 1 });
       sim.tuning.oreForgetDistance = Infinity;
       run(sim, 0.5);
       expect(sim.ores[0].vx).toBeLessThan(-50);
@@ -793,15 +796,15 @@ describe("station", () => {
 
   it("turns ore into credits only while docked", () => {
     const sim = dockedSim();
-    sim.ship.ore = 5;
+    sim.setOre(sim.ship, 5);
     run(sim, 1);
-    expect(sim.ship.ore).toBe(0);
-    expect(sim.ship.credits).toBe(5 * DEFAULTS.creditsPerOre);
+    expect(sim.oreIn(sim.ship)).toBe(0);
+    expect(sim.ship.credits).toBe(5 * sim.plainOrePrice());
 
     const away = emptySim();
-    away.ship.ore = 5;
+    away.setOre(away.ship, 5);
     run(away, 1);
-    expect(away.ship.ore).toBe(5);
+    expect(away.oreIn(away.ship)).toBe(5);
     expect(away.ship.credits).toBe(0);
   });
 
@@ -819,13 +822,13 @@ describe("station", () => {
   it("keeps credits when the ship is wrecked", () => {
     const sim = emptySim();
     sim.ship.credits = 70;
-    sim.ship.ore = 3;
+    sim.setOre(sim.ship, 3);
     sim.ship.hull = 1;
     sim.rocks.push(sim.makeRock(2, 100, 0, 0, 0));
     sim.ship.vx = 1000;
     run(sim, 0.2);
     expect(sim.ship.wrecks).toBe(1);
-    expect(sim.ship.ore).toBe(0);
+    expect(sim.oreIn(sim.ship)).toBe(0);
     expect(sim.ship.credits).toBe(70);
   });
 });
@@ -1340,7 +1343,7 @@ describe("mining", () => {
     sim.breakRock(rock);
     expect(sim.ores.length).toBe(1);
     run(sim, TICK);
-    expect(sim.ship.ore).toBe(1);
+    expect(sim.oreIn(sim.ship)).toBe(1);
     expect(sim.ores.length).toBe(0);
   });
 
@@ -1360,6 +1363,7 @@ describe("the new ship", () => {
       pirates: 0,
       defenders: 0,
       stationStartParts: 100000,
+      stationStorage: 1000000,
       stationReserveParts: Infinity,
       stationUnlocks: false,
       rockCount: 0,
@@ -1428,7 +1432,7 @@ describe("the new ship", () => {
     expect(Math.hypot(ore.x - rock.x, ore.y - rock.y)).toBeLessThan(rock.radius + 15);
     expect(ore.vx).toBeCloseTo(rock.vx, 6);
     expect(ore.vy).toBeCloseTo(rock.vy, 6);
-    expect(ore.amount).toBe(1);
+    expect(ore.count).toBe(1);
   });
 
   it("a break leaves pieces and ore drifting with the rock", () => {
@@ -1452,7 +1456,7 @@ describe("the new ship", () => {
     for (const ore of sim.ores) {
       expect(ore.vx).toBeCloseTo(12, 6);
       expect(ore.vy).toBeCloseTo(-7, 6);
-      expect(ore.amount).toBe(1);
+      expect(ore.count).toBe(1);
     }
   });
 
@@ -1468,11 +1472,11 @@ describe("the new ship", () => {
       if (gun1) {
         expect(flung.length).toBeGreaterThan(20);
         expect(flung.length).toBeLessThan(100);
-        for (const ore of flung) expect(ore.amount).toBe(3);
+        for (const ore of flung) expect(ore.count).toBe(3);
       } else {
         expect(flung).toEqual([]);
       }
-      for (const ore of sim.ores.filter((o) => !flung.includes(o))) expect(ore.amount).toBe(1);
+      for (const ore of sim.ores.filter((o) => !flung.includes(o))) expect(ore.count).toBe(1);
     }
   });
 
@@ -1486,10 +1490,12 @@ describe("the new ship", () => {
       vx: 0,
       vy: 0,
       kind: 0,
-      amount: 3,
+      item: "ore" as PartId,
+      wear: 0,
+      count: 3,
     });
     sim.step();
-    expect(sim.ship.ore).toBe(3);
+    expect(sim.oreIn(sim.ship)).toBe(3);
   });
 
   it("every hit wears the rock, so it still breaks in the end", () => {
@@ -1641,7 +1647,7 @@ describe("the new ship", () => {
       const angle = sim.ship.angle + off;
       const x = sim.ship.x + Math.cos(angle) * distance;
       const y = sim.ship.y + Math.sin(angle) * distance;
-      sim.ores.push({ x, y, px: x, py: y, vx: 0, vy, kind: 0, amount: 1 });
+      sim.ores.push({ x, y, px: x, py: y, vx: 0, vy, kind: 0, item: "ore" as PartId, wear: 0, count: 1 });
       return sim;
     }
     const near = GAME_DEFAULTS.tractorRange - 25;
@@ -1654,13 +1660,13 @@ describe("the new ship", () => {
       const sim = withOre(near);
       run(sim, 10);
       expect(sim.ores.length).toBe(0);
-      expect(sim.ship.ore).toBe(1);
+      expect(sim.oreIn(sim.ship)).toBe(1);
     });
 
     it("catches ore that's flying off", () => {
       const sim = withOre(near, 60);
       run(sim, 15);
-      expect(sim.ship.ore).toBe(1);
+      expect(sim.oreIn(sim.ship)).toBe(1);
     });
 
     it("leaves ore out of range alone", () => {
@@ -1680,7 +1686,7 @@ describe("the new ship", () => {
       const sim = withOre(near, 0, Math.PI);
       sim.tuning.tractorCone = 360;
       run(sim, 10);
-      expect(sim.ship.ore).toBe(1);
+      expect(sim.oreIn(sim.ship)).toBe(1);
     });
 
     it("catches behind the ship with the all-round tractor, which a racer can fit", () => {
@@ -1688,7 +1694,7 @@ describe("the new ship", () => {
       sim.devSet(sim.ship, "tractor", false);
       sim.devSet(sim.ship, "tractorAll", true);
       run(sim, 10);
-      expect(sim.ship.ore).toBe(1);
+      expect(sim.oreIn(sim.ship)).toBe(1);
       const racer = PARTS.find((part) => part.id === "tractorAll")!;
       expect(partFits(racer, "racer")).toBe(true);
     });
@@ -1700,7 +1706,7 @@ describe("the new ship", () => {
       sim.ship.angle += Math.PI;
       sim.ship.prevAngle = sim.ship.angle;
       run(sim, 10);
-      expect(sim.ship.ore).toBe(1);
+      expect(sim.oreIn(sim.ship)).toBe(1);
     });
 
     it("lets go of ore that gets out of range", () => {
@@ -1993,7 +1999,7 @@ describe("POI carrying zones", () => {
     expect(share(3500)).toBe(0);
   });
 
-  const looseOre = (x: number, y: number) => ({ x, y, px: x, py: y, vx: 0, vy: 0, kind: 0, amount: 1 });
+  const looseOre = (x: number, y: number) => ({ x, y, px: x, py: y, vx: 0, vy: 0, kind: 0, item: "ore" as PartId, wear: 0, count: 1 });
 
   it("ore outside every zone isn't turned by the field", () => {
     const sim = zoned({ ...carrying(500, 1000) });
@@ -2112,7 +2118,7 @@ describe("loose ore far out", () => {
       ...extra,
     });
   }
-  const flying = (x: number, y: number, vx: number) => ({ x, y, px: x, py: y, vx, vy: 0, kind: 0, amount: 1 });
+  const flying = (x: number, y: number, vx: number) => ({ x, y, px: x, py: y, vx, vy: 0, kind: 0, item: "ore" as PartId, wear: 0, count: 1 });
 
   it("isn't pulled back toward the field", () => {
     const sim = open();

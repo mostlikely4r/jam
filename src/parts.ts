@@ -16,7 +16,11 @@ export interface PartIcon {
   glow?: string;
 }
 
+/** The items the game ships with ids of their own. A module's item is the module's own id, so it's already here. */
+type ItemId = "ore" | "oreB" | "partA" | "partB";
+
 export type PartId =
+  | ItemId
   | "spinStabilizer"
   | "reverse"
   | "strafe"
@@ -48,7 +52,8 @@ export type PartId =
 
 /**
  * Where a part goes: on a mount of that kind, or (a program) into a computer's slots.
- * Programs are software: they belong to the pilot, not the ship.
+ * Programs are software: they belong to the pilot, not the ship, and have their own records
+ * (see src/programs.ts).
  */
 export type PartKind = "thruster" | "gun" | "turret" | "tractor" | "computer" | "section" | "program" | "cockpit" | "item";
 
@@ -136,20 +141,8 @@ const TRACTOR_COLORS: PartIcon = { glyph: "coneBeam", primary: "#467870", second
 const COMPUTER_COLORS: PartIcon = { glyph: "chip", primary: "#2e3d59", secondary: "#8fb4ff", border: "#8fb4ff" };
 const BAY_COLORS: PartIcon = { glyph: "crate", primary: "#566274", secondary: "#c8d4e8", border: "#f0d86a" };
 const COCKPIT_COLORS: PartIcon = { glyph: "kite", primary: "#2b4a74", secondary: "#a0d7ff", border: "#a0d7ff" };
-const PROGRAM_COLORS: PartIcon = { glyph: "gyro", primary: "#2f6e74", secondary: "#7fdfe6", border: "#c4a4f0" };
 
 export const PARTS: Part[] = [
-  {
-    id: "spinStabilizer",
-    kind: "program",
-    label: "Spin stabilizer",
-    short: "spin",
-    price: 100,
-    weight: 0.05,
-    description: "Stops your rotation when you let go",
-    tier: 0,
-    icon: { ...PROGRAM_COLORS, glyph: "gyro" },
-  },
   {
     id: "reverse",
     kind: "thruster",
@@ -176,28 +169,6 @@ export const PARTS: Part[] = [
     icon: { ...ENGINE_COLORS, glyph: "strafe" },
   },
   {
-    id: "retro",
-    kind: "program",
-    label: "Retro",
-    short: "retro",
-    price: 300,
-    weight: 0.1,
-    description: "Cancels drift, using the thrusters you own (X)",
-    tier: 2,
-    icon: { ...PROGRAM_COLORS, glyph: "retro" },
-  },
-  {
-    id: "meters",
-    kind: "program",
-    label: "Speed and distance meters",
-    short: "meters",
-    price: 50,
-    weight: 0.02,
-    description: "Adds readouts to the arrows",
-    tier: 0,
-    icon: { ...PROGRAM_COLORS, glyph: "gauge" },
-  },
-  {
     id: "gun2",
     kind: "gun",
     shape: { w: 1, h: 2 },
@@ -208,28 +179,6 @@ export const PARTS: Part[] = [
     description: "A slower gun that hits free ore that stays with the rock. No flung ore",
     tier: 0,
     icon: { ...GUN_COLORS, glyph: "gun", mark: "2" },
-  },
-  {
-    id: "clickMove",
-    kind: "program",
-    label: "Click to move",
-    short: "click",
-    price: 400,
-    weight: 0.02,
-    description: "Right click shifts you there, double click stops there. Drag to leave with a drift",
-    tier: 2,
-    icon: { ...PROGRAM_COLORS, glyph: "cursor" },
-  },
-  {
-    id: "clickRoute",
-    kind: "program",
-    label: "Route planner",
-    short: "route",
-    price: 200,
-    weight: 0.02,
-    description: "Click to move steers around what's in the way",
-    tier: 2,
-    icon: { ...PROGRAM_COLORS, glyph: "route" },
   },
   {
     id: "tractor",
@@ -256,39 +205,6 @@ export const PARTS: Part[] = [
     tier: 2,
     held: true,
     icon: { ...TRACTOR_COLORS, glyph: "ringBeam", mark: "360" },
-  },
-  {
-    id: "clickTurn",
-    kind: "program",
-    label: "Click to turn",
-    short: "turn",
-    price: 150,
-    weight: 0.02,
-    description: "Drag from your ship to set a facing to hold",
-    tier: 2,
-    icon: { ...PROGRAM_COLORS, glyph: "turnCursor" },
-  },
-  {
-    id: "starmap",
-    kind: "program",
-    label: "System chart",
-    short: "chart",
-    price: 350,
-    weight: 0.02,
-    description: "Map. Press C to open it",
-    tier: 2,
-    icon: { ...PROGRAM_COLORS, glyph: "chart" },
-  },
-  {
-    id: "autopilot",
-    kind: "program",
-    label: "Autopilot",
-    short: "auto",
-    price: 800,
-    weight: 0.05,
-    description: "From the chart, sets a course and flies it: out, coast, brake, round bodies",
-    tier: 2,
-    icon: { ...PROGRAM_COLORS, glyph: "autopilot" },
   },
   {
     id: "turret",
@@ -499,12 +415,6 @@ export function shapeOf(id: PartId): Shape {
   return PARTS_BY_ID.get(id)?.shape ?? { w: 1, h: 1 };
 }
 
-/**
- * Not a part: ore locked in a cell of the bay, standing in for one on the bay's grid so the
- * grid's rules (taking room, holding things up) treat it like any other one-cell thing.
- */
-export const ORE_BLOCK = "oreBlock" as PartId;
-
 /** A part by its id. */
 export function partOf(id: PartId): Part {
   return PARTS_BY_ID.get(id)!;
@@ -512,15 +422,15 @@ export function partOf(id: PartId): Part {
 
 /** A program goes into a computer's slots and belongs to the pilot. Anything else is fitted. */
 export function isProgram(id: PartId): boolean {
-  return partOf(id).kind === "program";
+  return PARTS_BY_ID.get(id)?.kind === "program";
 }
 
 const PARTS_BY_ID = new Map(PARTS.map((part) => [part.id, part]));
 
 /**
- * Lets `partOf` answer for an item as well, so everything that holds a module (the bay, the
- * locker, a base's store, loot) takes items without knowing the difference. Items are not in
- * `PARTS`, so nothing that lists the parts lists them. See src/items.ts.
+ * Lets `partOf` answer for an item or a program as well, so everything that holds a module (the
+ * bay, the locker, a base's store, loot) takes them without knowing the difference. Neither is
+ * in `PARTS`, so nothing that lists the parts lists them. See src/items.ts and src/programs.ts.
  */
 export function registerThing(part: Part): void {
   PARTS_BY_ID.set(part.id, part);

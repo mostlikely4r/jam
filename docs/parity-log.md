@@ -74,3 +74,51 @@ Looked at: not yet.
 
 Looked at: not yet.
 
+## 2026-11-19 08:37 — 8cfd793 — 4 to check
+
+8 seeds × 60 game minutes, camera far away. Took 65 min; flown side 27331 s of work, records 4313 s.
+
+| Total | Flown | Records | |
+|---|---:|---:|---|
+| traffic wrecked | 14 | 9 | ok |
+| pirate wrecked | 12 | 26 | ok |
+| defender wrecked | 2 | 4 | ok |
+| traffic left | 48 | 48 | ok |
+| pirates left | 13 | 12 | ok |
+| defenders left | 22 | 23 | ok |
+| traffic hits taken | 1009 | 318 | **check** |
+| pirate hits taken | 567 | 730 | ok |
+| defender hits taken | 98 | 151 | **check** |
+| attacks begun by pirate | 11 | 31 | **check** |
+| attacks begun by defender | 18 | 35 | ok |
+| traffic sold | 3220 | 3372 | ok |
+| pirate credits | 7707 | 4093 | **check** |
+| pirate ore | 0 | 0 | ok |
+| base ore | 537 | 544 | ok |
+
+Looked at: not yet.
+
+## 2026-11-19 23:51 — 539eb0e (with uncommitted changes) — 3 to check
+
+8 seeds × 60 game minutes, camera far away. Took 44 min; flown side 18619 s of work, records 3163 s.
+
+| Total | Flown | Records | |
+|---|---:|---:|---|
+| traffic wrecked | 8 | 6 | ok |
+| pirate wrecked | 10 | 21 | ok |
+| defender wrecked | 3 | 4 | ok |
+| traffic left | 48 | 48 | ok |
+| pirates left | 15 | 8 | ok |
+| defenders left | 21 | 20 | ok |
+| traffic hits taken | 863 | 207 | **check** |
+| pirate hits taken | 517 | 581 | ok |
+| defender hits taken | 73 | 130 | **check** |
+| attacks begun by pirate | 15 | 13 | ok |
+| attacks begun by defender | 13 | 24 | ok |
+| traffic sold | 2582 | 3553 | ok |
+| pirate credits | 5398 | 6160 | ok |
+| pirate ore | 0 | 0 | ok |
+| base ore | 244 | 483 | **check** |
+
+Looked at: not yet.
+

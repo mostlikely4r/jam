@@ -7,13 +7,11 @@
  */
 
 import { clampEccentricity, orbitSpeeds, orbitState, type OrbitShape } from "../kepler";
-import { PARTS, type PartId } from "../parts";
+import { itemDef } from "../items";
+import type { PartId } from "../parts";
 import { DEFAULTS } from "../tuning";
 
 export const WORLD_VERSION = 1;
-
-/** Parts nobody sells the blueprint for: a station holds them or they aren't sold at all. */
-export const HELD_PARTS: PartId[] = PARTS.filter((part) => part.held).map((part) => part.id);
 
 /** Bodies are solid and drawn filled. The rest are places, drawn as outlines. */
 export const BODY_KINDS = ["star", "planet", "moon", "asteroid"] as const;
@@ -74,8 +72,10 @@ export interface WorldNode {
   shipyard: boolean;
   /** Stations only: cells of storage. The player's lockers and the station's store of whole modules come out of it. */
   storage: number;
-  /** Stations only: the held blueprints it starts with, the only way those parts are sold. */
-  blueprints: PartId[];
+  /** Stations only: the modules it starts able to sell. None, and it sells no module at all. */
+  unlocked: PartId[];
+  /** Stations only: the modules it buys the blueprint for, when it can afford them. */
+  wanted: PartId[];
   /** Fields only: the items its rocks drop as well as plain ore, each with its chance on every ore roll. */
   drops: { item: string; chance: number }[];
   /** Stations only: the items in its store when the game starts (they come from nowhere). */
@@ -191,18 +191,18 @@ export function bodyDefaults(
  * sweep a ship far out sideways faster than it can fly.
  */
 export function placeDefaults(kind: NodeKind): Pick<WorldNode, PlaceKey> {
-  const none = { blueprints: [], drops: [], items: [], ...NOT_A_BASE };
+  const none = { unlocked: [], wanted: [], drops: [], items: [], ...NOT_A_BASE };
   if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, shipyard: false, storage: 0, ...none };
   if (kind === "station") {
     // A new station builds nothing and keeps quiet until the designer says; its turrets, once it has them, are the game's usual.
     const guards = { guardCount: DEFAULTS.stationGuardCount, guardArc: DEFAULTS.stationGuardArc, guardDistance: DEFAULTS.stationGuardDistance };
-    return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true, storage: 200, ...none, ...guards };
+    return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true, storage: DEFAULTS.stationStorage, ...none, ...guards };
   }
   if (kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: false, storage: 0, ...none };
   return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, shipyard: false, storage: 0, ...none };
 }
 
-type PlaceKey = "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "blueprints" | "drops" | "items" | BaseKey;
+type PlaceKey = "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "unlocked" | "wanted" | "drops" | "items" | BaseKey;
 type BaseKey = "projects" | "radio" | "guardCount" | "guardArc" | "guardDistance";
 
 /** What a place that isn't a station has for a station's own settings. */
@@ -396,6 +396,13 @@ function readItems(raw: unknown): { item: string; n: number }[] {
     .map((each) => ({ item: each.item, n: Math.floor(each.n) }));
 }
 
+/** A station's module lists read from a file: the module items there are. */
+function isModuleList(raw: unknown): PartId[] {
+  if (!Array.isArray(raw)) return [];
+  const ids = raw.filter((id): id is string => typeof id === "string" && itemDef(id)?.type === "module");
+  return [...new Set(ids)] as PartId[];
+}
+
 /** Reads a saved world, or null when it doesn't look like one. Missing numbers become 0. */
 export function parseWorld(text: string): World | null {
   try {
@@ -431,7 +438,8 @@ export function parseWorld(text: string): World | null {
         spawns: Array.isArray(raw.spawns) ? SHIP_CHOICES.filter((ship) => (raw.spawns as unknown[]).includes(ship)) : [],
         shipyard: typeof raw.shipyard === "boolean" ? raw.shipyard : places.shipyard,
         storage: num("storage", places.storage),
-        blueprints: Array.isArray(raw.blueprints) ? HELD_PARTS.filter((id) => (raw.blueprints as unknown[]).includes(id)) : [],
+        unlocked: isModuleList(raw.unlocked),
+        wanted: isModuleList(raw.wanted),
         drops: readDrops(raw.drops),
         items: readItems(raw.items),
         projects: typeof raw.projects === "boolean" ? raw.projects : places.projects,
@@ -465,7 +473,7 @@ export function parseWorld(text: string): World | null {
  */
 const NODE_KEYS: (keyof WorldNode)[] = [
   "id", "name", "kind", "radius", "surface", "pull", "pullFull", "pullAccel", "atmosphere", "burnSpeed",
-  "rocks", "rockDrift", "rockInflow", "carryFull", "carryNone", "spawns", "shipyard", "storage", "blueprints", "drops", "items",
+  "rocks", "rockDrift", "rockInflow", "carryFull", "carryNone", "spawns", "shipyard", "storage", "unlocked", "wanted", "drops", "items",
   "projects", "radio", "guardCount", "guardArc", "guardDistance", "count", "angleVariance", "orbitVariance", "orbitRadius", "eccentricity", "periapsisAngle", "orbitPeriod", "orbitPhase",
   "spinPeriod", "spinPhase", "children",
 ];
@@ -489,8 +497,8 @@ function ordered(node: Record<string, unknown>): Record<string, unknown> {
 export function stringifyWorld(world: World): string {
   // A spin start angle of 0, and a circular orbit, are left out, so layouts from before they existed read and save the same.
   const left = ["spinPhase", "eccentricity", "periapsisAngle"];
-  // So are no drops and no starting items, for the same reason.
-  const lists = ["drops", "items"];
+  // So are no drops, no starting items and no module lists, for the same reason.
+  const lists = ["drops", "items", "unlocked", "wanted"];
   const isNode = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value) && "kind" in value && "children" in value;
   const replacer = (key: string, value: unknown) => {

@@ -1,6 +1,8 @@
 import { isProgram, partFits, partOf, PARTS, SHIP_MODELS, type Part, type PartIcon, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "./parts";
 import shipFile from "./hulls.json";
 import { hasGlyph } from "./glyphs";
+import { itemDef } from "./items";
+import { programDef } from "./programs";
 import type { Placed } from "./grid";
 
 /**
@@ -75,9 +77,15 @@ export interface HullInfo {
 
 /**
  * The stats of a part the parts page can edit, kept in the ship file over the code's own in
- * `parts.ts`. Only the ones that differ from the code's are kept.
+ * `parts.ts`. Only the ones that differ from the code's are kept. A module's shape, price and
+ * icon are its item's, so they aren't here: the item designer owns those.
  */
-export type PartStats = Partial<Pick<Part, "price" | "weight" | "shape" | "tier" | "bay" | "slots" | "set" | "explosive" | "icon">>;
+export type PartStats = Partial<Pick<Part, "weight" | "tier" | "bay" | "slots" | "set" | "explosive" | "shape" | "icon">>;
+
+/** Whether an item stands behind a part, and owns its shape, price and icon. */
+export function itemOwned(id: PartId): boolean {
+  return itemDef(id) !== undefined;
+}
 
 /**
  * What src/hulls.json holds: the mount types, which each part fits, which parts are decals,
@@ -149,7 +157,7 @@ function readMount(raw: Partial<Mount>, index: number): Mount {
 
 /** A hull's settings read from a file, with anything missing or unknown left out. */
 function readHullInfo(raw: Partial<HullInfo> | undefined): HullInfo {
-  const programs = strings(raw?.programs).filter((id): id is PartId => PARTS.some((part) => part.id === id && part.kind === "program"));
+  const programs = strings(raw?.programs).filter((id): id is PartId => programDef(id) !== undefined);
   const usedBy = strings(raw?.usedBy).filter((use): use is HullUse => (HULL_USES as readonly string[]).includes(use));
   // The stats are always present as keys, so a file without one clears a value read before.
   const stat = (key: "price" | "weight" | "hull"): number | undefined => {
@@ -192,12 +200,14 @@ export function resetPartStats(id: PartId): void {
     if (base[key] === undefined) delete part[key];
     else part[key] = base[key];
   }
-  if (base.shape) part.shape = { ...base.shape };
-  else delete part.shape;
   if (base.bay) part.bay = { ...base.bay, entry: { ...base.bay.entry } };
   else delete part.bay;
-  part.icon = { ...base.icon! };
-  part.price = base.price!;
+  // A module's shape and icon are its item's: the item designer owns them.
+  if (!itemOwned(id)) {
+    if (base.shape) part.shape = { ...base.shape };
+    else delete part.shape;
+    part.icon = { ...base.icon! };
+  }
   part.weight = base.weight!;
   part.tier = base.tier!;
 }
@@ -216,9 +226,15 @@ export function onEdge(w: number, h: number, cell: { x: number; y: number }): { 
 function applyPartStats(id: PartId, stats: PartStats): void {
   const part = PARTS.find((each) => each.id === id);
   if (!part || part.kind === "program") return;
-  for (const key of ["price", "weight", "slots", "explosive"] as const) {
+  for (const key of ["weight", "slots", "explosive"] as const) {
     const value = stats[key];
     if (value !== undefined && Number.isFinite(value) && value >= 0) part[key] = value;
+  }
+  // A module's shape and icon are its item's: the item designer owns them.
+  if (itemOwned(id)) {
+    if (stats.set !== undefined && Number.isFinite(stats.set) && stats.set >= 1) part.set = Math.round(stats.set);
+    if (stats.tier === 0 || stats.tier === 1 || stats.tier === 2) part.tier = stats.tier;
+    return;
   }
   const cells = (value: unknown, min: number) => typeof value === "number" && Number.isInteger(value) && value >= min;
   const shape = stats.shape;
@@ -249,12 +265,15 @@ function partStatsNow(): NonNullable<ShipFile["partStats"]> {
     if (part.kind === "program") continue;
     const base = BASE_STATS.get(part.id)!;
     const diff: PartStats = {};
-    for (const key of ["price", "weight", "slots", "set", "explosive"] as const) {
+    for (const key of ["weight", "slots", "set", "explosive"] as const) {
       if (part[key] !== base[key]) diff[key] = part[key];
     }
-    if (part.shape && JSON.stringify(part.shape) !== JSON.stringify(base.shape)) diff.shape = { ...part.shape };
+    // A module's shape and icon are its item's: they aren't the ship file's to keep.
+    if (!itemOwned(part.id)) {
+      if (part.shape && JSON.stringify(part.shape) !== JSON.stringify(base.shape)) diff.shape = { ...part.shape };
+      if (part.icon && JSON.stringify(part.icon) !== JSON.stringify(base.icon)) diff.icon = { ...part.icon };
+    }
     if (part.bay && JSON.stringify(part.bay) !== JSON.stringify(base.bay)) diff.bay = { ...part.bay, entry: { ...part.bay.entry } };
-    if (part.icon && JSON.stringify(part.icon) !== JSON.stringify(base.icon)) diff.icon = { ...part.icon };
     if (part.tier !== base.tier) diff.tier = part.tier;
     if (Object.keys(diff).length > 0) out[part.id] = diff;
   }

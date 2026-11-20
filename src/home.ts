@@ -4,6 +4,7 @@
  * layout instead; this is the same kind of thing made in code, as specs, so the game runs the
  * one path either way and nothing about this home is special once it's in.
  */
+import { moduleIds } from "./items";
 import { Sim, type FieldSpec, type PirateBaseSpec, type StationSpec } from "./sim";
 import { DEFAULTS, type Tuning } from "./tuning";
 
@@ -143,7 +144,8 @@ export function homeStation(home: Home = HOME): StationSpec {
     rings: [{ center: [field], radius: own.radius, eccentricity: own.eccentricity, periapsis: own.periapsis }],
     carryFull: home.stationCarryFull,
     carryNone: home.stationCarryNone,
-    blueprints: [],
+    // The home station sells the lot, as every station did before the lists: all but the tractor.
+    unlocked: moduleIds().filter((id) => id !== "tractorAll"),
     field: FIRST_FIELD,
     projects: true,
     radio: true,

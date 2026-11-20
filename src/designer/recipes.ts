@@ -8,9 +8,17 @@
  *           npm run layout -- <recipe> --ship      write the shipped world (src/designer/world.json) and re-warm the start
  *           npm run layout -- <recipe> --save name write src/designer/layouts/name.json
  */
+import { moduleIds } from "../items";
 import { linkedNodes } from "./link";
 import { FLIGHTS, sharedParent, tripSpread } from "./trips";
 import { bodyDefaults, closestApproach, isBody, makeChild, parentOf, walk, type NodeKind, type World, type WorldNode } from "./world";
+
+/**
+ * What a station that sells the lot has unlocked: every module. The all-round tractor is the one
+ * module only some stations sell, so it's left out of the rest.
+ */
+const EVERY_MODULE = moduleIds();
+const EVERY_MODULE_BUT_360 = EVERY_MODULE.filter((id) => id !== "tractorAll");
 
 export interface Recipe {
   about: string;
@@ -32,6 +40,20 @@ export function tripReport(world: World, from: WorldNode, to: WorldNode, span: n
     const { min, mean, max } = tripSpread(world, from, to, flight, span);
     return `  ${label}: ${minutes(min)} to ${minutes(max)}, ${minutes(mean)} on average`;
   });
+}
+
+/**
+ * Gives a list to any station that has none: every module but the all-round tractor, which only the
+ * base the recipe builds holds. The home station came from a world from before the lists.
+ */
+function listEveryStation(world: World): string[] {
+  const lines: string[] = [];
+  for (const { node } of walk(world)) {
+    if (node.kind !== "station" || node.unlocked.length > 0) continue;
+    node.unlocked = [...EVERY_MODULE_BUT_360];
+    lines.push(`${node.name} sells every module but the all-round tractor`);
+  }
+  return lines;
 }
 
 /** Takes out any earlier copy of a named node, so running a recipe twice gives the same world. */
@@ -226,17 +248,20 @@ export const RECIPES: Record<string, Recipe> = {
         spinPeriod: 300,
         shipyard: true,
         spawns: [],
-        blueprints: ["tractorAll"],
-        // The all-round tractor is made from a part B (docs/items-plan.md): a few to begin with, which come from nowhere.
+        // The one station that sells the all-round tractor, and the only one with part B to make it from.
+        unlocked: EVERY_MODULE,
+        wanted: [],
         items: [{ item: "partB", n: 3 }],
       });
       field.children.push(base);
       const span = tripSpan(world, home, base);
       const clear = closestApproach(world, planet, base);
+      const listed = listEveryStation(world);
       return [
         `Added ${fieldName}: orbits ${planet.name} at ${field.orbitRadius} every ${minutes(field.orbitPeriod)}.`,
         `Added ${name} round it at ${base.orbitRadius}, holding the all-round tractor.`,
         `Keeps ${Math.round(clear.gap)} clear of ${planet.name}'s pull.`,
+        ...listed,
         `Trips from ${home.name} over ${minutes(span)}:`,
         ...tripReport(world, home, base, span),
       ];
@@ -289,7 +314,8 @@ export const RECIPES: Record<string, Recipe> = {
         spinPeriod: 420,
         shipyard: true,
         spawns: [],
-        blueprints: [],
+        unlocked: EVERY_MODULE_BUT_360,
+        wanted: [],
       });
       // Outer: an ice ball, a pair of planets round each other, and a dark far world with one lonely field.
       add(star, "planet", "Pale", { radius: 11000, orbitRadius: 4600000, orbitPhase: 10, atmosphere: 0, burnSpeed: 0 });

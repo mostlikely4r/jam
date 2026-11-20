@@ -1,10 +1,10 @@
 import { computerSize, DAMAGED_AT, mountsOf, programSlots, type Module, type Mount, type MountId } from "./fitting";
 import { canPlace, entryCells, fits, footprint, reachable, sticks, type GridSpec, type Placed } from "./grid";
-import { isItem, ORE_BLOCK, partOf, PARTS, type PartId } from "./parts";
+import { isItem, partOf, PARTS, type PartId } from "./parts";
+import { PROGRAM_PARTS } from "./programs";
 import { partIcon } from "./icons";
 import { setTip } from "./tooltip";
-import { bayBox, drawVectorShip } from "./shipArt";
-import { lumpOnGrid } from "./cargoBin";
+import { drawVectorShip } from "./shipArt";
 import { dragging, makeDraggable, setDragHandlers, type DragAt, type DragPayload } from "./drag";
 import type { BuyInto, ItemPlace, Sim, Spot } from "./sim";
 
@@ -53,10 +53,7 @@ export class Inventory {
   private ports = new Map<MountId, HTMLElement>();
   /** The footprint shown where a dragged item would land. */
   private preview: HTMLDivElement | null = null;
-  /** The loose ore in the bay as the game shows it, in its box's frame. Set by the game. */
-  lumps: () => readonly { x: number; y: number }[] = () => [];
-  /** Where the loose ore is drawn on the bay grid, every frame. */
-  private oreLayer: HTMLCanvasElement | null = null;
+
 
   constructor(
     private readonly box: HTMLDivElement,
@@ -92,7 +89,6 @@ export class Inventory {
 
   /** Rebuilds the screen when what it shows has changed. Never mid-drag. */
   update(): void {
-    this.drawOre();
     if (dragging()) return;
     const { sim } = this;
     const { ship } = sim;
@@ -107,10 +103,8 @@ export class Inventory {
           base?.id,
           ship.fit,
           ship.hold,
-          ship.oreBlocks,
           ship.programs,
           [...ship.software],
-          ship.ore,
           ship.credits,
           base ? sim.lockerAt(base) : null,
           base ? sim.storageFree(base) : null,
@@ -124,7 +118,6 @@ export class Inventory {
     if (!open) return;
     this.ports.clear();
     this.preview = null;
-    this.oreLayer = null;
     this.box.replaceChildren(this.statusBar());
     const columns = document.createElement("div");
     columns.className = "columns";
@@ -338,7 +331,7 @@ export class Inventory {
     const owned = document.createElement("div");
     owned.className = "software";
     owned.dataset.drop = "software";
-    const spare = PARTS.filter((part) => ship.software.has(part.id) && !ship.programs.includes(part.id));
+    const spare = PROGRAM_PARTS.filter((part) => ship.software.has(part.id) && !ship.programs.includes(part.id));
     for (const part of spare) {
       const chip = document.createElement("div");
       chip.className = "chip";
@@ -369,8 +362,7 @@ export class Inventory {
     const column = document.createElement("div");
     column.className = "column";
     const grid = sim.bayGrid(ship);
-    const locked = sim.lockedOre(ship);
-    column.append(this.heading(grid ? `Bay - ${ship.ore} ore${locked > 0 ? ` (${locked} locked)` : ""}, room for ${sim.cargoSpace(ship)}` : "Bay - none fitted"));
+    column.append(this.heading(grid ? `Bay - ${sim.oreIn(ship)} ore, room for ${sim.cargoSpace(ship)}` : "Bay - none fitted"));
     if (!grid) {
       column.append(this.note("Without a working bay the ship carries nothing."));
       return column;
@@ -381,7 +373,6 @@ export class Inventory {
     const empty = grid.w * grid.h - packed.reduce((sum, item) => sum + footprint(item).w * footprint(item).h, 0);
     if (free === 0) column.append(this.note("The entry is blocked: no ore can come in."));
     else if (free < empty) column.append(this.note("Shaded cells are sealed off from the entry: ore can't reach them."));
-    if (ship.ore > locked) column.append(this.note("Click loose ore by a wall or an item to lock it in place. Click locked ore to let it loose."));
     return column;
   }
 
@@ -432,32 +423,6 @@ export class Inventory {
         view.append(entry);
       }
     }
-    if (bay) {
-      this.sim.ship.oreBlocks.forEach((cell, index) => {
-        const block = this.block("ore", cell.x, cell.y, 1, 1);
-        setTip(block, () => "Locked ore. Click to let it loose");
-        block.addEventListener("click", () => {
-          this.message = this.sim.unlockOre(this.sim.ship, index) ? "" : "It holds something up, or the loose ore wouldn't fit";
-          this.redraw();
-        });
-        view.append(block);
-      });
-      const layer = document.createElement("canvas");
-      layer.className = "lumps";
-      layer.width = spec.w * CELL;
-      layer.height = spec.h * CELL;
-      view.append(layer);
-      this.oreLayer = layer;
-      // A click on loose ore locks it where it is.
-      view.addEventListener("click", (event) => {
-        if (event.target !== view && event.target !== layer && !(event.target as HTMLElement).classList.contains("entry")) return;
-        const rect = view.getBoundingClientRect();
-        const cell = { x: Math.floor((event.clientX - rect.left) / CELL), y: Math.floor((event.clientY - rect.top) / CELL) };
-        if (!this.loosePoints().some((point) => Math.floor(point.x) === cell.x && Math.floor(point.y) === cell.y)) return;
-        this.message = this.sim.lockOre(this.sim.ship, cell) ? "" : "Ore locks only next to a wall, an item or other locked ore, with room left for the rest";
-        this.redraw();
-      });
-    }
     items.forEach((item, index) => {
       const place: ItemPlace = { at: kind, index };
       const { w, h } = footprint(item);
@@ -483,32 +448,6 @@ export class Inventory {
       view.append(tile);
     });
     return view;
-  }
-
-  /** The loose ore lumps, where they are on the bay grid, in cells. */
-  private loosePoints(): { x: number; y: number }[] {
-    const { ship } = this.sim;
-    const grid = this.sim.bayGrid(ship);
-    if (!grid) return [];
-    const box = bayBox(ship);
-    return this.lumps().map((lump) => lumpOnGrid(box, grid, lump));
-  }
-
-  /** Draws the loose ore on the bay grid where it is in the game, lit up. */
-  private drawOre(): void {
-    const layer = this.oreLayer;
-    if (!layer || !layer.isConnected) return;
-    const ctx = layer.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, layer.width, layer.height);
-    ctx.fillStyle = "#f0d86a";
-    ctx.shadowColor = "#f0d86a";
-    ctx.shadowBlur = 6;
-    for (const point of this.loosePoints()) {
-      ctx.beginPath();
-      ctx.arc(point.x * CELL, point.y * CELL, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
   }
 
   private block(className: string, x: number, y: number, w: number, h: number): HTMLDivElement {
@@ -641,7 +580,7 @@ export class Inventory {
     if (place.at === "hold") {
       const floating = sim.floatingWithout(ship, place.index);
       const staying = at?.target?.dataset.drop === "hold";
-      if (floating.length > 0 && !staying) return `Taking it out would leave your ${floating.map((each) => (each.part === ORE_BLOCK ? "locked ore" : partOf(each.part).label.toLowerCase())).join(" and ")} floating`;
+      if (floating.length > 0 && !staying) return `Taking it out would leave your ${floating.map((each) => partOf(each.part).label.toLowerCase()).join(" and ")} floating`;
     }
     const drop = at?.target?.dataset.drop;
     if (drop === "hold" && at) {

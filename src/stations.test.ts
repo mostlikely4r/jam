@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { homeFields, homeSim, homeStations } from "./home";
 import { DEFAULTS } from "./tuning";
+import { moduleIds } from "./items";
 import { roundTrip } from "./save";
 import { type FieldSpec, MAX_HULL, type Poi, type Ship, Sim, type StationSpec, TICK } from "./sim";
 
@@ -27,10 +28,13 @@ const WORLD = {
   fieldOrbitPeriod: 10800,
   repairCost: 1,
   stationStartParts: 1000,
+  stationStorage: 100000,
   stationReserveParts: 0,
 };
 
 const FAR = 2.4;
+/** Every module but the all-round tractor: what both stations sell, until a test says otherwise. */
+const ALL_BUT_360 = moduleIds().filter((id) => id !== "tractorAll");
 
 /** A second field far round the first one's orbit, and a second base just past it. */
 function world(tuning: Partial<typeof WORLD> = {}, outpost: Partial<StationSpec> = {}): { sim: Sim; outpost: Poi } {
@@ -57,7 +61,7 @@ function world(tuning: Partial<typeof WORLD> = {}, outpost: Partial<StationSpec>
     carryFull: 2000,
     carryNone: 6000,
     shipyard: true,
-    blueprints: [],
+    unlocked: ALL_BUT_360,
     ...outpost,
   };
   sim.applyLayout(homeFields(sim, second), homeStations(sim, spec));
@@ -94,19 +98,19 @@ describe("a second base", () => {
     const { ship } = sim;
     const [first, second] = sim.bases;
     dockAt(sim, ship, outpost);
-    ship.ore = 5;
+    sim.setOre(ship, 5);
     ship.hull = 50;
-    const before = { ore: first.ore, parts: first.parts, credits: first.account.credits };
-    const secondOre = second.ore;
-    const secondParts = second.parts;
+    const before = { ore: sim.oreCount(first.ore), parts: sim.partA(first), credits: first.account.credits };
+    const secondOre = sim.oreCount(second.ore);
+    const secondParts = sim.partA(second);
     run(sim, 20);
     expect(sim.dockedAt(ship)).toBe(outpost);
-    expect(ship.ore).toBe(0);
-    expect(ship.earned).toBe(5 * DEFAULTS.creditsPerOre);
-    expect(second.ore).toBe(secondOre + 5);
+    expect(sim.oreIn(ship)).toBe(0);
+    expect(ship.earned).toBe(5 * sim.plainOrePrice());
+    expect(sim.oreCount(second.ore)).toBe(secondOre + 5);
     expect(ship.hull).toBeGreaterThan(50);
-    expect(second.parts).toBeLessThan(secondParts);
-    expect({ ore: first.ore, parts: first.parts, credits: first.account.credits }).toEqual(before);
+    expect(sim.partA(second)).toBeLessThan(secondParts);
+    expect({ ore: sim.oreCount(first.ore), parts: sim.partA(first), credits: first.account.credits }).toEqual(before);
   });
 
   it("has a shop of its own, which sells from its own parts", () => {
@@ -117,12 +121,12 @@ describe("a second base", () => {
     dockAt(sim, ship, outpost);
     expect(sim.atShop(ship)).toBe(true);
     expect(sim.baseAt(ship)).toBe(second);
-    const firstParts = first.parts;
+    const firstParts = sim.partA(first);
     expect(sim.buyPart(ship, "strafe")).toBe(true);
-    expect(second.parts).toBeLessThan(sim.tuning.stationStartParts);
-    expect(first.parts).toBe(firstParts);
+    expect(sim.partA(second)).toBeLessThan(sim.tuning.stationStartParts);
+    expect(sim.partA(first)).toBe(firstParts);
     // Out of parts there means out of parts there, whatever the first base holds.
-    second.parts = 0;
+    second.stock.set("partA", 0);
     expect(sim.buyPart(ship, "reverse")).toBe(false);
     dockAt(sim, ship, sim.station);
     expect(sim.buyPart(ship, "reverse")).toBe(true);
@@ -145,13 +149,13 @@ describe("a second base", () => {
   it("sends and pays its own hauler", () => {
     const { sim } = world({ haulers: true, haulerFirst: 5, stationStartCredits: 0 });
     const [first, second] = sim.bases;
-    second.ore = 30;
-    first.ore = 0;
+    second.ore = new Map([["ore", 30]]);
+    first.ore = new Map();
     let berthed = false;
     run(sim, 400, () => (berthed = second.hauler?.stage === "loading"));
     expect(berthed).toBe(true);
     run(sim, 60);
-    expect(second.ore).toBeLessThan(30);
+    expect(sim.oreCount(second.ore)).toBeLessThan(30);
     expect(second.account.credits).toBeGreaterThan(0);
     // Its hauler berthed at its own station, not the first's.
     const berth = sim.haulerBerth(false, second);
@@ -160,23 +164,23 @@ describe("a second base", () => {
 
   it("keeps what it holds through a save, and a save from before keeps it as new", () => {
     const { sim } = world();
-    sim.bases[1].ore = 77;
+    sim.bases[1].ore = new Map([["ore", 77]]);
     sim.bases[1].account.credits = 4321;
-    sim.bases[0].ore = 11;
+    sim.bases[0].ore = new Map([["ore", 11]]);
     const { sim: into } = world();
     roundTrip(sim, into);
-    expect(into.bases[1].ore).toBe(77);
+    expect(into.bases[1].ore.get("ore")).toBe(77);
     expect(into.bases[1].account.credits).toBe(4321);
-    expect(into.bases[0].ore).toBe(11);
+    expect(into.bases[0].ore.get("ore")).toBe(11);
     expect(into.bases[0].poi).toBe(into.station);
   });
 
   it("starts the designer's bases out as starter bases on a new game", () => {
     const { sim } = world();
-    sim.bases[1].ore = 77;
+    sim.bases[1].ore = new Map([["ore", 77]]);
     sim.reset(5);
     expect(sim.bases.length).toBe(2);
-    expect(sim.bases[1].ore).toBe(sim.tuning.stationStartOre);
+    expect(sim.bases[1].ore.get("ore")).toBe(sim.tuning.stationStartOre);
     expect(sim.bases[0].poi).toBe(sim.station);
   });
 
@@ -209,9 +213,9 @@ describe("a second base", () => {
     ship.x = ship.px = outpost.x + 1500;
     ship.y = ship.py = outpost.y + 1500;
     ship.vx = ship.vy = 0;
-    ship.ore = sim.cargoSpace(ship);
+    sim.setOre(ship, sim.cargoSpace(ship));
     let soldThere = false;
-    run(sim, 120, () => (soldThere = sim.dockedAt(ship) === outpost && ship.ore === 0));
+    run(sim, 120, () => (soldThere = sim.dockedAt(ship) === outpost && sim.oreIn(ship) === 0));
     expect(soldThere).toBe(true);
   }, 60000);
 
@@ -253,12 +257,12 @@ describe("a second base's own defence", () => {
     (sim as unknown as { removeShip(ship: Ship): void }).removeShip(ship);
     expect(second.lostTraffic).toEqual(["racer"]);
     expect(first.lostTraffic).toEqual([]);
-    const firstParts = first.parts;
-    const secondParts = second.parts;
+    const firstParts = sim.partA(first);
+    const secondParts = sim.partA(second);
     sim.step();
     expect(sim.traffic.length).toBe(1);
-    expect(second.parts).toBeLessThan(secondParts);
-    expect(first.parts).toBe(firstParts);
+    expect(sim.partA(second)).toBeLessThan(secondParts);
+    expect(sim.partA(first)).toBe(firstParts);
     expect(sim.dockedAt(sim.traffic[0].ship)).toBe(outpost);
   });
 
@@ -276,7 +280,7 @@ describe("a second base's own defence", () => {
 describe("blueprints per base", () => {
   it("sells a held part only where its blueprint is held, even when shops need no blueprints", () => {
     // The all-round tractor is made from one part B (src/items.json): the outpost starts with it.
-    const { sim, outpost } = world({}, { blueprints: ["tractorAll"], items: [{ item: "partB", n: 1 }] });
+    const { sim, outpost } = world({}, { unlocked: moduleIds(), items: [{ item: "partB", n: 1 }] });
     const { ship } = sim;
     ship.credits = 100000;
     expect(sim.buyPart(ship, "tractorAll")).toBe(false);
@@ -298,19 +302,20 @@ describe("blueprints per base", () => {
   });
 
   it("puts what a ship pays toward a blueprint into the base it's docked at", () => {
-    const { sim, outpost } = world({ stationUnlocks: true, stationCashBuffer: 1e9 });
+    // A station that sells nothing and wants a module: it's the one that orders it.
+    const { sim, outpost } = world({ stationUnlocks: true, stationCashBuffer: 1e9 }, { unlocked: [], wanted: ["reverse"] });
     const { ship } = sim;
     const [first, second] = sim.bases;
     ship.credits = 100000;
     dockAt(sim, ship, outpost);
-    expect(sim.unlocked("reverse")).toBe(false);
+    expect(sim.unlocked("reverse", second)).toBe(false);
     expect(sim.fundBlueprint(ship, "reverse")).toBe(true);
     expect(second.blueprintsOrdered.has("reverse")).toBe(true);
     expect(first.blueprintsOrdered.has("reverse")).toBe(false);
     // With no haulers, what's ordered arrives straight away, at that base only.
     run(sim, 1);
     expect(sim.unlocked("reverse", second)).toBe(true);
-    expect(sim.unlocked("reverse", first)).toBe(false);
+    expect(first.blueprintsOrdered.has("reverse")).toBe(false);
   });
 
   it("only lets a base that builds projects order them", () => {
@@ -324,13 +329,14 @@ describe("blueprints per base", () => {
   });
 
   it("keeps each base's blueprints through a save", () => {
-    const { sim } = world({}, { blueprints: ["tractorAll"] });
-    sim.bases[0].blueprints.add("strafe");
+    const { sim } = world({}, { unlocked: ["gun2"], wanted: ["reverse"] });
+    sim.bases[0].blueprints = new Set(["strafe"]);
     sim.bases[1].blueprintPaid.set("reverse", 40);
     const { sim: into } = world();
     roundTrip(sim, into);
     expect([...into.bases[0].blueprints]).toEqual(["strafe"]);
-    expect([...into.bases[1].blueprints]).toEqual(["tractorAll"]);
+    expect([...into.bases[1].blueprints]).toEqual(["gun2"]);
+    expect([...into.bases[1].wanted]).toEqual(["reverse"]);
     expect(into.bases[1].blueprintPaid.get("reverse")).toBe(40);
   });
 });
@@ -375,7 +381,7 @@ describe("the news board", () => {
   };
 
   it("carries word of a held part from the base that sells it to the next dock, with when it was seen", () => {
-    const { sim, outpost } = world({}, { blueprints: ["tractorAll"] });
+    const { sim, outpost } = world({}, { unlocked: moduleIds() });
     const { ship } = sim;
     const [first, second] = sim.bases;
     dockAt(sim, ship, outpost);
@@ -414,7 +420,7 @@ describe("the news board", () => {
   });
 
   it("is said on the radio by a ship that brings word the board didn't have, but not by the player", () => {
-    const { sim, outpost } = world({ trafficRacers: 1, trafficRecords: false, chatter: true }, { blueprints: ["tractorAll"] });
+    const { sim, outpost } = world({ trafficRacers: 1, trafficRecords: false, chatter: true }, { unlocked: moduleIds() });
     sim.reset(1);
     const theirs = sim.traffic.find((pilot) => pilot.ship.home === sim.bases[1].id)!.ship;
     const said = () => {
@@ -482,10 +488,10 @@ describe("the news board", () => {
   });
 
   it("keeps boards and what ships have heard through a save", () => {
-    const { sim, outpost } = world({}, { blueprints: ["tractorAll"] });
+    const { sim, outpost } = world({}, { unlocked: moduleIds() });
     dockAt(sim, sim.ship, outpost);
     sim.step();
-    const { sim: into } = world({}, { blueprints: ["tractorAll"] });
+    const { sim: into } = world({}, { unlocked: moduleIds() });
     roundTrip(sim, into);
     expect(into.bases[1].board).toHaveLength(1);
     expect(into.ship.news).toHaveLength(1);

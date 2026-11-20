@@ -327,3 +327,73 @@ changes how ore sits in the bay (the loose, bouncing ore), not how items are sto
 - **Decals as items, and projects or drones in the blueprint lists.**
 - **The economy calculator** (`src/economy/`) stays as it is.
 - **New items or new content.** Names, icons and numbers are placeholders for the item designer.
+
+## Built
+
+Built 2026-11-19, in the order above. `npm test` (619 tests) and `npm run build` pass, and the
+shipped world, `src/start.json` and `SAVE_VERSION` (9) are regenerated. Not played yet: the
+question this plan asks — whether packing common ore by auto-place feels the same — is still open.
+
+What is there, and where it differs from the plan:
+
+- **A module's item is the module.** The plan gave each module an `item` naming its item. Instead
+  the item takes the module's own id: `items.json` has an entry per module with `type: "module"`,
+  and everything in the game keys on one string. `partOf(id)` and `itemDef(id)` answer for it
+  alike, and the item owns the module's name, description, shape, volume, price, blueprint price
+  and icon, which `useItemsFile` lays over the module's record. So `Base.stock`, the bay, the
+  locker, loot, recipes and the blueprint lists never had to learn a second id. A test checks the
+  two sets are the same.
+- **Recipes are on the item**: `ItemDef.recipe` is `{ from, yields }`, `ITEM_RECIPES` is gone, and
+  `recipeFor`, `hubRecipes` and `saleRecipes` work them out when the file is read. Where one runs
+  follows the type: a part at the hub, a module at the station that sells it.
+- **Programs**: `src/programs.json` and `src/programs.ts`, with their own designer page. They
+  still register as parts of kind `program`, so `software`, `programs`, the shop, the hull
+  designer's default programs and both buy orders are the `PartId` lists they were. A program
+  costs its price and nothing else (`chargeCredits`, not `chargeForService`).
+- **Part A is whole, with a carry.** *Decided against proposal 9*: a service still costs a
+  fraction of a part (2 credits of repair is a tenth of one at 20 credits a part), so it is not
+  rounded up. `Base.parts` is gone; part A is counted in `Base.stock`, and each base holds
+  `partCarry`, under one part, spending a whole part when the fraction adds up. `hasStockFor`
+  counts the store plus the carry. That keeps today's rates: 100 hull points still cost ten
+  parts. The alternative, a whole part up front for every service, would have made repairs and the
+  rest dearer than they were.
+- **A module is made by its recipe, and that is its cost.** `supply` used to take `price /
+  serviceCreditsPerPart` parts *and* the recipe's inputs; now the recipe is the whole cost, so a
+  bay (13 parts A) is charged 13, not 26.
+- **Blueprints are lists.** `StationSpec.unlocked` and `.wanted` (module item ids) replace
+  `blueprints` and the `held` flag; `HELD_PARTS` is gone. A module is sold only by a station whose
+  `unlocked` holds it, and ordered only if it's in `wanted`: nobody can push one on a station. A
+  station that says nothing sells no module, so a new station in the designer starts with none.
+  Programs and the drone keep the old tier rule and the `stationUnlocks` switch.
+- **The shipped lists**: every station sells every module but the all-round tractor, and `Planet
+  base` sells that too, as the one that held its blueprint. `wanted` is empty everywhere, because
+  with `stationUnlocks` off nothing could be ordered today. `listEveryStation` in `recipes.ts` is
+  what gave the home station a list, which came from a world from before the lists existed.
+- **News** is now word of a module only one base sells (the tractor), rather than of a held part.
+- **Prices**: as proposed. `haulerMarkup` 1.5 and `blackMarketShare` 0.5 replace `haulerPrice` and
+  `blackMarketPays`; plain ore's price is the item's, 10, and `creditsPerOre` is gone. Deposits
+  keep their own `depositPays` and `depositSells` rather than the item's price: they are a cheap
+  outlet either way, and both at the item's price would leave them no margin at all.
+- **The hauler carries items only.** `Hauler.cargo`, `haulerCapacity`, `haulerItemLoad`,
+  `haulerPartsLoad` and `haulerPartPrice` are gone: ore, parts A and everything else are items in
+  one `items` map, and `haulerVolume` (raised from 40 to 120, so a station's whole stock of parts A
+  comes in one visit) is the one limit besides the targets. It loads every ore in the station's
+  ore store and stock, and brings the parts the station's unlocked recipes want, part A included.
+- **Loose things**: `Ore` and `Loot` are one `Loose` body (`item`, `wear`, `count`, `kind`,
+  `from`, `caughtBy`). They still sit in two lists, `ores` and `loot`, split by whether the item is
+  an ore: that keeps the tractor, the lead-on-touch rule and the drawing of each simple.
+- **A bay's entry row takes ore.** A part or a module never sits on the way in, but a piece of ore
+  does, so a small bay still holds ten of them, as it did. `cargoSpace` is the cells reachable from
+  the entry; `bayTotal` is the grid.
+- **Storage counts ore**: `storageUsed` adds the ore waiting for the hauler. `stationStorage` went
+  from 200 to 300 to leave room for a station holding its 100 parts A and its ore: the shipped
+  stations sat at 156 to 160 of 200 before the change.
+- **Kept on purpose**: `devSet` (many tests fit a part with it, and it's the same free hand the dev
+  tab had), `Base.ore` as its own store apart from `Base.stock`, and `pirateOre` as a map of ore.
+- **Parity** ran on the finished tree (8 seeds × 60 minutes, 44 minutes): its new baseline is in
+  `docs/parity-log.md`, with three lines marked to check — traffic hits taken, defender hits taken
+  and base ore — as the baseline before it had four of its own. Base ore is the one this plan
+  could have moved: the records side leaves more ore waiting at the bases than the flown side.
+- **The ledger** (`itemFlow`) counts plain ore too: a rock that breaks, a shot that frees ore and a
+  record's mining count it in; ore forgotten far from everything, or burned on a body, counts it
+  out; the hub counts what it makes from nothing.

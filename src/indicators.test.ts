@@ -229,7 +229,7 @@ describe("ore news", () => {
   function sale(sim: Sim): { base: Base; ship: Ship } {
     const pilot = sim.traffic[0];
     const deposit = sim.deposits[0];
-    pilot.ship.ore = 5;
+    sim.setOre(pilot.ship, 5);
     pilot.ship.oreField = ORE_FIELD.id;
     pilot.ship.x = pilot.ship.px = deposit.x;
     pilot.ship.y = pilot.ship.py = deposit.y;
@@ -247,7 +247,7 @@ describe("ore news", () => {
     // The player's own ore isn't news to anyone.
     const player = sim.ship;
     const deposit = sim.deposits[0];
-    player.ore = 5;
+    sim.setOre(player, 5);
     player.oreField = ORE_FIELD.id;
     player.x = player.px = deposit.x;
     player.y = player.py = deposit.y;
@@ -264,7 +264,7 @@ describe("ore news", () => {
     ship.x = ship.px = dock.x;
     ship.y = ship.py = dock.y;
     ship.newsFrom = null;
-    ship.ore = 0;
+    sim.setOre(ship, 0);
     sim.step();
     expect(base.board.some((report) => report.field === ORE_FIELD.id)).toBe(true);
     expect(ship.news.some((report) => report.field)).toBe(false);

@@ -1,0 +1,76 @@
+{
+  "programs": [
+    {
+      "id": "spinStabilizer",
+      "name": "Spin stabilizer",
+      "short": "spin",
+      "description": "Stops your rotation when you let go",
+      "price": 100,
+      "tier": 0,
+      "icon": { "glyph": "gyro", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+    },
+    {
+      "id": "retro",
+      "name": "Retro",
+      "short": "retro",
+      "description": "Cancels drift, using the thrusters you own (X)",
+      "price": 300,
+      "tier": 2,
+      "icon": { "glyph": "retro", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+    },
+    {
+      "id": "meters",
+      "name": "Speed and distance meters",
+      "short": "meters",
+      "description": "Adds readouts to the arrows",
+      "price": 50,
+      "tier": 0,
+      "icon": { "glyph": "gauge", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+    },
+    {
+      "id": "clickMove",
+      "name": "Click to move",
+      "short": "click",
+      "description": "Right click shifts you there, double click stops there. Drag to leave with a drift",
+      "price": 400,
+      "tier": 2,
+      "icon": { "glyph": "cursor", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+    },
+    {
+      "id": "clickRoute",
+      "name": "Route planner",
+      "short": "route",
+      "description": "Click to move steers around what's in the way",
+      "price": 200,
+      "tier": 2,
+      "icon": { "glyph": "route", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+    },
+    {
+      "id": "clickTurn",
+      "name": "Click to turn",
+      "short": "turn",
+      "description": "Drag from your ship to set a facing to hold",
+      "price": 150,
+      "tier": 2,
+      "icon": { "glyph": "turnCursor", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+    },
+    {
+      "id": "starmap",
+      "name": "System chart",
+      "short": "chart",
+      "description": "Map. Press C to open it",
+      "price": 350,
+      "tier": 2,
+      "icon": { "glyph": "chart", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+    },
+    {
+      "id": "autopilot",
+      "name": "Autopilot",
+      "short": "auto",
+      "description": "From the chart, sets a course and flies it: out, coast, brake, round bodies",
+      "price": 800,
+      "tier": 2,
+      "icon": { "glyph": "autopilot", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+    }
+  ]
+}

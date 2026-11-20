@@ -6,7 +6,7 @@
  */
 import { DAMAGED_AT, decalOf, facing, HULL_MOUNTS, type Module, type Mount, type MountId } from "./fitting";
 import { partOf, type PartId, type PartKind, type ShipModel } from "./parts";
-import { type Box } from "./cargoBin";
+import type { Box } from "./grid";
 
 const R = 12;
 

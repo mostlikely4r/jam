@@ -19,6 +19,7 @@ const WORLD = {
   testDrones: 0,
   rockCount: 0,
   stationStartParts: 100000,
+  stationStorage: 1000000,
   stationUnlocks: false,
 };
 
@@ -193,15 +194,15 @@ describe("module damage", () => {
     const { ship } = sim;
     ship.x += 2000;
     sim.devSet(ship, "bay", true);
-    ship.ore = sim.cargoSpace(ship);
-    const full = ship.ore;
+    sim.setOre(ship, sim.cargoSpace(ship));
+    const full = sim.oreIn(ship);
     ship.angle = 0;
     // Right on the bay, inside the hull.
     const bay = HULL_MOUNTS.racer.find((mount) => mount.id === "section")!;
     sim.damageModule(ship, bay.x * SHIP_RADIUS, bay.y * SHIP_RADIUS, 1000);
     expect(ship.fit.section!.wear).toBe(1);
-    expect(ship.ore).toBe(sim.cargoSpace(ship));
-    expect(sim.ores.length).toBe(full - ship.ore);
+    expect(sim.oreIn(ship)).toBe(sim.cargoSpace(ship));
+    expect(sim.ores.length).toBe(full - sim.oreIn(ship));
   });
 });
 
@@ -213,11 +214,11 @@ describe("items as counted things", () => {
     sim.buyPart(ship, "reverse");
     expect(sim.sellPart(ship, "reverse")).toBe(true);
     expect(sim.stockOf(base, "reverse")).toBe(1);
-    const parts = base.parts;
+    const parts = sim.partA(base);
     expect(sim.buyPart(ship, "reverse")).toBe(true);
     expect(sim.stockOf(base, "reverse")).toBe(0);
-    // Sold from the store: none of the base's parts went into it.
-    expect(base.parts).toBe(parts);
+    // Sold from the store at once: its stock of parts A is what a made one costs, not the whole price.
+    expect(sim.partA(base)).toBe(parts);
   });
 
   it("modules ride in the bay and take room from the ore", () => {
@@ -334,7 +335,7 @@ describe("critical, the pod and the yard", () => {
     ship.fit.thrusterStrafeLeft!.wear = 1;
     wreck(sim);
     for (let i = 0; i < 120 * 3; i++) sim.step();
-    const drifting = sim.loot.map((loot) => loot.item.part).sort();
+    const drifting = sim.loot.map((loot) => loot.item).sort();
     expect(drifting).toContain("bay");
     expect(drifting.filter((id) => id === "strafe").length).toBe(1);
     expect(ship.software.has("spinStabilizer")).toBe(true);
@@ -374,14 +375,14 @@ describe("critical, the pod and the yard", () => {
     const sim = outThere();
     wreck(sim);
     for (let i = 0; i < 120 * 60 && sim.down?.stage !== "choosing"; i++) sim.step();
-    sim.bases[0].parts = 0;
+    sim.bases[0].stock.delete("partA");
     expect(sim.rebuildOffer().missing.length).toBeGreaterThan(0);
     expect(sim.chooseHull(true)).toBe(false);
   });
 
   it("a pirate stops counting a ship that's going up as a threat", () => {
     const sim = outThere();
-    sim.ship.ore = 5;
+    sim.setOre(sim.ship, 5);
     wreck(sim);
     expect(sim.threatens({ ...sim.ship, faction: "pirate", hull: 100 } as never, sim.ship)).toBe(false);
   });
@@ -833,23 +834,37 @@ describe("the stats of hulls and parts", () => {
   });
 
   it("a part's edited stats carry in the ship file, and reset to the code's when it's thrown away", () => {
-    const coded = partOfForTest("bay").price;
+    const coded = partOfForTest("bay").weight;
     withFile(
-      () => (partOfForTest("bay").price = coded + 50),
+      () => (partOfForTest("bay").weight = coded + 0.5),
       () => {
-        expect(partOfForTest("bay").price).toBe(coded + 50);
+        expect(partOfForTest("bay").weight).toBe(coded + 0.5);
         const file = shipFileNow();
-        expect(file.partStats!.bay).toEqual({ price: coded + 50 });
+        expect(file.partStats!.bay).toEqual({ weight: coded + 0.5 });
         // Putting the file in play keeps the change; resetting the part puts the code's back.
         useShipFile(file);
-        expect(partOfForTest("bay").price).toBe(coded + 50);
+        expect(partOfForTest("bay").weight).toBe(coded + 0.5);
         resetPartStats("bay");
-        expect(partOfForTest("bay").price).toBe(coded);
+        expect(partOfForTest("bay").weight).toBe(coded);
         expect(shipFileNow().partStats!.bay).toBeUndefined();
         // What the parts' code ships is left alone until a stat is changed.
         expect(shipFileNow().partStats).toEqual({});
       },
     );
+  });
+
+  it("a module's shape, price and icon are its item's: the ship file leaves them alone", () => {
+    const keep = shipFileNow();
+    try {
+      const price = partOfForTest("bay").price;
+      const edited = { ...keep, partStats: { ...keep.partStats, bay: { price: price + 50, shape: { w: 1, h: 1 } } } };
+      useShipFile(edited);
+      expect(partOfForTest("bay").price).toBe(price);
+      expect(partOfForTest("bay").shape).toEqual({ w: 2, h: 3 });
+      expect(shipFileNow().partStats!.bay).toBeUndefined();
+    } finally {
+      useShipFile(keep);
+    }
   });
 });
 
@@ -857,7 +872,7 @@ describe("the bay's grid", () => {
   /** A docked racer with its small bay (2 across, 5 down, front up, the whole top row its entry) and spare guns in its locker. */
   function withSpareGun(): Sim {
     const sim = docked("racer");
-    sim.ship.ore = 0;
+    sim.setOre(sim.ship, 0);
     for (let i = 0; i < 2; i++) sim.putInLocker(sim.baseAt()!, { part: "gun2", wear: 0 });
     return sim;
   }
@@ -876,7 +891,7 @@ describe("the bay's grid", () => {
   it("a blocked entry leaves no room for ore, and the tractor lets go", () => {
     const sim = docked("floater");
     const { ship } = sim;
-    ship.ore = 0;
+    sim.setOre(ship, 0);
     sim.devSet(ship, "tractor", true);
     expect(sim.tractorOn(ship)).toBe(true);
     sim.putInLocker(sim.baseAt()!, { part: "gun2", wear: 0 });
@@ -889,7 +904,7 @@ describe("the bay's grid", () => {
   it("refuses an item that touches no wall and no chain of items that does", () => {
     const sim = docked("racer");
     const { ship } = sim;
-    ship.ore = 0;
+    sim.setOre(ship, 0);
     sim.devSet(ship, "bay", true);
     // The bay is 4 across, 5 down: a single cell at 1,2 touches no wall.
     sim.putInLocker(sim.baseAt()!, { part: "flightComputer", wear: 0 });
@@ -902,7 +917,7 @@ describe("the bay's grid", () => {
   it("refuses to take out an item that holds another up, and says which", () => {
     const sim = docked("racer");
     const { ship } = sim;
-    ship.ore = 0;
+    sim.setOre(ship, 0);
     sim.devSet(ship, "bay", true);
     sim.putInLocker(sim.baseAt()!, { part: "gun2", wear: 0 });
     sim.putInLocker(sim.baseAt()!, { part: "flightComputer", wear: 0 });
@@ -915,12 +930,16 @@ describe("the bay's grid", () => {
     expect(sim.toLocker(ship, { at: "hold", index: 0 })).toBe(true);
   });
 
-  it("refuses an item where the ore aboard would no longer fit", () => {
+  it("needs cells of its own, with the ore already aboard staying where it is", () => {
     const sim = withSpareGun();
-    sim.ship.ore = 9;
-    expect(sim.toHold(sim.ship, { at: "locker", index: 0 })).toBe(false);
-    sim.ship.ore = 8;
-    expect(sim.toHold(sim.ship, { at: "locker", index: 0 })).toBe(true);
+    const { ship } = sim;
+    sim.setOre(ship, 9);
+    expect(sim.cargoSpace(ship)).toBe(1);
+    // What's left is on the way in, where only a piece of ore sits.
+    expect(sim.toHold(ship, { at: "locker", index: 0 })).toBe(false);
+    sim.setOre(ship, 0);
+    expect(sim.toHold(ship, { at: "locker", index: 0 })).toBe(true);
+    expect(sim.oreIn(ship)).toBe(0);
   });
 
   it("a bigger bay carries what the old one held", () => {
@@ -1021,17 +1040,18 @@ describe("buying, WoW style", () => {
   it("with the bay full too, it goes in the locker here", () => {
     const sim = docked("racer");
     const { ship } = sim;
-    ship.ore = 10;
+    sim.setOre(ship, 10);
+    expect(sim.cargoSpace(ship)).toBe(0);
     expect(sim.whereBuyGoes(ship, "gun2")).toBe("locker");
     expect(sim.buyPart(ship, "gun2")).toBe(true);
-    expect(ship.hold).toEqual([]);
+    expect(sim.oreIn(ship)).toBe(10);
     expect(sim.lockerAt(sim.baseAt()!).items.map((item) => item.module.part)).toEqual(["gun2"]);
   });
 
   it("with no room anywhere, it's refused and says why", () => {
     const sim = docked("racer");
     const { ship } = sim;
-    ship.ore = 10;
+    sim.setOre(ship, 10);
     for (let i = 0; i < 3; i++) sim.putInLocker(sim.baseAt()!, { part: "tractor", wear: 0 });
     const credits = ship.credits;
     expect(sim.whereBuyGoes(ship, "gun2")).toBeNull();
@@ -1142,69 +1162,3 @@ describe("moving things on the blueprint", () => {
   });
 });
 
-describe("locked ore", () => {
-  it("locks a piece of loose ore in a cell next to a wall, and it still counts as room", () => {
-    const sim = docked("racer");
-    const { ship } = sim;
-    ship.ore = 4;
-    expect(sim.lockOre(ship, { x: 0, y: 4 })).toBe(true);
-    expect(ship.oreBlocks).toEqual([{ x: 0, y: 4 }]);
-    expect(sim.lockedOre(ship)).toBe(1);
-    expect(sim.cargoSpace(ship)).toBe(10);
-    // Not on a taken cell.
-    expect(sim.lockOre(ship, { x: 0, y: 4 })).toBe(false);
-  });
-
-  it("only next to a wall, an item or other locked ore, and only loose ore", () => {
-    const sim = docked("racer");
-    const { ship } = sim;
-    sim.devSet(ship, "bay", true);
-    ship.ore = 2;
-    expect(sim.lockOre(ship, { x: 1, y: 2 })).toBe(false);
-    expect(sim.lockOre(ship, { x: 1, y: 4 })).toBe(true);
-    expect(sim.lockOre(ship, { x: 1, y: 3 })).toBe(true);
-    expect(sim.lockOre(ship, { x: 2, y: 4 })).toBe(false);
-  });
-
-  it("can seal off part of the bay, but not so the ore aboard no longer fits", () => {
-    const sim = docked("racer");
-    const { ship } = sim;
-    ship.ore = 5;
-    expect(sim.lockOre(ship, { x: 0, y: 1 })).toBe(true);
-    // Across the bay it would leave 2 cells open by the entry, and 2 locked: no room for 5.
-    expect(sim.lockOre(ship, { x: 1, y: 1 })).toBe(false);
-    ship.ore = 4;
-    expect(sim.lockOre(ship, { x: 1, y: 1 })).toBe(true);
-    expect(sim.cargoSpace(ship)).toBe(4);
-  });
-
-  it("holds an item up like a wall, and then stays when the rest is sold", () => {
-    const sim = docked("racer");
-    const { ship } = sim;
-    sim.devSet(ship, "bay", true);
-    ship.ore = 5;
-    expect(sim.lockOre(ship, { x: 1, y: 4 })).toBe(true);
-    sim.putInLocker(sim.baseAt()!, { part: "flightComputer", wear: 0 });
-    expect(sim.toHold(ship, { at: "locker", index: 0 }, { x: 1, y: 3, turned: false })).toBe(true);
-    expect(sim.unlockOre(ship, 0)).toBe(false);
-    expect(sim.pinnedOre(ship)).toBe(1);
-    for (let i = 0; i < 120 * 20; i++) sim.step();
-    expect(ship.ore).toBe(1);
-    expect(ship.oreBlocks.length).toBe(1);
-    // With the computer gone, the last piece sells too.
-    expect(sim.toLocker(ship, { at: "hold", index: 0 })).toBe(true);
-    for (let i = 0; i < 120 * 5; i++) sim.step();
-    expect(ship.ore).toBe(0);
-    expect(ship.oreBlocks).toEqual([]);
-  });
-
-  it("unlocks again, back into the loose ore", () => {
-    const sim = docked("racer");
-    const { ship } = sim;
-    ship.ore = 2;
-    sim.lockOre(ship, { x: 0, y: 4 });
-    expect(sim.unlockOre(ship, 0)).toBe(true);
-    expect(ship.oreBlocks).toEqual([]);
-    expect(ship.ore).toBe(2);
-  });
-});

@@ -71,7 +71,7 @@ function decide(sim: Sim, pilot: DronePilot): string {
   ship.x = ship.px = sim.station.x + DOCK_OFFSET;
   ship.y = ship.py = sim.station.y;
   ship.vx = ship.vy = 0;
-  ship.ore = 0;
+  sim.setOre(ship, 0);
   sim.step();
   // Out of the dock and back, so it decides afresh next time.
   ship.x = ship.px = sim.station.x + 5000;
@@ -156,7 +156,7 @@ describe("traffic between fields", () => {
       sim.events.length = 0;
       closest = Math.min(closest, Math.hypot(ship.x, ship.y));
       if (pilot.task === "shooting" && sim.miningFieldAt(ship.x, ship.y).id === "second:0") minedThere = true;
-      if (minedThere && sim.isDocked(ship) && ship.ore > 0) homeWith = ship.ore;
+      if (minedThere && sim.isDocked(ship) && sim.oreIn(ship) > 0) homeWith = sim.oreIn(ship);
     }
     expect(minedThere).toBe(true);
     expect(closest).toBeGreaterThan(PLANET.pullStart);

@@ -36,7 +36,7 @@ const hulls = new Map<object, number>();
 const started = performance.now();
 for (let i = 0; i < Math.round((minutes * 60) / TICK); i++) {
   park();
-  const before = new Map(sim.ships.map((ship) => [ship, { hull: ship.hull, wrecks: ship.wrecks, ore: ship.ore }]));
+  const before = new Map(sim.ships.map((ship) => [ship, { hull: ship.hull, wrecks: ship.wrecks, ore: sim.oreIn(ship) }]));
   const all = [...sim.traffic.map((p) => p.ship), ...sim.fighters.map((p) => p.ship)];
   for (const ship of all) hulls.set(ship, ship.wrecks);
   const tasks = new Map(sim.fighters.map((pilot) => [pilot, pilot.task]));
@@ -72,7 +72,7 @@ for (let i = 0; i < Math.round((minutes * 60) / TICK); i++) {
   }
 }
 const lost = (sim as unknown as { bases: { lostTraffic: unknown[] }[] }).bases.reduce((sum, base) => sum + base.lostTraffic.length, 0);
-const sold = sim.traffic.reduce((sum, p) => sum + p.ship.earned, 0) / sim.tuning.creditsPerOre;
+const sold = sim.traffic.reduce((sum, p) => sum + p.ship.earned, 0) / sim.plainOrePrice();
 const left = (faction: string | null) => sim.fighters.filter((p) => p.ship.faction === faction).length;
 if (json) {
   const totals: Record<string, number> = Object.fromEntries(count);
@@ -82,8 +82,8 @@ if (json) {
     "defenders left": left("defender"),
     "traffic sold": Math.round(sold),
     "pirate credits": Math.round(sim.pirateCredits),
-    "pirate ore": Math.round(sim.pirateOre),
-    "base ore": Math.round(sim.bases.reduce((sum, base) => sum + base.ore, 0)),
+    "pirate ore": sim.oreCount(sim.pirateOre),
+    "base ore": sim.bases.reduce((sum, base) => sum + sim.oreCount(base.ore), 0),
     "seconds": Math.round((performance.now() - started) / 1000),
   });
   console.log(JSON.stringify(totals));

@@ -8,12 +8,6 @@ export const DEFAULTS = {
   throttleRamp: 1.5,
 
   retro: false,
-  thrusterMain: true,
-  thrusterReverse: true,
-  thrusterStrafeLeft: true,
-  thrusterStrafeRight: true,
-  thrusterRotateLeft: true,
-  thrusterRotateRight: true,
 
   shotSpeed: 1100,
   shotsPerSecond: 7,
@@ -33,8 +27,12 @@ export const DEFAULTS = {
 
   /** Whether a station rebuilds wrecked ships, when its spec doesn't say. A wreck goes to the nearest station that does. */
   stationShipyard: true,
-  /** Cells of storage at a base whose spec doesn't say. The player's lockers and its store of whole modules come out of it. */
-  stationStorage: 200,
+  /**
+   * Cells of storage at a base whose spec doesn't say. The player's lockers, its store of whole
+   * modules and the ore it holds for the hauler all come out of it. 300, up from 200, because ore
+   * and parts A are counted in it now.
+   */
+  stationStorage: 300,
   /** How many cells across a locker is. */
   lockerWidth: 6,
   /** The rows of locker every base gives the player for free. */
@@ -42,7 +40,6 @@ export const DEFAULTS = {
   /** What one more row of locker costs, bought once and kept. */
   lockerRowPrice: 500,
   dockDrag: 0.25,
-  creditsPerOre: 10,
 
   repairCost: 2,
   repairSpeed: 25,
@@ -107,8 +104,6 @@ export const DEFAULTS = {
   /** A body shows on the chart once the ship has been this many of its radii from it,
    * or inside its air, whichever reaches further. */
   bodySight: 4,
-  /** A blueprint's price, as a share of what the part sells for. */
-  blueprintScale: 0.75,
   /** Credits the station holds back before spending on blueprints. */
   stationCashBuffer: 300,
   trafficBuffer: 400,
@@ -174,17 +169,13 @@ export const DEFAULTS = {
   guardsDepositFree: false,
   haulerFirst: 300,
   haulerInterval: 600,
-  haulerCapacity: 200,
-  haulerPrice: 15,
-  /** Parts a hauler arrives with, and what the station pays for each. */
-  haulerPartsLoad: 100,
-  haulerPartPrice: 16,
+  /** What a hauler pays a station for an ore, over the item's own price. */
+  haulerMarkup: 1.5,
   haulerLoadRate: 2,
-  /** Room a hauler has for items, in volume (an item's volume starts as the area of its shape). */
-  haulerVolume: 40,
-  /** The most items a hauler brings a station from the hub on one visit. */
-  haulerItemLoad: 6,
-  /** A base asks for an item some recipe it can run needs while it holds fewer than this. */
+  /** Room a hauler has for items, in volume (an item's volume starts as the area of its shape). 120 so a
+   * station's whole stock of parts A can come in on one visit. */
+  haulerVolume: 120,
+  /** A base asks for a part while it holds fewer of it than this. */
   itemTarget: 4,
   chatterRange: 1500,
 
@@ -223,15 +214,17 @@ export const DEFAULTS = {
   /** The black market: when it first calls, how often, what it pays per ore and how much it takes. */
   blackMarketFirst: 450,
   blackMarketInterval: 600,
-  blackMarketPays: 5,
+  /** What the black market pays for an ore, as a share of the item's own price. */
+  blackMarketShare: 0.5,
   blackMarketCapacity: 300,
   /** A hurt pirate that can pay for repairs breaks off and goes home, even mid-fight. */
   pirateRetreats: true,
   stationStartCredits: 300,
   stationStartOre: 40,
   stationStartParts: 40,
-  /** The station buys parts from haulers up to this many. */
+  /** The station buys parts A from haulers up to this many: every service it sells uses them. */
   stationPartsTarget: 100,
+  /** Credits of service one part A pays for. */
   serviceCreditsPerPart: 20,
   stationReserveParts: 20,
   defenderPrice: 500,
@@ -242,8 +235,6 @@ export const DEFAULTS = {
   droneParts: 5,
   /** How full its bay an AI ship waits for before delivering. */
   deliverShare: 1,
-  /** How much ore one free cell of a cargo bay holds. */
-  orePerCell: 1,
   droneCruiseSpeed: 350,
   droneFieldSpeed: 100,
 
@@ -252,26 +243,12 @@ export const DEFAULTS = {
 };
 
 export type Tuning = typeof DEFAULTS;
+
+/** Which control a thruster answers to: the same roles the mounts carry. */
+export type ThrusterId = import("./parts").ThrusterRole;
 export type TuningKey = {
   [K in keyof Tuning]: Tuning[K] extends number ? K : never;
 }[keyof Tuning];
-
-export type ThrusterId =
-  | "thrusterMain"
-  | "thrusterReverse"
-  | "thrusterStrafeLeft"
-  | "thrusterStrafeRight"
-  | "thrusterRotateLeft"
-  | "thrusterRotateRight";
-
-export const THRUSTERS: { id: ThrusterId; label: string }[] = [
-  { id: "thrusterMain", label: "Main (W)" },
-  { id: "thrusterReverse", label: "Reverse (S)" },
-  { id: "thrusterStrafeLeft", label: "Strafe left (A)" },
-  { id: "thrusterStrafeRight", label: "Strafe right (D)" },
-  { id: "thrusterRotateLeft", label: "Rotate left (Q)" },
-  { id: "thrusterRotateRight", label: "Rotate right (E)" },
-];
 
 export type SwitchKey = {
   [K in keyof Tuning]: Tuning[K] extends boolean ? K : never;
@@ -341,7 +318,6 @@ export const GROUPS: Group[] = [
     title: "Station",
     sliders: [
       { key: "dockDrag", label: "Dock slowdown", min: 0, max: 3, step: 0.05 },
-      { key: "creditsPerOre", label: "Credits per ore", min: 1, max: 100, step: 1 },
     ],
   },
   {
@@ -363,7 +339,7 @@ export const GROUPS: Group[] = [
   {
     title: "Parts",
     sliders: [
-      { key: "partPriceScale", label: "Price scale", min: 0, max: 5, step: 0.1 },
+      { key: "partPriceScale", label: "Part A a module is made from: share of its price", min: 0, max: 5, step: 0.1 },
       { key: "partWeightScale", label: "Weight scale", min: 0, max: 5, step: 0.1 },
     ],
   },
@@ -433,12 +409,12 @@ export const GROUPS: Group[] = [
       { key: "pirateBaseReach", label: "Range for buying ore at the pirate base", min: 200, max: 1000, step: 25 },
       { key: "blackMarketFirst", label: "Seconds until the black market first calls", min: 0, max: 3000, step: 30 },
       { key: "blackMarketInterval", label: "Seconds between black market calls (0: never)", min: 0, max: 3000, step: 30 },
-      { key: "blackMarketPays", label: "Black market pays per ore", min: 0, max: 20, step: 1 },
+      { key: "blackMarketShare", label: "Black market pays: share of the ore's price", min: 0, max: 1, step: 0.05 },
       { key: "blackMarketCapacity", label: "Black market hold", min: 0, max: 1000, step: 10 },
       { key: "stationStartCredits", label: "Station starting balance (on restart)", min: 0, max: 5000, step: 100 },
       { key: "stationStartOre", label: "Station starting ore (on restart)", min: 0, max: 500, step: 10 },
-      { key: "stationStartParts", label: "Station starting parts (on restart)", min: 0, max: 500, step: 10 },
-      { key: "stationPartsTarget", label: "Parts the station buys up to", min: 0, max: 1000, step: 10 },
+      { key: "stationStartParts", label: "Station starting part A (on restart)", min: 0, max: 500, step: 10 },
+      { key: "stationPartsTarget", label: "Part A the station buys up to", min: 0, max: 1000, step: 10 },
       { key: "serviceCreditsPerPart", label: "Credits of service per part used", min: 1, max: 100, step: 1 },
       { key: "stationReserveParts", label: "Parts the station keeps for repairs", min: 0, max: 200, step: 5 },
       { key: "defenderPrice", label: "Credits of parts in a new defender", min: 0, max: 5000, step: 50 },
@@ -485,15 +461,10 @@ export const GROUPS: Group[] = [
     sliders: [
       { key: "haulerFirst", label: "First arrival (s, on restart)", min: 0, max: 3600, step: 30 },
       { key: "haulerInterval", label: "Time between visits (s)", min: 60, max: 3600, step: 30 },
-      { key: "haulerCapacity", label: "Ore a hauler carries", min: 10, max: 1000, step: 10 },
-      { key: "haulerPrice", label: "Credits a hauler pays per ore", min: 0, max: 100, step: 1 },
-      { key: "haulerPartsLoad", label: "Parts a hauler brings", min: 0, max: 1000, step: 10 },
-      { key: "haulerPartPrice", label: "Credits the station pays per part", min: 0, max: 100, step: 1 },
+      { key: "haulerMarkup", label: "What a hauler pays: times the ore's price", min: 0, max: 5, step: 0.05 },
       { key: "haulerLoadRate", label: "Ore and parts moved per second", min: 0.5, max: 20, step: 0.5 },
       { key: "haulerVolume", label: "Room a hauler has for items (volume)", min: 0, max: 400, step: 5 },
-      { key: "haulerItemLoad", label: "Items a hauler brings from the hub", min: 0, max: 50, step: 1 },
-      { key: "itemTarget", label: "Items a base holds before it stops asking", min: 0, max: 50, step: 1 },
-      { key: "blueprintScale", label: "Blueprint price, share of the part's price", min: 0, max: 5, step: 0.05 },
+      { key: "itemTarget", label: "Parts a base holds before it stops asking", min: 0, max: 50, step: 1 },
       { key: "stationCashBuffer", label: "Credits the station holds back from blueprints", min: 0, max: 5000, step: 50 },
       { key: "trafficBuffer", label: "Credits traffic keeps before buying parts", min: 0, max: 3000, step: 50 },
       { key: "tradeChance", label: "Chance traffic leaves the station to buy a load", min: 0, max: 1, step: 0.05 },
@@ -520,7 +491,6 @@ export const GROUPS: Group[] = [
       { key: "dronePrice", label: "Price of a new drone", min: 0, max: 5000, step: 50 },
       { key: "droneLimit", label: "Most drones allowed", min: 0, max: 10, step: 1 },
       { key: "deliverShare", label: "Delivers when this full", min: 0.1, max: 1, step: 0.05 },
-      { key: "orePerCell", label: "Ore per bay cell", min: 1, max: 5, step: 1 },
       { key: "droneCruiseSpeed", label: "Cruise speed", min: 100, max: 1000, step: 10 },
       { key: "droneFieldSpeed", label: "Speed in the field", min: 30, max: 300, step: 5 },
     ],

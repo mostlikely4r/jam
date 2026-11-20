@@ -1,9 +1,9 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
 import { DAMAGED_AT, facing, HULL_MOUNTS, turretMount, works, type Module } from "./fitting";
-import { drawBin, gridRect, newBin, stepBin, type Bin, type Rect } from "./cargoBin";
-import { cellsOf, footprint, reachable } from "./grid";
+import { footprint, gridRect, type Rect } from "./grid";
 import { isItem, partOf } from "./parts";
+import { isOreItem } from "./items";
 import { bayBox, drawVectorShip } from "./shipArt";
 import { canvasTip } from "./tooltip";
 import {
@@ -166,15 +166,6 @@ export class Renderer {
   /** How ships and their parts are drawn: a player setting (V), while the look is being chosen. */
   /** The world being drawn, for details drawn deep inside. */
   private sim: Sim | null = null;
-  /** Each ship's own scatter of cargo lumps. */
-  /** The ore loose in each ship's bay, as drawn. */
-  private bins = new WeakMap<Ship, Bin>();
-
-  /** The loose ore lumps in a ship's bay as last drawn, in its box's frame, for the ship screen. */
-  lumpsOf(ship: Ship): readonly { x: number; y: number }[] {
-    return this.bins.get(ship)?.lumps ?? [];
-  }
-
   /** Whether the player is watching their wreck, and shouldn't be flying. */
   get watchingWreck(): boolean {
     return this.wreck !== null && this.wreck.age < WRECK_WATCH_SECONDS + WRECK_FADE_SECONDS;
@@ -507,8 +498,8 @@ export class Renderer {
     ctx.strokeStyle = "#aab1bd";
     ctx.lineWidth = 3;
     ctx.strokeRect(-STATION_HALF, -STATION_HALF, size, size);
-    this.drawOrePile(base.ore, STATION_HALF);
-    this.drawCrates(base.parts, STATION_HALF);
+    this.drawOrePile(sim.oreCount(base.ore), STATION_HALF);
+    this.drawCrates(sim.partA(base), STATION_HALF);
     ctx.restore();
   }
 
@@ -539,7 +530,7 @@ export class Renderer {
       ctx.strokeStyle = "#aab1bd";
       ctx.lineWidth = 3;
       ctx.strokeRect(-DEPOSIT_HALF, -DEPOSIT_HALF, DEPOSIT_HALF * 2, DEPOSIT_HALF * 2);
-      this.drawOrePile(deposit.ore, DEPOSIT_HALF);
+      this.drawOrePile(sim.oreCount(deposit.ore), DEPOSIT_HALF);
       ctx.restore();
     }
   }
@@ -678,7 +669,7 @@ export class Renderer {
     ctx.setLineDash([]);
     ctx.save();
     ctx.translate(x, y);
-    this.drawOrePile(sim.pirateOre, PIRATE_BASE_RADIUS * 0.65);
+    this.drawOrePile(sim.oreCount(sim.pirateOre), PIRATE_BASE_RADIUS * 0.65);
     ctx.restore();
   }
 
@@ -828,7 +819,7 @@ export class Renderer {
       const y = lerp(ore.py, ore.y, alpha);
       if (!visible(x, y, 8)) continue;
       ctx.fillStyle = ORE_COLORS[ore.kind];
-      if (ore.amount > 1) {
+      if (ore.count > 1) {
         // Worth more: bigger, with a bright edge.
         ctx.fillRect(x - 6, y - 6, 12, 12);
         ctx.strokeStyle = "#fff6d8";
@@ -847,7 +838,7 @@ export class Renderer {
       const x = lerp(loot.px, loot.x, alpha);
       const y = lerp(loot.py, loot.y, alpha);
       if (!visible(x, y, 12)) continue;
-      const icon = isItem(loot.item.part) ? partOf(loot.item.part).icon : null;
+      const icon = isItem(loot.item) ? partOf(loot.item).icon : null;
       if (icon) {
         // An item glows in the colour its designer gave it, so it reads from far off.
         const glow = icon.glow ?? icon.border;
@@ -866,7 +857,7 @@ export class Renderer {
         ctx.stroke();
         continue;
       }
-      ctx.fillStyle = loot.item.wear >= 0.5 ? "#8a5a3a" : "#8d99ad";
+      ctx.fillStyle = loot.wear >= 0.5 ? "#8a5a3a" : "#8d99ad";
       ctx.fillRect(x - 5, y - 4, 10, 8);
       ctx.strokeStyle = "#e6f0ff";
       ctx.lineWidth = 1;
@@ -1100,7 +1091,8 @@ export class Renderer {
     ctx.fillStyle = "#3d4556";
     ctx.fillRect(half - 50, -side + 8, 42, HAULER_WIDTH - 16);
 
-    const lumps = Math.min(HAULER_ROWS * HAULER_COLUMNS, Math.ceil(hauler.cargo / PILE_ORE_PER_LUMP));
+    const aboard = [...hauler.items].filter(([id]) => isOreItem(id)).reduce((sum, [, count]) => sum + count, 0);
+    const lumps = Math.min(HAULER_ROWS * HAULER_COLUMNS, Math.ceil(aboard / PILE_ORE_PER_LUMP));
     const pitch = (HAULER_LENGTH - 70) / HAULER_COLUMNS;
     const rowPitch = (HAULER_WIDTH - 20) / HAULER_ROWS;
     for (let i = 0; i < lumps; i++) {
@@ -1111,7 +1103,8 @@ export class Renderer {
     }
     // Crates fill from the other end, so ore and parts visibly trade places.
     const cells = HAULER_ROWS * HAULER_COLUMNS;
-    const crates = Math.min(cells - lumps, Math.ceil(hauler.parts / PILE_ORE_PER_LUMP));
+    const partsAboard = [...hauler.items].filter(([id]) => !isOreItem(id)).reduce((sum, [, count]) => sum + count, 0);
+    const crates = Math.min(cells - lumps, Math.ceil(partsAboard / PILE_ORE_PER_LUMP));
     ctx.lineWidth = 1;
     ctx.strokeStyle = CRATE_EDGE;
     for (let i = 0; i < crates; i++) {
@@ -1164,7 +1157,7 @@ export class Renderer {
     ctx.fillStyle = color;
     ctx.font = "14px Consolas, monospace";
     ctx.textAlign = "center";
-    ctx.fillText(`${pilot.task} ${pilot.ship.ore}/${sim.cargoSpace(pilot.ship)}`, x, y + SHIP_RADIUS + 22);
+    ctx.fillText(`${pilot.task} ${sim.oreIn(pilot.ship)}/${sim.cargoSpace(pilot.ship)}`, x, y + SHIP_RADIUS + 22);
   }
 
   private drawShip(
@@ -1322,69 +1315,34 @@ export class Renderer {
     }
   }
 
-  /** Lumps of ore on the hull, more the fuller the hold, scattered the same way each time for this ship. */
-  /** The ore in the bay, loose and thrown about by how the ship moves; packed in when it's full. */
+  /** What's in the bay: every item on its cell of the grid, ore in its own colour. */
   private drawCargo(ship: Ship): void {
     const sim = this.sim;
     if (!sim) return;
-    const now = performance.now();
-    let bin = this.bins.get(ship);
-    if (!bin) {
-      bin = newBin(now);
-      this.bins.set(ship, bin);
-    }
-    // Locked ore sits in its cells: only the loose ore bounces, in the room left to it.
-    const locked = sim.lockedOre(ship);
-    const share = Math.min(1, (ship.ore - locked) / Math.max(1, sim.cargoSpace(ship) - locked));
     const box = bayBox(ship);
-    // The bay's grid laid over the box: items, and pockets sealed off from the entry, keep the ore out.
     const grid = sim.bayGrid(ship);
-    const items: Rect[] = [];
-    const ore: Rect[] = [];
-    const blocked: Rect[] = [];
-    if (grid) {
-      const rect = (x: number, y: number, w: number, h: number): Rect => gridRect(box, grid, x, y, w, h);
-      for (const item of ship.hold) {
-        const { w, h } = footprint(item);
-        items.push(rect(item.x, item.y, w, h));
-      }
-      for (const block of ship.oreBlocks) ore.push(rect(block.x, block.y, 1, 1));
-      blocked.push(...items, ...ore);
-      const packed = sim.packed(ship);
-      const open = reachable(grid, packed);
-      const taken = new Set(packed.flatMap((item) => cellsOf(item).map((cell) => cell.y * grid.w + cell.x)));
-      for (let k = 0; k < grid.w * grid.h; k++) if (!open.has(k) && !taken.has(k)) blocked.push(rect(k % grid.w, Math.floor(k / grid.w), 1, 1));
+    if (!grid || ship.hold.length === 0) return;
+    const cells: { rect: Rect; ore: boolean; wear: number }[] = [];
+    for (const item of ship.hold) {
+      const { w, h } = footprint(item);
+      cells.push({ rect: gridRect(box, grid, item.x, item.y, w, h), ore: isOreItem(item.module.part), wear: item.module.wear });
     }
-    stepBin(bin, box, share, ship, now, blocked);
-    if (bin.lumps.length === 0 && items.length === 0 && ore.length === 0) return;
-    // The bay's transparency covers the ore and items riding in it too.
+    // The bay's transparency covers what rides in it too.
     this.ctx.save();
     if ((box.alpha ?? 1) < 1) this.ctx.globalAlpha = box.alpha;
-    if (items.length > 0) {
-      const { ctx } = this;
-      // Drawn from the same grid as the ship screen.
-      ctx.save();
-      ctx.translate(box.x, box.y);
-      ctx.rotate(box.angle);
-      ctx.fillStyle = "rgba(70, 120, 140, 0.85)";
+    const { ctx } = this;
+    ctx.save();
+    ctx.translate(box.x, box.y);
+    ctx.rotate(box.angle);
+    for (const cell of cells) {
+      const { rect } = cell;
+      ctx.fillStyle = cell.ore ? ORE_COLORS[0] : cell.wear >= DAMAGED_AT ? "rgba(140, 100, 70, 0.85)" : "rgba(70, 120, 140, 0.85)";
       ctx.strokeStyle = "rgba(160, 220, 230, 0.9)";
       ctx.lineWidth = 0.25;
-      for (const item of items) {
-        ctx.fillRect(item.x + 0.1, item.y + 0.1, item.w - 0.2, item.h - 0.2);
-        ctx.strokeRect(item.x + 0.1, item.y + 0.1, item.w - 0.2, item.h - 0.2);
-      }
-      ctx.restore();
+      ctx.fillRect(rect.x + 0.1, rect.y + 0.1, rect.w - 0.2, rect.h - 0.2);
+      ctx.strokeRect(rect.x + 0.1, rect.y + 0.1, rect.w - 0.2, rect.h - 0.2);
     }
-    if (ore.length > 0) {
-      const { ctx } = this;
-      ctx.save();
-      ctx.translate(box.x, box.y);
-      ctx.rotate(box.angle);
-      ctx.fillStyle = ORE_COLORS[0];
-      for (const block of ore) ctx.fillRect(block.x + 0.1, block.y + 0.1, block.w - 0.2, block.h - 0.2);
-      ctx.restore();
-    }
-    drawBin(this.ctx, bin, box, ORE_COLORS, share >= 1);
+    ctx.restore();
     this.ctx.restore();
   }
 
@@ -1430,7 +1388,7 @@ export class Renderer {
     const arrows: NamedArrow[] = [];
     for (const { slot, label, name, reading } of sim.pointers(viewHalfWidth, viewHalfHeight)) {
       // Home flashes once the hold is full: the arrow saying come and sell, home or far from it.
-      const full = slot === "home" && sim.ship.ore >= sim.cargoSpace(sim.ship);
+      const full = slot === "home" && sim.oreIn(sim.ship) >= sim.cargoSpace(sim.ship);
       const lit = full && Math.floor(performance.now() / 350) % 2 === 0;
       const color = slot === "home" ? (lit ? POINTER_HOME_FLASH : POINTER_HOME) : (POINTER_COLORS[label] ?? POINTER_NEUTRAL);
       const arrow = this.drawPointer(reading, color, label, slot === "home" ? 0.22 : 0.34, meters, width, height, dpr);

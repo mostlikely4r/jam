@@ -11,13 +11,15 @@ import { Radio } from "./radio";
 import { type Base, type Deposit, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartIcon, type PartId } from "./parts";
+import { ITEMS, itemDef } from "./items";
+import { PROGRAM_PARTS } from "./programs";
 import { computerSize, hullMax, mountsHolding, owns } from "./fitting";
 import { blueprintIcon, iconEl } from "./icons";
 import { partCategory, shopCellState, SHOP_CATEGORIES, type ShopBadge } from "./shop";
 import { setTip } from "./tooltip";
 import { Inventory } from "./inventory";
 import { dragging, makeDraggable, rotateDrag } from "./drag";
-import { DEFAULTS, GROUPS, THRUSTERS, type Tuning } from "./tuning";
+import { DEFAULTS, GROUPS, type Tuning } from "./tuning";
 
 const STORAGE_KEY = "flight-test-tuning";
 const MAX_FRAME_SECONDS = 0.1;
@@ -489,8 +491,7 @@ let inventoryScreen: Inventory | null = null;
 function inventory(): Inventory {
   if (!inventoryScreen || inventoryScreen.sim !== sim) {
     inventoryScreen = new Inventory(inventoryBox, sim);
-    inventoryScreen.lumps = () => renderer.lumpsOf(sim.ship);
-  }
+    }
   return inventoryScreen;
 }
 
@@ -637,26 +638,27 @@ const shopHeading = document.createElement("h2");
 function dropLine(deposit: Deposit): ShopLine {
   const { depositPays } = tuning;
   const amount = sim.depositSellable(sim.ship, deposit);
-  if (sim.ship.ore <= 0) return { tag: "no ore", text: `Drop ore here for ${depositPays} credits each`, enabled: false };
+  if (sim.oreIn(sim.ship) <= 0) return { tag: "no ore", text: `Drop ore here for ${depositPays} credits each`, enabled: false };
   if (amount <= 0) return { tag: "full", text: "The deposit has no room", enabled: false };
   return { tag: "sell", style: "sell", text: `Drop ${amount} ore for ${amount * depositPays} credits`, enabled: true };
 }
 
 function loadLine(deposit: Deposit): ShopLine {
-  const { depositSells, creditsPerOre } = tuning;
+  const { depositSells } = tuning;
+  const orePrice = sim.plainOrePrice();
   const amount = sim.depositBuyable(sim.ship, deposit);
-  if (deposit.ore <= 0) return { tag: "empty", text: `Load ore here for ${depositSells} credits each`, enabled: false };
-  if (sim.ship.ore >= sim.cargoSpace(sim.ship)) return { tag: "bay full", text: "No room for more ore", enabled: false };
+  if (sim.oreCount(deposit.ore) <= 0) return { tag: "empty", text: `Load ore here for ${depositSells} credits each`, enabled: false };
+  if (sim.cargoSpace(sim.ship) <= 0) return { tag: "bay full", text: "No room for more ore", enabled: false };
   if (amount <= 0) return { tag: "not enough money", style: "poor", text: `Load ore here for ${depositSells} credits each`, enabled: false };
-  const text = `Load ${amount} ore for ${amount * depositSells} credits. The station pays ${amount * creditsPerOre}`;
+  const text = `Load ${amount} ore for ${amount * depositSells} credits. The station pays ${amount * orePrice}`;
   return { tag: "buy", style: "buy", text, enabled: true };
 }
 
 function updateDepositShop(deposit: Deposit): void {
   const { ship } = sim;
-  const title = `Field deposit - holds ${Math.floor(deposit.ore)} of ${tuning.depositCapacity} ore`;
+  const title = `Field deposit - holds ${sim.oreCount(deposit.ore)} ore, ${sim.depositRoom(deposit)} of ${tuning.depositCapacity} room free`;
   if (shopHeading.textContent !== title) shopHeading.textContent = title;
-  const state = `deposit ${ship.ore} ${sim.cargoSpace(ship)} ${ship.credits} ${deposit.ore} ${tuning.depositPays} ${tuning.depositSells} ${tuning.depositCapacity}`;
+  const state = `deposit ${sim.oreIn(ship)} ${sim.cargoSpace(ship)} ${ship.credits} ${sim.oreCount(deposit.ore)} ${tuning.depositPays} ${tuning.depositSells} ${tuning.depositCapacity}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = false;
@@ -669,22 +671,23 @@ function updateDepositShop(deposit: Deposit): void {
 
 function updatePirateShop(): void {
   const { ship } = sim;
-  const title = `Pirate base - ${Math.floor(sim.pirateOre)} ore for sale at ${tuning.depositSells} each`;
+  const held = sim.oreCount(sim.pirateOre);
+  const title = `Pirate base - ${held} ore for sale at ${tuning.depositSells} each`;
   if (shopHeading.textContent !== title) shopHeading.textContent = title;
   const amount = sim.pirateBaseBuyable(ship);
-  const state = `pirate ${ship.ore} ${sim.cargoSpace(ship)} ${ship.credits} ${Math.floor(sim.pirateOre)} ${tuning.depositSells}`;
+  const state = `pirate ${sim.oreIn(ship)} ${sim.cargoSpace(ship)} ${ship.credits} ${held} ${tuning.depositSells}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = false;
   const each = tuning.depositSells;
   const line: ShopLine =
-    ship.ore > 0
+    sim.oreIn(ship) > 0
       ? { tag: "hold not empty", style: "poor", text: "They only sell to an empty hold", enabled: false }
-      : sim.pirateOre < 1
+      : held < 1
         ? { tag: "empty", text: `Ore here costs ${each} credits each`, enabled: false }
         : amount <= 0
           ? { tag: "not enough money", style: "poor", text: `Ore here costs ${each} credits each`, enabled: false }
-          : { tag: "buy", style: "buy", text: `Load ${amount} ore for ${amount * each} credits. The station pays ${amount * tuning.creditsPerOre}`, enabled: true };
+          : { tag: "buy", style: "buy", text: `Load ${amount} ore for ${amount * each} credits. The station pays ${amount * sim.plainOrePrice()}`, enabled: true };
   shop.replaceChildren(shopHeading, shopButton("1", line, () => sim.buyFromPirateBase(ship)));
 }
 
@@ -754,7 +757,7 @@ function updateShop(): void {
   }
   if (!docked) shopOpen = false;
   const locker = base ? sim.lockerAt(base) : null;
-  const state = `${shopOpen} ${sim.buyRefused} ${ship.ore} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.home} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.blueprintScale} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${sim.hub.size} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()}`;
+  const state = `${shopOpen} ${sim.buyRefused} ${sim.oreIn(ship)} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.home} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${sim.hub.size} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked || !shopOpen;
@@ -790,11 +793,13 @@ function updateShop(): void {
   // The grid: one cell per item, no text, under category headers in the plan's order.
   const grid = document.createElement("div");
   grid.className = "shop-grid";
+  // A module is a part and an item at once; a program has its own records. Both are sold here.
+  const forSale = [...PARTS.filter(isGear), ...PROGRAM_PARTS];
   for (const category of SHOP_CATEGORIES) {
     const cells =
       category === "Station"
         ? stationCells()
-        : PARTS.filter((part) => isGear(part) && partCategory(part) === category).flatMap((part) => {
+        : forSale.filter((part) => partCategory(part) === category).flatMap((part) => {
             const line = partLine(part);
             return line ? [shopCell(line, () => tradePart(part), line.tag === "buy" ? part.id : undefined)] : [];
           });
@@ -1036,43 +1041,33 @@ function buildPanel(): void {
     }
 
     if (group.title === "Parts") {
+      // Any item, straight into the bay: what the designers make, and what a test ship needs.
       const note = document.createElement("p");
-      note.textContent = "Your ship's parts, free for testing:";
-      body.append(note);
-      for (const part of PARTS) {
-        if (!partFits(part, sim.ship.model) || !isGear(part)) continue;
-        const toggle = document.createElement("label");
-        toggle.className = "toggle";
-        const box = document.createElement("input");
-        box.type = "checkbox";
-        box.checked = owns(sim.ship, part.id);
-        box.addEventListener("change", () => {
-          sim.devSet(sim.ship, part.id, box.checked);
-          box.blur();
-        });
-        toggle.append(box, ` ${part.label}`);
-        body.append(toggle);
-      }
-    }
-
-    if (group.title === "Thrusters") {
-      const note = document.createElement("p");
-      note.textContent = "Switches for your ship. Reverse and strafe also need their parts.";
-      body.append(note);
-      for (const thruster of THRUSTERS) {
-        const toggle = document.createElement("label");
-        toggle.className = "toggle";
-        const box = document.createElement("input");
-        box.type = "checkbox";
-        box.checked = tuning[thruster.id];
-        box.addEventListener("change", () => {
-          tuning[thruster.id] = box.checked;
-          saveTuning();
-          box.blur();
-        });
-        toggle.append(box, ` ${thruster.label}`);
-        body.append(toggle);
-      }
+      note.textContent = "Any item in the game, free for testing. It goes in your bay; a module fitted on the ship is another matter.";
+      const pick = document.createElement("select");
+      for (const item of ITEMS) pick.append(new Option(`${item.name} (${item.type})`, item.id));
+      const add = document.createElement("button");
+      add.textContent = "Add to bay";
+      const said = document.createElement("p");
+      add.addEventListener("click", () => {
+        const id = pick.value as PartId;
+        if (!sim.holdSpotFor(sim.ship, { part: id, wear: 0 })) {
+          said.textContent = "There's no room in the bay for that";
+          return;
+        }
+        sim.placeInBay(sim.ship, id);
+        said.textContent = `${itemDef(id)!.name} is in the bay`;
+      });
+      const row = document.createElement("div");
+      row.className = "row";
+      row.append(pick, add);
+      const money = document.createElement("button");
+      money.textContent = "Give money";
+      money.addEventListener("click", () => {
+        sim.ship.credits += 1000;
+        money.blur();
+      });
+      body.append(note, row, said, money);
     }
   }
 
@@ -1329,7 +1324,7 @@ function cargoText(ship: Ship): string {
 }
 
 function partList(ship: Ship): string {
-  const owned = PARTS.filter((part) => ship.parts.has(part.id) && !part.builtIn);
+  const owned = [...PARTS, ...PROGRAM_PARTS].filter((part) => ship.parts.has(part.id) && !part.builtIn);
   return owned.length > 0 ? owned.map((part) => part.short).join(" ") : "none";
 }
 
@@ -1399,7 +1394,7 @@ function frame(now: number): void {
       `Speed ${Math.round(speed)}  (top ${Math.round(sim.stats.topSpeed)})`,
       `Spin  ${Math.round((sim.ship.spin * 180) / Math.PI)} deg/s  Retro ${sim.ship.parts.has("retro") ? (tuning.retro ? "ON" : "off") : "none"}`,
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
-      `Ore   ${sim.ship.ore}/${cargoText(sim.ship)}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
+      `Ore   ${sim.oreIn(sim.ship)}/${cargoText(sim.ship)}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
       `Parts ${partList(sim.ship)}  Weight ${sim.shipWeight(sim.ship).toFixed(2)}`,
       `${frameText()}${sim.isDocked() ? "  DOCKED" : ""}${sim.ship.marked ? "  MARKED by pirates" : ""}${sim.ship.wanted ? "  WANTED by the station" : ""}${sim.clickPilot.active ? `  ${sim.clickPilot.isCourse ? "Course" : "Click order"}: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < hullMax(sim.ship.model) && !sim.hasPartsFor(tuning.repairCost) ? "  No repairs: the station is out of parts" : ""}`,
       `Rocks ${sim.rocks.length}  Wrecks ${sim.ship.wrecks}`,
@@ -1407,24 +1402,24 @@ function frame(now: number): void {
         const { ship } = drone;
         const hull = Math.round((ship.hull / hullMax(ship.model)) * 100);
         return [
-          `${ship.owner ? "YOURS " : ""}Drone ${index + 1} ${drone.task} ${ship.ore}/${cargoText(ship)}  Hull ${hull}%  ${ship.owner ? `Earned ${ship.earned}` : `Credits ${ship.credits}`}  Trips ${ship.trips}  Wrecks ${ship.wrecks}  Upkeep ${ship.upkeep}`,
+          `${ship.owner ? "YOURS " : ""}Drone ${index + 1} ${drone.task} ${sim.oreIn(ship)}/${cargoText(ship)}  Hull ${hull}%  ${ship.owner ? `Earned ${ship.earned}` : `Credits ${ship.credits}`}  Trips ${ship.trips}  Wrecks ${ship.wrecks}  Upkeep ${ship.upkeep}`,
           `  Parts ${partList(ship)}  Weight ${sim.shipWeight(ship).toFixed(2)}`,
         ];
       }),
       ...(tuning.showTraffic
         ? sim.traffic.map(
             ({ ship, task }, index) =>
-              `Traffic ${index + 1} ${ship.model} ${task} ${ship.ore}/${cargoText(ship)}  Hull ${Math.round((ship.hull / hullMax(ship.model)) * 100)}%  Credits ${ship.credits}  Trips ${ship.trips}  Wrecks ${ship.wrecks}`,
+              `Traffic ${index + 1} ${ship.model} ${task} ${sim.oreIn(ship)}/${cargoText(ship)}  Hull ${Math.round((ship.hull / hullMax(ship.model)) * 100)}%  Credits ${ship.credits}  Trips ${ship.trips}  Wrecks ${ship.wrecks}`,
           )
         : []),
       ...(tuning.showTraffic
         ? sim.fighters.map(
             ({ ship, task }) =>
-              `${ship.faction === "pirate" ? "Pirate" : "Defender"} ${task}  Hull ${Math.round((ship.hull / hullMax(ship.model)) * 100)}%  Ore ${ship.ore}  Wrecks ${ship.wrecks}`,
+              `${ship.faction === "pirate" ? "Pirate" : "Defender"} ${task}  Hull ${Math.round((ship.hull / hullMax(ship.model)) * 100)}%  Ore ${sim.oreIn(ship)}  Wrecks ${ship.wrecks}`,
           )
         : []),
       ...(tuning.showTraffic
-        ? [`${sim.baseName(base.id)} balance ${base.account.credits}  Ore held ${Math.floor(base.ore)}  Parts held ${Math.floor(base.parts)}  Next blueprint ${sim.blueprintQueue(base)[0] ?? "none"}${sim.deposits.some((deposit) => deposit.base === base.id && deposit.partsLeft > 0) ? "  Building deposit" : ""}  Lost traffic ${base.lostTraffic.length}  Pirate base ore ${Math.floor(sim.pirateOre)} credits ${Math.floor(sim.pirateCredits)} pirates ${sim.fighters.filter((pilot) => pilot.ship.faction === "pirate").length}/${sim.pirateCap}${sim.blackMarket ? `  Black market ${sim.blackMarket.stage}` : ""}`]
+        ? [`${sim.baseName(base.id)} balance ${base.account.credits}  Ore held ${sim.oreCount(base.ore)}  Part A held ${Math.floor(sim.partA(base))}  Next blueprint ${sim.blueprintQueue(base)[0] ?? "none"}${sim.deposits.some((deposit) => deposit.base === base.id && deposit.partsLeft > 0) ? "  Building deposit" : ""}  Lost traffic ${base.lostTraffic.length}  Pirate base ore ${sim.oreCount(sim.pirateOre)} credits ${Math.floor(sim.pirateCredits)} pirates ${sim.fighters.filter((pilot) => pilot.ship.faction === "pirate").length}/${sim.pirateCap}${sim.blackMarket ? `  Black market ${sim.blackMarket.stage}` : ""}`]
         : []),
       `FPS   ${Math.round(fps)}${paused ? "  PAUSED" : ""}`,
     ].join("\n");

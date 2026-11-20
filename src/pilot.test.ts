@@ -2481,13 +2481,15 @@ describe("pirate and defender", () => {
 });
 
 describe("click orders", () => {
-  /** A floater alone in the world: nothing to shoot it, nothing to trade with. */
+  /** A floater alone in the world: nothing to shoot it, nothing to trade with, no rocks. */
   function alone(extra: Partial<typeof SOLO & Home> = {}): Sim {
     return homeSim(1, {
       ...SOLO,
       testDrones: 0,
       floaterStart: true,
       chatter: false,
+      rockCount: 0,
+      rockInflow: 0,
       ...extra,
     });
   }

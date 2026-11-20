@@ -714,9 +714,9 @@ describe("station", () => {
         expect(at.x).toBeCloseTo(poi.x, 6);
         expect(at.y).toBeCloseTo(poi.y, 6);
       }
-      // An hour of world is a long run: alone it takes about 19 seconds, and the whole suite
-      // at once takes longer still.
-    }, 60000);
+      // An hour of world is a long run: alone it takes about 34 seconds here, and the whole
+      // suite at once takes longer still.
+    }, 120000);
 
     it("tells where a POI will be, matching where it gets to", () => {
       const sim = orbiting();

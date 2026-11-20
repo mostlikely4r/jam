@@ -1277,9 +1277,9 @@ export class ClickPilot extends ShipPilot {
     }
     // A hull that has to turn round to brake doesn't stop the moment it is in range: it
     // coasts in and makes that one turn and one burn, so the last of the way is flown rather
-    // than eased. See `arriveSideways`.
-    if (this.arrivesSideways(order) && order.stage === "stopping") {
-      if (this.arriveSideways(sim, order, distance, vx, vy, target)) return;
+    // than eased. See `coastIn`.
+    if (this.coastsIn(order) && order.stage === "stopping") {
+      if (this.coastIn(sim, order, distance, vx, vy, target)) return;
     }
     if (order.stage === "stopping") {
       // Either way it trims what speed is left: to rest, or to exactly the drawn drift.
@@ -1302,7 +1302,7 @@ export class ClickPilot extends ShipPilot {
   }
 
   /** A plain click move on a hull with no side thrusters: the one that has to turn to brake. */
-  private arrivesSideways(order: ClickOrder): boolean {
+  private coastsIn(order: ClickOrder): boolean {
     const { ship } = this;
     if (order.follow || !order.move || order.drifts || ship.parts.has("strafe")) return false;
     // Coasting in means the line to the spot stays a line, with the same motion carrying the
@@ -1324,7 +1324,7 @@ export class ClickPilot extends ShipPilot {
    * there instead: twenty to forty seconds of it, and the order never finished
    * (docs/dock-click-plan.md, finding 2).
    */
-  private arriveSideways(sim: Sim, order: ClickOrder, off: number, vx: number, vy: number, target: Mover): boolean {
+  private coastIn(sim: Sim, order: ClickOrder, off: number, vx: number, vy: number, target: Mover): boolean {
     const { ship } = this;
     const speed = Math.hypot(vx, vy);
     if (!order.braking) {

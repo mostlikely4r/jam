@@ -99,6 +99,14 @@ describe("the bot's hands", () => {
   });
 });
 
+describe("the journey", () => {
+  it("ends on the chart and the autopilot, in six steps, and not the route planner", () => {
+    expect(FLOATER_JOURNEY.steps).toHaveLength(6);
+    expect(FLOATER_JOURNEY.steps[5]).toEqual({ label: "system chart, autopilot", parts: ["starmap", "autopilot"] });
+    expect(FLOATER_JOURNEY.steps.flatMap((step) => step.parts)).not.toContain("clickRoute");
+  });
+});
+
 describe("the run", () => {
   it("ends stuck, naming the step, when there's nothing to work", () => {
     // No rocks and no ore anywhere: mining has nothing to do, so the run can only stall.
@@ -133,6 +141,39 @@ describe("the run", () => {
     // The program is the pilot's now, even though it isn't running: bought once, not every tick.
     expect(sim.ship.software.has("targeting")).toBe(true);
     expect(bot.log.inputs.filter((input) => input.kind === "buy")).toHaveLength(1);
+  });
+
+  it("flies home on a click at the dock, following it, rather than a click to its berth", () => {
+    const sim = world();
+    // A hold full of ore, so the only thing left is the trip home.
+    sim.setOre(sim.ship, 100);
+    const bot = new Bot({ plan: FLOATER_JOURNEY, log: new BotLog() });
+    const hands = watched(sim);
+    // The order is the click pilot's, not the autopilot's: the journey hasn't got that far.
+    expect(sim.ship.parts.has("autopilot")).toBe(false);
+    for (let i = 0; i < Math.round(120 / TICK) && !sim.isDocked(); i++) playTick(sim, bot, hands);
+    const docks = bot.log.inputs.filter((input) => input.kind === "dock");
+    expect(docks).toHaveLength(1);
+    expect(sim.isDocked()).toBe(true);
+  }, 30000);
+
+  it("makes room in a full computer by unloading click-to-turn once the turret is fitted", () => {
+    const plan: Plan = { name: "A chart", steps: [{ label: "system chart", parts: ["starmap"] }] };
+    const sim = dock(world());
+    sim.ship.credits = 1000;
+    sim.devSet(sim.ship, "turret", true);
+    // Owned but with nowhere to run: the computer is full of the ship's own programs.
+    sim.devSet(sim.ship, "meters", true);
+    sim.devSet(sim.ship, "retro", true);
+    expect(sim.ship.programs).toHaveLength(4);
+    sim.giveProgram(sim.ship, "starmap");
+    const bot = new Bot({ plan, log: new BotLog() });
+    play(sim, bot, 30);
+    expect(sim.ship.parts.has("starmap")).toBe(true);
+    expect(sim.ship.parts.has("clickTurn")).toBe(false);
+    // What the bot flies with is untouched: the click orders and the turn keys.
+    expect(sim.ship.parts.has("clickMove")).toBe(true);
+    expect(bot.log.inputs.some((input) => input.kind === "unload")).toBe(true);
   });
 
   it("buys a step's part at the dock and calls it done", () => {

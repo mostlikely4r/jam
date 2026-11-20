@@ -2412,6 +2412,20 @@ export class Sim {
     return true;
   }
 
+  /**
+   * Flies the ship in to a station's dock, if it has click-to-move and the place is a station
+   * with one. The order follows the berth as it goes round, exactly as a course does, and ends
+   * the moment the ship is in the dock: the drag there holds it, so there is nothing left to
+   * fly. Nothing to do with the autopilot, which is for places off the screen. Returns whether
+   * it gave the order.
+   */
+  orderDock(station: Poi): boolean {
+    if (!this.ship.parts.has("clickMove")) return false;
+    if (!this.baseOf(station)) return false;
+    this.clickPilot.travelTo(station, DOCK_OFFSET, 0, 0, true);
+    return true;
+  }
+
   /** Sets a course for a deposit, if the ship has the autopilot. */
   orderTravelDeposit(deposit: Deposit): boolean {
     if (!this.ship.parts.has("autopilot")) return false;
@@ -4621,6 +4635,20 @@ export class Sim {
     const cos = Math.cos(station.rotation);
     const sin = Math.sin(station.rotation);
     return { x: x * cos - y * sin, y: x * sin + y * cos };
+  }
+
+  /**
+   * The station whose solid box or dock a world spot is in, or null: what a click lands on.
+   * A margin in world units widens both boxes, for a quick click on a station seen from far.
+   */
+  stationAt(x: number, y: number, margin = 0): Poi | null {
+    for (const station of this.docks) {
+      const local = this.toStationAxes(x - station.x, y - station.y, station);
+      if (Math.abs(local.x - STATION_SHAPE_CENTER) < STATION_SHAPE_HALF + margin && Math.abs(local.y) < STATION_HALF + margin) {
+        return station;
+      }
+    }
+    return null;
   }
 
   /** The station whose dock a ship is in, or null. */

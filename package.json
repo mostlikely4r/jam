@@ -14,7 +14,9 @@
     "census": "vite-node src/profile/census.ts",
     "parity": "vite-node src/profile/parity.ts",
     "news": "vite-node src/profile/news.ts",
-    "bot": "vite-node src/bot/run.ts",    "warm": "vite-node src/profile/warm.ts",
+    "bot": "vite-node src/bot/run.ts",
+    "dockchase": "vite-node src/profile/dockchase.ts",
+    "warm": "vite-node src/profile/warm.ts",
     "world": "vite-node src/designer/save-world.ts",
     "layout": "vite-node src/designer/layout.ts"
   },

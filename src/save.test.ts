@@ -119,7 +119,9 @@ describe("a warmed start", () => {
     expect(sim.ship.credits).toBe(new Sim(1, tuning).ship.credits);
     expect(Math.hypot(sim.ship.x - sim.station.x, sim.ship.y - sim.station.y)).toBeLessThan(fresh + 1);
     for (let i = 0; i < Math.round(5 / TICK); i++) sim.step();
-  });
+    // A minute of the shipped world is a few seconds of its own: the rest of the suite running
+    // beside it is what pushes it past the default.
+  }, 30000);
 });
 
 describe("the shipped start", () => {

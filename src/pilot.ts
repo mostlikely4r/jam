@@ -91,6 +91,8 @@ const EASE_RATE = 2;
 const EASE_FLIPS = 1;
 /** How close counts as on the spot for a ship that has to turn to brake. */
 const LANDING_TURNING = 2;
+/** How far off its spot a hull that had to brake onto it may call itself landed: it can't hover. */
+const BRAKE_MISS = 8;
 /** A trim burns along the nose once it points this close to the need, and leaves the rest for the next. */
 const TRIM_ANGLE = 0.2;
 /** It never eases slower than this, so the last stretch doesn't drag on. */
@@ -1007,12 +1009,16 @@ interface ClickOrder {
   stage: "flying" | "stopping" | "settling" | "facing";
   /** Reached its spot while settling, so from then on it only stops. */
   landed?: boolean;
+  /** A hull without side thrusters has begun the one brake that ends it on its spot. */
+  braking?: boolean;
   closest: number;
   stuck: number;
   /** How far the move had to go when it was ordered, for scaling its top speed. */
   trip?: number;
   /** Flies the straight line whatever is in the way, even with the route planner. */
   straight?: boolean;
+  /** A click on a dock: follows the berth with click-to-move, and ends inside it. */
+  dock?: boolean;
 }
 
 /** A click move's speed ceiling, as a share of the peak it would reach burning full to the halfway point. */
@@ -1101,12 +1107,13 @@ export class ClickPilot extends ShipPilot {
    * Sets a course for a place, ending `slack` short of its centre (or at the spot `ox, oy`
    * in its own axes, for a dock). The course chases the place as it moves and turns.
    */
-  travelTo(poi: CourseTarget, ox = 0, oy = 0, slack = 0): void {
+  travelTo(poi: CourseTarget, ox = 0, oy = 0, slack = 0, dock = false): void {
     this.order = {
       spot: { x: poi.x, y: poi.y, px: poi.px, py: poi.py, vx: 0, vy: 0 },
       follow: { poi, ox, oy, slack },
       drifts: false,
       move: true,
+      dock,
       face: this.order?.face ?? null,
       stage: "flying",
       closest: Infinity,
@@ -1213,8 +1220,15 @@ export class ClickPilot extends ShipPilot {
     const { order, ship } = this;
     if (!order) return;
     const stopping = order.stage === "stopping" || order.stage === "settling";
-    const needs = order.follow ? "autopilot" : order.move || stopping ? "clickMove" : "clickTurn";
+    // A course is the autopilot's; a click on a dock is click-to-move's, since it's the same
+    // follow given from the screen rather than the chart.
+    const needs = order.follow ? (order.dock ? "clickMove" : "autopilot") : order.move || stopping ? "clickMove" : "clickTurn";
     if (!ship.parts.has(needs)) {
+      this.cancel();
+      return;
+    }
+    // In the dock: the drag there holds the ship, so a dock order is done the moment it's in.
+    if (order.dock && order.follow && sim.dockedAt(ship) === order.follow.poi) {
       this.cancel();
       return;
     }
@@ -1261,6 +1275,12 @@ export class ClickPilot extends ShipPilot {
         order.stage = "stopping";
       } else this.flyTo(sim, target, 0, 0, null);
     }
+    // A hull that has to turn round to brake doesn't stop the moment it is in range: it
+    // coasts in and makes that one turn and one burn, so the last of the way is flown rather
+    // than eased. See `arriveSideways`.
+    if (this.arrivesSideways(order) && order.stage === "stopping") {
+      if (this.arriveSideways(sim, order, distance, vx, vy, target)) return;
+    }
     if (order.stage === "stopping") {
       // Either way it trims what speed is left: to rest, or to exactly the drawn drift.
       if (speed < STOPPED_SPEED) order.stage = "settling";
@@ -1279,6 +1299,55 @@ export class ClickPilot extends ShipPilot {
       if (off < FACING_ANGLE && Math.abs(ship.spin) < FACING_SPIN) this.cancel();
       else this.turnTo(sim, face);
     }
+  }
+
+  /** A plain click move on a hull with no side thrusters: the one that has to turn to brake. */
+  private arrivesSideways(order: ClickOrder): boolean {
+    const { ship } = this;
+    if (order.follow || !order.move || order.drifts || ship.parts.has("strafe")) return false;
+    // Coasting in means the line to the spot stays a line, with the same motion carrying the
+    // ship and everything around it. A deposit's ring swings it by itself, and a POI's carry
+    // fades with distance, and either way that line turns as the ship comes in. The ease flies
+    // those, the way it always has.
+    if (ship.frameShare > 0 && ship.frameShare < 1) return false;
+    return ship.frame === null || ship.frame.name !== "field deposit";
+  }
+
+  /**
+   * How a hull without side thrusters is stopped. It can only push along its nose, so stopping
+   * means putting the nose against its motion and burning, and that turn takes seconds the
+   * hull spends coasting. So the move coasts in at the speed it came in at, until the turn and
+   * the burn together end it on its spot, and takes the one brake from there.
+   *
+   * The older way, stopping as soon as it was in range and easing the rest of the way, turned
+   * the nose for every flicker of the correction. A hull with nothing to damp a spin tumbled
+   * there instead: twenty to forty seconds of it, and the order never finished
+   * (docs/dock-click-plan.md, finding 2).
+   */
+  private arriveSideways(sim: Sim, order: ClickOrder, off: number, vx: number, vy: number, target: Mover): boolean {
+    const { ship } = this;
+    const speed = Math.hypot(vx, vy);
+    if (!order.braking) {
+      // On the spot already, or nothing to brake: the settle eases it the way it always has.
+      if (off < LANDING_TURNING || speed < REST_SPEED) return false;
+      // The nose has to come round against the motion first, and the hull coasts while it
+      // does, so the brake starts where the turn and the burn end it on its spot.
+      const turn = (Math.abs(wrapAngle(Math.atan2(-vy, -vx) - ship.angle)) / Math.PI) * this.flipSeconds(sim);
+      const accel = sim.tuning.thrust * sim.shipResponse(ship);
+      const closing = (vx * (target.x - ship.x) + vy * (target.y - ship.y)) / (off || 1);
+      // Passing it without touching it: brake anyway, so the ship ends near its spot.
+      if (closing > 0 && off > speed * turn + (speed * speed) / (2 * accel)) return true;
+      order.braking = true;
+    }
+    this.brake(sim, -vx, -vy, LANDING_SPEED, order.face);
+    if (speed >= LANDING_SPEED) return true;
+    // Stopped. Within reach of its spot is landed; a hull that can't hover needs a wider
+    // reach than one that can, and a few units of a click isn't worth more turning for.
+    if (off <= BRAKE_MISS) {
+      order.stage = "facing";
+      return true;
+    }
+    return false;
   }
 
   /**

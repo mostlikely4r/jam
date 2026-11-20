@@ -35,7 +35,10 @@ export const FLOATER_JOURNEY: Plan = {
     { label: "tractor, cone", parts: ["tractor"] },
     { label: "targeting", parts: ["targeting"] },
     { label: "large bay", parts: ["largeBay"] },
-    { label: "route planner, system chart, autopilot", parts: ["clickRoute", "starmap", "autopilot"] },
+    // The chart and the autopilot are one step: a course is picked on the chart, so the
+    // autopilot is no use without it. The route planner leaves the journey: it only routes
+    // click moves, and a course already routes itself. It stays in the shop.
+    { label: "system chart, autopilot", parts: ["starmap", "autopilot"] },
   ],
 };
 

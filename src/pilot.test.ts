@@ -4,7 +4,7 @@ import { APPROACH, BOUGHT, HEADING_BACK, OUTBOUND, THANKS } from "./chatter";
 import { PARTS, partOf, type PartId } from "./parts";
 import { moduleIds } from "./items";
 import { DEFAULTS } from "./tuning";
-import { DOCK_OFFSET, MAX_HULL, Sim, TICK } from "./sim";
+import { DOCK_OFFSET, MAX_HULL, SHIP_RADIUS, Sim, TICK } from "./sim";
 import { partOf as partInfo } from "./parts";
 
 /** How much ore an empty bay of this part holds, at one ore per cell. */
@@ -2477,5 +2477,157 @@ describe("pirate and defender", () => {
     sim.controls.fire = true;
     run(sim, 1);
     expect(sim.ship.damageTaken).toBe(0);
+  });
+});
+
+describe("click orders", () => {
+  /** A floater alone in the world: nothing to shoot it, nothing to trade with. */
+  function alone(extra: Partial<typeof SOLO & Home> = {}): Sim {
+    return homeSim(1, {
+      ...SOLO,
+      testDrones: 0,
+      floaterStart: true,
+      chatter: false,
+      ...extra,
+    });
+  }
+
+  /** The ship at rest at a spot in open space, where nothing carries it. */
+  function park(ship: Sim["ship"], x: number, y: number, angle = 0): void {
+    ship.x = ship.px = x;
+    ship.y = ship.py = y;
+    ship.vx = ship.vy = 0;
+    ship.angle = angle;
+    ship.spin = 0;
+  }
+
+  /** Plays an order out, and says when it ended and how far the nose turned on the way. */
+  function fly(sim: Sim, seconds: number): { ended: number; nose: number } {
+    const { ship } = sim;
+    let nose = 0;
+    let angle = ship.angle;
+    for (let i = 0; i < Math.round(seconds / TICK); i++) {
+      sim.step();
+      sim.events.length = 0;
+      nose += Math.abs(Math.atan2(Math.sin(ship.angle - angle), Math.cos(ship.angle - angle)));
+      angle = ship.angle;
+      if (!sim.clickPilot.active) return { ended: i * TICK, nose };
+    }
+    return { ended: -1, nose };
+  }
+
+  it("a hull without side thrusters lands 50 units on, in a few seconds, without tumbling", () => {
+    const sim = alone();
+    const { ship } = sim;
+    park(ship, 40000, 40000, Math.PI / 3);
+    sim.step();
+    expect(sim.orderMove(40050, 40000)).toBe(true);
+    const { ended, nose } = fly(sim, 20);
+    // It finishes, where the old ease stood for twenty to forty seconds and never quite did.
+    expect(ended).toBeGreaterThan(0);
+    expect(ended).toBeLessThan(15);
+    // At rest, near enough for a hull that can't hover: inside the ship's own size.
+    expect(Math.hypot(ship.x - 40050, ship.y - 40000)).toBeLessThan(SHIP_RADIUS);
+    expect(Math.hypot(ship.vx, ship.vy)).toBeLessThan(1);
+    // One turn round to brake, and no hunting: the old way swung the nose through 600 degrees
+    // and more, a flicker of the correction at a time.
+    expect((nose * 180) / Math.PI).toBeLessThan(360);
+  }, 30000);
+
+  it("a hull with side thrusters still lands on the spot itself", () => {
+    const sim = alone();
+    const { ship } = sim;
+    sim.devSet(ship, "strafe", true);
+    sim.devSet(ship, "reverse", true);
+    park(ship, 40000, 40000, Math.PI / 3);
+    sim.step();
+    expect(sim.orderMove(40050, 40000)).toBe(true);
+    const { ended } = fly(sim, 20);
+    expect(ended).toBeGreaterThan(0);
+    expect(Math.hypot(ship.x - 40050, ship.y - 40000)).toBeLessThan(0.5);
+    expect(Math.hypot(ship.vx, ship.vy)).toBeLessThan(1);
+  }, 30000);
+
+  describe("docking from a click", () => {
+    /** The floater at rest at the field's edge nearest the station, with a hold full of ore. */
+    function edge(sim: Sim): void {
+      const { field, station } = sim;
+      const dx = station.x - field.x;
+      const dy = station.y - field.y;
+      const out = Math.hypot(dx, dy) || 1;
+      park(sim.ship, field.x + (dx / out) * field.reach, field.y + (dy / out) * field.reach, Math.atan2(dy, dx));
+      sim.setOre(sim.ship, 100);
+      sim.step();
+    }
+
+    it("flies in and docks at three points of the station's orbit, and the order goes with it", () => {
+      for (const warm of [0, 300, 600]) {
+        const sim = alone();
+        sim.warmUp(warm);
+        edge(sim);
+        expect(sim.orderDock(sim.station), `${warm} s in`).toBe(true);
+        let docked = false;
+        for (let i = 0; i < Math.round(300 / TICK); i++) {
+          sim.step();
+          sim.events.length = 0;
+          if (sim.isDocked()) {
+            docked = true;
+            break;
+          }
+        }
+        expect(docked, `${warm} s in`).toBe(true);
+        // In the dock the drag holds it, so there is nothing left to fly: the order goes on
+        // the next tick, once the pilot has seen where the ship ended up.
+        run(sim, 0.1);
+        expect(sim.clickPilot.active, `${warm} s in`).toBe(false);
+      }
+    }, 60000);
+
+    it("needs click-to-move, and a station to fly to", () => {
+      const racer = homeSim(1, { ...SOLO, testDrones: 0, floaterStart: false });
+      expect(racer.ship.parts.has("clickMove")).toBe(false);
+      expect(racer.orderDock(racer.station)).toBe(false);
+      const sim = alone();
+      expect(sim.orderDock(sim.field)).toBe(false);
+    });
+
+    it("is dropped when click-to-move goes while it's flying", () => {
+      const sim = alone();
+      edge(sim);
+      expect(sim.orderDock(sim.station)).toBe(true);
+      run(sim, 2);
+      expect(sim.clickPilot.active).toBe(true);
+      sim.devSet(sim.ship, "clickMove", false);
+      run(sim, 0.1);
+      expect(sim.clickPilot.active).toBe(false);
+    });
+  });
+
+  describe("what a click on a station lands on", () => {
+    /** A point in the station's own axes, where it is now. */
+    function at(station: Sim["station"], x: number, y: number): { x: number; y: number } {
+      const cos = Math.cos(station.rotation);
+      const sin = Math.sin(station.rotation);
+      return { x: station.x + x * cos - y * sin, y: station.y + x * sin + y * cos };
+    }
+
+    it("finds the station on its solid part and on its dock, at any rotation, and nowhere outside", () => {
+      const sim = alone();
+      const { station } = sim;
+      for (const turn of [0, 0.7, 2.1]) {
+        station.rotation = turn;
+        // The solid box is the station's middle, and the dock is a hull-length past it.
+        for (const [lx, ly] of [[0, 0], [140, 0], [0, -140], [299, 0], [299, 120]]) {
+          const spot = at(station, lx as number, ly as number);
+          expect(sim.stationAt(spot.x, spot.y), `${lx}, ${ly} at ${turn}`).toBe(station);
+        }
+        for (const [lx, ly] of [[-160, 0], [460, 0], [0, 160], [0, -160]]) {
+          const spot = at(station, lx as number, ly as number);
+          expect(sim.stationAt(spot.x, spot.y), `${lx}, ${ly} at ${turn}`).toBeNull();
+          // A margin widens both boxes by that much, for a quick click from far out.
+          if (Math.abs(ly) < 150) expect(sim.stationAt(spot.x, spot.y, 20), `${lx} with margin`).toBe(station);
+        }
+      }
+    });
   });
 });

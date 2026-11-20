@@ -46,7 +46,7 @@ const REPEAT_SECONDS = 90;
 /** Everything the bot may call on the sim: player inputs, and what it reads to decide. */
 export const BOT_CALLS = {
   /** What a click, a keypress or a shop click does. */
-  inputs: ["orderMove", "orderMoveStraight", "orderTravel", "orderStop", "buyPart", "fitItem", "setProgram", "chooseHull"],
+  inputs: ["orderMove", "orderMoveStraight", "orderTravel", "orderDock", "orderStop", "buyPart", "fitItem", "setProgram", "chooseHull"],
   /** The ship's own screens: what a player can see before deciding. */
   reads: [
     "isDocked",
@@ -343,6 +343,7 @@ export class Bot {
     const want = missingPart(ship, this.plan.steps[step]);
     if (!want) return false;
     const label = partOf(want).label.toLowerCase();
+    this.makeRoom(sim, want);
     // Owned but not running: a program with no free slot, which the game reports by doing nothing.
     if (ship.software.has(want)) {
       if (sim.setProgram(ship, want, true)) {
@@ -384,6 +385,19 @@ export class Bot {
       this.snag(sim, want, "the ship wouldn't take it");
     }
     return true;
+  }
+
+  /**
+   * Makes room in a full computer for a program the journey still wants. The turret aims for
+   * the ship, so click-to-turn is the one that goes: what it does by hand the bot does with the
+   * turn keys anyway. A player unloads it in the inventory the same way.
+   */
+  private makeRoom(sim: Sim, want: PartId): void {
+    const { ship } = sim;
+    if (!isProgram(want) || ship.programs.length < computerSize(ship)) return;
+    if (!ship.parts.has("turret") || !ship.parts.has("clickTurn")) return;
+    if (!sim.setProgram(ship, "clickTurn", false)) return;
+    this.log.input(sim.now, "unload", `${partOf("clickTurn").label.toLowerCase()}, making room for ${partOf(want).label.toLowerCase()}`);
   }
 
   /** Why a program won't load, in the game's own numbers. */
@@ -603,11 +617,14 @@ export class Bot {
       this.log.event(now, `heading home: ${why}, ${this.oreAboard} ore aboard`);
     }
     if (!sim.ship.parts.has("autopilot")) {
-      // A click order to the berth: its destination is carried along with the station, like
-      // anything else loose at that spot, so the order keeps up with the dock as it goes round.
-      // A chase, not an arrival: an order to the berth keeps going until the ship is in the
-      // dock, since stopping near a moving dock leaves it outside the dock's box.
-      this.head(sim, sim.dockPoint(false, dock), `home to ${name}`, false, false, false);
+      // A click on the dock: the click pilot follows the berth as it goes round, exactly as a
+      // course does, and the order ends when the ship is in the dock. Given once, and again
+      // only if it ended without docking, no faster than a second.
+      if (sim.clickPilot.active || (this.orderAt !== null && now - this.orderAt < 1)) return;
+      if (!sim.orderDock(dock)) return;
+      this.log.input(now, "dock", `home to ${name}`);
+      this.orderAt = now;
+      this.ordered = sim.dockPoint(false, dock);
       return;
     }
     // A course chases the place as it moves: given once, and again if it has lost it.
@@ -622,18 +639,17 @@ export class Bot {
    * A click order to a spot, as a player gives with a right click. While one is flying it's left
    * alone: the click pilot stops where it was told, and the next one comes from there.
    */
-  private head(sim: Sim, spot: { x: number; y: number }, what: string, chase = false, arrive = true, stopClose = true): void {
+  private head(sim: Sim, spot: { x: number; y: number }, what: string, chase = false): void {
     const { now } = sim;
     // No more than one click a second: a loop of them would say nothing a player could read,
     // and a player's hand couldn't click faster either.
     if (this.clickedAt !== null && now - this.clickedAt < 1) return;
-    // A click order that has arrived settles on its spot for a long while, trimmng the last of
-    // its speed and never quite finishing: close enough is close enough. Without this the order
-    // stands for its full while, and nothing else is told to the ship in the meantime.
+    // A click order brings the ship to rest on its spot and ends itself, so a click for a spot
+    // it is already at is one it doesn't need. (It used to stand for twenty to forty seconds,
+    // tumbling: docs/dock-click-plan.md, finding 2.)
     const target = sim.clickPilot.target();
     const close = target !== null && Math.hypot(target.x - sim.ship.x, target.y - sim.ship.y) < ARRIVED;
-    const settled = arrive && this.orderAt !== null && now - this.orderAt > 4 && Math.hypot(sim.ship.vx, sim.ship.vy) < 25;
-    if (sim.clickPilot.active && ((stopClose && close) || settled)) {
+    if (sim.clickPilot.active && close) {
       this.log.input(now, "stop", "close enough");
       sim.orderStop();
       this.orderAt = null;

@@ -1,7 +1,8 @@
 # Targeting plan: pick things, see how they move
 
-*2026-11-20. Nothing here is built yet. Line numbers are from `a257e36`. Items marked
-**decided** are the owner's calls; everything else is a proposal, open to veto.*
+*2026-11-20. Built 2026-11-20: all three steps, tests and all. Line numbers are from `a257e36`.
+A few things landed differently from the proposal, noted at the end. Items marked **decided**
+are the owner's calls; everything else is a proposal, open to veto.*
 
 ## Why
 
@@ -186,3 +187,31 @@ Three steps, each played before the next.
 - **Tweak hotkeys, a HUD tweak strip, cooldowns on tweaking.**
 - **Shift for anything in targeting.** Shift is the throttle.
 - **A limit on how many targets a ship holds.**
+
+## How it went
+
+- **Targets are references, not ids.** Rocks, loose ore and stations have no ids to hang in a
+  `string[]`, so `Ship.targets` holds the things themselves and the sim checks each is still in
+  the world. They still aren't saved: a restore clears every ship's list.
+- **A plain click on a picked target promotes it.** The rest of the queue stays, and it becomes
+  the main target; clicking something not picked replaces the queue with it (both proposals,
+  landed). Clicking nothing still clears everything.
+- **Targeting counts as loaded when it's running.** Every gate reads the working set, like every
+  other program, so a damaged computer drops the picks and left click does nothing until it's
+  fixed. Clicking a thing past the lock range does nothing at all, rather than clearing.
+- **Tweaks sit on the fitting beside `software`.** `ship.tweaks` is program id, then tweak id,
+  then the option picked; a missing pick reads as the default. It is copied where `software` is
+  (changes in a dock, a rebuild after death) and saved with the ship.
+- **A program's needs are data.** `ProgramDef.needs` names programs a program does nothing
+  without. Relative lines needs Targeting; the loadout table is what warns about a loadout that
+  leaves it out. The game itself just follows the tweaks and the programs' own checks.
+- **The loadout table is a section on the Programs page**, with tweak and needs editing beside
+  it. The Hulls page edits each hull's loadouts under Default programs. A second loadout with
+  a name a hull already has is ignored when read, and the editor refuses to make one.
+- **The first loadouts:** the racer's long trip (core: Autopilot; comfort: System chart), and
+  the floater's mining (core: Click to move, Click to turn; comfort: Spin stabilizer, Speed and
+  distance meters, Targeting, Relative lines) and long trip (core: Click to move, Autopilot;
+  comfort: Retro, System chart). Mining runs over the floater's own 4 slots, so it shows
+  "core only" against its own computer and fits the 6 it can mount: a real trade-off, and the
+  first thing to look at with the table.
+

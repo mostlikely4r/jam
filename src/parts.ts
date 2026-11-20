@@ -38,6 +38,8 @@ export type PartId =
   | "smallBay"
   | "starmap"
   | "autopilot"
+  | "targeting"
+  | "relativeLines"
   | "racerMain"
   | "floaterMain"
   | "turnThrusters"

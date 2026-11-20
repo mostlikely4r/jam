@@ -8,7 +8,7 @@ import { layoutKey, loadGame, loadStart, saveGame, saveInfo, type SaveSlot, type
 import { stringifyWorld } from "./designer/world";
 import { Audio } from "./audio";
 import { Radio } from "./radio";
-import { type Base, type Deposit, SHIP_RADIUS, type Ship, Sim, TICK } from "./sim";
+import { type Base, type Deposit, SHIP_RADIUS, type Ship, Sim, TICK, targetSpot, type Targetable } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartIcon, type PartId } from "./parts";
 import { ITEMS, itemDef } from "./items";
@@ -1217,7 +1217,17 @@ window.addEventListener("keydown", (event) => {
   keys.add(event.code);
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));
-window.addEventListener("blur", () => keys.clear());
+window.addEventListener("blur", () => {
+  keys.clear();
+  // A drag or a box can't be let go of when the window no longer has the pointer.
+  drag = null;
+  selecting = null;
+});
+// The same, for a pointer the browser takes away mid-drag.
+window.addEventListener("pointercancel", () => {
+  drag = null;
+  selecting = null;
+});
 // Closing or leaving the tab saves too, so walking away never loses anything.
 window.addEventListener("pagehide", autosave);
 document.addEventListener("visibilitychange", () => {
@@ -1234,12 +1244,23 @@ const DOUBLE_CLICK_MS = 350;
 let drag: { fromX: number; fromY: number; toX: number; toY: number; on: DragStart } | null = null;
 /** The last right click that could be the first half of a double click. */
 let lastClick: { x: number; y: number; time: number } | null = null;
+/** A left drag in progress, in screen pixels: picking with a box. Ctrl adds to the queue. */
+let selecting: { fromX: number; fromY: number; toX: number; toY: number; add: boolean } | null = null;
+
+/** How far a screen point is from a world position, in screen pixels. */
+function screenDistance(clientX: number, clientY: number, x: number, y: number): number {
+  const at = renderer.worldToScreen(x, y);
+  return Math.hypot(clientX - at.x, clientY - at.y);
+}
+
+/** How near a click has to be to count as on something this big, in screen pixels. */
+function reachScreen(radius: number): number {
+  return Math.max(18, radius * tuning.zoom * 1.6);
+}
 
 /** Whether a screen point is on a world position, with room for a quick click. */
 function near(clientX: number, clientY: number, x: number, y: number, radius: number): boolean {
-  const at = renderer.worldToScreen(x, y);
-  const reach = Math.max(18, radius * tuning.zoom * 1.6);
-  return Math.hypot(clientX - at.x, clientY - at.y) < reach;
+  return screenDistance(clientX, clientY, x, y) < reachScreen(radius);
 }
 
 /** What a right press lands on. The ship comes first, as the smaller and more used target. */
@@ -1250,13 +1271,51 @@ function dragStart(clientX: number, clientY: number): DragStart {
   return "space";
 }
 
+/**
+ * What a left click lands on: the nearest targetable thing the pointer is over, by the same
+ * reach the right button uses. Nothing: empty space, which clears the picks.
+ */
+function pickAt(clientX: number, clientY: number): Targetable | null {
+  let best: Targetable | null = null;
+  let closest = Infinity;
+  for (const target of sim.targetables()) {
+    if (target === sim.ship) continue;
+    const spot = targetSpot(target);
+    const distance = screenDistance(clientX, clientY, spot.x, spot.y);
+    if (distance < reachScreen(spot.radius) && distance < closest) {
+      best = target;
+      closest = distance;
+    }
+  }
+  return best;
+}
+
 canvas.addEventListener("mousedown", (event) => {
   audio.start();
+  if (event.button === 0 && !renderer.watchingWreck && sim.ship.parts.has("targeting")) {
+    selecting = { fromX: event.clientX, fromY: event.clientY, toX: event.clientX, toY: event.clientY, add: event.ctrlKey || event.metaKey };
+  }
   if (event.button !== 2 || renderer.watchingWreck) return;
   const { clientX: x, clientY: y } = event;
   drag = { fromX: x, fromY: y, toX: x, toY: y, on: dragStart(x, y) };
 });
 window.addEventListener("mouseup", (event) => {
+  if (event.button === 0 && selecting) {
+    const { fromX, fromY, add } = selecting;
+    selecting = null;
+    if (!sim.ship.parts.has("targeting")) return;
+    // Measured on screen, as the right drag is: what reads as a click is one here too.
+    if (Math.hypot(event.clientX - fromX, event.clientY - fromY) >= DRAG_PIXELS) {
+      const from = renderer.screenToWorld(fromX, fromY);
+      const to = renderer.screenToWorld(event.clientX, event.clientY);
+      sim.boxTargets(sim.ship, from, to, add);
+    } else {
+      const target = pickAt(fromX, fromY);
+      if (add) sim.toggleTarget(sim.ship, target);
+      else sim.selectTarget(sim.ship, target);
+    }
+    return;
+  }
   if (event.button !== 2 || !drag) return;
   const { fromX, fromY, on } = drag;
   drag = null;
@@ -1299,6 +1358,10 @@ window.addEventListener("mousemove", (event) => {
   if (drag) {
     drag.toX = event.clientX;
     drag.toY = event.clientY;
+  }
+  if (selecting) {
+    selecting.toX = event.clientX;
+    selecting.toY = event.clientY;
   }
   if (event.target !== canvas) return;
   mouse = { x: event.clientX, y: event.clientY };
@@ -1377,6 +1440,8 @@ function frame(now: number): void {
     ...drag,
     dragged: Math.hypot(drag.toX - drag.fromX, drag.toY - drag.fromY) >= DRAG_PIXELS,
   };
+  renderer.selectBox =
+    selecting && Math.hypot(selecting.toX - selecting.fromX, selecting.toY - selecting.fromY) >= DRAG_PIXELS ? selecting : null;
   sim.screen = { halfWidth: window.innerWidth / 2 / tuning.zoom, halfHeight: window.innerHeight / 2 / tuning.zoom };
   // The mouse is passed along for the arrows' tooltips, which are drawn and so can't be hit
   // any other way: only while the game's own view is what's under the pointer.

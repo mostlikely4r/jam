@@ -2,7 +2,7 @@ import { isProgram, partFits, partOf, PARTS, SHIP_MODELS, type Part, type PartIc
 import shipFile from "./hulls.json";
 import { hasGlyph } from "./glyphs";
 import { itemDef } from "./items";
-import { programDef } from "./programs";
+import { programDef, type TweakPicks } from "./programs";
 import type { Placed } from "./grid";
 
 /**
@@ -61,10 +61,22 @@ export const HULL_USE_NAMES: Record<HullUse, string> = {
   drone: "Drone",
 };
 
+/**
+ * A set of programs a hull is likely to fly with: what a loop needs to work (core) and what
+ * makes it comfortable (comfort). Names come from the designer.
+ */
+export interface Loadout {
+  name: string;
+  core: PartId[];
+  comfort: PartId[];
+}
+
 /** What a hull has besides its mounts. */
 export interface HullInfo {
   /** The programs a ship of this hull comes with, loaded into its computer as far as it has slots. */
   programs: PartId[];
+  /** The loops this hull is meant for, each with the programs it needs and the ones that help. */
+  loadouts: Loadout[];
   /** What the hull is used for. */
   usedBy: HullUse[];
   /** Credits a bare hull costs at a yard. Without one, the game's own rebuild cost. */
@@ -116,6 +128,8 @@ export interface Fitting {
   software: Set<PartId>;
   /** The programs loaded in the computer, in the order they were loaded. */
   programs: PartId[];
+  /** The pilot's pick for each tweak of each program they own. Missing reads as the default. */
+  tweaks: TweakPicks;
   /** What works right now: every working module's part and every running program. Kept up by `refresh`. */
   parts: Set<PartId>;
   /** Modules placed on the cargo bay's grid, taking room from the ore. */
@@ -164,7 +178,21 @@ function readHullInfo(raw: Partial<HullInfo> | undefined): HullInfo {
     const value = raw?.[key];
     return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
   };
-  return { programs: [...new Set(programs)], usedBy, price: stat("price"), weight: stat("weight"), hull: stat("hull") };
+  return { programs: [...new Set(programs)], loadouts: readLoadouts(raw?.loadouts), usedBy, price: stat("price"), weight: stat("weight"), hull: stat("hull") };
+}
+
+/** A hull's loadouts read from a file: a name, program ids the game knows, and no repeated names. */
+function readLoadouts(raw: unknown): Loadout[] {
+  if (!Array.isArray(raw)) return [];
+  const loadouts: Loadout[] = [];
+  const names = new Set<string>();
+  for (const each of raw as Partial<Loadout>[]) {
+    if (!each || typeof each.name !== "string" || each.name === "" || names.has(each.name)) continue;
+    names.add(each.name);
+    const list = (value: unknown) => [...new Set(strings(value).filter((id): id is PartId => programDef(id) !== undefined))];
+    loadouts.push({ name: each.name, core: list(each.core), comfort: list(each.comfort) });
+  }
+  return loadouts;
 }
 
 /** The ship file the game shipped with, as read. */
@@ -289,7 +317,7 @@ export const DECAL_PARTS: PartId[] = [];
 /** Each hull's mounts. The arrays are changed in place, so everything holding them sees it. */
 export const HULL_MOUNTS = Object.fromEntries(SHIP_MODELS.map((model) => [model, [] as Mount[]])) as Record<ShipModel, Mount[]>;
 /** What else each hull has: its default programs and what it's used for. Changed in place by the hull designer. */
-export const HULL_INFO = Object.fromEntries(SHIP_MODELS.map((model) => [model, { programs: [], usedBy: [] } as HullInfo])) as Record<ShipModel, HullInfo>;
+export const HULL_INFO = Object.fromEntries(SHIP_MODELS.map((model) => [model, { programs: [], loadouts: [], usedBy: [] } as HullInfo])) as Record<ShipModel, HullInfo>;
 
 /** The hull points every hull has unless its own say otherwise. */
 export const MAX_HULL = 100;
@@ -438,7 +466,7 @@ export function hullDefaults(model: ShipModel): Partial<Record<MountId, PartId>>
  * decal mount, picked with `random` (0 up to 1).
  */
 export function newFitting(model: ShipModel, random: () => number = Math.random): Fitting {
-  const fitting: Fitting = { fit: {}, software: new Set(), programs: [], parts: new Set(), hold: [], oreBlocks: [], decals: {} };
+  const fitting: Fitting = { fit: {}, software: new Set(), programs: [], parts: new Set(), hold: [], oreBlocks: [], decals: {}, tweaks: {} };
   for (const [mount, part] of Object.entries(hullDefaults(model)) as [MountId, PartId][]) fitting.fit[mount] = { part, wear: 0 };
   refresh(fitting);
   for (const id of HULL_INFO[model].programs) {

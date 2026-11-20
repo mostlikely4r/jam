@@ -55,6 +55,7 @@ export const STEP_PARTS: Record<string, FarSide> = {
     far: "Only flown ships go critical (from flown hits), and a critical one is never made a record, so it explodes flown. The player's pod flies by the clock wherever it is.",
   },
   burnOreOnBodies: { out: "in view only", far: "Only loose ore burns, and loose ore out of view doesn't move." },
+  upkeepTargets: { out: "everywhere", note: "Only the player picks targets for now, and the player's ship is always flown." },
   moveShots: { out: "in view only", far: "Fights out of view are flown: the dice only say when one starts. Stray shots between traffic aren't modelled yet." },
   fireShots: { out: "in view only", far: "As for shots." },
   collectOre: { out: "in view only", far: "Records collect at the end of a mining stay, all at once (`takeOre`)." },

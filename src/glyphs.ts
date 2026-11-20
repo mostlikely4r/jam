@@ -323,6 +323,16 @@ export const GLYPHS: readonly { id: string; draw: GlyphDraw }[] = [
     },
   },
   {
+    id: "crosshair",
+    draw(svg, p, s) {
+      svg.append(el("circle", { cx: 12, cy: 12, r: 6.2, fill: "none", stroke: s, "stroke-width": 1.5 }));
+      svg.append(el("circle", { cx: 12, cy: 12, r: 1.7, fill: p, stroke: s, "stroke-width": 1 }));
+      for (const [x1, y1, x2, y2] of [[12, 2.6, 12, 7], [12, 17, 12, 21.4], [2.6, 12, 7, 12], [17, 12, 21.4, 12]]) {
+        svg.append(el("line", { x1, y1, x2, y2, stroke: p, "stroke-width": 2, "stroke-linecap": "round" }));
+      }
+    },
+  },
+  {
     id: "unknown",
     draw(svg, p, s) {
       svg.append(el("path", { d: "M8.1 8.6 C8.1 6.3 9.9 4.9 12.2 4.9 C14.5 4.9 16.1 6.4 16.1 8.4 C16.1 10.6 14.3 11.3 13.2 12.4 C12.5 13.1 12.3 13.7 12.3 14.8", fill: "none", stroke: p, "stroke-width": 2.6, "stroke-linecap": "round" }));

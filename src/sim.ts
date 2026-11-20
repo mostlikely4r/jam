@@ -1,7 +1,7 @@
 import { Chatter } from "./chatter";
 import { type BayGrid, type BlueprintId, partFits, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
 import { hubRecipes, isOreItem, itemDef, oreItems, saleRecipes } from "./items";
-import { PROGRAMS } from "./programs";
+import { copyPicks, pickOf, PROGRAMS, setPick as setTweakPick } from "./programs";
 import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
 import { ClickPilot, DronePilot, FighterPilot, LOW_HULL } from "./pilot";
 export { MAX_HULL } from "./fitting";
@@ -168,6 +168,12 @@ export interface Ship extends Body, Fitting {
   prevTurretAngle: number;
   /** The world spot the turret turns toward, or null to face forward. */
   aim: { x: number; y: number } | null;
+  /**
+   * What the ship has picked, the main target first and the rest of the queue after it.
+   * A rock that breaks hands its place to the pieces; anything that leaves the world, or goes
+   * past the lock range, drops out. Targets aren't saved: a loaded game starts with none.
+   */
+  targets: Targetable[];
   /** Thrusters that fired on the last tick, and how hard: 0 to 1 of their full output. */
   firing: Map<ThrusterId, number>;
   /** It hit a pirate, so every pirate attacks it on sight, cargo or not. Until it dies. */
@@ -792,6 +798,31 @@ export type Ore = Loose;
 /** A part or a module adrift: picked up only by flying through it. */
 export type Loot = Loose;
 
+/** Something a ship can pick as a target: a rock, a ship, a station, or something loose in space. */
+export type Targetable = Rock | Loose | Ship | Base;
+
+/** How a targetable thing reads: where it is this tick and last, how big, and how it moves. */
+export interface TargetSpot extends Body {
+  radius: number;
+}
+
+/**
+ * Where a target is, how big it reads and how it moves. A station's body is its POI, so its
+ * velocity is the POI's own; nothing else is carried differently from the ship here.
+ */
+export function targetSpot(target: Targetable): TargetSpot {
+  if ("spec" in target) {
+    const poi = target.poi;
+    return { x: poi.x, y: poi.y, px: poi.px, py: poi.py, vx: (poi.x - poi.px) / TICK, vy: (poi.y - poi.py) / TICK, radius: STATION_HALF };
+  }
+  if ("model" in target) return { x: target.x, y: target.y, px: target.px, py: target.py, vx: target.vx, vy: target.vy, radius: SHIP_RADIUS };
+  if ("item" in target) return { x: target.x, y: target.y, px: target.px, py: target.py, vx: target.vx, vy: target.vy, radius: 6 };
+  return { x: target.x, y: target.y, px: target.px, py: target.py, vx: target.vx, vy: target.vy, radius: target.radius };
+}
+
+/** What a box pick catches, from the Targeting program's tweak. */
+export type BoxPicks = "rocks" | "ships" | "everything";
+
 /**
  * The player's ship is gone: its pod flies itself to the nearest shipyard, then the player
  * picks a bare hull or a rebuild of what they had, which takes a while.
@@ -1151,6 +1182,10 @@ export class Sim {
       for (const [key, value] of Object.entries(template)) {
         if (!(key in ship)) Object.assign(ship, { [key]: value instanceof Set || value instanceof Map ? new (value.constructor as typeof Set)() : value });
       }
+      // Targets aren't saved: a loaded game starts with none.
+      ship.targets = [];
+      // And a saved ship without picks gets its own, not the one shared by every ship.
+      ship.tweaks = copyPicks(ship.tweaks);
       return ship;
     };
     this.controls = data.controls;
@@ -1694,7 +1729,132 @@ export class Sim {
     return this.isDocked(ship);
   }
 
-  /** Everything that flies itself. */
+  /**
+   * A box pick's kind test: rocks are rocks, ships are ships, and everything is everything.
+   * A station and something loose count as everything, as there's no kind that names them.
+   */
+  private isKind(picks: BoxPicks, target: Targetable): boolean {
+    if (picks === "everything") return true;
+    if (picks === "ships") return "model" in target;
+    return !("model" in target) && !("spec" in target) && !("item" in target);
+  }
+
+  /** The targetable things the box from one world spot to the other catches: centres inside it, nearest the ship first. */
+  caughtInBox(ship: Ship, from: { x: number; y: number }, to: { x: number; y: number }): Targetable[] {
+    const picks = pickOf(ship.tweaks, "targeting", "boxPicks") as BoxPicks;
+    const left = Math.min(from.x, to.x);
+    const right = Math.max(from.x, to.x);
+    const top = Math.min(from.y, to.y);
+    const bottom = Math.max(from.y, to.y);
+    const near = (target: Targetable) => Math.hypot(targetSpot(target).x - ship.x, targetSpot(target).y - ship.y);
+    return this.targetables()
+      .filter((target) => target !== ship && this.isKind(picks, target) && this.inRange(ship, target))
+      .filter((target) => {
+        const spot = targetSpot(target);
+        return spot.x >= left && spot.x <= right && spot.y >= top && spot.y <= bottom;
+      })
+      .sort((a, b) => near(a) - near(b));
+  }
+
+  /** Every pickable thing in the world: rocks, stations, loose ore and items, and ships. */
+  targetables(): Targetable[] {
+    return [...this.rocks, ...this.bases, ...this.ores, ...this.loot, ...this.ships];
+  }
+
+  /** Whether a thing is still in the world to be picked, and so still worth keeping as a target. */
+  targetAlive(target: Targetable): boolean {
+    if ("spec" in target) return this.bases.includes(target);
+    if ("model" in target) return this.ships.includes(target);
+    if ("item" in target) return this.ores.includes(target) || this.loot.includes(target);
+    return this.rocks.includes(target);
+  }
+
+  /** Whether a target is within the lock range of a ship. */
+  inRange(ship: Ship, target: Targetable): boolean {
+    const spot = targetSpot(target);
+    return Math.hypot(spot.x - ship.x, spot.y - ship.y) <= this.tuning.targetRange;
+  }
+
+  /** The main target: the first picked, or null when there's none. */
+  mainTarget(ship: Ship): Targetable | null {
+    return ship.targets[0] ?? null;
+  }
+
+  /**
+   * A plain left click. A thing not picked becomes the only target; a picked one moves to the
+   * front of the queue, becoming the main target, and the rest of the queue stays. A click on
+   * nothing clears it all.
+   */
+  selectTarget(ship: Ship, target: Targetable | null): void {
+    if (!target) {
+      ship.targets = [];
+      return;
+    }
+    // A thing out of the lock range, or gone, isn't picked; it doesn't clear what is.
+    if (target === ship || !this.targetAlive(target) || !this.inRange(ship, target)) return;
+    const at = ship.targets.indexOf(target);
+    if (at < 0) {
+      ship.targets = [target];
+      return;
+    }
+    if (at === 0) return;
+    ship.targets.splice(at, 1);
+    ship.targets.unshift(target);
+  }
+
+  /** Ctrl and a left click: adds the thing to the queue, or takes it out. */
+  toggleTarget(ship: Ship, target: Targetable | null): void {
+    if (!target || target === ship) return;
+    const at = ship.targets.indexOf(target);
+    if (at >= 0) {
+      ship.targets.splice(at, 1);
+      return;
+    }
+    if (!this.targetAlive(target) || !this.inRange(ship, target)) return;
+    ship.targets.push(target);
+  }
+
+  /** A box: its catch, nearest first. A plain box replaces the queue, Ctrl adds to it. */
+  boxTargets(ship: Ship, from: { x: number; y: number }, to: { x: number; y: number }, add: boolean): void {
+    const caught = this.caughtInBox(ship, from, to);
+    ship.targets = add ? [...ship.targets, ...caught.filter((target) => !ship.targets.includes(target))] : caught;
+  }
+
+  /** Nothing picked any more. */
+  clearTargets(ship: Ship): void {
+    ship.targets = [];
+  }
+
+  /**
+   * Keeps a ship's targets true: a rock that broke has handed over to its pieces already, and
+   * what's gone from the world, too far off, or without Targeting loaded drops out here.
+   */
+  private upkeepTargets(pilots: (DronePilot | FighterPilot)[]): void {
+    // Almost always nothing is picked; the check costs nothing until something is.
+    if (this.ship.targets.length > 0) this.upkeepShipTargets(this.ship);
+    for (const pilot of pilots) if (pilot.ship.targets.length > 0) this.upkeepShipTargets(pilot.ship);
+  }
+
+  /** One ship's targets, kept: what left the world, what's past the lock range, and no Targeting. */
+  private upkeepShipTargets(ship: Ship): void {
+    if (!ship.parts.has("targeting")) {
+      ship.targets = [];
+      return;
+    }
+    ship.targets = ship.targets.filter((target) => this.targetAlive(target) && this.inRange(ship, target));
+  }
+
+  /**
+   * The pilot changes how one of its programs works, loaded or only owned. This is not a dock
+   * act: a pick can change in flight. False when the pilot doesn't own the program, or the
+   * tweak or the option doesn't exist.
+   */
+  setTweak(ship: Ship, programId: PartId, tweakId: string, optionId: string): boolean {
+    if (!ship.software.has(programId)) return false;
+    return setTweakPick(ship.tweaks, programId, tweakId, optionId);
+  }
+
+  /** The pilots whose ships are flown tick by tick: a record far off isn't one. */
   private get pilots(): (DronePilot | FighterPilot)[] {
     return [...this.drones, ...this.traffic.filter((pilot) => !pilot.record), ...this.fighters.filter((pilot) => !pilot.record)];
   }
@@ -2326,6 +2486,7 @@ export class Sim {
       turretAngle: 0,
       prevTurretAngle: 0,
       aim: null,
+      targets: [],
       firing: new Map(),
       marked: false,
       wanted: false,
@@ -3187,6 +3348,7 @@ export class Sim {
       oreBlocks: [...ship.oreBlocks],
       programs: [...ship.programs],
       software: new Set(ship.software),
+      tweaks: copyPicks(ship.tweaks),
       items: locker ? [...locker.items] : [],
       credits: account.credits,
       baseCredits: base.account.credits,
@@ -3203,6 +3365,7 @@ export class Sim {
     ship.oreBlocks = saved.oreBlocks;
     ship.programs = saved.programs;
     ship.software = saved.software;
+    ship.tweaks = saved.tweaks;
     if (locker) locker.items = saved.items;
     account.credits = saved.credits;
     base.account.credits = saved.baseCredits;
@@ -3932,6 +4095,7 @@ export class Sim {
     this.burnDown(dt);
     this.burnOreOnBodies();
     lap?.("ships");
+    this.upkeepTargets(pilots);
     this.moveShots(dt);
     lap?.("shots");
     this.fireShots(this.ship);
@@ -5722,10 +5886,13 @@ export class Sim {
 
   /** A hull as the yard makes it, with its pilot's programs loaded again as far as they fit. */
   private bareHull(ship: Ship): void {
-    const { software, programs, decals } = ship;
+    const { software, programs, decals, tweaks } = ship;
     Object.assign(ship, newFitting(ship.model));
     ship.software = software;
     ship.programs = programs;
+    // The picks are the pilot's, like the programs: they come back with them.
+    ship.tweaks = tweaks;
+    ship.targets = [];
     // It's the same hull, so it keeps its look.
     ship.decals = decals;
     trimPrograms(ship);
@@ -6471,6 +6638,10 @@ export class Sim {
     this.rocks.splice(this.rocks.indexOf(rock), 1);
     this.events.push({ type: "break", x: rock.x, y: rock.y, radius: rock.radius });
 
+    // A ship that had the rock picked keeps its place in the queue: the pieces take it over,
+    // the largest first. A bottom-tier rock breaks into nothing, so its place simply goes.
+    const made: Rock[] = [];
+
     if (rock.tier > 0) {
       const pieces = 2 + Math.floor(this.random() * 2);
       const spin = this.random();
@@ -6488,7 +6659,15 @@ export class Sim {
             rock.vy + Math.sin(dir) * kick,
           ),
         );
+        made.push(this.rocks[this.rocks.length - 1]);
       }
+    }
+
+    const heirs = made.slice().sort((a, b) => b.radius - a.radius);
+    for (const ship of this.ships) {
+      const at = ship.targets.indexOf(rock);
+      if (at < 0) continue;
+      ship.targets.splice(at, 1, ...heirs.filter((piece) => this.inRange(ship, piece)));
     }
 
     const rolls = rock.tier + 1;

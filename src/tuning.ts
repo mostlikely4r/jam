@@ -76,6 +76,13 @@ export const DEFAULTS = {
   tractorPull: 120,
   tractorSpeed: 100,
 
+  /** How far from the ship a target stays picked. Past it, it drops and doesn't come back on its own. */
+  targetRange: 1500,
+  /** Seconds of relative drift a relative line shows: a long line is fast, none is matched. */
+  relativeSeconds: 2,
+  /** How far ahead the will-collide test looks, in seconds. */
+  collideSeconds: 10,
+
   trafficRacers: 1,
   trafficFloaters: 1,
   showTraffic: false,
@@ -363,6 +370,14 @@ export const GROUPS: Group[] = [
     switches: [
       { key: "floaterStart", label: "Start in the new ship (on restart)" },
       { key: "dragAbsolute", label: "Drag drift is against the POI, not your motion" },
+    ],
+  },
+  {
+    title: "Targeting",
+    sliders: [
+      { key: "targetRange", label: "Lock range", min: 200, max: 6000, step: 50 },
+      { key: "relativeSeconds", label: "Relative line: seconds of drift it shows", min: 0.5, max: 10, step: 0.5 },
+      { key: "collideSeconds", label: "Will-collide looks this many seconds ahead", min: 1, max: 60, step: 1 },
     ],
   },
   {

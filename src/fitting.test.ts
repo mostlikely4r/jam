@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { homeSim } from "./home";
-import { decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, refresh, resetPartStats, shipFileNow, thrustOf, useShipFile } from "./fitting";
+import { decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, refresh, resetPartStats, shipFileNow, thrustOf, useShipFile, type HullInfo } from "./fitting";
 import { SHIP_MODELS, type PartId } from "./parts";
 import { bayBox, drawVectorShip } from "./shipArt";
 import { DEFAULTS } from "./tuning";
@@ -811,10 +811,25 @@ describe("the stats of hulls and parts", () => {
         useShipFile(file);
         expect(hullMax("racer")).toBe(250);
         // A file without the stat clears it again.
-        useShipFile({ ...file, hullInfo: { ...file.hullInfo!, racer: { programs: [], usedBy: [] } } });
+        useShipFile({ ...file, hullInfo: { ...file.hullInfo!, racer: { programs: [], loadouts: [], usedBy: [] } } });
         expect(hullMax("racer")).toBe(MAX_HULL);
       },
     );
+  });
+
+  it("a hull's loadouts read defensively: a name, known programs only, and no repeats", () => {
+    const file = shipFileNow();
+    const info = { programs: [], usedBy: [], loadouts: [
+      { name: "mining", core: ["clickMove", "noSuchProgram", "clickMove"], comfort: ["meters", "targeting"] },
+      { name: "", core: ["meters"] },
+      { core: ["meters"] },
+    ] };
+    try {
+      useShipFile({ ...file, hullInfo: { ...file.hullInfo!, racer: info as unknown as HullInfo } });
+      expect(HULL_INFO.racer.loadouts).toEqual([{ name: "mining", core: ["clickMove"], comfort: ["meters", "targeting"] }]);
+    } finally {
+      useShipFile(file);
+    }
   });
 
   it("a hull's price and weight are its own, over the game's tuning", () => {

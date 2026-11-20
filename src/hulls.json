@@ -806,6 +806,17 @@
   "hullInfo": {
     "racer": {
       "programs": [],
+      "loadouts": [
+        {
+          "name": "long trip",
+          "core": [
+            "autopilot"
+          ],
+          "comfort": [
+            "starmap"
+          ]
+        }
+      ],
       "usedBy": [
         "newGame",
         "sold",
@@ -817,6 +828,32 @@
         "clickMove",
         "clickTurn"
       ],
+      "loadouts": [
+        {
+          "name": "mining",
+          "core": [
+            "clickMove",
+            "clickTurn"
+          ],
+          "comfort": [
+            "spinStabilizer",
+            "meters",
+            "targeting",
+            "relativeLines"
+          ]
+        },
+        {
+          "name": "long trip",
+          "core": [
+            "clickMove",
+            "autopilot"
+          ],
+          "comfort": [
+            "retro",
+            "starmap"
+          ]
+        }
+      ],
       "usedBy": [
         "newGame",
         "sold",
@@ -825,18 +862,21 @@
     },
     "defender": {
       "programs": [],
+      "loadouts": [],
       "usedBy": [
         "defender"
       ]
     },
     "drone": {
       "programs": [],
+      "loadouts": [],
       "usedBy": [
         "drone"
       ]
     },
     "pirate": {
       "programs": [],
+      "loadouts": [],
       "usedBy": [
         "pirate"
       ]

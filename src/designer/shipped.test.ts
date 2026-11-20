@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Sim, bodyAt } from "../sim";
 import { DEFAULTS } from "../tuning";
+import { SHIPPED_SHIPS, shipFileNow } from "../fitting";
+import { SHIP_MODELS } from "../parts";
 import file from "./world.json";
 import { applyTo, shipMarks, useLayout, type GameLink } from "./link";
 import { shippedWorld } from "./shipped";
@@ -40,6 +42,17 @@ describe("the shipped world", () => {
     expect(clearance(sim)).toBeGreaterThan(0);
   });
 
+});
+
+describe("the shipped hulls", () => {
+  it("gives each hull's info back in the order the file has it, so saving changes nothing", () => {
+    for (const model of SHIP_MODELS) {
+      const written = shipFileNow().hullInfo?.[model];
+      const shipped = SHIPPED_SHIPS.hullInfo?.[model];
+      expect(written).toEqual(shipped);
+      expect(Object.keys(written!)).toEqual(Object.keys(shipped!));
+    }
+  });
 });
 
 describe("the designer's ship marks", () => {

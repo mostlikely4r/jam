@@ -34,6 +34,7 @@ import {
   HULL_MOUNTS,
   HULL_USE_NAMES,
   HULL_USES,
+  hullDefaults,
   isDecal,
   MOUNT_TYPES,
   mountTakes,
@@ -46,6 +47,8 @@ import {
   THRUSTER_ROLES,
   useShipFile,
   type HullUse,
+  type HullInfo,
+  type Loadout,
   type Module,
   type Mount,
   type MountId,
@@ -54,7 +57,7 @@ import {
 } from "../fitting";
 import { partFits, partOf, PARTS, SHIP_MODELS, type PartIcon, type PartId, type ShipModel, type ThrusterRole } from "../parts";
 import { ITEMS, ITEM_TYPES, itemDef, itemsFileNow, SHIPPED_ITEMS, useItemsFile, type ItemDef, type ItemType } from "../items";
-import { PROGRAMS, PROGRAM_PARTS, programDef, programsFileNow, SHIPPED_PROGRAMS, useProgramsFile, type ProgramDef } from "../programs";
+import { PROGRAMS, PROGRAM_PARTS, programDef, programsFileNow, SHIPPED_PROGRAMS, useProgramsFile, needsMet, type ProgramDef } from "../programs";
 import type { GlyphId } from "../glyphs";
 import { EVERY_GLYPH, glyphIcon, iconEl } from "../icons";
 import { DEFAULTS } from "../tuning";
@@ -127,6 +130,15 @@ const STYLE = `
 #hulls .icon-previews { display: flex; gap: 16px; align-items: flex-end; margin: 6px 0; }
 #hulls .icon-colours { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 6px 0; }
 #hulls .icon-colours input[type=color] { width: 100%; box-sizing: border-box; padding: 1px 2px; }
+#hulls .stack { border: 1px solid #222a3a; border-radius: 4px; padding: 4px 6px; margin: 6px 0; }
+#hulls .stack .row { margin-bottom: 2px; }
+#hulls table.loadouts { border-collapse: collapse; width: 100%; font-size: 11px; }
+#hulls table.loadouts th, #hulls table.loadouts td { border: 1px solid #222a3a; padding: 3px 4px; text-align: left; vertical-align: top; }
+#hulls table.loadouts th { color: #9aa6ba; font-weight: normal; }
+#hulls table.loadouts td.none { color: #4a5568; }
+#hulls table.loadouts .ok { color: #8fe3a1; }
+#hulls table.loadouts .warn { color: #f0d86a; }
+#hulls table.loadouts .bad { color: #e88a8a; }
 `;
 
 const round = (value: number, step: number) => Math.round(value / step) * step;
@@ -142,6 +154,16 @@ function shownPart(model: ShipModel, mount: Mount): PartId | null {
   const own = mount.default;
   if (own && mountTakes(mount, own) && partFits(partOf(own), model)) return own;
   return FITTED.find((part) => partFits(part, model) && mountTakes(mount, part.id))?.id ?? null;
+}
+
+/** The programs a hull's own computer runs, and the most any computer it can mount runs. */
+function computerSlots(model: ShipModel): { own: number; largest: number } {
+  const slots = (id: PartId | undefined) => (id && partOf(id).kind === "computer" ? partOf(id).slots ?? 0 : 0);
+  const own = Object.values(hullDefaults(model)).reduce((most, id) => Math.max(most, slots(id)), 0);
+  const largest = PARTS.filter(
+    (part) => part.kind === "computer" && partFits(part, model) && HULL_MOUNTS[model].some((mount) => mountTakes(mount, part.id)),
+  ).reduce((most, part) => Math.max(most, part.slots ?? 0), 0);
+  return { own, largest };
 }
 
 export class HullDesigner {
@@ -380,6 +402,62 @@ export class HullDesigner {
     this.side.replaceChildren(title, pages, ...body, file);
   }
 
+  /** The loops a hull is meant for, each with the programs it needs and the ones that help. */
+  private loadoutsEditor(info: HullInfo): HTMLElement[] {
+    const note = document.createElement("p");
+    note.textContent = "A loadout is a set of programs for one loop, such as mining or a long trip. Core is what the loop needs to work; comfort is what makes it pleasant. A hull lists only the loops it's meant for.";
+    const out: HTMLElement[] = [note];
+    info.loadouts.forEach((loadout, index) => {
+      const block = document.createElement("div");
+      block.className = "stack";
+      const name = document.createElement("input");
+      name.type = "text";
+      name.value = loadout.name;
+      name.addEventListener("change", () => {
+        const wanted = name.value.trim();
+        if (!wanted) {
+          name.value = loadout.name;
+          return;
+        }
+        // Two loadouts on one hull can't share a name: the table would show only the first.
+        if (wanted !== loadout.name && info.loadouts.some((each) => each !== loadout && each.name === wanted)) {
+          this.status = "Two loadouts on one hull can't share a name";
+          name.value = loadout.name;
+          return;
+        }
+        loadout.name = wanted;
+        this.changed();
+      });
+      block.append(this.labelled("Loop", name));
+      const list = (label: string, key: "core" | "comfort", hint: string) => {
+        const ticks = this.checks(
+          (id) => loadout[key].includes(id as PartId),
+          (id, on) => {
+            loadout[key] = on ? [...loadout[key], id as PartId] : loadout[key].filter((each) => each !== id);
+          },
+          PROGRAM_LIST.map((part): [string, string] => [part.id, part.label]),
+          "No programs yet.",
+        );
+        const line = document.createElement("p");
+        line.textContent = hint;
+        block.append(this.labelled(label, ticks), line);
+      };
+      list("Core: what the loop needs", "core", "Without these the loop doesn't work.");
+      list("Comfort: what makes it pleasant", "comfort", "These make the loop nice rather than possible.");
+      block.append(this.button("Remove this loadout", () => (info.loadouts.splice(index, 1), this.changed()), "danger"));
+      out.push(block);
+    });
+    out.push(
+      this.button("Add a loadout", () => {
+        let n = 1;
+        while (info.loadouts.some((each) => each.name === (n === 1 ? "new loop" : `new loop ${n}`))) n++;
+        info.loadouts.push({ name: n === 1 ? "new loop" : `new loop ${n}`, core: [], comfort: [] });
+        this.changed();
+      }),
+    );
+    return out;
+  }
+
   private hullsPage(): HTMLElement[] {
     const intro = document.createElement("p");
     intro.textContent = "Drag a mount to move it, its knob to turn it. What's on it moves with it and works the way it faces.";
@@ -456,6 +534,7 @@ export class HullDesigner {
       this.section("hull", "Hull", models),
       this.section("used", "Used by", usedBy, usedNote),
       this.section("programs", "Default programs", programs, programsNote),
+      this.section("loadouts", "Loadouts", ...this.loadoutsEditor(info)),
       this.section(
         `stats:${this.model}`,
         "Hull stats",
@@ -1347,8 +1426,223 @@ export class HullDesigner {
         },
       };
       body.push(this.section(`programicon:${id}`, "Icon", ...this.iconPicker(owner, (rebuild = true) => this.programsChanged(rebuild))));
+      body.push(this.section(`tweaks:${id}`, "Tweaks", ...this.tweaksEditor(id)));
+      body.push(this.section(`needs:${id}`, "Needs", ...this.needsEditor(id)));
     }
+    body.push(this.section("loadouttable", "Loadout table", ...this.loadoutTable()));
     return body;
+  }
+
+  /** Which programs a hull's loadouts hold, and whether they fit the computer it comes with and the largest it can mount. */
+  private loadoutTable(): HTMLElement[] {
+    const intro = document.createElement("p");
+    intro.textContent = "Do the programs a hull would run fit its computer? A red cell is creep: the loop can't fit even its core. 'Core only' means the loop works but the comfort programs are over the slots. A loadout naming a program without the one it needs doesn't work either.";
+    const names: string[] = [];
+    for (const model of MODELS) for (const loadout of HULL_INFO[model].loadouts) if (!names.includes(loadout.name)) names.push(loadout.name);
+    if (names.length === 0) {
+      const none = document.createElement("p");
+      none.textContent = "No hull has a loadout yet: add one under Default programs on the Hulls page.";
+      return [intro, none];
+    }
+    const table = document.createElement("table");
+    table.className = "loadouts";
+    const head = document.createElement("tr");
+    const heading = (text: string) => {
+      const box = document.createElement("th");
+      box.textContent = text;
+      return box;
+    };
+    head.append(heading("Hull"));
+    for (const name of names) head.append(heading(name));
+    table.append(head);
+    for (const model of MODELS) {
+      const row = document.createElement("tr");
+      row.append(heading(MODEL_NAMES[model]));
+      for (const name of names) {
+        const loadout = HULL_INFO[model].loadouts.find((each) => each.name === name);
+        if (!loadout) {
+          const td = document.createElement("td");
+          td.className = "none";
+          td.textContent = "-";
+          row.append(td);
+        } else row.append(this.loadoutCell(model, loadout));
+      }
+      table.append(row);
+    }
+    return [intro, table];
+  }
+
+  /** One cell: how the loadout fits the hull's own computer, and the largest one it can mount. */
+  private loadoutCell(model: ShipModel, loadout: Loadout): HTMLTableCellElement {
+    const td = document.createElement("td");
+    const all = new Set([...loadout.core, ...loadout.comfort]);
+    const line = (label: string, slots: number) => {
+      const box = document.createElement("div");
+      if (loadout.core.length > slots) {
+        box.className = "bad";
+        box.textContent = `${label} ${slots}: ${loadout.core.length - slots} over`;
+      } else if (all.size > slots) {
+        box.className = "warn";
+        box.textContent = `${label} ${slots}: core only`;
+      } else {
+        box.className = "ok";
+        box.textContent = `${label} ${slots}: fits`;
+      }
+      td.append(box);
+    };
+    const { own, largest } = computerSlots(model);
+    line("own", own);
+    line("max", largest);
+    const loaded = [...all];
+    for (const id of loaded) {
+      if (needsMet(id, loaded)) continue;
+      const needs = (programDef(id)?.needs ?? []).map((each) => programDef(each)?.name ?? each);
+      const box = document.createElement("div");
+      box.className = "bad";
+      box.textContent = `${programDef(id)?.name ?? id} needs ${needs.join(", ")}`;
+      td.append(box);
+    }
+    return td;
+  }
+
+  /** The programs a program can't do without: a check for each another one. */
+  private needsEditor(id: string): HTMLElement[] {
+    const ticks = this.checks(
+      (each) => (this.liveProgram(id).needs ?? []).includes(each),
+      (each, on) => {
+        const live = this.liveProgram(id);
+        const needs = new Set(live.needs ?? []);
+        if (on) needs.add(each);
+        else needs.delete(each);
+        if (needs.size > 0) live.needs = [...needs];
+        else delete live.needs;
+        this.programsChanged();
+      },
+      PROGRAM_LIST.filter((part) => part.id !== id).map((part): [string, string] => [part.id, part.label]),
+      "No other programs to need.",
+    );
+    const note = document.createElement("p");
+    note.textContent = "A program that needs another does nothing without it loaded. The loadout table warns about a loadout that leaves one out.";
+    return [ticks, note];
+  }
+
+  /**
+   * The tweaks of a program: each a named choice about how it works. Tweak and option ids are
+   * fixed here, since a pilot's pick names them; names, the default and the list can change.
+   */
+  private tweaksEditor(id: string): HTMLElement[] {
+    const intro = document.createElement("p");
+    intro.textContent = "A tweak changes how a program does its job, never what the job is. Every option should be worth picking sometimes.";
+    const out: HTMLElement[] = [intro];
+    const text = (value: string, set: (value: string) => void) => {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = value;
+      input.addEventListener("change", () => {
+        set(input.value.trim());
+        this.programsChanged();
+      });
+      return input;
+    };
+    const liveTweak = (tweakId: string) => this.liveProgram(id).tweaks?.find((each) => each.id === tweakId);
+    for (const tweak of this.liveProgram(id).tweaks ?? []) {
+      const block = document.createElement("div");
+      block.className = "stack";
+      const head = document.createElement("div");
+      head.className = "row";
+      const tag = document.createElement("span");
+      tag.textContent = tweak.id;
+      tag.style.color = "#6a7486";
+      head.append(
+        text(tweak.name, (value) => {
+          const live = liveTweak(tweak.id);
+          if (live && value) live.name = value;
+        }),
+        tag,
+        this.button(
+          "×",
+          () => {
+            const live = this.liveProgram(id);
+            live.tweaks = (live.tweaks ?? []).filter((each) => each.id !== tweak.id);
+            if (live.tweaks.length === 0) delete live.tweaks;
+            this.programsChanged();
+          },
+          "danger",
+        ),
+      );
+      block.append(this.labelled("Tweak", head));
+      block.append(
+        this.labelled(
+          "Default",
+          this.dropdown(
+            tweak.options.map((option): [string, string] => [option.id, option.name]),
+            tweak.default,
+            (value) => {
+              const live = liveTweak(tweak.id);
+              if (live) live.default = value;
+              this.programsChanged();
+            },
+          ),
+        ),
+      );
+      for (const option of tweak.options) {
+        const row = document.createElement("div");
+        row.className = "row";
+        row.append(
+          text(option.name, (value) => {
+            const live = liveTweak(tweak.id)?.options.find((each) => each.id === option.id);
+            if (live && value) live.name = value;
+          }),
+        );
+        const tag = document.createElement("span");
+        tag.textContent = option.id;
+        tag.style.color = "#6a7486";
+        row.append(
+          tag,
+          this.button(
+            "×",
+            () => {
+              const live = liveTweak(tweak.id);
+              if (!live) return;
+              if (live.options.length <= 2) {
+                this.status = "A tweak needs at least two options";
+                this.rebuild();
+                return;
+              }
+              live.options = live.options.filter((each) => each.id !== option.id);
+              if (live.default === option.id) live.default = live.options[0].id;
+              this.programsChanged();
+            },
+            "danger",
+          ),
+        );
+        block.append(row);
+      }
+      block.append(
+        this.button("Add an option", () => {
+          const live = liveTweak(tweak.id);
+          if (!live) return;
+          const taken = new Set(live.options.map((each) => each.id));
+          let n = 1;
+          while (taken.has(`option${n}`)) n++;
+          live.options.push({ id: `option${n}`, name: `Option ${n}` });
+          this.programsChanged();
+        }),
+      );
+      out.push(block);
+    }
+    out.push(
+      this.button("Add a tweak", () => {
+        const live = this.liveProgram(id);
+        live.tweaks ??= [];
+        const taken = new Set(live.tweaks.map((each) => each.id));
+        let n = 1;
+        while (taken.has(`tweak${n}`)) n++;
+        live.tweaks.push({ id: `tweak${n}`, name: `Tweak ${n}`, default: "a", options: [{ id: "a", name: "A" }, { id: "b", name: "B" }] });
+        this.programsChanged();
+      }),
+    );
+    return out;
   }
 
   private typesPage(): HTMLElement[] {

@@ -4,6 +4,8 @@ import { DAMAGED_AT, facing, HULL_MOUNTS, turretMount, works, type Module } from
 import { footprint, gridRect, type Rect } from "./grid";
 import { isItem, partOf } from "./parts";
 import { isOreItem } from "./items";
+import { pickOf } from "./programs";
+import { relativeLine, willCollide, type Motion } from "./relative";
 import { bayBox, drawVectorShip } from "./shipArt";
 import { canvasTip } from "./tooltip";
 import {
@@ -19,12 +21,14 @@ import {
   SHIP_RADIUS,
   STATION_HALF,
   TICK,
+  targetSpot,
   type Base,
   type Poi,
   type PoiReading,
   type Ship,
   type SimEvent,
   type Down,
+  type Targetable,
 } from "./sim";
 
 const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
@@ -180,6 +184,8 @@ export class Renderer {
     on: DragStart;
     dragged: boolean;
   } | null = null;
+  /** A left drag in progress, in screen pixels: the box selection's preview. */
+  selectBox: { fromX: number; fromY: number; toX: number; toY: number } | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d")!;
@@ -361,11 +367,14 @@ export class Renderer {
     }
     if (!sim.down?.exploded) this.drawShip(ship, shipX, shipY, alpha, [200, 215, 235]);
     if (sim.down && sim.down.stage === "pod") this.drawPod(sim.down, alpha);
+    this.drawRelative(sim, alpha);
+    this.drawTargets(sim, alpha);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.drawEdgePings(alpha);
     this.drawPointers(sim, width, height, scale, dpr, pointer);
     this.drawDrag(sim, scale, dpr, shipX, shipY, alpha);
+    this.drawSelectBox(dpr);
     if (this.wreck) {
       // Black at the switch from the wreck to the rebuilt ship, fading either side of it.
       const fromSwitch = Math.abs(this.wreck.age - (WRECK_WATCH_SECONDS + WRECK_FADE_SECONDS));
@@ -777,6 +786,86 @@ export class Renderer {
       }
     }
     ctx.stroke();
+  }
+
+  /** The preview of a left drag: the box the selection will catch. Drawn in screen pixels. */
+  private drawSelectBox(dpr: number): void {
+    const box = this.selectBox;
+    if (!box) return;
+    const { ctx } = this;
+    ctx.save();
+    ctx.strokeStyle = "rgba(143, 180, 255, 0.9)";
+    ctx.fillStyle = "rgba(143, 180, 255, 0.08)";
+    ctx.lineWidth = dpr;
+    ctx.setLineDash([4 * dpr, 4 * dpr]);
+    const x = Math.min(box.fromX, box.toX) * dpr;
+    const y = Math.min(box.fromY, box.toY) * dpr;
+    const w = Math.abs(box.toX - box.fromX) * dpr;
+    const h = Math.abs(box.toY - box.fromY) * dpr;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  /** A box round each picked thing, the main target's brighter. */
+  private drawTargets(sim: Sim, alpha: number): void {
+    const { ship } = sim;
+    if (!ship.parts.has("targeting")) return;
+    const { ctx } = this;
+    ship.targets.forEach((target, index) => {
+      const spot = targetSpot(target);
+      const x = lerp(spot.px, spot.x, alpha);
+      const y = lerp(spot.py, spot.y, alpha);
+      const size = Math.max(8, spot.radius + 5);
+      ctx.strokeStyle = index === 0 ? "#ffe9a3" : "rgba(143, 180, 255, 0.8)";
+      ctx.lineWidth = index === 0 ? 2 : 1.2;
+      ctx.strokeRect(x - size, y - size, size * 2, size * 2);
+    });
+  }
+
+  /**
+   * The Relative lines program: for each target the tweaks say to show, a line along how it
+   * moves against the reference, as long as that relative velocity in `relativeSeconds`. The
+   * inversion: with the main target as the reference and only it to show, the ship draws
+   * instead, since the main target against itself would be nothing.
+   */
+  private drawRelative(sim: Sim, alpha: number): void {
+    const { ship, tuning } = sim;
+    if (!ship.parts.has("targeting") || !ship.parts.has("relativeLines")) return;
+    const show = pickOf(ship.tweaks, "relativeLines", "show");
+    const relativeTo = pickOf(ship.tweaks, "relativeLines", "relativeTo");
+    const main = sim.mainTarget(ship);
+    if (relativeTo === "main" && !main) return;
+    const motionOf = (target: Targetable): Motion => {
+      const spot = targetSpot(target);
+      return { x: lerp(spot.px, spot.x, alpha), y: lerp(spot.py, spot.y, alpha), vx: spot.vx, vy: spot.vy, radius: spot.radius };
+    };
+    const shipMotion: Motion = { x: lerp(ship.px, ship.x, alpha), y: lerp(ship.py, ship.y, alpha), vx: ship.vx, vy: ship.vy, radius: SHIP_RADIUS };
+    const mainMotion = main ? motionOf(main) : null;
+    const reference = relativeTo === "main" && mainMotion ? mainMotion : shipMotion;
+    let subjects: Motion[];
+    if (show === "main") {
+      if (!mainMotion) return;
+      // The inversion: the main target against itself is nothing, so the ship draws instead.
+      subjects = [relativeTo === "main" ? shipMotion : mainMotion];
+    } else {
+      // The main target is the reference when relative to it: the same Motion means no line,
+      // which is the inversion's rule, rather than a zero-length line thrown away after.
+      const targets = ship.targets.map((target) => (mainMotion && target === main ? mainMotion : motionOf(target)));
+      subjects = show === "collide" ? targets.filter((target) => willCollide(target, reference, tuning.collideSeconds)) : targets;
+    }
+    const { ctx } = this;
+    ctx.strokeStyle = "rgba(127, 223, 230, 0.75)";
+    ctx.lineWidth = 1.5;
+    for (const subject of subjects) {
+      const line = relativeLine(subject, reference, tuning.relativeSeconds);
+      if (!line || Math.hypot(line.to.x - line.from.x, line.to.y - line.from.y) < 1) continue;
+      ctx.beginPath();
+      ctx.moveTo(line.from.x, line.from.y);
+      ctx.lineTo(line.to.x, line.to.y);
+      ctx.stroke();
+    }
   }
 
   private drawRocks(

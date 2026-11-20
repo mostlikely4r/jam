@@ -66,6 +66,27 @@ describe("save and load", () => {
     roundTrip(sim, into);
     expect(into.ship.wanted).toBe(false);
   });
+
+  it("carries a pilot's program tweaks, and a save from before them gives each ship its own", () => {
+    const sim = homeSim(1, { ...DEFAULTS });
+    sim.devSet(sim.ship, "targeting", true);
+    sim.setTweak(sim.ship, "targeting", "boxPicks", "ships");
+    const into = homeSim(2, { ...DEFAULTS });
+    roundTrip(sim, into);
+    expect(into.ship.tweaks.targeting?.boxPicks).toBe("ships");
+
+    // A save from before tweaks existed: every ship comes back without one, and each gets its
+    // own empty picks rather than one object shared by all of them.
+    const old = homeSim(3, { ...DEFAULTS });
+    const strip = (ship: Sim["ship"]) => delete (ship as { tweaks?: unknown }).tweaks;
+    strip(old.ship);
+    for (const pilot of [...old.traffic, ...old.fighters, ...old.drones]) strip(pilot.ship);
+    expect(old.traffic.length).toBeGreaterThan(0);
+    const older = homeSim(4, { ...DEFAULTS });
+    roundTrip(old, older);
+    older.ship.tweaks.targeting = { boxPicks: "everything" };
+    expect(older.traffic[0].ship.tweaks.targeting).toBeUndefined();
+  });
 });
 
 describe("a warmed start", () => {

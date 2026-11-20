@@ -1,7 +1,7 @@
 import { computerSize, DAMAGED_AT, mountsOf, programSlots, type Module, type Mount, type MountId } from "./fitting";
 import { canPlace, entryCells, fits, footprint, reachable, sticks, type GridSpec, type Placed } from "./grid";
 import { isItem, partOf, PARTS, type PartId } from "./parts";
-import { PROGRAM_PARTS } from "./programs";
+import { pickOf, programDef, PROGRAM_PARTS } from "./programs";
 import { partIcon } from "./icons";
 import { setTip } from "./tooltip";
 import { drawVectorShip } from "./shipArt";
@@ -53,6 +53,8 @@ export class Inventory {
   private ports = new Map<MountId, HTMLElement>();
   /** The footprint shown where a dragged item would land. */
   private preview: HTMLDivElement | null = null;
+  /** The open tweak menu, if any. */
+  private menu: HTMLDivElement | null = null;
 
 
   constructor(
@@ -64,6 +66,10 @@ export class Inventory {
       hover: (payload, at) => this.dragHover(payload, at),
       drop: (payload, at) => this.dragDrop(payload, at),
       end: () => this.dragEnd(),
+    });
+    // A click anywhere else puts the tweak menu away.
+    document.addEventListener("pointerdown", (event) => {
+      if (this.menu && !this.menu.contains(event.target as Node)) this.closeTweaks();
     });
   }
 
@@ -85,6 +91,7 @@ export class Inventory {
 
   close(): void {
     this.showShip = this.showLocker = false;
+    this.closeTweaks();
   }
 
   /** Rebuilds the screen when what it shows has changed. Never mid-drag. */
@@ -105,6 +112,7 @@ export class Inventory {
           ship.hold,
           ship.programs,
           [...ship.software],
+          ship.tweaks,
           ship.credits,
           base ? sim.lockerAt(base) : null,
           base ? sim.storageFree(base) : null,
@@ -115,7 +123,11 @@ export class Inventory {
     if (state === this.state) return;
     this.state = state;
     this.box.hidden = !open;
-    if (!open) return;
+    // The screen going away takes its menu with it.
+    if (!open) {
+      this.closeTweaks();
+      return;
+    }
     this.ports.clear();
     this.preview = null;
     this.box.replaceChildren(this.statusBar());
@@ -323,7 +335,7 @@ export class Inventory {
         const part = partOf(id);
         slot.append(partIcon(part, 20));
         const click = this.docked ? ". Click to unload" : "";
-        setTip(slot, () => `${part.label}: ${ship.parts.has(id) ? "running" : "loaded, computer down"}${click}`);
+        setTip(slot, () => `${part.label}: ${ship.parts.has(id) ? "running" : "loaded, computer down"}${click}${this.tweaksTip(id)}`);
         this.programHandle(slot, id, true);
       }
       slots.append(slot);
@@ -336,7 +348,7 @@ export class Inventory {
       const chip = document.createElement("div");
       chip.className = "chip";
       chip.append(partIcon(part, 20));
-      setTip(chip, () => `${part.label}: yours, not loaded${this.docked ? ". Click to load" : ""}`);
+      setTip(chip, () => `${part.label}: yours, not loaded${this.docked ? ". Click to load" : ""}${this.tweaksTip(part.id)}`);
       this.programHandle(chip, part.id, false);
       owned.append(chip);
     }
@@ -344,7 +356,19 @@ export class Inventory {
     return [heading, slots, owned];
   }
 
+  /** The last line of a program chip's tooltip: what right clicking it does. */
+  private tweaksTip(id: PartId): string {
+    return (programDef(id)?.tweaks?.length ?? 0) > 0 ? "\nRight click for its tweaks" : "";
+  }
+
   private programHandle(element: HTMLElement, id: PartId, loaded: boolean): void {
+    // Right click adjusts how the program works, whether it's loaded or only owned: it isn't
+    // the click that loads or unloads it.
+    element.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openTweaks(id, event.clientX, event.clientY);
+    });
     if (!this.docked) return;
     element.addEventListener("click", () => {
       if (!this.sim.setProgram(this.sim.ship, id, !loaded)) this.message = loaded ? "It can't come out here" : "No free slot in the computer";
@@ -352,6 +376,55 @@ export class Inventory {
       this.redraw();
     });
     makeDraggable(element, () => ({ from: "program", part: id, loaded }), partOf(id).label);
+  }
+
+  /** The tweak menu for a program: a row of buttons for each tweak, the current pick lit. */
+  private openTweaks(id: PartId, clientX: number, clientY: number): void {
+    this.closeTweaks();
+    const { ship } = this.sim;
+    const menu = document.createElement("div");
+    menu.id = "tweakmenu";
+    const title = document.createElement("b");
+    title.textContent = partOf(id).label;
+    menu.append(title);
+    const tweaks = programDef(id)?.tweaks ?? [];
+    if (tweaks.length === 0) {
+      const note = document.createElement("span");
+      note.textContent = "This program has no tweaks.";
+      menu.append(note);
+    }
+    for (const tweak of tweaks) {
+      const row = document.createElement("div");
+      row.className = "tweak";
+      const name = document.createElement("span");
+      name.textContent = tweak.name;
+      row.append(name);
+      const picked = pickOf(ship.tweaks, id, tweak.id);
+      for (const option of tweak.options) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = option.name;
+        if (option.id === picked) button.className = "on";
+        button.addEventListener("click", () => {
+          this.sim.setTweak(ship, id, tweak.id, option.id);
+          this.openTweaks(id, clientX, clientY);
+          this.redraw();
+        });
+        row.append(button);
+      }
+      menu.append(row);
+    }
+    document.body.append(menu);
+    // Keeps the whole menu on the screen, wherever the click was.
+    const box = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - box.width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(clientY, window.innerHeight - box.height - 8))}px`;
+    this.menu = menu;
+  }
+
+  private closeTweaks(): void {
+    this.menu?.remove();
+    this.menu = null;
   }
 
   // The bay and the locker: grids.

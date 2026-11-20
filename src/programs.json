@@ -19,6 +19,58 @@
       "icon": { "glyph": "retro", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
     },
     {
+      "id": "targeting",
+      "name": "Targeting",
+      "short": "targ",
+      "description": "Left click picks one thing, drag a box picks several. Ctrl adds and removes. Right click a program in the ship screen (I) to change how it works",
+      "price": 250,
+      "tier": 0,
+      "icon": { "glyph": "crosshair", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" },
+      "tweaks": [
+        {
+          "id": "boxPicks",
+          "name": "Box picks",
+          "default": "rocks",
+          "options": [
+            { "id": "rocks", "name": "Rocks" },
+            { "id": "ships", "name": "Ships" },
+            { "id": "everything", "name": "Everything" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "relativeLines",
+      "name": "Relative lines",
+      "short": "rel",
+      "description": "Shows how what you've picked moves against you. Needs Targeting loaded",
+      "price": 150,
+      "tier": 0,
+      "icon": { "glyph": "diamond", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" },
+      "needs": ["targeting"],
+      "tweaks": [
+        {
+          "id": "show",
+          "name": "Show",
+          "default": "main",
+          "options": [
+            { "id": "main", "name": "Main target only" },
+            { "id": "all", "name": "All targets" },
+            { "id": "collide", "name": "Targets that will collide" }
+          ]
+        },
+        {
+          "id": "relativeTo",
+          "name": "Relative to",
+          "default": "ship",
+          "options": [
+            { "id": "ship", "name": "Your ship" },
+            { "id": "main", "name": "The main target" }
+          ]
+        }
+      ]
+    },
+    {
       "id": "meters",
       "name": "Speed and distance meters",
       "short": "meters",

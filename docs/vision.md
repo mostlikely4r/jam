@@ -74,7 +74,7 @@ inventory, cargo bays, the full system and map flight have all changed underneat
 See `docs/shopping-trip-test.md` for the tractor split it also depends on.
 
 **Road.** Refined 2026-11-20 (moment, place, rhythm, earnings above). The features, bundles and
-order toward it are in `docs/idle-mining-road.md`; next to spec: auto-fire with measurement.
+order toward it are in `docs/idle-mining-road.md`; auto-fire with measurement is specced in `docs/keeps-mining-plan.md`.
 
 ### Shopping journey: 2
 

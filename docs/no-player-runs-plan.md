@@ -1,178 +1,205 @@
-# No-player runs plan
+# No-player runs plan: a bot that plays
 
-Written 2026-11-20. Nothing here is built yet.
+Written 2026-11-20, talked through with the user the same day. Nothing here is built yet.
 
 ## Why
 
-Pillar 3 in `docs/vision.md` is the current focus: *alive without you*. Set things in motion,
-look away, come back to what changed. The experience-target scale leans on the same tool: level
-2 ("closes once") is checked by code and **no-player runs**, level 4 ("repeats") by play plus
-no-player runs, and the floating idle mining target wants its two numbers (minutes between
-decisions, credits per hour idle against active) measured that way. These are *decided* in the
-vision; this plan is how to get the tool.
+Pillar 3 in `docs/vision.md` is the current focus: *alive without you*. The experience-target
+scale checks level 2 ("closes once") with code and **no-player runs**, and level 4 ("repeats")
+with play plus no-player runs. The floating idle mining target wants two numbers measured that
+way: minutes between decisions, and credits per hour idle against active.
 
-Today there are three one-off scripts that each run the world with the player parked far away:
-`npm run news` (`src/profile/news.ts`, who docks where and how news spreads), `npm run census`
-(`src/profile/census.ts`, fights and money for the parity check) and `npm run profile`
-(`src/profile/run.ts`, step timing). Each copies the same set-up: build a `Sim`, lay a world in,
-reset, park the player's ship each tick, step, count. A new question means a new copy.
+What the user wants from a no-player run (*decided*): not a unit test and not background
+simulation, but the game **played**. It sits between an AI playing the game and the user playing
+it to test a new feature: a scripted player, like a player bot in an MMO server, that does what a
+player does and shows how the session **goes**. It shows what it runs into, how far it gets and
+where it stalls. It may one day feed new traffic behaviour, but that is not the purpose.
 
-The first implementation turns `news.ts` into one runner with named **scenarios** and reusable
-**watchers**, and adds the first scenario for pillar 3 itself: leave the world alone for hours and
-print what changed.
+`npm run news` (`src/profile/news.ts`) is where this starts: today's script that runs the world
+with the player parked far away. The bot replaces the parked player with one who plays.
 
 ## The picture
 
-Everything below is my proposal unless marked *decided*. The user asked for this plan starting
-from `npm run news` (*decided*), and for "at least a first implementation" (*decided*: this plan
-is that, not the whole tool).
+*Decided* marks the user's calls; the rest is my proposal.
 
-- **A scenario** is a name, one line of what it asks, a default length in game minutes, a set-up
-  (which world, which tuning, anything placed or ordered before the clock starts) and a list of
-  watchers. It doesn't step the sim itself.
-- **A watcher** looks at the sim after each step (or every N game seconds) and writes its part of
-  the report at the end. Watchers are small and shared: `news` and `away` both use the docks
-  watcher. They read the sim; they never change it.
-- **One runner** does the rest: build the sim, set it up, park the player, step for the length,
-  call the watchers, print. Same seed and same scenario give the same report, line for line.
-- **No player** means the player's ship sits far out in empty space, out of view of everything,
-  every tick, as `news.ts` does today. Whatever is out of view runs as records (the default),
-  or flown with `flown`, so the same scenario doubles as a records-versus-flown spot check.
-- **Reports are plain text** for reading, plus `--json` (one line, as `census --json` does) so a
-  slow script can collect and compare runs later. They print; they don't gate anything. Long
-  runs follow the slow-checks rule in `CLAUDE.md`: run in the background, never part of done.
+- **Two tracks, one per starting ship** (*decided*): idle floating (the floater) and active ore
+  hunting (the racer). Both start from a new game. They also give the comparison the vision asks
+  for. **The floater track comes first** (*decided*); the racer is the next step, specced on its
+  own after the floater bot runs (*decided*).
+- **New-game journey first** (*decided*). The bot starts a new game and grows its ship. Runs
+  that start already kitted out at equal investment are shorter scenarios that come later.
+- **The bot only uses what a player has** (my proposal, agreed in talk). It plays the player's own ship
+  through the same calls the game's input code makes: the controls, the click orders, the shop,
+  buying and fitting, docking. No traffic shortcuts, no records, no reaching into sim internals
+  to move ore or credits. It may be dumb, never cheating: its value is the snags it finds.
+- **A written plan, not judgement** (*decided*). Each track is a readable list of steps (the
+  journey the designer intends), with simple rules for the in-between. When the bot stalls,
+  the game doesn't support the path we meant. Later, bots may get goals and judgement, with
+  clear logging of why each choice was made, so a stall can be pinned on the game or the bot
+  (*decided*, later).
+- **Every input is logged** (my proposal). Each order, each burst of fire, each buy counts as a
+  player input. The gaps between inputs are the vision's "minutes between decisions". Today the
+  floater has no auto-fire, so its bot aims and fires by hand like a player must, and the log
+  will show it isn't idle yet. When auto-fire lands the bot stops firing and the gaps open: the
+  before and after for `docs/idle-mining-road.md`.
+- **The world runs as it is** (*decided*): pirates, defenders, traffic all on. Running into them
+  is part of how a session goes.
+- **Trouble is a setback, not an end** (*decided*). A wreck goes through whatever the game does to
+  a player, gets logged with what it cost in time and credits, and the bot plays on. The first bot
+  doesn't flee or fight (my proposal, agreed): the log shows what happens to a passive player.
+- **A run ends** (*decided*) when the goal is reached, the time runs out, or it is stuck: no plan
+  step advanced and no credits earned for a while.
+- **Both a report and a watch mode** (*decided*). Headless in node, faster than real time, for the
+  session log; and a dev-only switch in the running game that hands the player's ship to the bot
+  so you can watch it play, to see what a "stuck" line actually looked like. The bot is the same
+  code in both.
+
+## The floater journey (*decided*)
+
+The run ends when every upgrade relevant to idle floating is bought. "Earn 1000 credits in that
+life" is a separate, shorter scenario that starts with the full kit (later, equal-footing kind).
+
+| Step | Buy | Price today | Why |
+|---|---|---|---|
+| 1 | Bay (`bay`) | 250 | The small bay holds 10 ore; trips too short to look away |
+| 2 | Turret (`turret`) | 300 | Shoot without turning the slow hull |
+| 3 | Tractor, cone (`tractor`) | 300 | Ore comes to you |
+| 4 | Targeting (program `targeting`) | 250 | Pick the rock, systems aim |
+| 5 | Large bay (`largeBay`) | 600 | Longer gaps between trips home |
+| 6 | Route planner, system chart, autopilot (programs `clickRoute`, `starmap`, `autopilot`) | 200, 350, 800 | Click the map to go home |
+
+The all-round tractor at the far base is left out (*decided*). If the floater's computer has no
+slots for all these programs (`computerSize`, `programSlots` in `src/fitting.ts`), the bot does
+not work around it: it logs the refusal as a snag and the run reports it. Prices come from the
+game, never from this table.
 
 ## What to build
 
-### 1. The runner: `src/profile/scenario.ts`
+### 1. The bot: `src/bot/`
 
-`npm run scenario -- <name> [game minutes] [seed] [flown] [--json]`
+A new folder, kept out of the shipped game except through the dev switch (add it to whatever
+`scripts/boundaries.mjs` checks, as the designer is).
 
-- No name, or an unknown one: list the scenarios with their one-line question and exit.
-- Defaults: the scenario's own length, seed 1, records.
-- Builds `new Sim(seed, { ...DEFAULTS, trafficRecords, fighterRecords, chatter: false, ...scenario.tuning })`,
-  lays the world in with `useLayout(world, linkTo(sim))` from `src/profile/world.ts`, then
-  `sim.reset(seed)`, then the scenario's set-up.
-- The world is the shipped one (`shippedWorld()`), or a layout by name from
-  `src/designer/layouts/<name>.json` when the scenario or a `--layout <name>` flag says so (that
-  folder is made by `npm run layout`; a missing one is a clear error, as in `news.ts` today).
-- Parks the player each tick before `sim.step()`. Use one shared `park(sim)` in
-  `src/profile/world.ts`; `news.ts`'s fixed (400000, 400000) and `census.ts`'s "40,000 beyond the
-  field" are two copies of the same idea. Pick the 400000 spot (clear of the full system) and
-  check it is still outside every body and field in the shipped world; if not, compute "beyond
-  the outermost orbit" instead.
-- Report header: scenario, game minutes, seed, world, records or flown, and wall time taken.
+- **`src/bot/bot.ts`**: `class Bot` given a `Sim` and a `Plan`. `step(sim)` is called once per sim
+  tick before `sim.step()`, like the game's input code. It may only:
+  - set `sim.controls` (thrust, strafe, turn, fire), as `main.ts` does from keys;
+  - call the player order methods the mouse code calls: `orderMove`, `orderMoveStraight`,
+    `orderTranslate`, `orderNudge`, `orderFace`, `orderStop`, `orderTravel`, `orderTravelDeposit`,
+    `selectTarget`, `toggleTarget`, `boxTargets`, `clearTargets`, `setDestination`;
+  - call the shop and fitting methods the shop UI calls: `buyPart`, `sellPart`, `fitItem`,
+    `sellItem`, and whatever `main.ts` calls to dock, undock and sell ore;
+  - read anything (the sim's state is the player's screen, roughly).
+  Every call that is a player input goes through one `input(kind, detail)` helper that logs it
+  with the game time. A set of `controls.fire` that holds for many ticks counts as one input
+  (the press), not one per tick.
+- **`src/bot/plan.ts`**: the plan is data: an ordered list of steps, each a goal the bot works
+  toward with the in-between rules. Floater steps: "own `bay`", "own `turret`", and so on. Between
+  steps the rules are the mining loop: pick the nearest rock in reach, move beside it, shoot it
+  (aim the turret if fitted), let the tractor (if fitted) or the ship's pickup take ore, go home
+  when the hold is full or nothing is in reach, dock, sell, buy the next step's item when it can
+  be afforded, fit it, undock, repeat. Use the route planner and autopilot to go home once owned,
+  click orders before.
+- **`src/bot/log.ts`**: the session log: timestamped events (step started, step done, bought,
+  fitted, refused with the game's reason, docked, sold for N, wrecked, rescued, stuck, end) plus
+  the input log. Prints as text, and as one JSON line with `--json`.
 
-### 2. Scenarios and watchers: `src/profile/scenarios.ts`
+How each player action really happens (docking, selling ore, what a wreck does to a player and
+how a player gets back) is read from `main.ts` and `sim.ts`, and the bot does exactly that. Where
+the only way is something the UI does inside `main.ts`, move that bit into a function both can
+call rather than copy it.
 
-Types, roughly:
+### 2. The headless run: `npm run bot`
 
-```ts
-interface Watcher {
-  name: string;
-  /** Called after every step. Keep it cheap, or check `sim.now` and act every N seconds. */
-  step(sim: Sim): void;
-  /** Lines for the text report. */
-  report(sim: Sim, minutes: number): string[];
-  /** Numbers for --json, flat keys. */
-  totals(sim: Sim): Record<string, number>;
-}
-interface Scenario {
-  name: string;
-  question: string;
-  minutes: number;
-  layout?: string;
-  tuning?: Partial<Tuning>;
-  setup?(sim: Sim): void;
-  watchers(): Watcher[];   // fresh watchers per run
-}
+`npm run bot -- [track] [game hours] [seed] [--json]`, in `src/bot/run.ts`. Track defaults to
+`floater`, hours to 6, seed to 1.
+
+- Builds the sim as `src/profile/news.ts` does (shipped world, `chatter: false`), with the
+  floater start (`tuning.floaterStart`), then `sim.reset(seed)` as a new game does. Read
+  `main.ts`'s new-game path and match it.
+- Each tick: `bot.step(sim)`, then `sim.step()`. No parking: the player's ship is in play, so
+  what's near it is flown and the rest runs as records, as in the game.
+- **Stuck**: no plan step done and no credits earned for 15 game minutes (a tuning constant in
+  `src/bot/`). The run ends, logging the step it was on, where the ship is, and its last inputs.
+- Ends at goal, at the time limit, or stuck. Prints the report.
+
+`npm run news` stays as it is.
+
+### 3. The report
+
+Text, for reading:
+
+```
+Floater journey, seed 1, 6 h limit, shipped world
+0:00  new game, floater, 0 cr
+0:03  step 1: own bay
+0:07  first rock
+0:12  hold full (10), going home
+0:16  docked at Hub, sold 10 ore for 84 cr
+...
+0:41  bought bay (250), fitted
+...
+1:52  wrecked by pirate near Field 2: lost 40 ore, 6 min to get back
+...
+3:10  goal reached: all 6 steps
+Steps:  1 bay 0:41 | 2 turret 1:05 | 3 tractor 1:30 | ...
+Inputs: 1,840 total, median gap 2 s, longest gap 3 min
+Per hour: credits earned 410, 520, 600 | inputs 700, 610, 530
+Setbacks: 1 wreck (6 min, 40 ore)
 ```
 
-Watchers to start with, split out of `news.ts` as it stands:
+The numbers above are invented to show the shape. `--json` gives the same as one line of flat
+keys (step times, inputs per hour, credits per hour, gap median and longest, wrecks, end reason)
+so a later script can compare runs and commits.
 
-| Watcher | What it reports |
-|---|---|
-| docks | Traffic stays per base (a ship arriving at a base it wasn't docked at counts once). |
-| news | Per "base hears item at other base": first heard, how many fresh deliveries after, share of time on the board. Exactly today's lines. |
-| working | Every 30 game minutes, how many traffic ships work fields nearest each base. Today's progress lines. |
-| changed | New, for pillar 3; below. |
+### 4. The watch switch
 
-### 3. The `news` scenario: today's script, moved
-
-`news` = docks + news + working, 120 minutes. Its text output matches today's `npm run news` for
-the same arguments (same seed, same numbers), so nothing measured in
-`docs/shopping-trip-test.md` step 3 is lost. `npm run news` stays as a script and becomes
-`vite-node src/profile/scenario.ts news`, so old notes keep working. Delete the old body of
-`news.ts` (or the file, if the package script points at the runner).
-
-### 4. The `away` scenario: come back to what changed
-
-The pillar 3 question in its plainest form: *you leave for a few hours; what's different when you
-come back?* Default 240 game minutes. Watchers: docks + changed.
-
-The **changed** watcher takes a picture of the world at the start (after set-up) and at the end,
-and prints the differences a returning player could notice, biggest first, skipping zeros:
-
-- Per base (`sim.bases`): credits (`account.credits`), ore held (`ore`, by item), stock (`stock`, by
-  item), blueprints gained (`blueprints`), blueprints ordered or still being paid, traffic lost
-  and not yet replaced (`lostTraffic`), board size.
-- Ships: traffic, pirates and defenders alive at start and end, and wrecks along the way (from
-  `ship.wrecks` per ship, as `census.ts` counts them, without its monkey-patching).
-- Haulers: trips made (count a hauler setting out).
-- Fields: for each field, rocks at start and end where the sim knows it (asleep fields included
-  where `sim.sleeping` holds a count); if a field's count isn't cheaply known, leave fields out of
-  the first version and say so in the report rather than guessing.
-
-Plus one closing line that reads like news, not a table, e.g. *"4 h away: Hub +1,240 cr and a new
-blueprint, 3 traffic lost (2 replaced), pirates 6 → 4."* That line is the small, real form of the
-"come back to what changed" candidate in the vision: it shows whether there is anything worth
-coming back to yet.
-
-`--json` totals: flat keys such as `base Hub credits`, `traffic alive`, `pirates wrecked`,
-`hauler trips`, so two runs (or two commits) can be compared by a later script.
+Dev only, behind `?dev` (`main.ts` line ~77): a key or panel toggle "bot plays" that, each frame
+before the sim steps, calls `bot.step(sim)` and ignores the player's own input while on. The log
+prints to the console, and the current plan step shows in the dev status lines. Turning it off
+hands control back. Game speed stays whatever the game offers; no new fast-forward for this.
 
 ### 5. Tests
 
-- `src/profile/scenarios.test.ts` (in `test:fast` only if it runs under about a second; otherwise
-  add it to the slow exclusion list in `package.json`'s `test:fast`):
-  - every scenario has a unique name, a question and a positive length;
-  - the runner, given a tiny scenario (a few game seconds on the shipped world, seed 1), runs and
-    returns the same report twice;
-  - the changed watcher, given a sim where one base's credits are bumped between start and end,
-    reports that base and that amount, and reports nothing for a world where nothing changed;
-  - watchers don't change the sim: a run with all watchers and one with none end in the same
-    `sim.snapshot()` for a short run.
-- By hand: `npm run news -- 240 1` before and after the change prints the same numbers;
-  `npm run scenario -- away` prints a readable summary; `npm run scenario` lists both.
+- `src/bot/bot.test.ts`:
+  - the bot never calls outside its allowed list: wrap the sim in a proxy for a short run and fail
+    on any other method that changes state;
+  - same seed, same run: two short runs (a few game minutes) give the same log;
+  - a fire held for many ticks logs one input;
+  - stuck: in a world with no rocks in reach, the run ends as stuck after the stuck time, naming
+    the step;
+  - a refusal (buying with too few credits, or a program with no free slot) is logged with the
+    game's own reason and doesn't crash or loop.
+- These steps run the sim, so put the file in the slow exclusion list of `test:fast` in
+  `package.json`.
+- By hand: `npm run bot` prints a log that reads like the example; with `?dev`, the switch flies
+  the floater visibly through the same loop; a full journey run is slow, so run it in the
+  background and treat it like the parity checks: it reports, it never gates done.
 
 ## Edge cases
 
-- A scenario longer than a few hours is slow on the flown side; the header prints wall time so
-  that's visible, and the text in `CLAUDE.md` about slow checks applies.
-- A base with no change at all prints nothing, not a row of zeros; a world where nothing changed
-  says so in one line.
-- Seeds must keep giving the same run: watchers use no randomness and never call into the sim's
-  random source.
-- The player's own ship and its credits are left out of "what changed": the player is away.
+- Prices, shop stock and slots change under the bot: it asks the game each time, never caches the
+  table above.
+- The shop may be out of an item (stock per base): logged as a refusal, the bot keeps mining and
+  retries on its next dock.
+- Wreck while carrying ore or mid-trip: the plan step is not reset; the bot resumes the loop from
+  wherever the game puts the player.
+- The player's ship already docked at the start of a new game: the loop starts with undocking.
+- The watch switch on while a menu or shop panel is open: the bot acts on the sim, the panel shows
+  the result as it would for a player.
 
-## Later, not in this first step
+## Next, not in this step
 
-In the order they'd likely come, each its own `/spec` when it comes up:
-
-1. **Idle mining measurement** (`docs/idle-mining-road.md`, step "Keeps mining"): a scenario
-   where the player's ship is *not* parked but set up as an idle miner, with a watcher for
-   minutes between decisions and credits per hour, and a reference active pilot to compare
-   against. Needs auto-fire first; this runner is where it lands.
-2. **Many seeds**: a slow wrapper, like `npm run parity`, that runs a scenario over several seeds
-   in the background and logs to `docs/`.
-3. **Start from a save**: run `away` from a player's own saved world (saves live in browser
-   storage today, so this needs an export first). That is the "more and more yours" half of
-   pillar 3.
-4. Moving `census` onto the runner, once the watcher shape has held for two or three scenarios.
+- **The racer track** (*decided* as next): active ore hunting, flying by hand with thrust and
+  turn, its own journey and upgrade list, and the first idle-against-active comparison.
+  Specced on its own after the floater bot has run.
+- **Shorter scenarios from equal footing** (*decided* later): both ships start kitted out at equal
+  investment. The first: the floater with its full kit, earn 1000 credits.
+- **Goals and judgement** with logged reasons (*decided* later).
+- Many seeds in the background, logged to `docs/`, as `npm run parity` does.
 
 ## Not doing
 
-- No in-game "time passes" or fast-forward button: this is a developer tool, not a feature.
-- No new simulation rules: runs only read what the sim already does.
-- No pass/fail thresholds yet: the reports are read, not asserted, until we know what good looks
-  like.
+- No cheating bot: no records, teleports, or direct edits of credits, ore or fittings.
+- No fleeing or fighting in the first bot.
+- No new player feature or fast-forward for players: the bot and its switch are dev tools.
+- Not new traffic. Turning bots into traffic is a separate decision, weighed on cost later.

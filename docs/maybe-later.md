@@ -21,6 +21,7 @@ when it bears on the current choice. Revisits (see `docs/vision.md`) send their 
 - New game with a choice of starting ship. Today it's a panel switch.
 - Fuel and cargo tradeoffs, drone upgrades such as cargo. A stronger gun, even though parts should mainly make the game different.
 - Tractor beam is nearly overpowered: balance its range and cost later, not now.
+- Raised 2026-11-21: a recovery system for a broken module you can't pay to repair. A broken gun or thruster early really kills a run; today the only way out is to wreck yourself and go into debt. Found by the no-player bot (`docs/go-home-broken-plan.md`).
 
 **World**
 - Two more fields of different size, rotation and orbit center, so a crowded field means flying to another. Same arc as pirates: first avoid and hide, later fight or ignore.

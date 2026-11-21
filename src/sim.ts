@@ -9,7 +9,7 @@ import { pathAround } from "./route";
 import { orbitState } from "./kepler";
 import { autoPlace, canPlace, cellsOf, floatsAfterRemoval, footprint, reachable, reachableCells, sticks, usedCells, type GridSpec, type Placed } from "./grid";
 import { pilotKind, type StepProfile } from "./profile/step";
-import { DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
+import { applyTuning, changedTuning, DEFAULTS, type ThrusterId, type Tuning } from "./tuning";
 
 export const TICK = 1 / 120;
 /**
@@ -1132,7 +1132,8 @@ export class Sim {
       record: each.record,
     });
     return {
-      tuning: this.tuning,
+      // Only what differs from the defaults, so a default changed since reaches an old save.
+      tweaks: changedTuning(this.tuning),
       controls: this.controls,
       pointersManual: this.pointersManual,
       ship: this.ship,
@@ -1176,9 +1177,9 @@ export class Sim {
   restore(saved: unknown): void {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data = saved as any;
-    for (const key of Object.keys(this.tuning) as (keyof Tuning)[]) {
-      if (key in data.tuning) Object.assign(this.tuning, { [key]: data.tuning[key] });
-    }
+    // A save's own tweaks go on top of these. An older save kept every value, stale defaults and
+    // all, under \`tuning\`: that's left unread, and the tweaks in play stand.
+    if (data.tweaks) applyTuning(this.tuning, data.tweaks);
     const template = this.makeShip(0, 0, this.controls);
     const fill = (ship: Ship): Ship => {
       for (const [key, value] of Object.entries(template)) {

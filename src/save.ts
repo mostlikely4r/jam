@@ -161,8 +161,10 @@ export function makeStart(sim: Sim, layout: string): StartFile {
 export function loadStart(sim: Sim, file: StartFile | null, layout: string): boolean {
   if (!file || file.version !== SAVE_VERSION || file.layout !== layout) return false;
   try {
-    const data = decode(file.data) as { tuning: object };
-    data.tuning = {};
+    const data = decode(file.data) as { tweaks?: object; tuning?: object };
+    // The world keeps its own tuning: a start brings none.
+    delete data.tweaks;
+    delete data.tuning;
     sim.restore(data);
     sim.warmedUp = file.warmed;
     return true;

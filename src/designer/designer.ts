@@ -27,6 +27,7 @@ import { clampEccentricity, orbitEllipse, phaseToward } from "../kepler";
 import { ITEMS, moduleItems } from "../items";
 import { linkSummary, linkedNodes, useLayout, type GameLink, type ShipMarkKind } from "./link";
 import { shippedWorld } from "./shipped";
+import { layoutKey } from "../save";
 import { type Route } from "../route";
 import { FLIGHTS, tripBetween } from "./trips";
 import { type PartId } from "../parts";
@@ -35,6 +36,8 @@ import { type PartId } from "../parts";
 const DEFAULT_ZOOM = 0.8;
 const MAX_OUT_ZOOM = 0.35;
 const DRAFT_KEY = "jam-world-draft";
+/** The fingerprint of the shipped layout a draft was started from (`layoutKey`), or "unknown". */
+const DRAFT_BASE_KEY = "jam-world-draft-base";
 /** Set once a draft from before carrying had a range has been given the default ranges. */
 const CARRY_LIMITED_KEY = "jam-designer-carry-limited";
 /** The settings groups the user has opened. All start closed. */
@@ -46,6 +49,13 @@ const SHIPS_KEY = "jam-designer-ships";
 /** Ships faster than this, units/s, get an arrow showing where they're going. */
 const ARROW_SPEED = 500;
 const SPEEDS = [1, 10, 60, 600, 3600, 36000];
+
+let shippedTextCache: string | null = null;
+/** The shipped layout as the designer writes it: what a draft is told apart from. */
+function shippedText(): string {
+  shippedTextCache ??= stringifyWorld(shippedWorld());
+  return shippedTextCache;
+}
 const CLICK_PIXELS = 5;
 /** Ships to time a route with, from the game's own numbers. */
 
@@ -186,6 +196,8 @@ export class Designer {
   private readonly editor: HTMLDivElement;
   private readonly passes: HTMLDivElement;
   private readonly status: HTMLDivElement;
+  /** Why the draft in play may be out of date, or null when it isn't (or there is none). */
+  draftNote: string | null = null;
   private readonly clock: HTMLSpanElement;
   private readonly playButton: HTMLButtonElement;
   private world: World;
@@ -250,6 +262,7 @@ export class Designer {
     this.status = document.createElement("div");
     this.status.className = "status";
     this.status.style.whiteSpace = "pre-line";
+    this.status.textContent = this.draftNote ?? "";
     this.linkText = document.createElement("div");
     this.linkText.className = "route";
     side.append(
@@ -331,14 +344,9 @@ export class Designer {
     return stringifyWorld(this.world);
   }
 
-  /** Hands the game this layout. */
+  /** Hands the game this layout. It isn't kept as a draft unless it was edited: see `changed`. */
   linkToGame(): void {
     useLayout(this.world, this.game);
-    try {
-      localStorage.setItem(DRAFT_KEY, stringifyWorld(this.world));
-    } catch {
-      // Storage off: the link still holds until the page is closed.
-    }
   }
 
   // --- Small DOM helpers -------------------------------------------------------------
@@ -365,12 +373,30 @@ export class Designer {
 
   // --- State ------------------------------------------------------------------------
 
+  /**
+   * Unsaved edits from before a reload. A draft no different from the shipped layout is dropped,
+   * so the shipped one, as it is now, is what plays. One made from an older shipped layout is kept,
+   * as it may hold edits, but `draftNote` says what it's missing.
+   */
   private loadDraft(): World | null {
     try {
       const text = localStorage.getItem(DRAFT_KEY);
-      const world = text ? parseWorld(text) : null;
-      if (world) this.moveOldField(world);
-      if (world && localStorage.getItem(CARRY_LIMITED_KEY) === null) {
+      if (!text) return null;
+      if (text === shippedText()) {
+        this.forgetDraft();
+        return null;
+      }
+      const world = parseWorld(text);
+      if (!world) return null;
+      const base = localStorage.getItem(DRAFT_BASE_KEY);
+      // A draft from before the fingerprint: where it came from is unknown, and stays so.
+      if (base === null) localStorage.setItem(DRAFT_BASE_KEY, "unknown");
+      if (base !== layoutKey(shippedText())) {
+        this.draftNote =
+          "Playing your system designer draft, made from an older default layout: what's changed in the shipped world since isn't in it. Start over from the default layout in the designer to take it (save your draft to a file first if it holds edits you want).";
+      }
+      this.moveOldField(world);
+      if (localStorage.getItem(CARRY_LIMITED_KEY) === null) {
         limitCarrying(world);
         localStorage.setItem(CARRY_LIMITED_KEY, "1");
       }
@@ -378,6 +404,14 @@ export class Designer {
     } catch {
       return null;
     }
+  }
+
+  private forgetDraft(): void {
+    localStorage.removeItem(DRAFT_KEY);
+    localStorage.removeItem(DRAFT_BASE_KEY);
+    // Before the panel is made there's no status line yet to clear.
+    if (this.draftNote && this.status?.textContent === this.draftNote) this.status.textContent = "";
+    this.draftNote = null;
   }
 
   /**
@@ -391,10 +425,19 @@ export class Designer {
     field.orbitPeriod = 10800;
   }
 
-  /** Every edit is kept in the browser at once, so a reload loses nothing. */
+  /**
+   * Every edit is kept in the browser at once, so a reload loses nothing. A layout back to the
+   * shipped one, as after starting over, leaves no draft.
+   */
   private changed(): void {
     try {
-      localStorage.setItem(DRAFT_KEY, stringifyWorld(this.world));
+      const text = stringifyWorld(this.world);
+      if (text === shippedText()) this.forgetDraft();
+      else {
+        // A new draft starts from the shipped layout as it is now.
+        if (localStorage.getItem(DRAFT_KEY) === null) localStorage.setItem(DRAFT_BASE_KEY, layoutKey(shippedText()));
+        localStorage.setItem(DRAFT_KEY, text);
+      }
     } catch {
       // Storage off or full: the file buttons still work.
     }

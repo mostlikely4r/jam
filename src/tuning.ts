@@ -258,6 +258,28 @@ export const DEFAULTS = {
 
 export type Tuning = typeof DEFAULTS;
 
+/**
+ * The values that differ from the defaults: all a browser or a save keeps of the tuning, so a
+ * default changed later reaches it, rather than the old one staying frozen in its copy.
+ */
+export function changedTuning(tuning: Tuning): Partial<Tuning> {
+  const changed: Partial<Tuning> = {};
+  for (const key of Object.keys(DEFAULTS) as (keyof Tuning)[]) {
+    if (tuning[key] !== DEFAULTS[key]) Object.assign(changed, { [key]: tuning[key] });
+  }
+  return changed;
+}
+
+/** Puts kept changes into a tuning: only keys it knows, and JSON's null back to infinity. */
+export function applyTuning(into: Tuning, changed: Record<string, unknown>): Tuning {
+  for (const key of Object.keys(DEFAULTS) as (keyof Tuning)[]) {
+    if (!(key in changed)) continue;
+    const value = changed[key] === null ? Infinity : changed[key];
+    if (typeof value === typeof DEFAULTS[key]) Object.assign(into, { [key]: value });
+  }
+  return into;
+}
+
 /** Which control a thruster answers to: the same roles the mounts carry. */
 export type ThrusterId = import("./parts").ThrusterRole;
 export type TuningKey = {

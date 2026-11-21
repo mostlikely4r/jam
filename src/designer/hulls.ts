@@ -207,13 +207,20 @@ export class HullDesigner {
     this.element.append(this.side, this.canvas);
     document.body.append(this.element);
     this.listen();
-    // Unsaved work from before a reload carries on.
+    // Unsaved work from before a reload carries on. A draft no different from the shipped file
+    // is dropped, so the file as it is now plays, and a later change to it isn't hidden.
     try {
-      const draft = localStorage.getItem(DRAFT_KEY);
+      const draftOf = (key: string, shipped: unknown): string | null => {
+        const text = localStorage.getItem(key);
+        if (text === null || text !== JSON.stringify(shipped)) return text;
+        localStorage.removeItem(key);
+        return null;
+      };
+      const draft = draftOf(DRAFT_KEY, shipFileNow());
       if (draft) useShipFile(JSON.parse(draft) as ShipFile);
-      const items = localStorage.getItem(ITEMS_DRAFT_KEY);
+      const items = draftOf(ITEMS_DRAFT_KEY, itemsFileNow());
       if (items) useItemsFile(JSON.parse(items));
-      const programs = localStorage.getItem(PROGRAMS_DRAFT_KEY);
+      const programs = draftOf(PROGRAMS_DRAFT_KEY, programsFileNow());
       if (programs) useProgramsFile(JSON.parse(programs));
     } catch {
       /* no draft */

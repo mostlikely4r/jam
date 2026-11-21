@@ -20,9 +20,11 @@ import { partCategory, shopCellState, SHOP_CATEGORIES, type ShopBadge } from "./
 import { setTip } from "./tooltip";
 import { Inventory } from "./inventory";
 import { dragging, makeDraggable, rotateDrag } from "./drag";
-import { DEFAULTS, GROUPS, type Tuning } from "./tuning";
+import { applyTuning, changedTuning, DEFAULTS, GROUPS, type Tuning } from "./tuning";
 
-const STORAGE_KEY = "flight-test-tuning";
+const STORAGE_KEY = "jam-tweaks";
+/** Where tweaks used to be kept, every value at once. */
+const OLD_TUNING_KEY = "flight-test-tuning";
 const MAX_FRAME_SECONDS = 0.1;
 /** Beyond this, other ships' work can't be heard. */
 const HEARING_DISTANCE = 1500;
@@ -44,16 +46,14 @@ function saveOpened(): void {
   localStorage.setItem(OPEN_KEY, JSON.stringify([...opened]));
 }
 
+/**
+ * The tweaks kept in this browser: only what was changed from the defaults. The old store kept
+ * every value, so a default changed later never arrived; it's dropped once, unread.
+ */
 function loadTuning(): Tuning {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
-    const tuning: Tuning = { ...DEFAULTS };
-    for (const key of Object.keys(DEFAULTS) as (keyof Tuning)[]) {
-      // JSON has no infinity: it saves as null.
-      const value = saved[key] === null && DEFAULTS[key] === Infinity ? Infinity : saved[key];
-      if (key in saved && value !== null) Object.assign(tuning, { [key]: value });
-    }
-    return tuning;
+    localStorage.removeItem(OLD_TUNING_KEY);
+    return applyTuning({ ...DEFAULTS }, JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}"));
   } catch {
     return { ...DEFAULTS };
   }
@@ -453,6 +453,11 @@ function showPage(page: "main" | "help" | "settings"): void {
       load,
       newGame,
     );
+    if (designer?.draftNote) {
+      const note = document.createElement("p");
+      note.textContent = designer.draftNote;
+      pauseBox.append(note);
+    }
     if (designer) pauseBox.append(menuButton("System designer (dev, O)", openDesigner));
     if (hullDesigner) pauseBox.append(menuButton("Hull designer (dev, H)", openHulls));
     return;
@@ -989,7 +994,7 @@ function replacedBy(part: Part): string {
 }
 
 function saveTuning(): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(tuning));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(changedTuning(tuning)));
 }
 
 function setRetro(on: boolean): void {

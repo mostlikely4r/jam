@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { homeSim } from "./home";
 import { layoutKey, loadStart, makeStart, roundTrip, type StartFile } from "./save";
 import { Sim, TICK } from "./sim";
-import { DEFAULTS } from "./tuning";
+import { applyTuning, changedTuning, DEFAULTS } from "./tuning";
 
 function run(sim: Sim, seconds: number): void {
   for (let i = 0; i < Math.round(seconds / TICK); i++) {
@@ -10,6 +10,33 @@ function run(sim: Sim, seconds: number): void {
     sim.events.length = 0;
   }
 }
+
+describe("kept tuning", () => {
+  it("keeps only what differs from the defaults, so a later default reaches it", () => {
+    const tuning = { ...DEFAULTS, zoom: DEFAULTS.zoom + 0.1, retro: !DEFAULTS.retro, dockDrag: Infinity };
+    const kept = JSON.parse(JSON.stringify(changedTuning(tuning)));
+    expect(Object.keys(kept).sort()).toEqual(["dockDrag", "retro", "zoom"]);
+    // JSON's null comes back as infinity, and a key the game no longer has is left out.
+    const back = applyTuning({ ...DEFAULTS }, { ...kept, gone: 5 });
+    expect(back).toEqual(tuning);
+    expect("gone" in back).toBe(false);
+  });
+
+  it("brings a save's tweaks back, and leaves an old save's full tuning unread", () => {
+    const sim = homeSim(3, { ...DEFAULTS, haulerVolume: DEFAULTS.haulerVolume + 7 });
+    const into = homeSim(99, { ...DEFAULTS });
+    roundTrip(sim, into);
+    expect(into.tuning.haulerVolume).toBe(DEFAULTS.haulerVolume + 7);
+
+    // A save from before kept every value, old defaults and all, under \`tuning\`.
+    const old = sim.snapshot() as unknown as Record<string, unknown>;
+    delete old.tweaks;
+    old.tuning = { ...DEFAULTS, haulerVolume: 40 };
+    const fresh = homeSim(99, { ...DEFAULTS });
+    fresh.restore(old);
+    expect(fresh.tuning.haulerVolume).toBe(DEFAULTS.haulerVolume);
+  });
+});
 
 describe("save and load", () => {
   it("carries on from where it was: the ship, the money, the world, and who's linked to whom", () => {

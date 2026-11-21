@@ -327,3 +327,99 @@ Two things it still can't do, both outside the route. A course across a field fl
 `AVOID_MARGIN` — 30 units — of clearance per rock whatever the speed, so a crossing at 480 units a
 second still grazes (the course check's 663.9 hull lost against 1047.9). And a *straight* order, the
 chart's "Move here", still flies into the station: that is what the order is for.
+
+## Broken modules, and coming in like the user
+
+*2026-11-21, after the work planned in `docs/go-home-broken-plan.md`. Two runs of two hours, seed 1,
+one with step 1 only and one with both steps, and a throwaway per-second trace of the second (not
+committed).*
+
+### The stall at 1:30, and what it was
+
+The run before this one bought its cargo bay at 0:41 and was called stuck at 1:30 on step 2, the
+turret: "nothing bought and nothing earned for 15 game minutes", 3,718 units inside the field's
+edge, last inputs "turn 65 deg, turn 47 deg, fire at a rock". The trace the plan was written from
+says why. At 1:16:01, eleven seconds out of the dock on its way back to the field, the ship hit a
+rock 592 units outside the field at 152 units a second: 15.5 hull, on the gun mount. The gun's wear
+went from 0 to 0.52, past `DAMAGED_AT`, and for the next fourteen minutes the bot parked beside
+rocks with its nose a degree off them and in reach, held fire, and no shot left the ship. It never
+went home, because it only goes home with a full hold or with nothing in reach, and it had 0 to 3
+ore aboard. The dock had the parts to repair it and the bot had 128 credits.
+
+Two things came out of that. **A module that stops working now sends it home** (any module, not the
+gun), and the dock repairs before it shops. **A module the dock can't fix ends the run**, with the
+reason in the log, rather than fifteen minutes of firing a dead gun.
+
+### Step 1 only: the coming home works, and the damage eats the run
+
+```
+0:05  docked at Station, sold 10 ore for 100 cr, 100 in hand
+0:12  gun 2 broken at 13165, -7773
+0:12  heading home: gun 2 broken, 10 ore aboard
+0:13  docked at Station, sold 10 ore for 100 cr, 150 in hand
+...
+0:25  wrecked in Field, 0 ore and 148 cr aboard
+0:38  turning thrusters broken at -17055, -11480
+0:38  gun 2 broken at -17050, -11517
+0:45  stuck: gun 2 broken and the dock can't fix it, -252 cr in hand
+```
+
+It comes home every time a module breaks — four guns and one turning thruster — and the run ends
+the way the plan asked it to, out loud, when the dock can no longer be paid. It never buys the
+cargo bay: 752 credits of repairs and two wrecks at 300 each leave it at −252. **The trip out is
+where the damage is**: the click on a spot 7,500 units inside the field lets the click pilot reach
+466 to 554 units a second on the way, and the rock it meets at that speed puts 15 to 20 hull into
+one module.
+
+### Step 2: the trip out like the user's
+
+The trip out is now a right drag towards the field marker, of the length that carries the ship at
+`CRUISE_SPEED` (170 units a second, a 544-pixel drag), and the moment a rock comes within a half
+screen (1,200 units) the bot stops the drag and brakes. Every trip out in the trace reads the same
+way:
+
+```
+0:16  > move: out to Field at 2169, -18457, drifting 170
+0:16  > stop: a rock in sight
+```
+
+The ship holds 168 units a second on the way out — the cruise, to the unit — and the fastest
+moments in the whole run, 300 to 335 units a second, are all on the **trip home** or in a chase,
+never on a trip out. (The trip home still gets today's click order; the plan left it out, and these
+are the hits it costs.)
+
+Side by side, `npm run bot -- floater 2 1`, seed 1:
+
+| | step 1 only | steps 1 and 2 |
+| --- | --- | --- |
+| stalls | 0:45, step 1 (bay) | 0:48, step 2 (turret) |
+| where | 2,499 past the field's edge | 28,111 past it, chasing drifting ore |
+| hull lost | 277 | 47 |
+| credits on repairs | 752 | 162 |
+| breaks | 5 | 1 |
+| wrecks | 2 | 0 |
+| dockings | 5, and 2 rebuilds | 4 |
+| cargo bay | never | 0:25 |
+
+That is 6 times less hull, 4.6 times fewer credits, one break instead of five and no wreck at all,
+for the same two hours of play. The bay comes at 0:25 instead of 0:41. Neither run gets past 1:30,
+which is what the plan hoped for: the hull was only half the wall.
+
+### Where the wall is next
+
+**A stream of drifting ore takes the bot out of the field.** After the last docking at 0:33 the bot
+chases one piece of ore after another — `move through a piece of ore` every second or so — and at
+0:48 it is 28,111 units past the field's edge, 7 ore aboard, 48 credits, with the stuck timer run
+out. In the trace it is drifting steadily at about 40 units a second the whole time, and the
+pieces it is following drift with it, so the chase's own rule — give up after 40 seconds if the gap
+hasn't closed by a tenth — never fires. `nearestOre` has no rule about staying in the field, and it
+is asked before "deeper into the field" or "home". This is finding 5 in its worst shape so far
+(419 pieces broken loose, 95 picked up): the ore that runs away takes the ship with it.
+
+What would settle it is a decision, not a patch: whether a bot (or a player's habit) should follow
+ore out of a field at all, or leave it — the tractor is the journey's answer to the drift itself,
+and it is step 3.
+
+**And the trip home is the fast one.** 300 to 335 units a second on the way in, against 168 on the
+way out. The plan left the trip home as it is, on the measurement that only 9 of 28 hits were on a
+"move home" order; the drag is now a shape that could be given there too, if the numbers say so.

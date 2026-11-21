@@ -7,7 +7,7 @@
  *
  * `step(sim)` is called once per tick, before `sim.step()`, where the game reads its own input.
  */
-import { computerSize } from "../fitting";
+import { computerSize, works, type Module, type MountId } from "../fitting";
 import { isOreItem } from "../items";
 import { isProgram, partOf, type PartId } from "../parts";
 import { TICK, type Loose, type Poi, type Rock, type Sim } from "../sim";
@@ -42,6 +42,18 @@ const REPEAT_DISTANCE = 150;
 const ARRIVED = 100;
 /** And this long passes, in case the world moves under a standing order. */
 const REPEAT_SECONDS = 90;
+/** How far out it counts a rock as in sight: half a 1920-wide window at the default zoom of 0.8. */
+export const SIGHT = 1200;
+/**
+ * The fastest it crosses open space coming in to a field: 170 units a second, which the bare
+ * floater can come to rest from in 1,034 units, inside 90% of `SIGHT`. A player's drag of it is
+ * 544 pixels on screen (170 * `dragSeconds` 4 s * `zoom` 0.8), a little over a quarter of the
+ * window: the user's own half-screen drag is 300 a second, which needs 1,800 to brake, more than
+ * the half screen they have.
+ */
+export const CRUISE_SPEED = 170;
+/** How far ahead of the ship a drag's spot sits: a hand starts one just off the ship, not on it. */
+const DRAG_START = 60;
 
 /** Everything the bot may call on the sim: player inputs, and what it reads to decide. */
 export const BOT_CALLS = {
@@ -67,6 +79,7 @@ export const BOT_CALLS = {
     "whereBuyGoes",
     "rebuildOffer",
     "shipResponse",
+    "canRepair",
   ],
 } as const;
 
@@ -143,10 +156,19 @@ export class Bot {
   private homeSaid: string | null = null;
   /** The dock it's making for, kept until it's in. */
   private dock: Poi | null = null;
+  /** The field a trip out is flying to, kept until it's stopped or in: one drag a trip. */
+  private outbound: Poi | null = null;
   /** Whether it was in a dock last tick, so arriving is said once. */
   private port = false;
   /** Snags already said, by part and reason: the same refusal at every dock is one finding. */
   private said = new Set<string>();
+  /** The mounts that don't work, as last seen: a break is said once, and a repaired one again. */
+  private broken = new Set<MountId>();
+  /** The mount that broke most recently, for why it's heading home. */
+  private brokeMount: MountId | null = null;
+  /** The hull and the upkeep the run began with, so the report says what it cost. */
+  private hullAt = 0;
+  private upkeepAt = 0;
 
   constructor(options: BotOptions) {
     this.plan = options.plan;
@@ -161,6 +183,7 @@ export class Bot {
     if (!this.began) this.begin(sim);
     this.oreAboard = sim.oreIn(sim.ship);
     this.noteWreck(sim);
+    this.noteDamage(sim);
     if (sim.down) {
       this.down(sim);
       return;
@@ -171,6 +194,7 @@ export class Bot {
     const docked = sim.isDocked();
     if (docked && !this.port) this.arrive(sim);
     this.port = docked;
+    this.noteBreaks(sim, docked);
     if (docked) this.inDock(sim);
     else this.inSpace(sim);
     if (sim.ship.earned !== this.earned) {
@@ -185,6 +209,8 @@ export class Bot {
     this.lastProgress = sim.now;
     this.earned = sim.ship.earned;
     this.wrecks = sim.ship.wrecks;
+    this.hullAt = sim.ship.damageTaken;
+    this.upkeepAt = sim.ship.upkeep;
     this.where = stepName(sim.ship, this.plan);
     this.log.event(sim.now, `${this.fresh ? "new game" : "bot in"}, ${sim.ship.model}, ${Math.round(sim.ship.credits)} cr`);
   }
@@ -221,10 +247,11 @@ export class Bot {
     if (now - this.lastProgress > this.stuck) this.finish(sim, "stuck");
   }
 
-  private finish(sim: Sim, why: "goal" | "stuck"): void {
+  private finish(sim: Sim, why: "goal" | "stuck", reason?: string): void {
     const step = stepName(sim.ship, this.plan);
     this.end = why;
-    this.log.end = { why, at: sim.now, step };
+    this.log.end = { why, at: sim.now, step, reason };
+    if (reason) this.log.event(sim.now, reason);
     if (why === "stuck") {
       const field = sim.miningFieldAt(sim.ship.x, sim.ship.y);
       const past = Math.hypot(field.poi.x - sim.ship.x, field.poi.y - sim.ship.y) - field.radius;
@@ -242,6 +269,62 @@ export class Bot {
     this.trigger(sim, false, "");
     if (sim.clickPilot.active) sim.orderStop();
     this.orderAt = null;
+    this.outbound = null;
+  }
+
+  // What broke, and what the hits cost.
+
+  /**
+   * Notices a module that has stopped working: every one of them, not only the gun, and one
+   * that breaks, is repaired and breaks again is two breaks. Said in space only, since a docked
+   * ship is being repaired by its dock and its break is not the run's news.
+   */
+  private noteBreaks(sim: Sim, docked: boolean): void {
+    const found = new Set<MountId>();
+    for (const [mount, module] of Object.entries(sim.ship.fit) as [MountId, Module | undefined][]) {
+      if (!module || works(module)) continue;
+      found.add(mount);
+      if (this.broken.has(mount)) continue;
+      this.brokeMount = mount;
+      if (docked) continue;
+      const label = this.labelOf(mount, sim);
+      this.log.broke(sim.now, label);
+      this.log.event(sim.now, `${label} broken at ${Math.round(sim.ship.x)}, ${Math.round(sim.ship.y)}`);
+    }
+    this.broken = found;
+  }
+
+  /** The module that isn't working, in the shop's words, or null while every one does. */
+  private brokenReason(sim: Sim): string | null {
+    const newest = this.brokeMount;
+    if (newest !== null && sim.ship.fit[newest] && !works(sim.ship.fit[newest])) return this.labelOf(newest, sim);
+    for (const [mount, module] of Object.entries(sim.ship.fit) as [MountId, Module | undefined][]) {
+      if (module && !works(module)) return this.labelOf(mount, sim);
+    }
+    return null;
+  }
+
+  private labelOf(mount: MountId, sim: Sim): string {
+    const module = sim.ship.fit[mount];
+    return module ? partOf(module.part).label.toLowerCase() : "module";
+  }
+
+  /**
+   * What the hits have cost so far: hull lost, and credits on repairs and rebuilds. Counted as
+   * the growth of the ship's own two tallies each tick, so a wreck that reset them would lose
+   * nothing (it doesn't: `respawn` and `bareHull` leave both alone).
+   */
+  private noteDamage(sim: Sim): void {
+    const { damageTaken, upkeep } = sim.ship;
+    const hull = Math.max(0, damageTaken - this.hullAt);
+    const credits = Math.max(0, upkeep - this.upkeepAt);
+    this.hullAt = damageTaken;
+    this.upkeepAt = upkeep;
+    if (hull === 0 && credits === 0) return;
+    this.log.damage = {
+      hullLost: this.log.damage.hullLost + hull,
+      repairCredits: this.log.damage.repairCredits + credits,
+    };
   }
 
   // A wreck, the pod, and the yard.
@@ -254,6 +337,7 @@ export class Bot {
     this.loss = { at: sim.now, ore: this.oreAboard, cost: 0 };
     this.visit = null;
     this.orderAt = null;
+    this.outbound = null;
     this.trigger(sim, false, "");
   }
 
@@ -309,6 +393,7 @@ export class Bot {
     this.visit = null;
     this.homeSaid = null;
     this.dock = null;
+    this.outbound = null;
   }
 
   private inDock(sim: Sim): void {
@@ -322,6 +407,15 @@ export class Bot {
     if (visit.ore > 0 && !visit.sold) {
       visit.sold = true;
       this.log.event(now, `docked at ${sim.baseName(base.id)}, sold ${visit.ore} ore for ${visit.value} cr, ${Math.round(sim.ship.credits)} in hand`);
+    }
+    // The dock repairs hull first, then worn modules, then destroyed ones: wait for it, so a
+    // broken gun doesn't leave the dock with the bot. Then shop.
+    if (sim.canRepair(sim.ship)) return;
+    // Done, and a module still doesn't work: this dock can't fix it, and nothing out there will.
+    const broken = this.brokenReason(sim);
+    if (broken) {
+      this.finish(sim, "stuck", `stuck: ${broken} broken and the dock can't fix it, ${Math.round(sim.ship.credits)} cr in hand`);
+      return;
     }
     if (this.buy(sim)) return;
     // Nothing the journey wants is here or affordable: back out to the rocks.
@@ -406,19 +500,58 @@ export class Bot {
     return `no free program slot (${programs.length} of ${computerSize(sim.ship)} in use)`;
   }
 
-  /** Out of the dock and back to the rocks, by the click order a player has from the start. */
+  /** Out of the dock and back to the rocks: a drag towards the field, at the cruising speed. */
   private leave(sim: Sim): void {
     const base = sim.baseAt();
-    const station = base?.poi;
-    if (!base || !station) return;
-    const field = this.field(sim);
-    const from = sim.dockPoint(false, station);
-    const dx = field.poi.x - from.x;
-    const dy = field.poi.y - from.y;
-    const out = Math.hypot(dx, dy) || 1;
-    const spot = { x: field.poi.x - (dx / out) * field.radius * 0.45, y: field.poi.y - (dy / out) * field.radius * 0.45 };
+    if (!base?.poi) return;
     this.visit = null;
-    this.head(sim, spot, `out to ${sim.fieldName(field.id)}`);
+    // One drag a trip: the dock calls this every tick until the ship is out of it.
+    if (this.outbound) return;
+    this.outTo(sim, `out to ${sim.fieldName(this.field(sim).id)}`);
+  }
+
+  /**
+   * Sets out for a field the way the user flies: a right drag towards its marker, a start's
+   * length long, so the ship comes up to `CRUISE_SPEED` and coasts there rather than being
+   * thrown at the rocks by a click on the far side of the field.
+   */
+  private outTo(sim: Sim, what: string, again = false): void {
+    if (this.outbound && !again) return;
+    const { ship, now } = sim;
+    const field = this.field(sim);
+    const dx = field.poi.x - ship.x;
+    const dy = field.poi.y - ship.y;
+    const out = Math.hypot(dx, dy) || 1;
+    const ux = dx / out;
+    const uy = dy / out;
+    const spot = { x: ship.x + ux * DRAG_START, y: ship.y + uy * DRAG_START };
+    this.log.input(now, "move", `${what} at ${Math.round(spot.x)}, ${Math.round(spot.y)}, drifting ${Math.round(CRUISE_SPEED)}`);
+    sim.orderMove(spot.x, spot.y, ux * CRUISE_SPEED, uy * CRUISE_SPEED);
+    this.orderAt = now;
+    this.clickedAt = now;
+    this.ordered = spot;
+    this.outbound = field.poi;
+  }
+
+  /** Whether any rock worth breaking is close enough to stop for. */
+  private sighted(sim: Sim): boolean {
+    const { ship } = sim;
+    for (const rock of sim.rocks) {
+      if (rock.arriving || rock.hp <= 0) continue;
+      if (Math.hypot(rock.x - ship.x, rock.y - ship.y) <= SIGHT) return true;
+    }
+    return false;
+  }
+
+  /** Stops the trip out where it is: the drag cancelled, then the coast braked, as two clicks do. */
+  private stopOut(sim: Sim): void {
+    this.outbound = null;
+    // A click on the ship cancels the move and leaves it coasting; the second stops the coast.
+    sim.orderStop();
+    sim.orderStop();
+    this.orderAt = null;
+    this.ordered = null;
+    this.clickedAt = sim.now;
   }
 
   // Out in space: rock, ore, and the way home.
@@ -426,10 +559,37 @@ export class Bot {
   private inSpace(sim: Sim): void {
     const { ship } = sim;
     this.visit = null;
+    // A module that doesn't work is the whole trip, the way a full hold is: nothing out here
+    // pays for it, and the dock does.
+    const broken = this.brokenReason(sim);
+    if (broken) {
+      this.home(sim, `${broken} broken`);
+      return;
+    }
     // `cargoSpace` is the room left, not the hold's size: none left and it's full.
     if (this.oreAboard > 0 && sim.cargoSpace(ship) < 1) {
       this.home(sim, "the hold is full");
       return;
+    }
+    // The trip out: a drag towards the field, stopped the moment a rock comes into sight.
+    if (this.outbound) {
+      if (this.sighted(sim)) {
+        this.log.input(sim.now, "stop", "a rock in sight");
+        this.stopOut(sim);
+        return;
+      }
+      const field = this.field(sim);
+      const inside = Math.hypot(field.poi.x - ship.x, field.poi.y - ship.y) < field.radius;
+      // Still out and nothing in sight: the drag is doing the work, so there's nothing to give it.
+      if (!inside) {
+        // Unless the coast has died, short of the rocks: then one more leg.
+        if (!sim.clickPilot.active && Math.hypot(ship.vx, ship.vy) < CRUISE_SPEED * 0.5) {
+          this.outTo(sim, `deeper into ${sim.fieldName(field.id)}`, true);
+        }
+        return;
+      }
+      // At the field: the beat takes it from here.
+      this.outbound = null;
     }
     const rock = this.nearestRock(sim);
     const ore = this.nearestOre(sim);
@@ -457,8 +617,14 @@ export class Bot {
       return;
     }
     const field = this.field(sim);
-    const spot = { x: field.poi.x - field.radius * 0.4, y: field.poi.y };
     this.trigger(sim, false, "");
+    // Outside it and nothing to work: a trip out to the rocks, as from the dock.
+    const outside = Math.hypot(field.poi.x - ship.x, field.poi.y - ship.y) - field.radius;
+    if (outside > 0) {
+      this.outTo(sim, `deeper into ${sim.fieldName(field.id)}`);
+      return;
+    }
+    const spot = { x: field.poi.x - field.radius * 0.4, y: field.poi.y };
     if (Math.hypot(spot.x - ship.x, spot.y - ship.y) > field.radius * 0.5) {
       this.head(sim, spot, `deeper into ${sim.fieldName(field.id)}`);
       return;
@@ -602,6 +768,7 @@ export class Bot {
   /** Home to sell, by the autopilot's course once it has one and a click order before. */
   private home(sim: Sim, why: string): void {
     const { now } = sim;
+    this.outbound = null;
     // One dock, picked and kept: two of them either side of the ship would have it turning
     // for a new one every few seconds, and never arriving at either.
     const nearest = sim.nearestDock(sim.ship.x, sim.ship.y);

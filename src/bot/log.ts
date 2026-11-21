@@ -44,11 +44,25 @@ export interface Snag {
   why: string;
 }
 
+/** A module that stopped working, and when: one that is repaired and breaks again is two. */
+export interface Break {
+  at: number;
+  what: string;
+}
+
+/** What the hits cost the run: hull points lost, and credits spent on repairs and rebuilds. */
+export interface Damage {
+  hullLost: number;
+  repairCredits: number;
+}
+
 export interface RunEnd {
   why: "goal" | "stuck" | "time";
   at: number;
   /** The step it was on, for a stall: "step 2, turret". */
   step: string;
+  /** Why the run ended, when it ended for a reason of its own rather than the clock. */
+  reason?: string;
 }
 
 /** What the run was, for the report's headings. */
@@ -101,6 +115,9 @@ export class BotLog {
   steps: StepDone[] = [];
   wrecks: Wreck[] = [];
   snags: Snag[] = [];
+  breaks: Break[] = [];
+  /** What the hull and the modules have cost so far, kept up as the run goes. */
+  damage: Damage = { hullLost: 0, repairCredits: 0 };
   /** The ship's credits earned, sampled as it grew: the report's credits an hour come from it. */
   earned: { at: number; total: number }[] = [];
   end: RunEnd | null = null;
@@ -139,6 +156,11 @@ export class BotLog {
   snag(at: number, what: string, why: string): void {
     this.snags.push({ at, what, why });
     this.event(at, `snag: ${what} - ${why}`);
+  }
+
+  /** A module that has stopped working: its label, and when. */
+  broke(at: number, what: string): void {
+    this.breaks.push({ at, what });
   }
 
   /** The ship's earned credits, as the run goes: the report reads the growth of this. */
@@ -212,6 +234,11 @@ export class BotLog {
     const credits = this.perHour("credits");
     const perHour = this.perHour("inputs");
     lines.push(`Per hour: credits earned ${credits.join(", ")} | inputs ${perHour.join(", ")}`);
+    lines.push(`Damage: ${thousands(this.damage.hullLost)} hull lost, ${thousands(this.damage.repairCredits)} cr on repairs`);
+    if (this.breaks.length > 0) {
+      const broke = this.breaks.map((each) => `${each.what} ${clock(this.since(each.at))}`).join(", ");
+      lines.push(`Broken: ${broke}`);
+    }
     if (this.wrecks.length > 0) {
       const wrecked = this.wrecks
         .map((wreck) => `${wreck.back === null ? "no" : span(wreck.back - wreck.at)} (${wreck.ore} ore, ${thousands(wreck.cost)} cr)`)
@@ -241,8 +268,7 @@ export class BotLog {
     }
     this.perHour("credits").forEach((value, hour) => (flat[`credits.h${hour + 1}`] = value));
     this.perHour("inputs").forEach((value, hour) => (flat[`inputs.h${hour + 1}`] = value));
-    flat.wrecks = this.wrecks.length;
-    this.wrecks.forEach((wreck, index) => {
+    flat.wrecks = this.wrecks.length;    this.wrecks.forEach((wreck, index) => {
       flat[`wreck${index + 1}.at`] = Math.round(this.since(wreck.at));
       flat[`wreck${index + 1}.minutes`] = wreck.back === null ? 0 : Math.round((wreck.back - wreck.at) / 60);
       flat[`wreck${index + 1}.ore`] = wreck.ore;
@@ -250,6 +276,10 @@ export class BotLog {
     });
     flat.snags = this.snags.length;
     [...new Set(this.snags.map((snag) => `${snag.what}: ${snag.why}`))].forEach((line, index) => (flat[`snag${index + 1}`] = line));
+    flat.hullLost = Math.round(this.damage.hullLost);
+    flat.repairCredits = Math.round(this.damage.repairCredits);
+    flat.breaks = this.breaks.length;
+    this.breaks.forEach((each, index) => (flat[`break${index + 1}`] = `${each.what} ${clock(this.since(each.at))}`));
     return JSON.stringify(flat);
   }
 

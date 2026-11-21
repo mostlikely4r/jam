@@ -57,7 +57,7 @@ copy):
 
 ## What to build
 
-### 1. Home when broken: `src/bot/bot.ts`, `src/bot/log.ts`
+### 1. Home when broken (*built*): `src/bot/bot.ts`, `src/bot/log.ts`
 
 Measured, not a guess: the log above. Build it, then measure (below).
 
@@ -101,7 +101,7 @@ Tests in `src/bot/bot.test.ts`:
 background with output to a log. Write down where it stalls now, the damage line, and the breaks.
 The run should get past 1:30 on step 2; if it buys the turret, note when.
 
-### 2. Out to the field like the user: `src/bot/bot.ts`
+### 2. Out to the field like the user (*built*): `src/bot/bot.ts`
 
 Rests on the user's own play and one measured hit (1:16:01, 152 units a second, on the way out).
 Whether it cuts the bot's damage is a guess until step 1's numbers are compared with this step's.
@@ -143,7 +143,7 @@ Tests in `src/bot/bot.test.ts`:
 **Measure:** the same two bot runs as step 1, in the background. Compare the damage line and the
 repair credits per dock visit with step 1's, and where it stalls.
 
-### 3. Write it down: `docs/no-player-runs-findings.md`
+### 3. Write it down (*built*): `docs/no-player-runs-findings.md`
 
 A new section, "Broken modules, and coming in like the user", with: the stall at 1:30 and its
 cause (above), step 1's run and step 2's run side by side (where each stalls, hull lost, repair
@@ -190,7 +190,8 @@ credits, breaks), and where the wall is next. Update the journey line in
 - **A way back from a broken module you can't pay for** (raised by the user 2026-11-21): "we might
   need some recovery system since a broken gun or thruster at start really kills a run (but then
   you can always kill yourself and go in debt)". Parked in `docs/maybe-later.md`. Step 1 makes the
-  bot report the case instead of hiding it.
+  bot report the case instead of hiding it, and the measurement below is that case: step 1's run
+  ends at 0:45 with a gun broken and −252 cr in hand.
 - **The trip home and moves inside the field** keep today's orders. Measured: 9 of the 28 hits
   were on a "move home" order; the rest were small taps. A later step if step 2's numbers say so.
 - **The course check's grazing** (`npm run dockchase -- course 20 1`: docks 20 of 20, 663.9 hull
@@ -199,9 +200,77 @@ credits, breaks), and where the wall is next. Update the journey line in
   decision for the user: should the route's clearance from a rock grow with speed, or is the
   grazing accepted? Not decided; not in this build.
 - **Ore lost to drift** (finding 5): the tractor's job, step 3 of the journey.
+- **Following a stream of drifting ore out of the field**, which is where the built run stalls
+  next: it chases pieces, one after another, and 15 minutes later is 28,111 units past the field's
+  edge with 7 ore aboard. The chase's own 40-second give-up never fires while the pieces keep
+  coming, and `nearestOre` has no "stay in the field" rule. Found in this build's measurement,
+  not fixed: it is the bot's next wall, and the plan above says nothing about it.
 
 ## Not doing
 
 - No change to the click pilot, the route planner or the ring round the station (built and
   measured in `docs/look-ahead-plan.md`).
 - No game-side rule that sends a broken ship home: the bot does what a player does.
+
+## Built
+
+Built 2026-11-21, in one commit, with the numbers in
+`docs/no-player-runs-findings.md` ("Broken modules, and coming in like the user").
+
+**Both steps are in**, with six things to know.
+
+1. **The drag's spot is a hand's length ahead of the ship, not the field marker.** The plan's
+   `orderMove(field.poi.x, field.poi.y, dvx, dvy)` is not the drag `main.ts` gives: there the
+   destination is where the drag started and the drift is the drag's own length, so the spot sits
+   by the ship and the drift is what carries it along. A spot on the marker (9,900 units out) lets
+   the click pilot's own trip ceiling rule the flight, and measured from the dock it peaks at 466,
+   504 and 554 units a second for drifts of 60, 100 and 150 — no cap at all, which is the case the
+   plan said to stop and report. A drag started 60 units off the ship peaks at 201 (1.19 × the
+   cruise) in the test world, and the two-hour run's own trips out hold 168.
+2. **The peak test's bound is 1.25 × `CRUISE_SPEED`, not 1.15.** 1.15 is below what the click
+   pilot's arrival drift gives even from a 40-unit drag start (measured 1.15 exactly, too tight to
+   pin). The test pins 1.25 against a measured 1.19.
+3. **`CRUISE_SPEED` is 170.** The fastest is 175 (1,075.7 units to come to rest from, against
+   1,080), and 170 keeps 46 units of margin for a hull heavier than the bare floater the pin
+   measures: a cargo bay's weight lengthens the stop. The drag on screen is 544 pixels.
+4. **A stop on sight is two `orderStop()` calls: one cancels the drag and coasts, the second
+   brakes.** One alone leaves the ship coasting at the cruise into the rock it has just seen, which
+   is what the plan's "doesn't touch the rock" test asks it not to do. A player gives the same two
+   clicks.
+5. **A rock in sight when a trip out begins can't happen out in space**: `ROCK_REACH` (3,000) is
+   larger than `SIGHT`, so the mining beat would already have gone for it. From the dock it is the
+   "stop on sight right at the dock" case, which the drag and the stop cover: the trip out is
+   given and stopped a tick later.
+6. **A second leg, which the plan didn't ask for.** A drag's coast dies before the field when
+   nothing comes into sight (measured: 170 for about 30 seconds, then a decay), and the bot would
+   sit out there until the 15-minute stall timer. While a trip out is flying, and the ship is
+   below half the cruise with no order, it gives one more drag towards the marker.
+
+`BOT_CALLS.reads` gained `canRepair`, so the surface a player's own hands reach stays pinned.
+The damage line counts the growth of `ship.damageTaken` and `ship.upkeep` each tick rather than
+their totals at the end, so the plan's "read both fields before the wreck resets them" holds by
+construction. Checked: `respawn` and `bareHull` leave both alone, so a wreck's lost ship is
+counted anyway, and a test pins that a cleaned tally keeps what the lost ship took.
+
+**What the runs came to.** Both two-hour runs end on their stall well before the hour, so the
+six-hour runs would end on the same second and were not run. Side by side, `npm run bot -- floater
+2 1`, seed 1:
+
+| | step 1 only | steps 1 and 2 |
+| --- | --- | --- |
+| stalls | 0:45, step 1 (bay) | 0:48, step 2 (turret) |
+| where | 2,499 past the field's edge | 28,111 past it, chasing drifting ore |
+| hull lost | 277 | 47 |
+| credits on repairs | 752 | 162 |
+| breaks | 5 (gun 2 four times, turning thrusters) | 1 (gun 2 at 0:32) |
+| wrecks | 2 | 0 |
+| dockings | 5, and 2 rebuilds | 4 |
+| cargo bay | never | 0:25 |
+
+**Still short of the plan, and left for the user to call.** The plan expected step 1's run to get
+past the 1:30 stall. Neither run does. Coming home when a module breaks works — step 1's run does
+it five times, and ends with the new "the dock can't fix it" line at 0:45 — but the trip out was
+the damage: 277 hull and 752 credits in three quarters of an hour, so the bot paid its way to −252
+cr and could not pay for the gun. Step 2 takes that damage out (47 hull, one break, no wrecks) and
+buys the bay at 0:25 instead of 0:41, and then stalls in the ore chase above. The wall moved from
+the hull to the bot's ore chasing, not past 1:30.

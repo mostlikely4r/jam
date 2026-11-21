@@ -46,7 +46,7 @@ const REPEAT_SECONDS = 90;
 /** Everything the bot may call on the sim: player inputs, and what it reads to decide. */
 export const BOT_CALLS = {
   /** What a click, a keypress or a shop click does. */
-  inputs: ["orderMove", "orderMoveStraight", "orderTravel", "orderDock", "orderStop", "buyPart", "fitItem", "setProgram", "chooseHull"],
+  inputs: ["orderMove", "orderMoveStraight", "orderTravel", "orderStop", "buyPart", "fitItem", "setProgram", "chooseHull"],
   /** The ship's own screens: what a player can see before deciding. */
   reads: [
     "isDocked",
@@ -617,14 +617,10 @@ export class Bot {
       this.log.event(now, `heading home: ${why}, ${this.oreAboard} ore aboard`);
     }
     if (!sim.ship.parts.has("autopilot")) {
-      // A click on the dock: the click pilot follows the berth as it goes round, exactly as a
-      // course does, and the order ends when the ship is in the dock. Given once, and again
-      // only if it ended without docking, no faster than a second.
-      if (sim.clickPilot.active || (this.orderAt !== null && now - this.orderAt < 1)) return;
-      if (!sim.orderDock(dock)) return;
-      this.log.input(now, "dock", `home to ${name}`);
-      this.orderAt = now;
-      this.ordered = sim.dockPoint(false, dock);
+      // A click on the berth, as a player gives with a right click, on a line picked to miss
+      // the rocks in the way. The berth rides with the station, so the spot keeps up with the
+      // dock as it goes round and the ship comes to rest in the box.
+      this.head(sim, sim.dockPoint(false, dock), `home to ${name}`);
       return;
     }
     // A course chases the place as it moves: given once, and again if it has lost it.

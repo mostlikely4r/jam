@@ -143,19 +143,25 @@ describe("the run", () => {
     expect(bot.log.inputs.filter((input) => input.kind === "buy")).toHaveLength(1);
   });
 
-  it("flies home on a click at the dock, following it, rather than a click to its berth", () => {
+  it("flies home by a click on the berth, and ends in the dock", () => {
     const sim = world();
     // A hold full of ore, so the only thing left is the trip home.
     sim.setOre(sim.ship, 100);
     const bot = new Bot({ plan: FLOATER_JOURNEY, log: new BotLog() });
     const hands = watched(sim);
-    // The order is the click pilot's, not the autopilot's: the journey hasn't got that far.
+    // A click order, not a course: the journey hasn't got the autopilot yet.
     expect(sim.ship.parts.has("autopilot")).toBe(false);
-    for (let i = 0; i < Math.round(120 / TICK) && !sim.isDocked(); i++) playTick(sim, bot, hands);
-    const docks = bot.log.inputs.filter((input) => input.kind === "dock");
-    expect(docks).toHaveLength(1);
+    let at = -1;
+    for (let i = 0; i < Math.round(600 / TICK) && !sim.isDocked(); i++) {
+      playTick(sim, bot, hands);
+      if (at < 0 && bot.log.inputs.some((input) => input.kind === "move" && input.detail.startsWith("home to"))) at = sim.now;
+    }
+    expect(at, "set out for home").toBeGreaterThanOrEqual(0);
     expect(sim.isDocked()).toBe(true);
-  }, 30000);
+    // There and in, not a chase that never ends: the settle finishes what it arrives at, so a
+    // click on the berth is enough however far the dock has gone round.
+    expect(sim.now - at).toBeLessThan(240);
+  }, 60000);
 
   it("makes room in a full computer by unloading click-to-turn once the turret is fitted", () => {
     const plan: Plan = { name: "A chart", steps: [{ label: "system chart", parts: ["starmap"] }] };

@@ -1017,8 +1017,6 @@ interface ClickOrder {
   trip?: number;
   /** Flies the straight line whatever is in the way, even with the route planner. */
   straight?: boolean;
-  /** A click on a dock: follows the berth with click-to-move, and ends inside it. */
-  dock?: boolean;
 }
 
 /** A click move's speed ceiling, as a share of the peak it would reach burning full to the halfway point. */
@@ -1107,13 +1105,12 @@ export class ClickPilot extends ShipPilot {
    * Sets a course for a place, ending `slack` short of its centre (or at the spot `ox, oy`
    * in its own axes, for a dock). The course chases the place as it moves and turns.
    */
-  travelTo(poi: CourseTarget, ox = 0, oy = 0, slack = 0, dock = false): void {
+  travelTo(poi: CourseTarget, ox = 0, oy = 0, slack = 0): void {
     this.order = {
       spot: { x: poi.x, y: poi.y, px: poi.px, py: poi.py, vx: 0, vy: 0 },
       follow: { poi, ox, oy, slack },
       drifts: false,
       move: true,
-      dock,
       face: this.order?.face ?? null,
       stage: "flying",
       closest: Infinity,
@@ -1220,15 +1217,8 @@ export class ClickPilot extends ShipPilot {
     const { order, ship } = this;
     if (!order) return;
     const stopping = order.stage === "stopping" || order.stage === "settling";
-    // A course is the autopilot's; a click on a dock is click-to-move's, since it's the same
-    // follow given from the screen rather than the chart.
-    const needs = order.follow ? (order.dock ? "clickMove" : "autopilot") : order.move || stopping ? "clickMove" : "clickTurn";
+    const needs = order.follow ? "autopilot" : order.move || stopping ? "clickMove" : "clickTurn";
     if (!ship.parts.has(needs)) {
-      this.cancel();
-      return;
-    }
-    // In the dock: the drag there holds the ship, so a dock order is done the moment it's in.
-    if (order.dock && order.follow && sim.dockedAt(ship) === order.follow.poi) {
       this.cancel();
       return;
     }

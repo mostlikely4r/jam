@@ -2550,7 +2550,7 @@ describe("click orders", () => {
     expect(Math.hypot(ship.vx, ship.vy)).toBeLessThan(1);
   }, 30000);
 
-  describe("docking from a click", () => {
+  describe("coming home by a click on the berth", () => {
     /** The floater at rest at the field's edge nearest the station, with a hold full of ore. */
     function edge(sim: Sim): void {
       const { field, station } = sim;
@@ -2562,74 +2562,45 @@ describe("click orders", () => {
       sim.step();
     }
 
-    it("flies in and docks at three points of the station's orbit, and the order goes with it", () => {
+    it("docks at three points of the station's orbit, a click at a time", () => {
       for (const warm of [0, 300, 600]) {
         const sim = alone();
         sim.warmUp(warm);
         edge(sim);
-        expect(sim.orderDock(sim.station), `${warm} s in`).toBe(true);
-        let docked = false;
-        for (let i = 0; i < Math.round(300 / TICK); i++) {
+        let clicks = 0;
+        let clicked = -1;
+        for (let i = 0; i < Math.round(300 / TICK) && !sim.isDocked(); i++) {
+          // The berth rides with the station, so a click on it keeps up as the dock goes
+          // round; a player clicks again only when the order has finished and it isn't in.
+          if (!sim.clickPilot.active && i * TICK - clicked > 1) {
+            const berth = sim.dockPoint(false, sim.station);
+            expect(sim.orderMove(berth.x, berth.y), `${warm} s in`).toBe(true);
+            clicked = i * TICK;
+            clicks++;
+          }
           sim.step();
           sim.events.length = 0;
-          if (sim.isDocked()) {
-            docked = true;
-            break;
-          }
         }
-        expect(docked, `${warm} s in`).toBe(true);
-        // In the dock the drag holds it, so there is nothing left to fly: the order goes on
-        // the next tick, once the pilot has seen where the ship ended up.
-        run(sim, 0.1);
-        expect(sim.clickPilot.active, `${warm} s in`).toBe(false);
+        expect(sim.isDocked(), `${warm} s in`).toBe(true);
+        // The settle now finishes what it arrives at, so a second click is rare: this is
+        // finding 1 and finding 2 together (docs/dock-click-plan.md).
+        expect(clicks, `${warm} s in`).toBeLessThan(4);
       }
     }, 60000);
 
-    it("needs click-to-move, and a station to fly to", () => {
+    it("a click with no click-to-move is refused, and the order goes when the part does", () => {
       const racer = homeSim(1, { ...SOLO, testDrones: 0, floaterStart: false });
       expect(racer.ship.parts.has("clickMove")).toBe(false);
-      expect(racer.orderDock(racer.station)).toBe(false);
-      const sim = alone();
-      expect(sim.orderDock(sim.field)).toBe(false);
-    });
-
-    it("is dropped when click-to-move goes while it's flying", () => {
+      expect(racer.orderMove(racer.station.x, racer.station.y)).toBe(false);
       const sim = alone();
       edge(sim);
-      expect(sim.orderDock(sim.station)).toBe(true);
+      const berth = sim.dockPoint(false, sim.station);
+      expect(sim.orderMove(berth.x, berth.y)).toBe(true);
       run(sim, 2);
       expect(sim.clickPilot.active).toBe(true);
       sim.devSet(sim.ship, "clickMove", false);
       run(sim, 0.1);
       expect(sim.clickPilot.active).toBe(false);
-    });
-  });
-
-  describe("what a click on a station lands on", () => {
-    /** A point in the station's own axes, where it is now. */
-    function at(station: Sim["station"], x: number, y: number): { x: number; y: number } {
-      const cos = Math.cos(station.rotation);
-      const sin = Math.sin(station.rotation);
-      return { x: station.x + x * cos - y * sin, y: station.y + x * sin + y * cos };
-    }
-
-    it("finds the station on its solid part and on its dock, at any rotation, and nowhere outside", () => {
-      const sim = alone();
-      const { station } = sim;
-      for (const turn of [0, 0.7, 2.1]) {
-        station.rotation = turn;
-        // The solid box is the station's middle, and the dock is a hull-length past it.
-        for (const [lx, ly] of [[0, 0], [140, 0], [0, -140], [299, 0], [299, 120]]) {
-          const spot = at(station, lx as number, ly as number);
-          expect(sim.stationAt(spot.x, spot.y), `${lx}, ${ly} at ${turn}`).toBe(station);
-        }
-        for (const [lx, ly] of [[-160, 0], [460, 0], [0, 160], [0, -160]]) {
-          const spot = at(station, lx as number, ly as number);
-          expect(sim.stationAt(spot.x, spot.y), `${lx}, ${ly} at ${turn}`).toBeNull();
-          // A margin widens both boxes by that much, for a quick click from far out.
-          if (Math.abs(ly) < 150) expect(sim.stationAt(spot.x, spot.y, 20), `${lx} with margin`).toBe(station);
-        }
-      }
     });
   });
 });

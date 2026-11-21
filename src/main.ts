@@ -354,7 +354,6 @@ const HELP: [string, HelpLine[]][] = [
       ["Right drag from your ship", "Hold a facing", has("clickTurn")],
       ["Right drag from the destination", "Nudge its drift", has("clickMove")],
       ["Right click your ship", "Stop, or cancel an order", has("clickMove")],
-      ["Right click a dock", "Fly in and dock, following it as it goes round", has("clickMove")],
       ["Flight keys", "Take over for a moment; the order carries on after", has("clickMove")],
     ],
   ],
@@ -1273,8 +1272,6 @@ document.addEventListener("visibilitychange", () => {
 const DRAG_PIXELS = 10;
 /** A second right click this soon after the first, in the same place, makes a double click. */
 const DOUBLE_CLICK_MS = 350;
-/** How near a click has to be to a station's boxes to count as on it, in screen pixels. */
-const DOCK_CLICK_PIXELS = 6;
 /**
  * A right drag in progress, in screen pixels. What it starts on decides what it does:
  * your own ship sets a facing, the current destination nudges its drift, space moves.
@@ -1364,13 +1361,6 @@ window.addEventListener("mouseup", (event) => {
   // The first click's destination is right here, so this comes before asking what was hit.
   const first = lastClick;
   lastClick = null;
-  // A click on a station's boxes is a dock order: it flies in and follows the berth round.
-  // A drag that starts on one is still the drawn move it was. Single and double click alike.
-  if (!dragged && on === "space") {
-    const spot = renderer.screenToWorld(fromX, fromY);
-    const station = sim.stationAt(spot.x, spot.y, DOCK_CLICK_PIXELS / tuning.zoom);
-    if (station && sim.orderDock(station)) return;
-  }
   if (!dragged && on !== "ship") {
     const spot = renderer.screenToWorld(fromX, fromY);
     const isDouble =

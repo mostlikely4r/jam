@@ -148,20 +148,25 @@ much of this a person meets.
 Nothing here is a decision. Finding 1 decides whether the bot's journey is reachable at all;
 finding 4 decides what the last step of that journey should be.
 
-## The dock click, and the settle under it
+## Coming home: the settle, and the ring round the station
 
-*2026-12-01, after the build in `docs/dock-click-plan.md`. It answers finding 1 and finding 2, and
-says what each other finding came to, so none of them is picked up again as if it still stood.*
+*2026-12-01, after the work planned in `docs/dock-click-plan.md`. It comes back to finding 1 with a
+sharper answer than the first one, answers finding 2, and says what each other finding came to, so
+none of them is picked up again as if it still stood.*
 
 ### How each finding was judged
 
-- **1, coming home stalls: the game's.** A click order goes to a world spot, and the berth has
-  moved by the time the ship gets there: the dock goes round at about 50 units a second. A click
-  on a dock now follows it (`Sim.orderDock`), and the order ends inside the box.
-- **2, an arrived order never finishes: the game's.** `ClickPilot.settle` eased onto the spot and
-  turned the nose for every flicker of the correction it wanted; with nothing on the hull to damp
-  a spin, a floater tumbled over the last few units and the order stood for its full while. The
-  settle now flies the arrival instead: see "the settle" below.
+- **1, coming home stalls: the game's, but not for the reason given.** It is not the order aiming
+  where the berth was. A click on the berth rides with the station's carry, so the spot keeps up as
+  the dock goes round, and a plain double-click on the pad docks: 12 of 12 from 400 to 2,600 units
+  out, on the build before this work and on the build after it, in the same times. What does stall
+  is the route: `ShipPilot.routeAround` keeps a ship out of a ring 254 units round the station's
+  centre, and the berth sits 300 from that centre, so an approach from the far side circles the
+  ring and never converges. See "the ring" below.
+- **2, an arrived order never finishes: the game's, and fixed.** `ClickPilot.settle` eased onto the
+  spot and turned the nose for every flicker of the correction it wanted; with nothing on the hull
+  to damp a spin, a floater tumbled over the last few units and the order stood for its full while.
+  The settle now flies the arrival instead: see "the settle" below.
 - **3, click-turn can't hold a facing: dropped.** The bot re-issued `orderFace` every tick for a
   drifting rock, which restarts the turn. That shows nothing about one order.
 - **4, four slots for four programs: the game's, and decided.** The journey's last step is now the
@@ -173,22 +178,24 @@ says what each other finding came to, so none of them is picked up again as if i
 - **6, every new game has the same dice: the game's, but separate.** Still open, and still its own
   decision.
 
-### The chase check, before and after
+### A click on the dock was built, then taken out
 
-`npm run dockchase -- before 20 1` and `npm run dockchase -- after 20 1`: a floater at rest at the
-home field's edge nearest the station, hold full, sent home the way a player with no autopilot
-would send it — a click to the berth before, a dock order after — from 20 starts spread over one
-turn of the station's orbit, five game minutes each at most, with the station's phase moved between
-starts by warming a fresh world.
+The plan's first item was a right click on a dock that follows the berth. It was built, and
+measured, and then removed by the player's call: a right click on the pad has to keep meaning "fly
+there and stop, where I clicked", because picking the spot on the pad is worth more than saving a
+click. A follow that ends in docking went with it, so the bot flies home by the click a player
+gives. What each measurement said, while it existed:
 
-| | docked | median | mean | orders |
-| --- | --- | --- | --- | --- |
-| before | 17 of 20 | 18.7 s | 18.9 s | 47 |
-| after | 20 of 20 | 19.1 s | 19.2 s | 20 |
+| one order to the berth, from the field's edge | 20 starts | |
+| --- | --- | --- |
+| before any of this work | 17 of 20 | median 18.7 s, 47 orders |
+| with the settle fixed, a click on the berth | 17 of 20 | median 18.7 s, 47 orders |
+| with a dock order that follows the berth | 20 of 20 | median 19.1 s, 20 orders |
 
-The three misses before were all the same thing: ten clicks each over five minutes, the distance
-to the berth closing and then not closing, and the run over. The after numbers are one order per
-start and none missed, which is the click following the berth rather than a spot where it was.
+So the settle fix changed nothing in that check, and the dock order changed everything in it — but
+it is the ring below that the three misses are, not the berth moving, and the dock order only got
+round them by routing. `npm run dockchase` now measures the first line only, since it is what the
+game does.
 
 ### The settle
 
@@ -203,28 +210,36 @@ against its motion, and its rotation thrusters make that turn at about 1.5 radia
 the fix does instead is make that one turn count, and accept a stop within 8 units — inside the
 ship's own 12-unit radius — rather than turn again for the last few.
 
+### The ring round the station
+
+A start that misses find the ship almost stopped about 460 units from the berth, its order still
+"flying", creeping at a unit a second, re-clicked every 30 seconds (when the order gives up on
+getting closer) until the five minutes are gone. It is going round the station, not at it: the
+route keeps out of a circle `hypot(150, 150) + 12 + 30` round the station's centre, and the berth is
+300 from that centre, 46 units outside the circle. From the near side the ship reaches the box
+before the circle matters. From the far side the tangent it steers along swings with the station and
+never closes.
+
+That is the same wall the bot meets, and it can be watched happening: on seed 1 the run docks eight
+times in 84 minutes and then, at 85 minutes, sits **462 units from the berth at 0 to 1 a second
+with its order still "flying"** and stays there until the run is called stuck on step 1. The chase
+check's three misses sit at 462 too. **The route wants the station's own box as its keep-out, not a
+circle round its middle** — or the berth excluded from the circle that guards it. Nothing in this
+work touches the route.
+
 ### Where a run stalls next
 
-`npm run bot -- floater 2 1`, before and after (the same seed, the shipped world):
+`npm run bot -- floater 2 1`, on this build: eight dockings in 84 minutes, 600 credits earned in
+the second hour, one wreck at 0:31 (a rock, and the yard took all 186 credits it had) — and then the
+ring, at 85 minutes, as above.
 
-- Before: docked twice, then stuck on step 1 at 0:40 with a full hold, 946 units inside the field's
-  edge, on the way home. That is finding 1.
-- After: docked twice, then stuck on step 1 at 0:25 with no ore and no credits, deep in the field.
+The rock is worth a line of its own: an earlier version of this change had the bot fly home on a
+course that follows the berth, and it rammed rocks at 257 units a second with 500 units of
+look-ahead. A click order is given a line with no rock on it, so the bot's own way home is safer
+than the course — which is one more reason the click stayed and the follow went.
 
-The dock half works: of the twenty chase starts, every one docked, and a start needed one order.
-What stalls the run is the way home *through the field*. A click on a dock far off is a course, and
-a course flies as fast as the trip allows: 257 units a second on a 2,600-unit haul, while the
-pilot's route looks 500 units ahead for rocks. That is two seconds of warning, and turning the nose
-round takes three. The floater hits rocks at close to 200 a second, and the dock's repairs
-take every credit it earned; at 0:25 the hull is at 58 and it is looking for a rock it can't reach.
+### Still untouched
 
-Before, the bot flew itself home by a *straight* click order and picked a line with no rock on it
-by hand. So this is the route's limit, met by asking the pilot to fly the line: **a course needs to
-look ahead as far as it takes to stop**, and that is its own finding, not the click's. The plan put
-it out of scope (`docs/dock-click-plan.md`, "If the solid box gets hit in the check's runs, that is
-a finding for the route").
-
-One more, untouched and pre-existing: a hull with `strafe` and no `reverse` still never finishes a
-click order on a fixed spot in open space, because it can only brake to within 9 units and its
-landing circle is half a unit. Hulls with side thrusters were to land exactly as they did before,
-so it was left as it was.
+A hull with `strafe` and no `reverse` never finishes a click order on a fixed spot in open space: it
+can only brake to within 9 units and its landing circle is half a unit. Hulls with side thrusters
+were to land exactly as they did before, so it was left as it was.

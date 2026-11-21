@@ -1,11 +1,10 @@
 /**
  * How the click pilot alone gets home: a floater with a full hold at the home field's edge,
- * sent to the dock as a player with no autopilot would send it. No bot in the way, so the
- * numbers say what the game's click does, not what a bot does around it.
+ * sent to the dock the way a player with no autopilot sends it, a click on the berth at a
+ * time. No bot in the way, so the numbers say what the game's click does, not what a bot does
+ * around it.
  *
- * Run with: npm run dockchase -- [before|after] [starts] [seed]
- * - before: a click order to the berth, given again whenever the pilot has none.
- * - after: one dock order, given again only if it ended without docking.
+ * Run with: npm run dockchase -- [starts] [seed]
  *
  * Each start is its own game, warmed by its own share of the station's orbit, so the starts
  * meet the dock at points all the way round its orbit and none of them inherits the last one's
@@ -23,9 +22,8 @@ const LIMIT_SECONDS = 5 * 60;
 const REPEAT_SECONDS = 1;
 
 const words = process.argv.slice(2).filter((arg) => !arg.startsWith("--"));
-const after = (words[0] ?? "after").toLowerCase() !== "before";
-const starts = Number(words[1]) || 20;
-const seed = Number(words[2]) || 1;
+const starts = Number(words[0]) || 20;
+const seed = Number(words[1]) || 1;
 
 /** A new game of the shipped world, from scratch, as `src/bot/run.ts` builds one. */
 function world(): Sim {
@@ -60,11 +58,10 @@ function attempt(warm: number): { docked: boolean; seconds: number; orders: numb
   let since = REPEAT_SECONDS;
   for (let tick = 0; tick < Math.round(LIMIT_SECONDS / TICK); tick++) {
     if (sim.isDocked()) return { docked: true, seconds: tick * TICK, orders };
-    // Before, a player clicks again whenever the ship has no order. After, only when one ended.
+    // A player clicks again whenever the ship has no order: no leading, no stopping by hand.
     if (!sim.clickPilot.active && since >= REPEAT_SECONDS) {
-      // A dock order, or before there was one, a click on where the berth is now.
-      const sent = after ? sim.orderDock(station) : sim.orderMove(sim.dockPoint(false, station).x, sim.dockPoint(false, station).y);
-      if (sent) orders++;
+      const berth = sim.dockPoint(false, station);
+      if (sim.orderMove(berth.x, berth.y)) orders++;
       since = 0;
     }
     since += TICK;
@@ -88,4 +85,4 @@ const times = made.sort((a, b) => a - b);
 const median = times.length === 0 ? Infinity : times[Math.floor(times.length / 2)];
 const mean = times.reduce((sum, time) => sum + time, 0) / (times.length || 1);
 const orders = results.reduce((sum, result) => sum + result.orders, 0);
-console.log(`\n${after ? "after" : "before"}: docked ${made.length} of ${starts}, median ${median.toFixed(1)} s, mean ${mean.toFixed(1)} s, ${orders} orders`);
+console.log(`\ndocked ${made.length} of ${starts}, median ${median.toFixed(1)} s, mean ${mean.toFixed(1)} s, ${orders} orders`);

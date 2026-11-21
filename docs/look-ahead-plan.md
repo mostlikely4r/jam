@@ -187,3 +187,43 @@ Fast, pure-logic tests:
 - **Dropping the station's circle altogether for a trip to its berth.** From the far side, that
   flies the ship straight into the solid box.
 - **Slowing courses down inside fields.** The fix is seeing further, not flying slower.
+
+## Built
+
+Built 2026-12-02, in one commit, with the numbers in
+`docs/no-player-runs-findings.md` ("The ring, and looking as far ahead as it takes to stop").
+
+**Steps 1 and 2 are in as planned**, with three things to know.
+
+1. **The three starts that miss were not on the ring.** Step 1a's log found no route in them to
+   log: a bare floater has `clickMove` and `clickTurn`, not `clickRoute`, so
+   `ClickPilot.routeAround` handed it the straight line and the ring never applied. The ship flew
+   that line into the station's solid box, bounced, and sat 460 to 520 from the berth swinging its
+   nose. So the ring changes alone could not make the check: *a click on a station's pad now takes
+   the ring round the station it is going to*, which is what `How we'll know it works` asks of a
+   double-click on the pad. The plan's sentence in step 2, "A plain straight click order still
+   flies straight", holds for everything else: a pad click takes the ring and no rocks, so a hull
+   without the planner still flies its own line and takes its chances with the field.
+
+2. **1c's tilt is not a circle 10% larger.** Inside the circle there is no tangent point to aim
+   at, so the tangent is taken where the ship stands and scaled by `gap / blockRadius`: none of it
+   in the middle, where straight out is the only way out, all of it at the edge, which is where
+   the flip was. Across the edge the heading moves by at most 19 degrees.
+
+3. **The bot needed one change of its own**, which the plan did not see: `head()` gave every order
+   with `orderMoveStraight`, the chart's kind, which flies the line whatever is in the way *even
+   with the route planner*, so the ring could not reach the bot either. Its own comment already
+   said "as a player gives with a right click", and a right click is `orderMove`. With that the
+   bot gets past the 85-minute stall and stops next on step 2, the turret, at 1:30.
+
+**What the checks came to.** `npm run dockchase -- 20 1`: 20 of 20, median 19.1 s, mean 18.9 s,
+was 17 of 20 at 18.7 s and 18.9 s. `npm run dockchase -- course 20 1`: 20 of 20, median 50.2 s,
+mean 65.3 s, 663.9 hull lost, was 17 of 20 at 50.9 s and 73.0 s with 1047.9 lost. `npm run bot --
+floater 2 1` gets past 85 minutes.
+
+**Still short of the plan, and left for the user to call.** The course check docks every start but
+loses 663.9 hull, not the "near zero" the plan expected. The cause is in the plan's own spec: a
+rock's keep-out is `radius + SHIP_RADIUS + AVOID_MARGIN` whatever the speed, so a ship following a
+tangent passes exactly that close, and a crossing at 480 units a second lags the aim by more than
+30. Getting near zero means letting the margin grow with speed, or slowing a course that is
+blocked, and the second is in *Not doing*. Neither was done: it is a decision, not a fix.

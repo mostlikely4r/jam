@@ -1,19 +1,28 @@
 ---
-description: Write what we agreed in this thread into a plan in docs/, ready to build in a fresh thread
+description: Write what we agreed in this thread into a plan, ready to build in a fresh thread
 argument-hint: "[short name, e.g. turret]"
 ---
 
-Write the design we agreed in this thread to `docs/$ARGUMENTS-plan.md` (pick a short name if none
-is given; if a plan for it already exists, update that one). Don't write code.
+Write the design we agreed in this thread to a plan named after `$ARGUMENTS` (pick a short name if
+none is given). Where plans live, how they are named and which one to copy the style of is in the
+Workflow section of `AGENTS.md`. If a plan for this already exists, update that one. Don't write
+code.
 
-- Follow the style of `docs/fitting-plan.md`: date, why, the picture, then what to build.
+- Follow the style of the example plan: date, why, the picture, then what to build as numbered
+  steps.
 - Only what was decided. Leave out options we rejected, and don't mention them except under a
   short "Not doing" list if a fresh reader might reintroduce them.
 - Mark the user's own calls *decided*; mark my proposals as such.
+- Say where each premise comes from: the user's own use or play, a log or measurement, or a guess.
+  If the plan rests on a guess, make step 1 the smallest version the user can try, and write
+  "stop here for the user to try" after it.
 - Make it self-contained: someone with no access to this chat must be able to build from it.
-  Name the files and systems it touches, the rules, edge cases, and how we'll know it works
-  (tests, or what to try in the game).
-- Keep anything that would spoil a surprise for players out of this public file, or ask first.
+  Name the files and systems it touches, the rules, edge cases, and how we'll know it works.
+- "How we'll know" has the checks (tests, probes, runs) and a **Try it** line: what the user does,
+  in a few minutes, to see it working: where to go, what to press, what to expect.
+- End with **Needs first** (anything this depends on that may not be built yet; check that it
+  exists) and **Not in this build** (open items left for later), so the build doesn't guess.
+- Keep out anything `AGENTS.md` says must stay private, or ask first.
 
-Commit the plan, then reply with its path and the line to start the build:
-`/build docs/<name>-plan.md`, to paste into a new thread.
+Save the plan, and commit it if `AGENTS.md` says the agent commits. Reply with its path and the
+line to start the build, `/build <path>`, to paste into a new thread.

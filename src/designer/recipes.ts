@@ -49,7 +49,10 @@ export function tripReport(world: World, from: WorldNode, to: WorldNode, span: n
 function listEveryStation(world: World): string[] {
   const lines: string[] = [];
   for (const { node } of walk(world)) {
-    if (node.kind !== "station" || node.unlocked.length > 0) continue;
+    if (node.kind !== "station") continue;
+    // Every station wants every module but the all-round tractor, so a player can fund any it loses.
+    if (node.wanted.length === 0) node.wanted = [...EVERY_MODULE_BUT_360];
+    if (node.unlocked.length > 0) continue;
     node.unlocked = [...EVERY_MODULE_BUT_360];
     lines.push(`${node.name} sells every module but the all-round tractor`);
   }
@@ -250,7 +253,7 @@ export const RECIPES: Record<string, Recipe> = {
         spawns: [],
         // The one station that sells the all-round tractor, and the only one with part B to make it from.
         unlocked: EVERY_MODULE,
-        wanted: [],
+        wanted: EVERY_MODULE_BUT_360,
         items: [{ item: "partB", n: 3 }],
       });
       field.children.push(base);
@@ -315,7 +318,7 @@ export const RECIPES: Record<string, Recipe> = {
         shipyard: true,
         spawns: [],
         unlocked: EVERY_MODULE_BUT_360,
-        wanted: [],
+        wanted: EVERY_MODULE_BUT_360,
       });
       // Outer: an ice ball, a pair of planets round each other, and a dark far world with one lonely field.
       add(star, "planet", "Pale", { radius: 11000, orbitRadius: 4600000, orbitPhase: 10, atmosphere: 0, burnSpeed: 0 });

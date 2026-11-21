@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { useLayout } from "./designer/link";
+import { shippedWorld } from "./designer/shipped";
 import { homeFields, homeSim, homeStations } from "./home";
+import { linkTo } from "./profile/world";
 import {
   hubRecipes,
   itemDef,
@@ -828,6 +831,21 @@ describe("the blueprint lists", () => {
     expect(sim.fundBlueprint(ship, "strafe")).toBe(false);
     expect(sim.fundBlueprint(ship, "reverse")).toBe(true);
     expect(base.blueprintsOrdered.has("reverse")).toBe(true);
+    // Its shop lists what it sells, has ordered or wants, and leaves the rest out.
+    expect(sim.shopLists("gun2", base)).toBe(true);
+    expect(sim.shopLists("reverse", base)).toBe(true);
+    expect(sim.shopLists("strafe", base)).toBe(false);
+  });
+
+  it("has every shipped station want every module but the all-round tractor", () => {
+    const { sim } = world();
+    useLayout(shippedWorld(), linkTo(sim));
+    expect(sim.bases.length).toBeGreaterThan(1);
+    for (const base of sim.bases) {
+      for (const item of ITEMS.filter((each) => each.type === "module")) {
+        expect(base.wanted.has(item.id as PartId)).toBe(item.id !== "tractorAll");
+      }
+    }
   });
 
   it("prices a blueprint at the module item's own blueprint price", () => {

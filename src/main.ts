@@ -964,6 +964,8 @@ function partLine(part: Part): ShopLine | null {
     return { tag: "sell", style: "sell", label: part.label, icon: part.icon, text: `Sell for ${value} credits, -${(part.weight * tuning.partWeightScale).toFixed(2)} weight`, enabled: true };
   }
   if (part.held && !sim.unlocked(part.id)) return null;
+  // A module this station neither sells nor wants isn't in its shop: there's nothing to do with it here.
+  if (!sim.shopLists(part.id)) return null;
   if (part.builtIn && !sim.canBuy(ship, part.id)) return null;
   if (!sim.canBuy(ship, part.id)) return { tag: "doesn't fit", label: part.label, icon: part.icon, text: `${part.description}\nNo mount on your ship takes it`, enabled: false };
   if (!sim.unlocked(part.id)) return lockedLine(part.id, part.label, part.icon);

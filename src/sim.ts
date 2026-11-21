@@ -2649,6 +2649,15 @@ export class Sim {
     return true;
   }
 
+  /**
+   * Whether a base's shop lists a module at all: one it sells, has on order, or wants. A module it
+   * neither sells nor wants isn't shown, as nobody can fund it there. Anything else is always listed.
+   */
+  shopLists(id: PartId, base: Base = this.shopBase()): boolean {
+    if (itemDef(id)?.type !== "module") return true;
+    return this.unlocked(id, base) || base.blueprintsOrdered.has(id) || base.wanted.has(id);
+  }
+
   /** Puts the ship owner's credits toward a blueprint at its base, as far as they go. Returns whether any went in. */
   fundBlueprint(ship: Ship, id: BlueprintId): boolean {
     const base = this.serviceBase(ship);

@@ -18,7 +18,8 @@ describe("layout recipes", () => {
     expect(fields[0].parent?.kind).toBe("planet");
     const spec = stationsFor(world).find((station) => station.name === "Planet base")!;
     expect(spec.unlocked).toEqual(moduleIds());
-    expect(spec.wanted).toEqual([]);
+    // It wants every module but the all-round tractor, like every station.
+    expect(spec.wanted).toEqual(moduleIds().filter((id) => id !== "tractorAll"));
     expect(spec.shipyard).toBe(true);
     expect(lines.some((line) => line.includes("Racer"))).toBe(true);
   });

@@ -522,7 +522,8 @@ describe("the hauler and the hub", () => {
     for (let i = 0; i < seconds / TICK; i++) {
       sim.step();
       sim.events.length = 0;
-      if (base.hauler !== null && base.hauler.stage !== "loading" && base.hauler.stage !== "arriving" && base.hauler.stage !== "docking") return true;
+      // Its cargo reaches the hub once it's out of sight.
+      if (base.hauler === null) return true;
     }
     return false;
   }
@@ -595,6 +596,32 @@ describe("the hauler and the hub", () => {
     // Two ore B fit in 5 (a volume of 4); a third would make 6.
     expect(most).toBe(4);
     expect(base.stock.get(ORE)).toBe(18);
+  });
+
+  it("trades its parts for a station's ore when it comes in full and the station is in debt", () => {
+    // Full of part A, it has no room for ore until they're off, and the station can't pay for them:
+    // the ore it holds pays instead, or the hauler would leave with both.
+    const { sim } = world({ ...HAULERS, haulerVolume: 10, stationPartsTarget: 1000 }, { items: [] });
+    const base = sim.bases[1];
+    base.ore = new Map([[PLAIN, 30]]);
+    base.stock.delete(PART_A);
+    base.account.credits = -1000;
+    expect(untilBerthed(sim, base)).toBe(true);
+    expect(base.hauler!.items.get(PART_A)).toBe(10);
+    let leaving = 0;
+    let partsLeft = 10;
+    for (let i = 0; i < 600 / TICK && base.hauler; i++) {
+      sim.step();
+      sim.events.length = 0;
+      if (base.hauler) partsLeft = Math.min(partsLeft, base.hauler.items.get(PART_A) ?? 0);
+      if (base.hauler?.stage === "leaving") leaving = Math.max(leaving, base.hauler.items.get(PLAIN) ?? 0);
+    }
+    // Part A goes to work at the station as it lands, so count what came off the hauler instead:
+    // the 10 ore that fit pay 150, enough for 9 parts at 16. The last goes back to the hub.
+    expect(partsLeft).toBe(1);
+    expect(base.ore.get(PLAIN) ?? 0).toBeLessThan(30);
+    // It flies off with the ore aboard: the hub only gets it once the hauler is out of sight.
+    expect(leaving).toBeGreaterThan(0);
   });
 
   it("brings part B to a base that sells the 360 tractor and is low on it, and none to a base with no such recipe", () => {

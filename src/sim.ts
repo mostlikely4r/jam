@@ -249,7 +249,7 @@ export interface Hauler {
   thrust: { forward: number; side: number; turn: number };
   /** What it carries: every item aboard, ore included, counted by volume. */
   items: Map<PartId, number>;
-  /** Credits paid for ore this visit and not yet spent on parts. */
+  /** Credits paid for ore this visit and not yet spent on parts. Below zero while parts were paid with ore still to come. */
   earned: number;
   /** Seconds at the berth with nothing to load. */
   idle: number;
@@ -2122,7 +2122,9 @@ export class Sim {
               this.addTo(hauler.items, unload, -1);
               this.addTo(base.stock, unload, 1);
               account.credits -= price;
-              hauler.earned = Math.max(0, hauler.earned - price);
+              // This visit's ore pays first, ore still to come included: it may run ahead of what's aboard.
+              const fromOre = hauler.earned + this.haulerOreToCome(base, hauler);
+              hauler.earned -= Math.min(price, Math.max(0, fromOre));
             }
           }
         }
@@ -2130,10 +2132,7 @@ export class Sim {
         if ((full && itemToLoad() === null && itemToUnload() === null) || hauler.idle >= HAULER_WAIT_SECONDS) {
           hauler.stage = "undocking";
           hauler.time = 0;
-          const aboard = this.oreAboard(hauler);
-          // Whatever it carries off goes to the hub, where recipes run.
-          this.unloadToHub(hauler);
-          if (tuning.chatter) this.chatter.haulerLeaving(this, base, aboard);
+          if (tuning.chatter) this.chatter.haulerLeaving(this, base, this.oreAboard(hauler));
         }
         return;
       }
@@ -2173,6 +2172,8 @@ export class Sim {
         hauler.x += hauler.vx * dt;
         hauler.y += hauler.vy * dt;
         if (Math.hypot(hauler.x - station.x, hauler.y - station.y) > HAULER_GONE) {
+          // Out of sight, what it carries goes to the hub, where recipes run: it leaves loaded.
+          this.unloadToHub(hauler);
           base.hauler = null;
         }
         return;
@@ -2286,12 +2287,37 @@ export class Sim {
     return null;
   }
 
-  /** The part a hauler at the berth would set down now: one the base asks for, paid for out of credits. */
+  /**
+   * What the ore still waiting for a hauler at the berth will pay: as much of the station's ore as
+   * fits in the room it will have once its parts are off.
+   */
+  private haulerOreToCome(base: Base, hauler: Hauler): number {
+    let room = this.tuning.haulerVolume;
+    for (const [id, count] of hauler.items) if (isOreItem(id)) room -= volumeOf(id) * count;
+    let worth = 0;
+    for (const item of oreItems()) {
+      const id = item.id as PartId;
+      const volume = Math.max(volumeOf(id), 1e-9);
+      const takes = Math.min((base.ore.get(id) ?? 0) + this.stockOf(base, id), Math.floor((room + 1e-9) / volume));
+      if (takes <= 0) continue;
+      room -= takes * volume;
+      worth += takes * this.haulerPays(id);
+    }
+    return worth;
+  }
+
+  /**
+   * The part a hauler at the berth would set down now: one the base asks for, paid for out of
+   * credits, or out of this visit's ore: what the hauler has paid so far and the ore still to come.
+   * A hauler that comes in full has no room for that ore until its parts are off, so the ore a
+   * station in debt holds has to count before it's aboard, or the hauler leaves with both.
+   */
   private haulerUnloads(base: Base, hauler: Hauler): PartId | null {
+    const fromOre = hauler.earned + this.haulerOreToCome(base, hauler);
     for (const [id, count] of hauler.items) {
       if (count < 1 || !this.needsItem(base, id)) continue;
       const price = partOf(id).price;
-      if (base.account.credits >= price || hauler.earned >= price) return id;
+      if (base.account.credits >= price || fromOre >= price) return id;
     }
     return null;
   }

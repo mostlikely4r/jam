@@ -663,7 +663,10 @@ export class Bot {
     if (sim.clickPilot.active && sim.clickPilot.target() === null) sim.orderStop();
     const run = this.clearRun(sim, spot);
     this.log.input(now, "move", `${what} at ${Math.round(run.x)}, ${Math.round(run.y)}`);
-    sim.orderMoveStraight(run.x, run.y);
+    // The plain click a player gives, not the chart's straight line: a click on a pad comes
+    // round the station to the dock instead of through the solid box, which is where a run
+    // home used to end up sitting, 500 units out with its order still "flying".
+    sim.orderMove(run.x, run.y);
     this.orderAt = now;
     this.clickedAt = now;
     this.freshAt = now;

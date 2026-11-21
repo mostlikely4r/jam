@@ -3,6 +3,7 @@ import { planRoute, type Route, type Vec } from "./route";
 import {
   type Body,
   type Deposit,
+  DOCK_OFFSET,
 
   type MiningField,
   type Ore,
@@ -144,6 +145,20 @@ function toPoiAxes(poi: Poi, x: number, y: number): { x: number; y: number } {
   const cos = Math.cos(poi.rotation);
   const sin = Math.sin(poi.rotation);
   return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
+}
+
+/** Whether a trip is to this station's berth: a spot within the dock's own box. */
+function aimsAtBerth(station: Poi, target: { x: number; y: number }): boolean {
+  const local = toPoiAxes(station, target.x, target.y);
+  return Math.abs(local.x - DOCK_OFFSET) <= STATION_HALF && Math.abs(local.y) <= STATION_HALF;
+}
+
+/**
+ * Whether a spot is past a station's dock face, in the station's own axes. From there the
+ * straight line to the berth can't touch the solid box, so the ring has nothing left to guard.
+ */
+function pastDockFace(station: Poi, x: number, y: number): boolean {
+  return toPoiAxes(station, x, y).x >= STATION_HALF + SHIP_RADIUS;
 }
 
 /**
@@ -371,8 +386,8 @@ class ShipPilot {
     return Math.min(tuning.droneCruiseSpeed, nearField);
   }
 
-  /** The fastest speed from which the ship can still turn and stop within a distance. */
-  protected stoppingSpeed(sim: Sim, distance: number): number {
+  /** The braking acceleration, and the time it takes to turn for it: the two stopping sums share these. */
+  private braking(sim: Sim): { accel: number; flipSeconds: number } {
     const { ship } = this;
     const { tuning } = sim;
     const hasReverse = ship.parts.has("reverse");
@@ -382,12 +397,28 @@ class ShipPilot {
     const flipSeconds = hasReverse
       ? REVERSE_BRAKE_SECONDS
       : Math.max(Math.PI / SPIN_LIMIT + 0.5, 2.5 * Math.sqrt(Math.PI / spinAccel));
+    return { accel, flipSeconds };
+  }
+
+  /** The fastest speed from which the ship can still turn and stop within a distance. */
+  protected stoppingSpeed(sim: Sim, distance: number): number {
+    const { accel, flipSeconds } = this.braking(sim);
     const lead = accel * flipSeconds;
     return -lead + Math.sqrt(lead * lead + 2 * accel * distance);
   }
 
-  /** Direction to fly: straight at the target, or past the first thing in the way. */
-  protected routeAround(sim: Sim, target: Mover, exclude: object | null): { x: number; y: number } {
+  /** How far it takes to turn and stop from a speed: the inverse of `stoppingSpeed`. */
+  protected stoppingDistance(sim: Sim, speed: number): number {
+    const { accel, flipSeconds } = this.braking(sim);
+    const lead = accel * flipSeconds;
+    return (speed * speed + 2 * speed * lead) / (2 * accel);
+  }
+
+  /**
+   * Direction to fly: straight at the target, or past the first thing in the way. With
+   * `rocks` off it only keeps clear of stations, which is all a plain click on a pad needs.
+   */
+  protected routeAround(sim: Sim, target: Mover, exclude: object | null, rocks = true): { x: number; y: number } {
     const { ship } = this;
     const toX = target.x - ship.x;
     const toY = target.y - ship.y;
@@ -395,7 +426,13 @@ class ShipPilot {
     const dirX = toX / distance;
     const dirY = toY / distance;
 
-    let along = Math.min(distance, AVOID_LOOK_AHEAD);
+    // It looks ahead as far as it would take to stop from the speed it is at, and never less
+    // than the old fixed reach: a slow flight sees exactly what it saw before, and a fast
+    // course meets a rock with time to turn its nose round and brake.
+    const { vx, vy } = this.relativeVelocity(target);
+    const lookAhead = Math.max(AVOID_LOOK_AHEAD, this.stoppingDistance(sim, Math.hypot(vx, vy)));
+
+    let along = Math.min(distance, lookAhead);
     let blockX = 0;
     let blockY = 0;
     let blockRadius = 0;
@@ -415,9 +452,15 @@ class ShipPilot {
     // The station is big enough to plan around from further away.
     // Clears its corners, while the dock's center stays outside this radius.
     const stationRadius = Math.hypot(STATION_HALF, STATION_HALF) + SHIP_RADIUS + 30;
-    for (const station of sim.docks) consider(station.x, station.y, stationRadius, Math.min(distance, AVOID_LOOK_AHEAD * 3));
+    for (const station of sim.docks) {
+      // Coming in to a station's own berth, its ring stops guarding once the way in is clear:
+      // past the dock's face the straight run in clears the solid box, so holding the ship out
+      // on the ring there only keeps it off the dock. Other stations keep their rings.
+      if (aimsAtBerth(station, target) && pastDockFace(station, ship.x, ship.y)) continue;
+      consider(station.x, station.y, stationRadius, Math.min(distance, Math.max(AVOID_LOOK_AHEAD * 3, lookAhead)));
+    }
     for (const rock of sim.rocks) {
-      if (rock === exclude) continue;
+      if (!rocks || rock === exclude) continue;
       consider(rock.x, rock.y, rock.radius + SHIP_RADIUS + AVOID_MARGIN, along);
     }
     if (blockRadius === 0) return { x: dirX, y: dirY };
@@ -425,12 +468,17 @@ class ShipPilot {
     const offX = blockX - ship.x;
     const offY = blockY - ship.y;
     const gap = Math.hypot(offX, offY) || 1;
-    if (gap <= blockRadius) return { x: -offX / gap, y: -offY / gap };
 
-    // The tangent past the obstacle, on the side the ship is already on.
+    // The tangent past the obstacle, on the side the ship is already on. Inside the circle
+    // there is no tangent point, so it takes the tangent where it stands, and that fades to
+    // straight out nearer the middle, where out is the only way out. Either side of the edge
+    // the heading is the tangent, so crossing it doesn't flip the nose: that flip is what
+    // stalled a ship coming round a station to its dock from the far side.
     const side = offX * dirY - offY * dirX >= 0 ? 1 : -1;
     const center = Math.atan2(offY, offX);
-    const angle = center + side * Math.asin(blockRadius / gap);
+    // How much of the tangent to take: none in the middle, all of it at the circle's edge.
+    const out = Math.min(1, gap / blockRadius);
+    const angle = center + side * Math.asin(Math.min(1, blockRadius / gap)) * out;
     return { x: Math.cos(angle), y: Math.sin(angle) };
   }
 
@@ -1434,7 +1482,12 @@ export class ClickPilot extends ShipPilot {
     return Math.min(sim.tuning.autopilotSpeed, scaled);
   }
 
-  /** Straight at the spot, whatever is in the way, unless it has the route planner or a course. */
+  /**
+   * Straight at the spot, whatever is in the way, unless it has the route planner or a course.
+   * A click on a station's pad is the one straight line that isn't: from the far side of the
+   * station it runs through the solid box, so it takes the ring round the station it is going
+   * to. Rocks stay out of it, so an order without the planner decides a line and keeps it.
+   */
   protected override routeAround(
     sim: Sim,
     target: { x: number; y: number; px: number; py: number },
@@ -1442,6 +1495,9 @@ export class ClickPilot extends ShipPilot {
   ): { x: number; y: number } {
     const { ship } = this;
     if ((ship.parts.has("clickRoute") && !this.order?.straight) || this.order?.follow) return super.routeAround(sim, target, exclude);
+    if (!this.order?.straight && sim.docks.some((station) => aimsAtBerth(station, target))) {
+      return super.routeAround(sim, target, exclude, false);
+    }
     const dx = target.x - ship.x;
     const dy = target.y - ship.y;
     const distance = Math.hypot(dx, dy) || 1;

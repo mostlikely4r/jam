@@ -243,3 +243,87 @@ than the course — which is one more reason the click stayed and the follow wen
 A hull with `strafe` and no `reverse` never finishes a click order on a fixed spot in open space: it
 can only brake to within 9 units and its landing circle is half a unit. Hulls with side thrusters
 were to land exactly as they did before, so it was left as it was.
+
+## The ring, and looking as far ahead as it takes to stop
+
+*2026-12-02, after the work planned in `docs/look-ahead-plan.md`. It comes back to the ring with the
+numbers the build actually made, because the plan's reading of why the three starts miss did not
+survive contact with the code.*
+
+### The log the plan asked for first
+
+The plan wanted the route's heading logged, tick by tick, for the three starts that miss. There was
+no route in them to log: a bare floater starts with `clickMove` and `clickTurn`, not `clickRoute`,
+so `ClickPilot.routeAround` handed it the straight line to the berth and the ring never came into
+it. What those starts do instead is fly that line into the station's solid box — 100 hull to 97.4
+on one and to 98.3 on another, at 16 to 21 seconds in — bounce, and then sit 460 to 520 units from
+the berth with the nose swinging through 90 to 180 degrees a tick, at 0 to 30 units a second, the
+order still "flying", re-clicked every 30 seconds until the five minutes are gone. It is the same
+shut-still that the run report reads as a stall; it is not the ring.
+
+The ring's flip is real, though, once a ship is routed. Logged from a hull with the planner, the
+heading just inside the circle is straight out and just outside it is the tangent, and where the
+ship sits on the far side of the station, on the line through to its berth, those two are 160
+degrees apart. That is what `docs/look-ahead-plan.md` describes, and what step 1c fixes: across the
+edge the heading now moves by at most 19 degrees.
+
+Each new test was also run against the build before its step, and fails there. The far-side click
+test fails on the build before the ring: `planner false, 0 s in: expected false to be true` — the
+ship never docks. The fast-course test fails on the build with step 1 in and step 2 not: `expected
+89.68857532160509 to be 100`, which is the rock taking a tenth of the hull on the way past.
+
+### What the click check says
+
+`npm run dockchase -- 20 1`, the click on the berth, one order at a time:
+
+| | docked | median | mean | orders |
+| --- | --- | --- | --- | --- |
+| before | 17 of 20 | 18.7 s | 18.9 s | 47 |
+| after | 20 of 20 | 19.1 s | 18.9 s | 20 |
+
+The one change that moved those three starts is that a click on a station's pad now takes the ring
+round the station it is going to. With the same pad-click rule but the ring itself left as it was
+(no berth release, straight out inside the circle), the check still docks 20 of 20 at a median of
+19.1 s and a mean of 19.0 s — so the ring's own changes cost a tenth of a second and fix nothing in
+this check. They are in because the far-side approach is still what a routed hull meets, and
+because 1c is the only thing standing between a path round a station and the flip above.
+
+### What the course check says
+
+`npm run dockchase -- course 20 1`, the floater on the far side of the field with its autopilot,
+sent home with a course:
+
+| | docked | median | mean | hull lost |
+| --- | --- | --- | --- | --- |
+| before step 2 | 17 of 20 | 50.9 s | 73.0 s | 1047.9 |
+| after step 2 | 20 of 20 | 50.2 s | 65.3 s | 663.9 |
+
+Seeing as far ahead as it takes to stop is worth a third of the damage and the last three misses,
+and it is not "hull lost near zero", which is what the plan expected. The damage that is left is
+the field crossed flat out: these trips are 13,300 units, so the course peaks near 480 units a
+second, not the 257 the plan's example had, and the route's clearance is `AVOID_MARGIN` — 30 units
+— whatever the speed. A ship following a tangent passes at exactly the circle it aims for, so a
+hull that lags the aim by more than 30 units grazes. At 480 that is most rocks it meets.
+
+### Where a run stalls next
+
+`npm run bot -- floater 2 1` on this build gets past the 85-minute stall: it docks eight times in
+an hour and a half, buys its cargo bay at 0:41, and is stuck at 1:30 on **step 2, the turret** —
+"nothing bought and nothing earned for 15 game minutes", 3,718 units inside the field's edge, with
+its last inputs "turn 65 deg, turn 47 deg, fire at a rock". So the next wall is the shooting, not
+the coming home, and there was no wreck on this run at all.
+
+It took one change outside the ring to get there. The bot gave every order with
+`orderMoveStraight`, the chart's kind, which flies the line whatever is in the way *even with the
+route planner* — its own doc comment above the call says "a click on the berth, as a player gives
+with a right click", and a player's right click is `orderMove`. With `orderMoveStraight` the ring
+could not reach the bot at all: it flew the line into the station's solid box and sat there, which
+is the same stall the click check's three starts had, and the same 500 units out. `head()` now gives
+the order a player gives, and the ring does the rest.
+
+### What is left of the ring
+
+Two things it still can't do, both outside the route. A course across a field flat out keeps only
+`AVOID_MARGIN` — 30 units — of clearance per rock whatever the speed, so a crossing at 480 units a
+second still grazes (the course check's 663.9 hull lost against 1047.9). And a *straight* order, the
+chart's "Move here", still flies into the station: that is what the order is for.

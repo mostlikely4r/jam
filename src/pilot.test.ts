@@ -4,8 +4,27 @@ import { APPROACH, BOUGHT, HEADING_BACK, OUTBOUND, THANKS } from "./chatter";
 import { PARTS, partOf, type PartId } from "./parts";
 import { moduleIds } from "./items";
 import { DEFAULTS } from "./tuning";
-import { DOCK_OFFSET, MAX_HULL, SHIP_RADIUS, Sim, TICK } from "./sim";
+import { DOCK_OFFSET, MAX_HULL, SHIP_RADIUS, STATION_HALF, Sim, TICK } from "./sim";
+import { ClickPilot } from "./pilot";
 import { partOf as partInfo } from "./parts";
+
+/**
+ * Reaches the flying arithmetic the pilot keeps to itself, for the pure-logic tests. It flies
+ * nothing: it's handed the sim to read and asked what a hull of its kind would do.
+ */
+class Probe extends ClickPilot {
+  stopSpeed(sim: Sim, distance: number): number {
+    return this.stoppingSpeed(sim, distance);
+  }
+
+  stopDistance(sim: Sim, speed: number): number {
+    return this.stoppingDistance(sim, speed);
+  }
+
+  heading(sim: Sim, target: { x: number; y: number; px: number; py: number }): { x: number; y: number } {
+    return this.routeAround(sim, target, null);
+  }
+}
 
 /** How much ore an empty bay of this part holds, at one ore per cell. */
 const bayCells = (id: "smallBay" | "bay" | "largeBay") => partInfo(id).bay!.w * partInfo(id).bay!.h;
@@ -2601,6 +2620,148 @@ describe("click orders", () => {
       sim.devSet(sim.ship, "clickMove", false);
       run(sim, 0.1);
       expect(sim.clickPilot.active).toBe(false);
+    });
+  });
+
+  describe("the ring round a station, and looking as far ahead as it takes to stop", () => {
+    /** A spot `far` from the station's middle, on the side away from its dock. */
+    function farSide(sim: Sim, far = 500): void {
+      const { station } = sim;
+      park(sim.ship, station.x - Math.cos(station.rotation) * far, station.y - Math.sin(station.rotation) * far, station.rotation);
+      sim.step();
+    }
+
+    /** A spot the station's own axes call `x, y`, in the world. */
+    function stationSpot(sim: Sim, x: number, y: number): { x: number; y: number } {
+      const { station } = sim;
+      const cos = Math.cos(station.rotation);
+      const sin = Math.sin(station.rotation);
+      return { x: station.x + x * cos - y * sin, y: station.y + x * sin + y * cos };
+    }
+
+    /** Where the ship is, in the station's own axes. */
+    function localOf(sim: Sim): { x: number; y: number } {
+      const { station, ship } = sim;
+      const dx = ship.x - station.x;
+      const dy = ship.y - station.y;
+      const cos = Math.cos(station.rotation);
+      const sin = Math.sin(station.rotation);
+      return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
+    }
+
+    it("comes round the station to its berth from the far side, planner or no planner", () => {
+      for (const planner of [false, true]) {
+        for (const warm of [0, 300]) {
+          const sim = alone();
+          sim.warmUp(warm);
+          if (planner) sim.devSet(sim.ship, "clickRoute", true);
+          farSide(sim);
+          const berth = sim.dockPoint(false, sim.station);
+          expect(sim.orderMove(berth.x, berth.y), `${warm} s in`).toBe(true);
+          // A player clicks again only when the order has finished and the ship isn't in.
+          let clicked = 0;
+          for (let i = 0; i < Math.round(60 / TICK) && !sim.isDocked(); i++) {
+            if (!sim.clickPilot.active && i * TICK - clicked > 1) {
+              const again = sim.dockPoint(false, sim.station);
+              expect(sim.orderMove(again.x, again.y), `${warm} s in`).toBe(true);
+              clicked = i * TICK;
+            }
+            sim.step();
+            sim.events.length = 0;
+          }
+          expect(sim.isDocked(), `planner ${planner}, ${warm} s in`).toBe(true);
+        }
+      }
+    }, 120000);
+
+    it("still goes round a station it is only passing", () => {
+      const sim = alone();
+      sim.devSet(sim.ship, "clickRoute", true);
+      const from = stationSpot(sim, -900, 0);
+      const to = stationSpot(sim, 1200, 0);
+      park(sim.ship, from.x, from.y, sim.station.rotation);
+      sim.step();
+      expect(sim.orderMove(to.x, to.y)).toBe(true);
+      // How far outside the solid box's own edges it is: negative once it's in the box.
+      let shallowest = Infinity;
+      for (let i = 0; i < Math.round(90 / TICK); i++) {
+        sim.step();
+        sim.events.length = 0;
+        const local = localOf(sim);
+        shallowest = Math.min(shallowest, Math.max(Math.abs(local.x), Math.abs(local.y)) - STATION_HALF);
+      }
+      expect(shallowest).toBeGreaterThan(0);
+      // And it gets past the station rather than settling on its ring.
+      expect(localOf(sim).x).toBeGreaterThan(STATION_HALF + DOCK_OFFSET);
+    }, 60000);
+
+    it("stoppingDistance is the inverse of stoppingSpeed, with and without a reverse thruster", () => {
+      for (const reverse of [false, true]) {
+        const sim = alone();
+        if (reverse) sim.devSet(sim.ship, "reverse", true);
+        const probe = new Probe(sim.ship);
+        for (const speed of [0, 5, 50, 120, 250]) {
+          expect(probe.stopSpeed(sim, probe.stopDistance(sim, speed)), `speed ${speed}`).toBeCloseTo(speed, 6);
+        }
+        for (const distance of [0, 10, 500, 2600]) {
+          expect(probe.stopDistance(sim, probe.stopSpeed(sim, distance)), `distance ${distance}`).toBeCloseTo(distance, 6);
+        }
+      }
+    });
+
+    it("a fast course sees a rock far enough ahead to miss it", () => {
+      const sim = alone();
+      const { ship } = sim;
+      // Where the game puts it, by the home field: rocks out here belong to the field and
+      // drift with it, so the one on the line stays on it.
+      const from = { x: ship.x, y: ship.y };
+      const to = { x: from.x + 4000, y: from.y };
+      sim.devSet(ship, "autopilot", true);
+      const rock = sim.makeRock(2, from.x + 900, from.y, 0, 0);
+      sim.rocks.push(rock);
+      const hull = ship.hull;
+      sim.clickPilot.travelTo({ x: to.x, y: to.y, px: to.x, py: to.y }, 0, 0, 0);
+      let closest = Infinity;
+      let peak = 0;
+      for (let i = 0; i < Math.round(40 / TICK); i++) {
+        sim.step();
+        sim.events.length = 0;
+        closest = Math.min(closest, Math.hypot(ship.x - rock.x, ship.y - rock.y));
+        peak = Math.max(peak, Math.hypot(ship.vx, ship.vy));
+        if (Math.hypot(ship.x - to.x, ship.y - to.y) < 100) break;
+      }
+      // A course this long does go fast: the rock is past where the old 500 units reached.
+      expect(peak).toBeGreaterThan(200);
+      expect(closest).toBeGreaterThan(rock.radius + SHIP_RADIUS);
+      expect(ship.hull).toBe(hull);
+    }, 60000);
+
+    it("a slow flight sees exactly what it saw before", () => {
+      const sim = alone();
+      const probe = new Probe(sim.ship);
+      sim.devSet(sim.ship, "clickRoute", true);
+      const from = { x: sim.ship.x, y: sim.ship.y };
+      probe.moveTo(sim, from.x + 4000, from.y);
+      // 50 units a second plans to stop well inside today's 500, so the look ahead is that 500.
+      sim.ship.px = sim.ship.x - 50 * TICK;
+      const target = probe.target()!;
+      expect(probe.heading(sim, target)).toEqual({ x: 1, y: 0 });
+      sim.rocks.push(sim.makeRock(2, from.x + 600, from.y, 0, 0));
+      expect(probe.heading(sim, target)).toEqual({ x: 1, y: 0 });
+    });
+
+    it("a click order with no planner still flies straight", () => {
+      const sim = alone();
+      const probe = new Probe(sim.ship);
+      const from = { x: sim.ship.x, y: sim.ship.y };
+      probe.moveTo(sim, from.x + 4000, from.y);
+      sim.rocks.push(sim.makeRock(2, from.x + 900, from.y, 0, 0));
+      sim.ship.px = sim.ship.x - 250 * TICK;
+      const target = probe.target()!;
+      expect(probe.heading(sim, target)).toEqual({ x: 1, y: 0 });
+      // With the planner, that same rock comes into sight and the route turns aside.
+      sim.devSet(sim.ship, "clickRoute", true);
+      expect(probe.heading(sim, target).y).toBeGreaterThan(0.05);
     });
   });
 });

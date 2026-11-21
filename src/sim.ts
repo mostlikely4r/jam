@@ -217,6 +217,8 @@ type BuyPlan = { where: "mount"; mounts: MountId[] } | { where: "hold" | "locker
 export interface Rock extends Body {
   /** Still on its way in from outside the field. */
   arriving: boolean;
+  /** Seconds since it was knocked out of its field, too fast to be pulled back. Older saves have none. */
+  strayed?: number;
   tier: number;
   radius: number;
   hp: number;
@@ -5361,20 +5363,28 @@ export class Sim {
     return timer;
   }
 
+  /**
+   * Rocks fly on as they go. One that drifts out of its field slowly is pulled gently back in. One
+   * knocked out fast isn't: pulled back, it would come swinging through the lanes at speed. It
+   * flies on, and after a while it's gone for good, even should it come back through the field.
+   */
   private moveRocks(dt: number): void {
+    const { rockStraySpeed, rockStraySeconds } = this.tuning;
     const fields = this.awakeRockFields();
+    let gone = false;
     for (const rock of this.rocks) {
       const { poi, radius } = fields[this.fieldAt(fields, rock.x, rock.y)];
-      if (rock.arriving) {
-        // The field's pull would speed it up all the way in.
-        rock.arriving = Math.hypot(rock.x - poi.x, rock.y - poi.y) > radius;
-      } else {
-        this.containInField(rock, poi, radius, dt);
-      }
+      const outside = Math.hypot(rock.x - poi.x, rock.y - poi.y) > radius;
+      if (rock.arriving) rock.arriving = outside;
+      else if (rock.strayed !== undefined || (outside && Math.hypot(rock.vx, rock.vy) > rockStraySpeed)) {
+        rock.strayed = (rock.strayed ?? 0) + dt;
+        if (rock.strayed >= rockStraySeconds) gone = true;
+      } else this.containInField(rock, poi, radius, dt);
       rock.x += rock.vx * dt;
       rock.y += rock.vy * dt;
       rock.angle += rock.spin * dt;
     }
+    if (gone) this.rocks = this.rocks.filter((rock) => (rock.strayed ?? 0) < rockStraySeconds);
   }
 
   /** Whether a ship's tractor beam is working: fitted, and room in the bay for a piece of ore. */

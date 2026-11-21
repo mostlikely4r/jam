@@ -213,6 +213,25 @@ describe("turret mount", () => {
   });
 });
 
+describe("rocks out of their field", () => {
+  it("lets one knocked out fast fly on and be gone, and pulls a slow drifter back in", () => {
+    const sim = emptySim();
+    const [field] = (sim as unknown as { awakeRockFields(): { poi: Poi; radius: number }[] }).awakeRockFields();
+    const edge = field.poi.x + field.radius + 50;
+    const fast = sim.makeRock(2, edge, field.poi.y, sim.tuning.rockStraySpeed * 2, 0);
+    const slow = sim.makeRock(2, edge, field.poi.y + 2000, sim.tuning.rockStraySpeed / 4, 0);
+    sim.rocks.push(fast, slow);
+    run(sim, sim.tuning.rockStraySeconds / 2);
+    // The fast one is still flying out: nothing turned it.
+    expect(sim.rocks).toContain(fast);
+    expect(fast.vx).toBeCloseTo(sim.tuning.rockStraySpeed * 2, 6);
+    expect(slow.vx).toBeLessThan(0);
+    run(sim, sim.tuning.rockStraySeconds / 2 + 1);
+    expect(sim.rocks).not.toContain(fast);
+    expect(sim.rocks).toContain(slow);
+  });
+});
+
 describe("impacts", () => {
   it("does not let a very fast ship pass through a rock", () => {
     const sim = emptySim();

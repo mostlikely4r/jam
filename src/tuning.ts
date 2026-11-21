@@ -16,6 +16,13 @@ export const DEFAULTS = {
   oreChance: 0.45,
   /** How fast broken pieces drift apart. Zero keeps them moving with the rock. */
   rockBreakSpeed: 0,
+  /**
+   * A rock that leaves its field faster than this (its own speed, not the field's) is knocked out:
+   * nothing pulls it back, and after `rockStraySeconds` out it's gone. Slower ones, the field's own
+   * drift, are pulled gently back in, so the field doesn't empty.
+   */
+  rockStraySpeed: 40,
+  rockStraySeconds: 30,
   /** Gun 1 only: the chance each piece of ore from a break flies off, and what it's worth. */
   flingChance: 0.3,
   flingOreAmount: 3,
@@ -298,6 +305,8 @@ export const GROUPS: Group[] = [
       { key: "rockToughness", label: "Rock toughness", min: 1, max: 20, step: 1 },
       { key: "oreChance", label: "Ore chance", min: 0, max: 1, step: 0.05 },
       { key: "rockBreakSpeed", label: "Broken pieces drift apart at", min: 0, max: 60, step: 1 },
+      { key: "rockStraySpeed", label: "A rock leaving its field faster than this flies off", min: 0, max: 200, step: 5 },
+      { key: "rockStraySeconds", label: "A rock knocked out of its field is gone after (s)", min: 1, max: 300, step: 1 },
       { key: "flingChance", label: "Gun 1: chance break ore flies off", min: 0, max: 1, step: 0.05 },
       { key: "flingOreAmount", label: "Gun 1: ore a flung piece is worth", min: 1, max: 10, step: 1 },
     ],

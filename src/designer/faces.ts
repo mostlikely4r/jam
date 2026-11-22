@@ -1,7 +1,19 @@
 // SAFETY: dev page only; it reads the same hand-authored file the renderer reads, to say which
 // moods a voice actually wrote and which are being borrowed.
 import file from "../voices.json";
-import { FACE_BOX, MOODS, VOICES, renderFaceSvg, type FaceFile, type Mood, type Voice } from "../faces";
+import {
+  FACE_BOX,
+  MOODS,
+  VOICES,
+  faceFor,
+  renderFace,
+  renderFaceSvg,
+  type Face,
+  type FaceFile,
+  type Mood,
+  type Part,
+  type Voice,
+} from "../faces";
 
 const DATA = file as unknown as FaceFile;
 
@@ -57,6 +69,16 @@ const STYLE = `
   #faces .cell .tag em { color: #5a6a80; font-style: normal; }
   #faces .cell svg { display: block; }
   #faces .big { line-height: 0; }
+  #faces .opt { margin-bottom: 14px; }
+  #faces .optlabel { color: #8fb4ff; letter-spacing: 1px; margin-bottom: 6px; }
+  #faces .optrow { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+  #faces .option { background: #0b0f18; border: 1px solid #1e2a3d; padding: 8px; }
+  #faces .option .faces { display: flex; gap: 8px; }
+  #faces .option figure { margin: 0; }
+  #faces .option figure svg { display: block; }
+  #faces .option figcaption { color: #5a6a80; font-size: 10px; letter-spacing: 1px; margin-top: 3px; }
+  #faces .option .name { color: #cfe8ee; margin-top: 6px; letter-spacing: 1px; }
+  #faces .option .name em { color: #5a6a80; font-style: normal; }
   #faces .grades { display: flex; gap: 10px; margin-top: 7px; align-items: flex-start; }
   #faces .grades figure { margin: 0; line-height: 0; }
   #faces .grades figcaption { font-size: 10px; color: #5a6a80; margin-top: 3px; letter-spacing: 1px; }
@@ -124,6 +146,134 @@ export class FaceGallery {
     return !this.element.hidden;
   }
 
+  /** The open calls, side by side: the things that are easier to point at than to describe. */
+  private options(): HTMLElement {
+    const section = document.createElement("div");
+    const head = document.createElement("h2");
+    head.textContent = "Options";
+    const note = document.createElement("span");
+    note.textContent = "name a letter per row — nothing here is saved";
+    head.append(note);
+
+    const question = (title: string, boxes: HTMLDivElement[]): void => {
+      const line = document.createElement("div");
+      line.className = "opt";
+      const label = document.createElement("div");
+      label.className = "optlabel";
+      label.textContent = title;
+      const row = document.createElement("div");
+      row.className = "optrow";
+      row.append(...boxes);
+      line.append(label, row);
+      section.append(line);
+    };
+
+    const box = (name: string, note: string, ...faces: [Face, string][]): HTMLDivElement => {
+      const element = document.createElement("div");
+      element.className = "option";
+      const shown = document.createElement("div");
+      shown.className = "faces";
+      for (const [face, caption] of faces) {
+        const figure = document.createElement("figure");
+        const cap = document.createElement("figcaption");
+        cap.textContent = caption;
+        figure.append(svg(renderFace(face, { size: 96, seed: `opt-${name}-${caption}` })), cap);
+        shown.append(figure);
+      }
+      const named = document.createElement("div");
+      named.className = "name";
+      named.textContent = name;
+      const why = document.createElement("em");
+      why.textContent = note ? ` ${note}` : "";
+      named.append(why);
+      element.append(shown, named);
+      return element;
+    };
+
+    const gus = (mood: Mood, change: Partial<Face> = {}): Face => ({ ...faceFor("gus", mood), ...change });
+    const plainBrows: Part[] = faceFor("gus", "neutral").brows;
+    const refinedBrows: Part[] = [
+      { kind: "arc", at: [34, 21], half: 6, bow: 1.5, rot: 5, w: 3.4 },
+      { kind: "arc", at: [66, 20], half: 6.5, bow: 1.5, rot: -5, w: 3.4 },
+    ];
+    question("Gus — brows", [
+      box("A fixed", "identity, never moves", [gus("neutral", { over: [...gus("neutral").over, ...plainBrows], brows: [] }), "neutral"], [gus("scared", { over: [...gus("scared").over, ...plainBrows], brows: [] }), "scared"]),
+      box("B none", "the reference has none", [gus("neutral", { brows: [] }), "neutral"], [gus("scared", { brows: [] }), "scared"]),
+      box("C mood", "thinner, tilted more", [gus("neutral", { brows: refinedBrows }), "neutral"], [gus("scared", { brows: refinedBrows }), "scared"]),
+    ]);
+
+    const scar = (parts: Part[]): Partial<Face> => ({ over: parts });
+    const pale = "#FFE2B4";
+    const slash: Part[] = [{ kind: "line", from: [24, 11], to: [31, 26], w: 2.2, color: pale }];
+    const cross: Part[] = [
+      { kind: "line", from: [24.5, 14], to: [31.5, 25], w: 2.2, color: pale },
+      { kind: "line", from: [24.5, 25], to: [31.5, 14], w: 2.2, color: pale },
+    ];
+    const stitch: Part[] = [
+      { kind: "line", from: [26.5, 10], to: [31, 28], w: 2.2, color: pale },
+      { kind: "line", from: [25, 14], to: [30.5, 12.5], w: 1.8, color: pale },
+      { kind: "line", from: [26.5, 19], to: [32, 17.5], w: 1.8, color: pale },
+      { kind: "line", from: [28, 24], to: [33.5, 22.5], w: 1.8, color: pale },
+    ];
+    const hash: Part[] = [
+      { kind: "line", from: [26, 12], to: [31, 25], w: 2, color: pale },
+      { kind: "line", from: [30, 11], to: [35, 24], w: 2, color: pale },
+      { kind: "line", from: [24.5, 16], to: [36, 14], w: 2, color: pale },
+      { kind: "line", from: [25.5, 22], to: [37, 20], w: 2, color: pale },
+    ];
+    question("Gus — scar", [
+      box("A none", "the brow carries him", [gus("neutral", { over: [] }), "neutral"]),
+      box("B slash", "one cut through the brow", [gus("neutral", scar(slash)), "neutral"]),
+      box("C cross", "two cuts", [gus("neutral", scar(cross)), "neutral"]),
+      box("D stitch", "a line with three ticks", [gus("neutral", scar(stitch)), "neutral"]),
+      box("E hash", "the one you asked for", [gus("neutral", scar(hash)), "neutral"]),
+    ]);
+
+    question("Pip — lean", [
+      box("A 0°", "dead straight", [{ ...faceFor("pip", "scared"), tilt: 0 }, "scared"]),
+      box("B 3°", "this one", [{ ...faceFor("pip", "scared"), tilt: 3 }, "scared"]),
+      box("C 6°", "the last one, too much", [{ ...faceFor("pip", "scared"), tilt: 6 }, "scared"]),
+    ]);
+
+    const generic = faceFor("generic", "neutral");
+    question("Plain traffic — how much", [
+      box(
+        "A bare",
+        "no glint, a line mouth",
+        [
+          {
+            ...generic,
+            eyes: [
+              { kind: "square", at: [35, 26], half: 6, depth: 6, round: 2.5 },
+              { kind: "square", at: [65, 26], half: 6, depth: 6, round: 2.5 },
+            ],
+            mouth: [{ kind: "arc", at: [50, 49], half: 6.5, bow: 2.5, w: 4 }],
+          },
+          "neutral",
+        ],
+      ),
+      box("B glint", "glint and lip shine, no marks", [generic, "neutral"]),
+      box(
+        "C glint + smile",
+        "the mouth gets mass",
+        [{ ...generic, mouth: [{ kind: "disc", at: [50, 46], half: 9, depth: 7 }, { kind: "disc", at: [46.5, 47], half: 1.8, depth: 1.6, cut: true }] }, "neutral"],
+      ),
+    ]);
+
+    const station = faceFor("station", "neutral");
+    question("Station — its own display", [
+      box(
+        "A recoloured generic",
+        "what it was",
+        [{ ...station, screen: { ...station.screen, radius: 3 }, under: [], eyes: station.eyes.slice(0, 2), mouth: [{ kind: "arc", at: [50, 49], half: 7.5, bow: 3, w: 4.2 }] }, "neutral"],
+      ),
+      box("B own display", "bezel, wide flat mouth", [station, "neutral"]),
+    ]);
+
+    section.prepend(head);
+    return section;
+  }
+
   open(): void {
     this.element.hidden = false;
     this.rebuild();
@@ -188,7 +338,7 @@ export class FaceGallery {
   }
 
   private rebuild(): void {
-    this.body.replaceChildren(this.lines());
+    this.body.replaceChildren(this.options(), this.lines());
     for (const voice of VOICES) {
       const head = document.createElement("h2");
       head.textContent = NAMES[voice];

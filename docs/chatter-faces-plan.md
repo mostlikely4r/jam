@@ -55,7 +55,12 @@ Items marked *decided* are the user's calls. The rest is my proposal, open to ve
 - **The mood still comes from what really happened**, never at random (*decided*).
 - **Fallbacks** (*decided*): angry → annoyed → neutral, tired → neutral. A missing layer falls
   back to the generic face's layer in the voice's colour. Identity layers always stay.
-- **Gus and Pip get neutral, happy, annoyed and scared** (*decided*); everything else falls back.
+- **Gus and Pip get neutral, happy and scared, and annoyed** (*decided*); everything else falls back.
+- **The look starts at filled** (*decided*, from looking at the gallery): the line-only grade reads
+  worse than the filled one, so `^_^` grade stays a comparison, never a target.
+- **Plain traffic gets craft, not personality** (*decided*): a glint in each eye, a mouth with mass,
+  and the station its own display — a squarer screen with a bezel and a wide flat mouth. What it
+  still never gets is mood marks, so a face with blush or a sweat drop still means *someone*.
 
 ### A step up from `^_^`
 
@@ -110,7 +115,12 @@ Starting points to tune in the gallery, not rules:
 ### The grammar (mine)
 
 Parts, not drawings. Each voice's moods are written as combinations of a small vocabulary, which
-is what lets a third eye or a mandible mouth be a new data entry later instead of new art:
+is what lets a third eye or a mandible mouth be a new data entry later instead of new art.
+
+The user's hope, on seeing four faces: **a pool that combines into 200+ variants**, and aliens
+being "more of that". The vocabulary below is already the pool; the missing layer is naming the
+parts so a voice — and later a species — picks from the pool instead of spelling out every mood.
+Nothing in this build does the combining yet, but nothing in the data blocks it either:
 
 - eyes: half-disc lid, dome, ring, oval with a glint, star, caret, squiggle, dot, rounded square
 - brows: a tilted stroke, angled or raised
@@ -180,6 +190,11 @@ and by slider; raw paths are for the one-off shape nothing else shares.
   returning markup. Unit tested.
 - `src/voices.json`: Gus, Pip, generic and station, with Gus and Pip written for neutral, happy,
   annoyed and scared. Station is neutral only.
+- An **Options** section at the top of the page puts the open calls side by side, because they are
+  easier to point at than to describe: Gus's brows (fixed, none, per mood), Gus's scar (none,
+  slash, cross, stitch, hash), Pip's lean, how much craft plain traffic gets, and whether the
+  station gets its own display. The page saves nothing; the pick goes into `voices.json` by hand.
+  The options block is scaffolding and should go once these calls are made.
 - A dev page in `src/designer/faces.ts`, reached from `main.ts` under `?dev` (key F), showing every
   voice at every mood in a grid: the same face at **three grades** side by side — line only
   (`^_^` grade), filled and straight, and filled, crooked and marked (the target) — at a size the

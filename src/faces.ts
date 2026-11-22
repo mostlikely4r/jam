@@ -71,8 +71,8 @@ export type Part =
   /** Flat bottom, round top: a dome, a tongue, an open happy mouth. */
   | (Placed & { kind: "cap"; half: number; depth: number })
   | (Placed & { kind: "star"; r: number; inner?: number })
-  /** A rounded square: the plain eye generic traffic gets. */
-  | (Placed & { kind: "square"; half: number; depth: number; round?: number })
+  /** A rounded square: the plain eye generic traffic gets, and a screen's bezel when stroked. */
+  | (Placed & { kind: "square"; half: number; depth: number; round?: number; w?: number })
   | (Placed & { kind: "dot"; r: number })
   | (Placed & { kind: "poly"; points: Pt[] })
   /** The escape hatch: hand-drawn data, filled when it has no `w`. */
@@ -308,17 +308,13 @@ function layer(parts: Part[], face: Face, grade: Grade): string {
     .join("");
 }
 
-/**
- * A face as inline SVG. `size` is its height in pixels, so a face is as tall as it is asked to be,
- * and the same call always gives the same markup.
- */
-export function renderFaceSvg(voice: Voice, mood: Mood, render: FaceRender = {}): string {
-  const face = faceFor(voice, mood);
+/** A resolved face as inline SVG, for a gallery trying shapes out that no voice has yet. */
+export function renderFace(face: Face, render: FaceRender = {}): string {
   const grade = render.grade ?? 3;
   const size = render.size ?? 30;
   const width = round((size * FACE_BOX.w) / FACE_BOX.h);
   const screen = face.screen;
-  const id = `face-${render.seed ?? `${voice}-${mood}-${grade}-${size}`}`;
+  const id = `face-${render.seed ?? `${face.voice}-${face.mood}-${grade}-${size}`}`;
   const tilt = grade === 1 ? 0 : face.tilt;
   const open = tilt ? `<g transform="rotate(${tilt} 50 33)">` : "";
   const close = tilt ? "</g>" : "";
@@ -344,4 +340,12 @@ export function renderFaceSvg(voice: Voice, mood: Mood, render: FaceRender = {})
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${FACE_BOX.w} ${FACE_BOX.h}" width="${width}" height="${size}"` +
     ` style="color:${face.color}">${defs}${body}</svg>`
   );
+}
+
+/**
+ * A voice's face as inline SVG. `size` is its height in pixels, so a face is as tall as it is asked
+ * to be, and the same call always gives the same markup.
+ */
+export function renderFaceSvg(voice: Voice, mood: Mood, render: FaceRender = {}): string {
+  return renderFace(faceFor(voice, mood), render);
 }

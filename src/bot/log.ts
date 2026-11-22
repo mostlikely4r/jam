@@ -118,6 +118,10 @@ export class BotLog {
   breaks: Break[] = [];
   /** What the hull and the modules have cost so far, kept up as the run goes. */
   damage: Damage = { hullLost: 0, repairCredits: 0 };
+  /** Ore its own shots broke loose, and how much of that it picked up. */
+  own: { freed: number; picked: number } = { freed: 0, picked: 0 };
+  /** How far from the rock it was each time it opened fire, one a burst. */
+  fired: number[] = [];
   /** The ship's credits earned, sampled as it grew: the report's credits an hour come from it. */
   earned: { at: number; total: number }[] = [];
   end: RunEnd | null = null;
@@ -234,6 +238,7 @@ export class BotLog {
     const credits = this.perHour("credits");
     const perHour = this.perHour("inputs");
     lines.push(`Per hour: credits earned ${credits.join(", ")} | inputs ${perHour.join(", ")}`);
+    lines.push(`Mining: fires from a median ${Math.round(median(this.fired))} | own shots freed ${thousands(this.own.freed)} ore, ${thousands(this.own.picked)} of it picked up`);
     lines.push(`Damage: ${thousands(this.damage.hullLost)} hull lost, ${thousands(this.damage.repairCredits)} cr on repairs`);
     if (this.breaks.length > 0) {
       const broke = this.breaks.map((each) => `${each.what} ${clock(this.since(each.at))}`).join(", ");
@@ -278,6 +283,10 @@ export class BotLog {
     [...new Set(this.snags.map((snag) => `${snag.what}: ${snag.why}`))].forEach((line, index) => (flat[`snag${index + 1}`] = line));
     flat.hullLost = Math.round(this.damage.hullLost);
     flat.repairCredits = Math.round(this.damage.repairCredits);
+    flat.fires = this.fired.length;
+    flat.fireMedian = Math.round(median(this.fired));
+    flat.ownFreed = this.own.freed;
+    flat.ownPicked = this.own.picked;
     flat.breaks = this.breaks.length;
     this.breaks.forEach((each, index) => (flat[`break${index + 1}`] = `${each.what} ${clock(this.since(each.at))}`));
     return JSON.stringify(flat);

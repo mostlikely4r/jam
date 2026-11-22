@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { hullMax, refresh } from "../fitting";
 import { homeSim, type Home } from "../home";
-import { partOf } from "../parts";
+import { partOf, type PartId } from "../parts";
 import { ClickPilot } from "../pilot";
-import { DOCK_OFFSET, type Rock, type Sim, TICK } from "../sim";
+import { DOCK_OFFSET, TICK, type Loose, type Rock, type Ship, type Sim } from "../sim";
 import { DEFAULTS, type Tuning } from "../tuning";
-import { BOT_CALLS, Bot, CRUISE_SPEED, SIGHT } from "./bot";
+import { BOT_CALLS, Bot, CRUISE_SPEED, FIRE_CLOSE, SHIP_CLEARANCE, SIGHT } from "./bot";
 import { BotLog, type RunInfo } from "./log";
 import { FLOATER_JOURNEY, type Plan } from "./plan";
 
@@ -56,6 +56,16 @@ function play(sim: Sim, bot: Bot, seconds: number): void {
   for (let i = 0; i < Math.round(seconds / TICK); i++) {
     playTick(sim, bot);
   }
+}
+
+/** A piece of ore lying in space, as a shot or a wreck leaves it. */
+function oreAt(x: number, y: number, from: Ship | null = null): Loose {
+  return { x, y, px: x, py: y, vx: 0, vy: 0, item: "ore" as PartId, wear: 0, count: 1, kind: 0, from };
+}
+
+/** The inputs one tick of play added: what the bot did on it. */
+function inputsOf(log: BotLog, from: number) {
+  return log.inputs.slice(from);
 }
 
 /** One tick of play, with the bot handed a watched sim and the world stepping the real one. */
@@ -357,4 +367,147 @@ describe("out to the field", () => {
     const probe = new Probe(sim.ship);
     expect(probe.stopDistance(sim, CRUISE_SPEED)).toBeLessThanOrEqual(0.9 * SIGHT);
   });
+});
+
+describe("mining close and clean", () => {
+  /** The ship at rest inside the field, with the field's own rocks out, so a test's rock is all there is. */
+  function cleared(extra: Partial<Tuning> & Partial<Home> = {}): Sim {
+    const sim = world(extra);
+    sim.rocks.length = 0;
+    // Inside the field: a rock outside its edge is drawn back in, and wouldn't hold still under the ore.
+    const field = sim.miningFieldAt(sim.ship.x, sim.ship.y);
+    sim.ship.x = sim.ship.px = field.poi.x - field.radius * 0.4;
+    sim.ship.y = sim.ship.py = field.poi.y;
+    sim.ship.vx = sim.ship.vy = 0;
+    sim.ship.spin = 0;
+    return sim;
+  }
+
+  it("goes in close before it fires, rather than shooting from the gun's full reach", () => {
+    const sim = cleared();
+    const rock = sim.makeRock(1, sim.ship.x + 900, sim.ship.y, 0, 0);
+    rock.hp = 4000;
+    sim.rocks.push(rock);
+    sim.ship.angle = 0;
+    const bot = new Bot({ plan: FLOATER_JOURNEY, log: new BotLog() });
+    const near = rock.radius + FIRE_CLOSE;
+    let shots = 0;
+    let far = 0;
+    for (let i = 0; i < Math.round(40 / TICK); i++) {
+      const at = Math.hypot(rock.x - sim.ship.x, rock.y - sim.ship.y);
+      const before = bot.log.inputs.length;
+      playTick(sim, bot);
+      for (const input of inputsOf(bot.log, before)) {
+        if (input.kind !== "fire") continue;
+        shots++;
+        if (at > near) far++;
+      }
+    }
+    // It moved in, and every burst it opened was from inside the close range.
+    expect(bot.log.inputs.some((input) => input.kind === "move")).toBe(true);
+    expect(shots, "it fired at all").toBeGreaterThan(0);
+    expect(far, "no shot from beyond the close range").toBe(0);
+  }, 30000);
+
+  it("goes back for ore its own shot freed before it breaks another rock", () => {
+    const sim = cleared();
+    // A rock it could break straight away, and a piece its own gun freed 600 out: a trip, but its own.
+    const rock = sim.makeRock(2, sim.ship.x + 250, sim.ship.y, 0, 0);
+    rock.hp = 4000;
+    sim.rocks.push(rock);
+    sim.ores.push(oreAt(sim.ship.x - 600, sim.ship.y, sim.ship));
+    const bot = new Bot({ plan: FLOATER_JOURNEY, log: new BotLog() });
+    play(sim, bot, 6);
+    const said = bot.log.inputs.map((input) => `${input.kind} ${input.detail}`);
+    expect(said.some((line) => line.startsWith("move through a piece of ore"))).toBe(true);
+    expect(said.some((line) => line.startsWith("fire")), "nothing broken for a second rock").toBe(false);
+  }, 30000);
+
+  it("works the pieces of the rock it broke until they are gone, before it starts another", () => {
+    const sim = cleared();
+    // A rock that breaks in one shot, and a bigger one further off that scores better once its
+    // pieces are small: without the set of worked rocks, the bot would turn to the bigger one.
+    const rock = sim.makeRock(2, sim.ship.x + 300, sim.ship.y, 0, 0);
+    rock.hp = 40;
+    sim.rocks.push(rock);
+    const better = sim.makeRock(2, sim.ship.x - 700, sim.ship.y, 0, 0);
+    better.hp = 4000;
+    sim.rocks.push(better);
+    sim.ship.angle = 0;
+    const bot = new Bot({ plan: FLOATER_JOURNEY, log: new BotLog() });
+    const worked = new Set<Rock>([rock]);
+    const seen = new Set(sim.rocks);
+    let broke = false;
+    for (let i = 0; i < Math.round(120 / TICK); i++) {
+      const before = bot.log.inputs.length;
+      playTick(sim, bot);
+      for (const each of sim.rocks) {
+        if (seen.has(each)) continue;
+        seen.add(each);
+        worked.add(each);
+        broke = true;
+      }
+      // Every burst it opens is at a rock of the set it's working.
+      for (const input of inputsOf(bot.log, before)) {
+        if (input.kind !== "fire") continue;
+        const aim = sim.ship.aim;
+        let nearest: Rock | null = null;
+        let best = Infinity;
+        for (const each of sim.rocks) {
+          const away = aim === null ? Infinity : Math.hypot(each.x - aim.x, each.y - aim.y);
+          if (away < best) {
+            best = away;
+            nearest = each;
+          }
+        }
+        expect(nearest !== null && worked.has(nearest), "a shot at a rock it set out on").toBe(true);
+      }
+      const left = [...worked].filter((each) => each.hp > 0 && sim.rocks.includes(each));
+      if (broke && left.length === 0) break;
+    }
+    // It broke the rock it set out on, worked its pieces, and never turned to the better one.
+    expect(broke, "it broke the rock it set out on").toBe(true);
+    expect(worked.size).toBeGreaterThan(1);
+    expect(better.hp).toBe(4000);
+  }, 60000);
+
+  it("goes in at the ore a rock holds against itself, slowly, rather than round the rock", () => {
+    const sim = cleared();
+    const rock = sim.makeRock(1, sim.ship.x - 500, sim.ship.y, 0, 0);
+    rock.hp = 4000;
+    sim.rocks.push(rock);
+    const start = { x: rock.x, y: rock.y };
+    const from = { x: sim.ship.x, y: sim.ship.y };
+    // Its own ore, lying against the rock's near side: inside the reach of a hull up against it.
+    const ore = oreAt(rock.x + rock.radius - 8, rock.y, sim.ship);
+    sim.ores.push(ore);
+    sim.ship.angle = Math.PI;
+    const bot = new Bot({ plan: FLOATER_JOURNEY, log: new BotLog() });
+    let closest = Infinity;
+    let speedAtTake: number | null = null;
+    let last = 0;
+    for (let i = 0; i < Math.round(20 / TICK); i++) {
+      last = Math.hypot(sim.ship.vx, sim.ship.vy);
+      playTick(sim, bot);
+      closest = Math.min(closest, Math.hypot(rock.x - sim.ship.x, rock.y - sim.ship.y));
+      if (sim.oreIn(sim.ship) > 0) {
+        speedAtTake = last;
+        break;
+      }
+    }
+    // The order goes at the ore through the rock's line, not round the rock: a way round the
+    // rock keeps a hull's clearance from it, which is the slip this step takes away.
+    const spot = bot.log.inputs.find((input) => input.kind === "move" && input.detail.startsWith("through a piece of ore"));
+    expect(spot, "an order at the ore").toBeDefined();
+    const [x, y] = spot!.detail.replace(/^through a piece of ore at /, "").split(", ").map(Number);
+    const out = Math.hypot(x - from.x, y - from.y) || 1;
+    const across = Math.abs((start.x - from.x) * ((y - from.y) / out) - (start.y - from.y) * ((x - from.x) / out));
+    expect(across, "the order goes at the rock, not round it").toBeLessThan(rock.radius + 20);    // In at it, well inside the clearance a way round the rock would have kept.
+    expect(closest).toBeLessThan(rock.radius + SHIP_CLEARANCE / 2);
+    expect(sim.oreIn(sim.ship), "the ore in the bay within 20 s").toBeGreaterThan(0);
+    // A walking pace, which `safeImpactSpeed` makes free: no dent, and no hull lost.
+    expect(speedAtTake).not.toBeNull();
+    expect(speedAtTake!).toBeLessThan(sim.tuning.safeImpactSpeed);
+    expect(sim.ship.damageTaken).toBe(0);
+  }, 30000);
 });

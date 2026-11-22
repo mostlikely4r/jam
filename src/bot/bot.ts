@@ -20,14 +20,33 @@ export const STUCK_MINUTES = 15;
 const ROCK_REACH = 3000;
 /** How far out a piece of loose ore is worth a trip: a floater can't chase what drifts away. */
 const ORE_REACH = 250;
+/**
+ * How far out the ore its own shots freed is worth a trip. Its own work is a place it knows, so
+ * it goes back for it, and the limit is what it can still catch rather than what it can see.
+ */
+const OWN_ORE_REACH = 800;
 /** Ore this close is picked up before anything is broken: a grab, not a trip. */
 const GRAB_DISTANCE = 200;
+/** How near the ship a piece of its own ore has to leave the water to have been taken, not lost. */
+const OWN_TAKEN = 60;
 /** How long it will try for the same piece of ore before leaving it to drift. */
 const CHASE_SECONDS = 40;
 /** How many seconds of a piece's drift to lead it by, so a move through it meets it. */
 const ORE_LEAD = 4;
-/** The nearest it parks to a rock, and the most of its gun's reach it will use. */
-const STANDOFF = 400;
+/** How far off a rock's edge it fires from: near enough that what it frees lands on the ship. */
+export const FIRE_CLOSE = 250;
+/** How near a rock a piece of ore lies for the ship to bump the rock rather than go round it. */
+const ORE_AGAINST = 40;
+/**
+ * How far past a piece of ore a slow move at it aims. A click order stops a hull's length and
+ * more short of its spot, so this is what keeps the move going through the ore rather than
+ * stopping beside it; it is also short enough that the pilot is braking as it arrives. Measured
+ * on a piece lying against a rock: 40 to 50 units a second at the rock's edge, under
+ * `safeImpactSpeed`, so the bump costs nothing.
+ */
+const ORE_EDGE = 150;
+/** How fast a piece has to be drifting before the ship overtakes it rather than going in at it. */
+const ORE_STILL = 30;
 /** The fastest it fires at, so its own drift doesn't carry the shots wide. */
 const FIRE_SPEED = 60;
 /** The fastest the hull turns by hand, in radians a second. */
@@ -35,7 +54,7 @@ const TURN_RATE = 1;
 /** How far off a rock the nose or the turret may be, in radians, for a shot to be worth taking. */
 const AIM_ANGLE = 0.05;
 /** How far past a rock it slips when one is in the way: more than the hull, so a pass is clean. */
-const SHIP_CLEARANCE = 120;
+export const SHIP_CLEARANCE = 120;
 /** Where an order aims has to move this far before it's worth giving another. */
 const REPEAT_DISTANCE = 150;
 /** How close to the spot it was sent to counts as arrived. */
@@ -126,6 +145,8 @@ export class Bot {
   private wrecks = 0;
   /** Ore counted on the tick before: the wreck itself empties the bay. */
   private oreAboard = 0;
+  /** The most ore it has had aboard, so a hold filling up counts as the run working. */
+  private oreBest = 0;
   /** The wreck still to be accounted for. */
   private loss: Loss | null = null;
   /** Said once per wreck: the pod is on its way. */
@@ -143,10 +164,19 @@ export class Bot {
   private chase: { ore: Loose; since: number; from: number } | null = null;
   /** Ore it has given up on. */
   private ignored = new Set<Loose>();
-  /** The rock it's working, kept until it's broken: a new nearest one every tick would be a dancer. */
-  private mark: Rock | null = null;
-  /** The standoff point it picked beside a rock, kept while the rock stays put. */
-  private beside: { rock: Rock; x: number; y: number } | null = null;
+  /**
+   * The rocks it's working: the one it set out on, and the pieces its breaks made of it. Kept
+   * until all of them are gone, since a new nearest one every tick would be a dancer.
+   */
+  private worked = new Set<Rock>();
+  /** Every rock it has seen, so a piece a break has just made can be told from one drifting in. */
+  private known = new Set<Rock>();
+  /** Where each rock of `worked` was last seen, for telling its pieces from the rest of the field. */
+  private wasAt = new Map<Rock, { x: number; y: number }>();
+  /** Ore its own shots freed that is still out there, and where it last saw each piece. */
+  private ownOre = new Map<Loose, { x: number; y: number }>();
+  /** The standoff point it picked beside a rock, and where the rock was then, kept while it stays put. */
+  private beside: { rock: Rock; x: number; y: number; at: { x: number; y: number } } | null = null;
   /** Which way the turn keys are held, when they last went down, so a held turn is one input. */
   private turnPush = 0;
   private turnAt: number | null = null;
@@ -184,6 +214,7 @@ export class Bot {
     this.oreAboard = sim.oreIn(sim.ship);
     this.noteWreck(sim);
     this.noteDamage(sim);
+    this.noteOwnOre(sim);
     if (sim.down) {
       this.down(sim);
       return;
@@ -242,6 +273,13 @@ export class Bot {
     if (sim.ship.earned > this.earned) {
       this.earned = sim.ship.earned;
       this.log.sample(now, this.earned);
+      this.lastProgress = now;
+    }
+    // A hold filling up is the run working, even before anything is sold: mining close to the
+    // rock takes longer per load than shooting from across the field, and being slow at it isn't
+    // being stuck.
+    if (this.oreAboard > this.oreBest) {
+      this.oreBest = this.oreAboard;
       this.lastProgress = now;
     }
     if (now - this.lastProgress > this.stuck) this.finish(sim, "stuck");
@@ -325,6 +363,25 @@ export class Bot {
       hullLost: this.log.damage.hullLost + hull,
       repairCredits: this.log.damage.repairCredits + credits,
     };
+  }
+
+  /**
+   * Counts the ore its own shots freed, and how much of it the ship took: a piece that leaves the
+   * water within a hull's length of the ship was taken, not lost to the drift.
+   */
+  private noteOwnOre(sim: Sim): void {
+    const { ship } = sim;
+    const here = new Set(sim.ores);
+    for (const ore of sim.ores) {
+      if (ore.from !== ship) continue;
+      if (!this.ownOre.has(ore)) this.log.own.freed += ore.count;
+      this.ownOre.set(ore, { x: ore.x, y: ore.y });
+    }
+    for (const [ore, at] of this.ownOre) {
+      if (here.has(ore)) continue;
+      this.ownOre.delete(ore);
+      if (Math.hypot(at.x - ship.x, at.y - ship.y) < OWN_TAKEN) this.log.own.picked += ore.count;
+    }
   }
 
   // A wreck, the pod, and the yard.
@@ -591,8 +648,15 @@ export class Bot {
       // At the field: the beat takes it from here.
       this.outbound = null;
     }
+    this.noteRocks(sim);
     const rock = this.nearestRock(sim);
     const ore = this.nearestOre(sim);
+    // Ore its own shots freed is the work it set in motion: back for that before it breaks
+    // anything else, however far it has drifted. Any other ore is a grab when it's close.
+    if (ore && ore.from === ship) {
+      this.fetch(sim, ore);
+      return;
+    }
     // Ore already loose and close is the cheapest thing to carry: take it before breaking more.
     // Farther out, the rock in reach comes first, since it's the ore it lets go that's wanted.
     if (ore && (!rock || Math.hypot(ore.x - ship.x, ore.y - ship.y) < GRAB_DISTANCE)) {
@@ -641,12 +705,19 @@ export class Bot {
   /** The nearest piece of ore close enough to be worth the trip, or null. */
   private nearestOre(sim: Sim): Loose | null {
     const { ship } = sim;
+    // The piece it is already after stays the one it is after: a new nearest one every tick would
+    // have it turning between two of them, reaching neither.
+    const held = this.chase?.ore;
+    if (held && !this.ignored.has(held) && sim.ores.includes(held) && this.oreReach(sim, held) > Math.hypot(held.x - ship.x, held.y - ship.y)) {
+      return held;
+    }
     let best: Loose | null = null;
-    let bestDistance = ORE_REACH;
+    let bestDistance = Infinity;
     for (const ore of sim.ores) {
       if (this.ignored.has(ore)) continue;
+      const reach = this.oreReach(sim, ore);
       const distance = Math.hypot(ore.x - ship.x, ore.y - ship.y);
-      if (distance < bestDistance) {
+      if (distance < reach && distance < bestDistance) {
         bestDistance = distance;
         best = ore;
       }
@@ -654,9 +725,18 @@ export class Bot {
     return best;
   }
 
+  /** How far out a piece of ore is worth a trip: its own shots' work goes further than anyone's. */
+  private oreReach(sim: Sim, ore: Loose): number {
+    return ore.from === sim.ship ? OWN_ORE_REACH : ORE_REACH;
+  }
+
   /** The rock it's working, or else the nearest one worth breaking, or null. */
   private nearestRock(sim: Sim): Rock | null {
     const { ship } = sim;
+    // One rock to the end: while anything of the rock it set out on is left -- its pieces are
+    // rocks too -- that comes before anything new, however much better the rest of the field looks.
+    const left = this.workedLeft(sim);
+    if (left) return left;
     let best: Rock | null = null;
     let bestScore = Infinity;
     for (const rock of sim.rocks) {
@@ -670,17 +750,66 @@ export class Bot {
         best = rock;
       }
     }
-    // One rock at a time: its pieces come loose where it was, and a ship that keeps changing its
-    // mind never breaks anything. Only something much better takes over.
-    if (this.mark && this.mark.hp > 0 && sim.rocks.includes(this.mark)) {
-      const distance = Math.hypot(this.mark.x - ship.x, this.mark.y - ship.y);
-      if (distance <= ROCK_REACH && distance / (this.mark.tier + 1) <= bestScore * 2.5) return this.mark;
-    }
-    this.mark = best;
+    this.worked.clear();
+    if (best) this.worked.add(best);
     return best;
   }
 
-  /** Collects a piece of ore: a move through where it will be, so the sweep takes it. */
+  /** The nearest rock still standing of the set it's working, or null once the set is done. */
+  private workedLeft(sim: Sim): Rock | null {
+    let best: Rock | null = null;
+    let bestDistance = Infinity;
+    for (const rock of this.worked) {
+      // Broken, or gone from the field: not this rock's work any more.
+      if (rock.hp <= 0 || !sim.rocks.includes(rock)) {
+        this.worked.delete(rock);
+        continue;
+      }
+      const distance = Math.hypot(rock.x - sim.ship.x, rock.y - sim.ship.y);
+      // Out of reach for the moment is not the same as finished: a piece a break set down just
+      // past `ROCK_REACH` stays in the set, and is worked if the ship comes back to it. It isn't
+      // flown to either, which is what a rock knocked out of the field would cost.
+      if (distance > ROCK_REACH) continue;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = rock;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Keeps the set of rocks it's working up to date: a worked rock that has gone was broken, and
+   * the rocks that have just appeared at its spot are its pieces, so they join the set.
+   */
+  private noteRocks(sim: Sim): void {
+    for (const rock of this.worked) {
+      if (rock.hp > 0 && sim.rocks.includes(rock)) continue;
+      this.worked.delete(rock);
+      const at = this.wasAt.get(rock);
+      this.wasAt.delete(rock);
+      if (!at) continue;
+      // The pieces are set down around where it stood, so the next rock to break doesn't fall
+      // into the set by having drifted past.
+      const spread = rock.radius * 3;
+      for (const piece of sim.rocks) {
+        if (this.known.has(piece)) continue;
+        if (Math.hypot(piece.x - at.x, piece.y - at.y) > spread) continue;
+        this.worked.add(piece);
+      }
+    }
+    for (const rock of sim.rocks) {
+      this.known.add(rock);
+      if (this.worked.has(rock)) this.wasAt.set(rock, { x: rock.x, y: rock.y });
+    }
+    // A long run meets more rocks than it can remember; the set that matters is small.
+    if (this.known.size > 2000) this.known = new Set(sim.rocks);
+  }
+
+  /**
+   * Collects a piece of ore: a slow move at it, so the hull takes it by touching it. Where a rock
+   * holds the ore against itself, the ship goes in and may touch the rock rather than round it.
+   */
   private fetch(sim: Sim, ore: Loose): void {
     const { ship, now } = sim;
     this.trigger(sim, false, "");
@@ -694,20 +823,45 @@ export class Bot {
       this.chase = null;
       return;
     }
-    // Where it will be when the ship gets there, and on past it: what the hull sweeps through is taken.
+    // Where it will be when the ship gets there: what the hull sweeps through is taken.
     const leadX = ore.x + ore.vx * ORE_LEAD;
     const leadY = ore.y + ore.vy * ORE_LEAD;
     this.aimAt(sim, leadX, leadY);
     const dx = leadX - ship.x;
     const dy = leadY - ship.y;
     const out = Math.hypot(dx, dy) || 1;
-    this.head(sim, { x: leadX + (dx / out) * 250, y: leadY + (dy / out) * 250 }, "through a piece of ore", true);
+    // A piece lying still, which is how one against a rock sits, is gone at just past its edge:
+    // the move ends slowly, and may touch the rock it lies on, which the way round leaves out.
+    // A drifting piece is overtaken the way it always was, well past where it will be.
+    const still = Math.hypot(ore.vx, ore.vy) < ORE_STILL;
+    const past = still ? ORE_EDGE : 250;
+    this.head(sim, { x: leadX + (dx / out) * past, y: leadY + (dy / out) * past }, "through a piece of ore", {
+      chase: true,
+      exclude: still ? this.againstRock(sim, ore) : null,
+    });
+  }
+
+  /**
+   * The rock a piece of ore lies against: the nearest one whose edge is within a bump of it. The
+   * way round the rocks leaves that one out, since the ore is on the far side of it.
+   */
+  private againstRock(sim: Sim, ore: Loose): Rock | null {
+    let best: Rock | null = null;
+    let bestGap = ORE_AGAINST;
+    for (const rock of sim.rocks) {
+      if (rock.hp <= 0) continue;
+      const gap = Math.hypot(rock.x - ore.x, rock.y - ore.y) - rock.radius;
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = rock;
+      }
+    }
+    return best;
   }
 
   /** Breaks the rock it's beside: parks it close, then turns the hull on it by hand and fires. */
   private shoot(sim: Sim, rock: Rock): void {
     const { ship, now } = sim;
-    const reach = this.reach(sim);
     const distance = Math.hypot(rock.x - ship.x, rock.y - ship.y);
     // Where the rock will be when a shot gets there, less the way the ship carries its own shots.
     // Only from a near standstill: a ship still coming in would swing the aim about by its own
@@ -717,23 +871,32 @@ export class Bot {
     const aimX = rock.x + (rock.vx - (still ? ship.vx : 0)) * flight;
     const aimY = rock.y + (rock.vy - (still ? ship.vy : 0)) * flight;
     this.aimAt(sim, aimX, aimY);
-    // Close enough to shoot from: no more flying. A click order that has arrived settles on its
-    // spot for a long while, tumbling as it trims the last of its speed, so a player clicks the
-    // ship to stop and turns by hand. That handover is here, as soon as it's in range and slow.
-    const inRange = distance <= reach * 0.8;
+    // Close enough to fire from: near the rock, so what it frees lands within the ship's own
+    // reach, with the nose on it and the drift small. A click order that has arrived settles on
+    // its spot for a long while, tumbling as it trims the last of its speed, so a player clicks
+    // the ship to stop and turns by hand. That handover is here, as soon as it's in range and slow.
+    const inRange = this.inReach(sim, rock);
     const slow = Math.hypot(ship.vx, ship.vy) < FIRE_SPEED * 2.5;
     if (!inRange || !slow) {
       if (inRange) this.trigger(sim, false, "");
-      // Beside it, on the side it came from, inside the guns' reach. The spot is kept while the
-      // rock stays put, so a ship still coming in isn't chased by a moving order.
-      const stand = Math.min(STANDOFF, Math.max(rock.radius + 160, 200));
-      if (!this.beside || this.beside.rock !== rock || Math.hypot(this.beside.x - rock.x, this.beside.y - rock.y) > REPEAT_DISTANCE) {
-        const dx = ship.x - rock.x;
-        const dy = ship.y - rock.y;
+      // Beside it, on the side it came from, and a stop's length inside the line it fires from:
+      // a click order stops `ARRIVED` short of its spot, so a spot on that line would leave the
+      // ship out of range, ordering the same spot again. A rock that drifts is met where it will
+      // be by the time the ship gets there, since a spot on the rock itself is one the ship chases
+      // for as long as it drifts. The spot is kept while the rock stays put.
+      const stand = Math.max(rock.radius + 40, this.fireDistance(sim, rock) - ARRIVED * 1.2);
+      const rvx = (rock.x - rock.px) / TICK;
+      const rvy = (rock.y - rock.py) / TICK;
+      const lead = Math.min(6, distance / Math.max(1, sim.tuning.clickSpeed));
+      const moving = Math.hypot(rvx, rvy) > 5;
+      const at = { x: rock.x + rvx * lead, y: rock.y + rvy * lead };
+      if (!this.beside || this.beside.rock !== rock || Math.hypot(this.beside.at.x - rock.x, this.beside.at.y - rock.y) > REPEAT_DISTANCE) {
+        const dx = ship.x - at.x;
+        const dy = ship.y - at.y;
         const out = Math.hypot(dx, dy) || 1;
-        this.beside = { rock, x: rock.x + (dx / out) * stand, y: rock.y + (dy / out) * stand };
+        this.beside = { rock, x: at.x + (dx / out) * stand, y: at.y + (dy / out) * stand, at: { x: rock.x, y: rock.y } };
       }
-      this.head(sim, this.beside, "beside a rock");
+      this.head(sim, this.beside, "beside a rock", { chase: moving });
       return;
     }
     if (sim.clickPilot.active) {
@@ -745,18 +908,26 @@ export class Bot {
     if (!ship.parts.has("turret")) {
       // The hull's own gun shoots where the nose points, so the nose has to point at it.
       const off = Math.abs(Math.atan2(Math.sin(Math.atan2(aimY - ship.y, aimX - ship.x) - ship.angle), Math.cos(Math.atan2(aimY - ship.y, aimX - ship.x) - ship.angle)));
-      this.trigger(sim, off < (this.firing ? AIM_ANGLE * 3 : AIM_ANGLE), "at a rock");
+      this.trigger(sim, off < (this.firing ? AIM_ANGLE * 3 : AIM_ANGLE), "at a rock", distance);
       return;
     }
     // A turret turns to the aim on its own, so it may fire while the ship is still coming in.
     const want = Math.atan2(aimY - ship.y, aimX - ship.x) - ship.angle;
     const off = Math.abs(Math.atan2(Math.sin(want - ship.turretAngle), Math.cos(want - ship.turretAngle)));
-    this.trigger(sim, off < (this.firing ? AIM_ANGLE * 3 : AIM_ANGLE), "at a rock");
+    this.trigger(sim, off < (this.firing ? AIM_ANGLE * 3 : AIM_ANGLE), "at a rock", distance);
   }
 
   /** Whether a rock is close enough that breaking it is worth a shot. */
   private inReach(sim: Sim, rock: Rock): boolean {
-    return Math.hypot(rock.x - sim.ship.x, rock.y - sim.ship.y) <= this.reach(sim) * 0.8;
+    return Math.hypot(rock.x - sim.ship.x, rock.y - sim.ship.y) <= this.fireDistance(sim, rock);
+  }
+
+  /**
+   * How close a rock has to be before a shot is worth it: near, so the ore lands on the ship, and
+   * no further than the guns carry, since a turret cuts their reach to a third.
+   */
+  private fireDistance(sim: Sim, rock: Rock): number {
+    return Math.min(rock.radius + FIRE_CLOSE, this.reach(sim) * 0.8);
   }
 
   /** How far its guns reach, which the turret cuts to a third of. */
@@ -802,7 +973,17 @@ export class Bot {
    * A click order to a spot, as a player gives with a right click. While one is flying it's left
    * alone: the click pilot stops where it was told, and the next one comes from there.
    */
-  private head(sim: Sim, spot: { x: number; y: number }, what: string, chase = false): void {
+  /**
+   * A click order to a spot, as a player gives with a right click. While one is flying it's left
+   * alone: the click pilot stops where it was told, and the next one comes from there. `exclude`
+   * is a rock the order may touch on the way, which is the one a piece of ore lies on.
+   */
+  private head(
+    sim: Sim,
+    spot: { x: number; y: number },
+    what: string,
+    { chase = false, exclude = null }: { chase?: boolean; exclude?: Rock | null } = {},
+  ): void {
     const { now } = sim;
     // No more than one click a second: a loop of them would say nothing a player could read,
     // and a player's hand couldn't click faster either.
@@ -810,8 +991,13 @@ export class Bot {
     // A click order brings the ship to rest on its spot and ends itself, so a click for a spot
     // it is already at is one it doesn't need. (It used to stand for twenty to forty seconds,
     // tumbling: docs/dock-click-plan.md, finding 2.)
+    //
+    // Close enough means at the spot it meant to reach, not at a slip round a rock on the way:
+    // that point is one to fly through, and stopping on it leaves the ship beside the rock it
+    // was getting past, ordering the same slip again.
     const target = sim.clickPilot.target();
-    const close = target !== null && Math.hypot(target.x - sim.ship.x, target.y - sim.ship.y) < ARRIVED;
+    const meant = target !== null && Math.hypot(target.x - spot.x, target.y - spot.y) < ARRIVED;
+    const close = meant && Math.hypot(target!.x - sim.ship.x, target!.y - sim.ship.y) < ARRIVED;
     if (sim.clickPilot.active && close) {
       this.log.input(now, "stop", "close enough");
       sim.orderStop();
@@ -828,7 +1014,7 @@ export class Bot {
       return;
     }
     if (sim.clickPilot.active && sim.clickPilot.target() === null) sim.orderStop();
-    const run = this.clearRun(sim, spot);
+    const run = this.clearRun(sim, spot, exclude);
     this.log.input(now, "move", `${what} at ${Math.round(run.x)}, ${Math.round(run.y)}`);
     // The plain click a player gives, not the chart's straight line: a click on a pad comes
     // round the station to the dock instead of through the solid box, which is where a run
@@ -843,9 +1029,10 @@ export class Bot {
   /**
    * How far it dares fly in one click order. A straight order flies at speed and smashes into
    * whatever drifts across its line, so it looks along the line and slips past the first rock
-   * on it. A player sees that rock; a bot has to work it out.
+   * on it. A player sees that rock; a bot has to work it out. The rock the ore lies against is
+   * left out: going to that ore means touching it, and a touch at walking pace costs nothing.
    */
-  private clearRun(sim: Sim, to: { x: number; y: number }): { x: number; y: number } {
+  private clearRun(sim: Sim, to: { x: number; y: number }, exclude: Rock | null = null): { x: number; y: number } {
     const { ship } = sim;
     const dx = to.x - ship.x;
     const dy = to.y - ship.y;
@@ -856,7 +1043,7 @@ export class Bot {
     let first: Rock | null = null;
     let firstAt = Infinity;
     for (const rock of sim.rocks) {
-      if (rock.hp <= 0) continue;
+      if (rock.hp <= 0 || rock === exclude) continue;
       const rx = rock.x - ship.x;
       const ry = rock.y - ship.y;
       const along = rx * ux + ry * uy;
@@ -905,11 +1092,14 @@ export class Bot {
   }
 
   /** Fire is one input a burst: pressing it counts, holding it doesn't. */
-  private trigger(sim: Sim, on: boolean, what: string): void {
+  private trigger(sim: Sim, on: boolean, what: string, from = 0): void {
     if (on === this.firing) return;
     this.firing = on;
     sim.controls.fire = on;
-    if (on) this.log.input(sim.now, "fire", what);
+    if (!on) return;
+    this.log.input(sim.now, "fire", what);
+    // How far out it opens a burst, for the report's median: the distance to the rock it fires at.
+    if (from > 0) this.log.fired.push(from);
   }
 
   /** A snag is said once per part and reason. */

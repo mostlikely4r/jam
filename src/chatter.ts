@@ -1,5 +1,46 @@
 import { PARTS } from "./parts";
+import type { Mood, Voice } from "./faces";
+// SAFETY: hand-authored data in the same file the faces live in. A pack only writes the kinds it
+// has an opinion about, and anything missing falls back to the shared list.
+import packFile from "./voices.json";
 import type { Base, Ore, Poi, Report, Ship, Sim } from "./sim";
+
+/** What a line is about. A voice pack writes its own lines for the kinds it cares to. */
+export type LineKind =
+  | "approach"
+  | "heading_back"
+  | "outbound"
+  | "all_clear"
+  | "fleeing"
+  | "engaged"
+  | "mayday"
+  | "thanks"
+  | "bought"
+  | "field"
+  | "slim"
+  | "news";
+
+/** The mood each kind of line is said in. It comes from what happened, never at random. */
+const MOOD_OF: Record<LineKind, Mood> = {
+  approach: "neutral",
+  heading_back: "neutral",
+  outbound: "neutral",
+  all_clear: "happy",
+  fleeing: "scared",
+  engaged: "scared",
+  mayday: "scared",
+  thanks: "happy",
+  bought: "happy",
+  field: "neutral",
+  slim: "tired",
+  news: "neutral",
+};
+
+/** What a face is, on a line: a key, not a picture, which the radio draws. */
+export interface FaceKey {
+  voice: Voice;
+  mood: Mood;
+}
 
 /** One line on the radio. A null speaker is the station. */
 export interface ChatterLine {
@@ -8,10 +49,33 @@ export interface ChatterLine {
   text: string;
   x: number;
   y: number;
+  /** Who is talking and how it looks. */
+  face: FaceKey;
   /** Heard at any distance. */
   mayday: boolean;
   /** Station news for everyone: heard at any distance, without the alarm. */
   broadcast: boolean;
+}
+
+/** A pack's written lines per kind: what a regular says instead of the shared list. */
+interface Pack {
+  lines?: Partial<Record<LineKind, string[]>>;
+}
+
+// SAFETY: the file is hand-authored pack data; `FaceFile` in voices.json's own type covers the
+// faces, and this covers the lines. A kind with no entry falls back to the shared list.
+const PACKS = packFile as unknown as Record<string, Pack>;
+
+/** The two regulars, in the order they settle at the player's home base. */
+const REGULARS: Voice[] = ["gus", "pip"];
+const REGULAR_NAMES: Partial<Record<Voice, string>> = { gus: "Gus", pip: "Pip" };
+
+/**
+ * The lines a regular wrote for a kind, if any. Exported so a test can check that a line came from
+ * the voice that said it, and that a missing kind really falls back.
+ */
+export function voiceLines(voice: Voice, kind: LineKind): string[] | undefined {
+  return PACKS[voice]?.lines?.[kind];
 }
 
 const TRAFFIC_NAMES = [
@@ -116,11 +180,14 @@ export class Chatter {
   private cooldowns = new WeakMap<Ship, Map<string, number>>();
   private stationCooldowns = new Map<string, number>();
   private nextFieldTalk = new WeakMap<Ship, number>();
-  /** Station lines still to come, and which station says each. */
-  private replies: { at: number; text: string; from: Poi }[] = [];
+  /** Station lines still to come, which station says each, and in what mood. */
+  private replies: { at: number; text: string; from: Poi; mood: Mood }[] = [];
   /** Ships that asked for the dock on this trip home. */
   private approached = new WeakSet<Ship>();
   private playerFar = true;
+  /** The two regulars at the player's home base, by ship: settled once for the game. */
+  private regulars = new WeakMap<Ship, Voice>();
+  private settled = false;
   private random: () => number;
 
   constructor(seed: number) {
@@ -134,20 +201,46 @@ export class Chatter {
   nameOf(sim: Sim, ship: Ship): string {
     let name = this.names.get(ship);
     if (name) return name;
+    this.settle(sim);
+    const regular = this.regulars.get(ship);
     const drone = sim.drones.findIndex((pilot) => pilot.ship === ship);
     if (ship.faction === "defender") name = "Defender";
     else if (ship.faction === "pirate") name = "Unknown";
+    else if (regular) name = REGULAR_NAMES[regular] ?? "Traffic";
     else if (drone >= 0) name = ship.owner ? `Your drone ${drone + 1}` : `Drone ${drone + 1}`;
     else name = TRAFFIC_NAMES[this.nextName++ % TRAFFIC_NAMES.length];
     this.names.set(ship, name);
     return name;
   }
 
+  /**
+   * Settles the two regulars, once: the first traffic ships whose home is the player's home base
+   * become Gus and Pip, in that order. Names and faces only; the world's generator is not asked.
+   */
+  private settle(sim: Sim): void {
+    if (this.settled) return;
+    this.settled = true;
+    const home = sim.homeBaseOf(sim.ship).id;
+    const waiting = [...REGULARS];
+    for (const pilot of sim.traffic) {
+      if (waiting.length === 0) return;
+      if (sim.homeBaseOf(pilot.ship).id !== home) continue;
+      this.regulars.set(pilot.ship, waiting.shift()!);
+    }
+  }
+
+  /** The voice a speaker talks in, which is also how its line is drawn. */
+  private voiceOf(sim: Sim, ship: Ship | null): Voice {
+    if (!ship) return "station";
+    if (ship !== sim.ship) this.settle(sim);
+    return this.regulars.get(ship) ?? "generic";
+  }
+
   update(sim: Sim, dt: number): void {
     this.time += dt;
     const due = this.replies.filter((reply) => reply.at <= this.time);
     this.replies = this.replies.filter((reply) => reply.at > this.time);
-    for (const reply of due) this.stationSays(sim, reply.text, false, reply.from);
+    for (const reply of due) this.stationSays(sim, reply.text, false, reply.from, reply.mood);
 
     for (const pilot of [...sim.traffic, ...sim.drones]) {
       const { ship, task } = pilot;
@@ -163,28 +256,34 @@ export class Chatter {
         // Close in: it asks for the dock, and the station clears it.
         this.approached.add(ship);
         if (this.ready(ship, "approach", DOCKING_COOLDOWN)) {
-          this.say(sim, ship, this.pick(APPROACH));
+          this.sayKind(sim, ship, "approach", APPROACH);
           this.reply(`Roger, ${name}, cleared to dock.`, STATION_REPLY_DELAY, sim.nearestDock(ship.x, ship.y));
         }
       } else if (task !== before && task === "to station" && sim.oreIn(ship) > 0) {
         // Turning for home, out in the field. Nobody needs to answer that.
-        if (this.ready(ship, "heading back", DOCKING_COOLDOWN)) this.say(sim, ship, this.pick(HEADING_BACK));
+        if (this.ready(ship, "heading back", DOCKING_COOLDOWN)) this.sayKind(sim, ship, "heading_back", HEADING_BACK);
       } else if (task !== before && task === "to buy" && pilot.trading) {
         // Off to buy a load. The station has an opinion about buying from pirates.
         if (this.ready(ship, "outbound", OUTBOUND_COOLDOWN)) {
           const pirates = pilot.trading === "pirate base";
-          this.say(sim, ship, pirates ? this.pick(TO_PIRATES) : this.pick(TO_DEPOSIT));
-          this.reply((pirates ? this.pick(PIRATE_WARNING) : this.pick(SEE_OFF)).replace("{name}", name), STATION_REPLY_DELAY, home);
+          this.sayKind(sim, ship, "outbound", pirates ? TO_PIRATES : TO_DEPOSIT);
+          this.reply(
+            (pirates ? this.pick(PIRATE_WARNING) : this.pick(SEE_OFF)).replace("{name}", name),
+            STATION_REPLY_DELAY,
+            home,
+            pirates ? "annoyed" : "neutral",
+          );
         }
       } else if (task !== before && before !== undefined && AT_STATION.has(before) && FIELD_TASKS.has(task)) {
         // Leaving the station for the field. Once there are other places, this says which.
         if (this.ready(ship, "outbound", OUTBOUND_COOLDOWN)) {
-          this.say(sim, ship, this.pick(before === "sheltering" ? ALL_CLEAR : OUTBOUND));
+          if (before === "sheltering") this.sayKind(sim, ship, "all_clear", ALL_CLEAR);
+          else this.sayKind(sim, ship, "outbound", OUTBOUND);
           this.reply(this.pick(SEE_OFF).replace("{name}", name), STATION_REPLY_DELAY, home);
         }
       } else if (task !== before && task === "fleeing") {
         if (this.ready(ship, "fleeing", FLEEING_COOLDOWN)) {
-          this.say(sim, ship, this.pick(FLEEING));
+          this.sayKind(sim, ship, "fleeing", FLEEING);
           this.reply(`${name}, the dock is clear. Come on in.`, STATION_REPLY_DELAY, home);
         }
       } else if (FIELD_TASKS.has(task)) {
@@ -197,7 +296,7 @@ export class Chatter {
       const before = this.tasks.get(ship);
       this.tasks.set(ship, task);
       if (ship.faction === "defender" && task !== before && task === "responding") {
-        if (this.ready(ship, "responding", MAYDAY_COOLDOWN)) this.say(sim, ship, "On my way.");
+        if (this.ready(ship, "responding", MAYDAY_COOLDOWN)) this.sayText(sim, ship, "On my way.", "neutral");
       }
     }
 
@@ -216,14 +315,15 @@ export class Chatter {
   pickedUp(sim: Sim, ship: Ship, ore: Ore): void {
     if (ore.from !== sim.ship || ship === sim.ship || ship.owner || ship.faction) return;
     if (Math.hypot(ore.x - sim.ship.x, ore.y - sim.ship.y) < THANKS_DISTANCE) return;
-    if (this.ready(ship, "thanks", THANKS_COOLDOWN)) this.say(sim, ship, this.pick(THANKS));
+    if (this.ready(ship, "thanks", THANKS_COOLDOWN)) this.sayKind(sim, ship, "thanks", THANKS);
   }
 
   /** A ship took a hit. A pirate's attack brings a mayday heard everywhere. */
   shot(sim: Sim, ship: Ship, from: Ship): void {
     if (from.faction !== "pirate" || ship.faction === "pirate" || ship === sim.ship) return;
     if (!this.ready(ship, "mayday", MAYDAY_COOLDOWN)) return;
-    this.say(sim, ship, this.pick(ship.faction === "defender" ? ENGAGED : MAYDAY), true);
+    if (ship.faction === "defender") this.sayKind(sim, ship, "engaged", ENGAGED, true);
+    else this.sayKind(sim, ship, "mayday", MAYDAY, true);
   }
 
   blackMarketArrived(sim: Sim): void {
@@ -268,7 +368,7 @@ export class Chatter {
   /** Someone shot a pirate, and now every pirate knows. */
   marked(sim: Sim, pirate: Ship, attacker: Ship): void {
     const text = attacker === sim.ship ? "You'll regret that." : `Big mistake, ${this.nameOf(sim, attacker)}.`;
-    this.say(sim, pirate, text);
+    this.sayText(sim, pirate, text, "angry");
   }
 
   /** A ship that took one hit too many runs for the station to tell. */
@@ -277,7 +377,7 @@ export class Chatter {
       attacker === sim.ship
         ? "Stop shooting at me! I'm reporting you."
         : `${this.nameOf(sim, attacker)} is firing on me! Heading in to report it.`;
-    this.say(sim, victim, text);
+    this.sayText(sim, victim, text, "scared");
   }
 
   /** The station puts out word of a wanted ship, to everyone. */
@@ -289,12 +389,12 @@ export class Chatter {
       attacker === sim.ship
         ? `${this.nameOf(sim, victim)} reports you fired on them. You're wanted.${law}`
         : `All ships, ${who} attacked ${this.nameOf(sim, victim)} and is wanted.${law}`;
-    this.stationSays(sim, text, true, sim.nearestDock(victim.x, victim.y));
+    this.stationSays(sim, text, true, sim.nearestDock(victim.x, victim.y), "annoyed");
   }
 
   /** A ship docked with word the board didn't have: it tells the station, which posts it. */
   newsBrought(sim: Sim, ship: Ship, base: Base, reports: Report[]): void {
-    this.say(sim, ship, this.newsLine(sim, this.pick(NEWS), reports));
+    this.sayKind(sim, ship, "news", NEWS, false, (pattern) => this.newsLine(sim, pattern, reports));
     this.reply(this.pick(NEWS_REPLY).replace("{name}", this.nameOf(sim, ship)), STATION_REPLY_DELAY, base.poi);
   }
 
@@ -316,7 +416,7 @@ export class Chatter {
   /** A ship other than the player bought a part at the station. */
   bought(sim: Sim, ship: Ship, part: string): void {
     const name = this.nameOf(sim, ship);
-    this.say(sim, ship, this.pick(ship.owner ? BOUGHT_OWNED : BOUGHT).replace("{part}", part));
+    this.sayKind(sim, ship, "bought", ship.owner ? BOUGHT_OWNED : BOUGHT, false, (line) => line.replace("{part}", part));
     if (!ship.owner) this.reply(this.pick(BOUGHT_REPLY).replace("{part}", part).replace("{name}", name), STATION_REPLY_DELAY, sim.baseAt(ship)?.poi ?? sim.homeBaseOf(ship).poi);
   }
 
@@ -353,10 +453,23 @@ export class Chatter {
     const rocksNear = sim.rocks.filter(
       (rock) => Math.hypot(rock.x - ship.x, rock.y - ship.y) < SLIM_RADIUS,
     ).length;
-    this.say(sim, ship, this.pick(rocksNear < SLIM_ROCKS ? SLIM : FIELD));
+    if (rocksNear < SLIM_ROCKS) this.sayKind(sim, ship, "slim", SLIM);
+    else this.sayKind(sim, ship, "field", FIELD);
   }
 
-  private say(sim: Sim, ship: Ship, text: string, mayday = false): void {
+  private sayKind(
+    sim: Sim,
+    ship: Ship,
+    kind: LineKind,
+    shared: string[],
+    mayday = false,
+    shape: (line: string) => string = (line) => line,
+  ): void {
+    const pool = voiceLines(this.voiceOf(sim, ship), kind) ?? shared;
+    this.sayText(sim, ship, shape(this.pick(pool)), MOOD_OF[kind], mayday);
+  }
+
+  private sayText(sim: Sim, ship: Ship, text: string, mood: Mood, mayday = false): void {
     sim.events.push({
       type: "chatter",
       speaker: ship,
@@ -364,22 +477,43 @@ export class Chatter {
       text,
       x: ship.x,
       y: ship.y,
+      face: { voice: this.voiceOf(sim, ship), mood },
       mayday,
       broadcast: false,
     });
   }
 
   private lineFrom(sim: Sim, name: string, text: string, x: number, y: number): void {
-    sim.events.push({ type: "chatter", speaker: null, name, text, x, y, mayday: false, broadcast: false });
+    sim.events.push({
+      type: "chatter",
+      speaker: null,
+      name,
+      text,
+      x,
+      y,
+      face: { voice: "station", mood: "neutral" },
+      mayday: false,
+      broadcast: false,
+    });
   }
 
-  private stationSays(sim: Sim, text: string, broadcast: boolean, from: Poi): void {
+  private stationSays(sim: Sim, text: string, broadcast: boolean, from: Poi, mood: Mood = "neutral"): void {
     const dock = sim.dockPoint(false, from);
-    sim.events.push({ type: "chatter", speaker: null, name: "Station", text, x: dock.x, y: dock.y, mayday: false, broadcast });
+    sim.events.push({
+      type: "chatter",
+      speaker: null,
+      name: "Station",
+      text,
+      x: dock.x,
+      y: dock.y,
+      face: { voice: "station", mood },
+      mayday: false,
+      broadcast,
+    });
   }
 
-  private reply(text: string, delay: number, from: Poi): void {
-    this.replies.push({ at: this.time + delay, text, from });
+  private reply(text: string, delay: number, from: Poi, mood: Mood = "neutral"): void {
+    this.replies.push({ at: this.time + delay, text, from, mood });
   }
 
   /** The player's ship was wrecked and rebuilt in the dock. Said once the wreck has been watched. */

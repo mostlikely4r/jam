@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { HOME, type Home, homeSim } from "./home";
-import { APPROACH, BOUGHT, HEADING_BACK, OUTBOUND, THANKS } from "./chatter";
+import { APPROACH, BOUGHT, HEADING_BACK, OUTBOUND, THANKS, voiceLines, type LineKind } from "./chatter";
 import { PARTS, partOf, type PartId } from "./parts";
 import { moduleIds } from "./items";
 import { DEFAULTS } from "./tuning";
@@ -1089,6 +1089,8 @@ describe("pirate and defender", () => {
       });
       return heard;
     }
+    /** The pool a line could have come from: the speaker's own pack, or the shared list. */
+    const pool = (line: Line, kind: LineKind, shared: string[]): string[] => voiceLines(line.face.voice, kind) ?? shared;
     const looseOre = (sim: Sim, x: number, y: number) => ({
       x,
       y,
@@ -1109,10 +1111,10 @@ describe("pirate and defender", () => {
       pin(sim.ship, ship.x + 3000, ship.y);
       sim.ores.push(looseOre(sim, ship.x, ship.y));
       const first = listen(sim, 0.1);
-      expect(first.some((line) => line.speaker === ship && THANKS.includes(line.text))).toBe(true);
+      expect(first.some((line) => line.speaker === ship && pool(line, "thanks", THANKS).includes(line.text))).toBe(true);
       sim.ores.push(looseOre(sim, ship.x, ship.y));
       const second = listen(sim, 0.1);
-      expect(second.filter((line) => THANKS.includes(line.text))).toEqual([]);
+      expect(second.filter((line) => line.speaker === ship)).toEqual([]);
     });
 
     it("traffic leaves ore near the player alone unless it broke it loose itself; your drones take it", () => {
@@ -1162,8 +1164,28 @@ describe("pirate and defender", () => {
       });
       const mayday = heard.find((line) => line.mayday);
       expect(mayday?.speaker).toBe(ship);
+      // A mayday is drawn scared, whatever the ship's face usually looks like.
+      expect(mayday?.face.mood).toBe("scared");
       expect(sim.hears(mayday!)).toBe(true);
       expect(sim.hears({ ...mayday!, mayday: false })).toBe(false);
+    });
+
+    it("settles Gus and Pip at the player's home base, and leaves the rest of the traffic plain", () => {
+      const sim = arena({ trafficRacers: 3 });
+      const [first, second, third] = sim.traffic.map((pilot) => pilot.ship);
+      expect(sim.chatter.nameOf(sim, first)).toBe("Gus");
+      expect(sim.chatter.nameOf(sim, second)).toBe("Pip");
+      expect(["Gus", "Pip"]).not.toContain(sim.chatter.nameOf(sim, third));
+
+      pin(sim.ship, first.x + 3000, first.y);
+      sim.ores.push(looseOre(sim, first.x, first.y));
+      const heard = listen(sim, 0.1);
+      const line = heard.find((each) => each.speaker === first)!;
+      expect(line.name).toBe("Gus");
+      expect(line.face).toEqual({ voice: "gus", mood: "happy" });
+      // It is his own line, not the shared one wearing his face.
+      expect(voiceLines("gus", "thanks")).toContain(line.text);
+      expect(THANKS).not.toContain(line.text);
     });
 
     it("traffic turning for home says so, then asks for the dock once close and is cleared", () => {
@@ -1174,10 +1196,10 @@ describe("pirate and defender", () => {
       pin(pilot.ship, dock.x + 2500, dock.y);
       sim.setOre(pilot.ship, LOAD);
       const far = listen(sim, 3, () => pin(pilot.ship, dock.x + 2500, dock.y));
-      expect(far.some((line) => line.speaker === pilot.ship && HEADING_BACK.includes(line.text))).toBe(true);
+      expect(far.some((line) => line.speaker === pilot.ship && pool(line, "heading_back", HEADING_BACK).includes(line.text))).toBe(true);
       expect(far.some((line) => line.speaker === null && line.text.includes(name))).toBe(false);
       const near = listen(sim, 3, () => pin(pilot.ship, dock.x + 600, dock.y));
-      expect(near.some((line) => line.speaker === pilot.ship && APPROACH.includes(line.text))).toBe(true);
+      expect(near.some((line) => line.speaker === pilot.ship && pool(line, "approach", APPROACH).includes(line.text))).toBe(true);
       expect(near.some((line) => line.speaker === null && line.text === `Roger, ${name}, cleared to dock.`)).toBe(true);
     });
 
@@ -1189,7 +1211,7 @@ describe("pirate and defender", () => {
       pin(pilot.ship, dock.x, dock.y);
       sim.setOre(pilot.ship, LOAD);
       const heard = listen(sim, 60);
-      const out = heard.findIndex((line) => line.speaker === pilot.ship && OUTBOUND.includes(line.text));
+      const out = heard.findIndex((line) => line.speaker === pilot.ship && pool(line, "outbound", OUTBOUND).includes(line.text));
       expect(out).toBeGreaterThanOrEqual(0);
       expect(heard.slice(out).some((line) => line.speaker === null && line.text.includes(name))).toBe(true);
     });
@@ -1204,7 +1226,7 @@ describe("pirate and defender", () => {
       const heard = listen(sim, 2);
       const said = heard.find((line) => line.speaker === pilot.ship);
       expect(said?.text).toContain("reverse thruster");
-      expect(BOUGHT.some((text) => said!.text === text.replace("{part}", "reverse thruster"))).toBe(true);
+      expect(pool(said!, "bought", BOUGHT).some((text) => said!.text === text.replace("{part}", "reverse thruster"))).toBe(true);
       expect(heard.some((line) => line.speaker === null && line.text.includes(sim.chatter.nameOf(sim, pilot.ship)))).toBe(true);
     });
 

@@ -1,4 +1,4 @@
-import { Chatter } from "./chatter";
+import { Chatter, type FaceKey } from "./chatter";
 import { type BayGrid, type BlueprintId, partFits, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
 import { hubRecipes, isOreItem, itemDef, oreItems, saleRecipes } from "./items";
 import { copyPicks, pickOf, PROGRAMS, setPick as setTweakPick } from "./programs";
@@ -876,6 +876,8 @@ export type SimEvent =
       speaker: Ship | null;
       name: string;
       text: string;
+      /** Who is talking and how it looks: a key the radio draws. */
+      face: FaceKey;
       /** Heard at any distance. */
       mayday: boolean;
       /** Station news for everyone: heard at any distance, without the alarm. */

@@ -1,5 +1,18 @@
 {
   "gus": {
+    "lines": {
+      "approach": ["Dock, Gus. Room for one more?", "Full hold coming in. Open the door.", "This is Gus. Same berth as always."],
+      "heading_back": ["Load's in. Coming home.", "Full hold. Don't get excited.", "That's enough rock for one day."],
+      "outbound": ["Back out. Same rocks, same dust.", "Empty again. Off I go.", "Field's still there, worse luck."],
+      "all_clear": ["Pirate's gone. Back to work.", "Coast's clear. Wasting daylight."],
+      "fleeing": ["Pirate. I'm too old for this.", "Running. Don't laugh.", "Bugging out. Cover me."],
+      "mayday": ["Mayday. He's on me. Again.", "Mayday, mayday. Someone put a hole in my hull."],
+      "thanks": ["That's my rock. Thanks.", "Owe you one, kid.", "Didn't see that. Won't say it twice."],
+      "bought": ["Fitted a {part}. Feels wrong.", "New {part}. Cost me.", "They saw me coming on this {part}."],
+      "field": ["Rocks don't get easier.", "Quiet. Good.", "Forty years of this.", "Anyone else hear that? No. Never mind."],
+      "slim": ["Barren out here.", "Nothing but dust.", "Picked this corner clean."],
+      "news": ["Word for you: {item} at {base}, {price}.", "Heard {base} has {item}. {price}."]
+    },
     "face": {
       "color": "#F2A623",
       "identity": {
@@ -70,6 +83,19 @@
     }
   },
   "pip": {
+    "lines": {
+      "approach": ["Coming in! Got a full hold!", "It's Pip! Requesting a berth!", "Nearly there! Don't close up!"],
+      "heading_back": ["Full hold! Heading in!", "Haul's done! Coming home!", "That's the lot! Turning round!"],
+      "outbound": ["Back out! Rocks don't mine themselves!", "Empty again! Off I go!", "New day, new rocks!"],
+      "all_clear": ["It's gone! Back to work!", "All clear! Phew!"],
+      "fleeing": ["Pirate! Running!", "Eek, pirate! Bugging out!", "Not today! Going home!"],
+      "mayday": ["Mayday! He's right behind me!", "Mayday mayday! Help!"],
+      "thanks": ["Thanks! That's so many rocks!", "You're the best! Thank you!", "Owe you one!"],
+      "bought": ["Look at my new {part}!", "I got a {part}! It's shiny!", "Fitted a {part}! Feels fast!"],
+      "field": ["So many rocks!", "This is the good bit!", "One day I'll find the big one.", "Hello, rocks!"],
+      "slim": ["Aww, nothing left here.", "This corner's picked clean.", "Where'd all the rock go?"],
+      "news": ["Psst! {item} at {base}, {price}!", "Guess what: {base} has {item} for {price}!"]
+    },
     "face": {
       "color": "#F0709C",
       "identity": {

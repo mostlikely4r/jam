@@ -69,7 +69,8 @@
       #chatter { position: fixed; right: 12px; top: 12px; width: 380px; pointer-events: none; font-size: 13px;
                  text-shadow: 0 1px 2px #000; }
       body:has(#panel:not([hidden])) #chatter { right: 302px; }
-      #chatter div { margin-bottom: 3px; transition: opacity 1s; }
+      #chatter div { margin-bottom: 3px; transition: opacity 1s; display: flex; align-items: center; gap: 5px; }
+      #chatter svg.face { flex: none; }
       #chatter .who { color: #a8d8ff; }
       #chatter .station .who { color: #8fe3a1; }
       #chatter .mayday { color: #ff8a7c; }

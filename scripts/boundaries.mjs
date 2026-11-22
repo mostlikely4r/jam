@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("../src/", import.meta.url));
 /** The editors and the bot, by the tail of whatever path a game module might import. */
-const EDITORS = /(^|\/)(designer\/(hulls|designer)|bot\/(bot|log|plan))$/;
+const EDITORS = /(^|\/)(designer\/(hulls|designer|faces)|bot\/(bot|log|plan))$/;
 /** The one module allowed to reach them: the entry point that mounts them behind `?dev`. */
 const ALLOWED = new Set(["main.ts"]);
 

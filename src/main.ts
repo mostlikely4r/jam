@@ -2,6 +2,7 @@ import { ShipDemo } from "./demo";
 import { Chart } from "./chart";
 import type { Bot } from "./bot/bot";
 import { HullDesigner } from "./designer/hulls";
+import { FaceGallery } from "./designer/faces";
 import { Designer } from "./designer/designer";
 import { applyTo, shipMarks, useLayout, type GameLink } from "./designer/link";
 import { shippedWorld } from "./designer/shipped";
@@ -102,6 +103,21 @@ function openHulls(): void {
   keys.clear();
   pauseOverlay.hidden = true;
   hullDesigner.open();
+}
+/** Dev only: every face at every mood, for tuning the shapes in `src/voices.json` by looking. */
+const faceGallery = dev
+  ? new FaceGallery(() => {
+      keys.clear();
+      // Opened from the pause menu: go back to it.
+      if (paused) setPaused(true);
+    })
+  : null;
+
+function openFaces(): void {
+  if (!faceGallery) return;
+  keys.clear();
+  pauseOverlay.hidden = true;
+  faceGallery.open();
 }
 /** Dev only: the system designer, a separate view for laying out stars, planets and places. */
 const designer = dev
@@ -304,7 +320,7 @@ const keys = new Set<string>();
 let paused = false;
 let timeScale = 1;
 /** The menu is up, or the designer covers the game. */
-const pausedNow = () => paused || (designer?.isOpen ?? false) || (hullDesigner?.isOpen ?? false);
+const pausedNow = () => paused || (designer?.isOpen ?? false) || (hullDesigner?.isOpen ?? false) || (faceGallery?.isOpen ?? false);
 
 /**
  * The world new games start in, already running for a while (npm run warm makes it). Only
@@ -460,6 +476,7 @@ function showPage(page: "main" | "help" | "settings"): void {
     }
     if (designer) pauseBox.append(menuButton("System designer (dev, O)", openDesigner));
     if (hullDesigner) pauseBox.append(menuButton("Hull designer (dev, H)", openHulls));
+    if (faceGallery) pauseBox.append(menuButton("Face gallery (dev, F)", openFaces));
     return;
   }
   if (page === "help") {
@@ -1187,13 +1204,17 @@ window.addEventListener("keydown", (event) => {
   // Picking a ship comes first.
   if (!startOverlay.hidden) return;
   // The designer has its own keys, and the game holds still behind it.
-  if (designer?.isOpen || hullDesigner?.isOpen) return;
+  if (designer?.isOpen || hullDesigner?.isOpen || faceGallery?.isOpen) return;
   if (event.code === "KeyG" && dev && !event.repeat) {
     void toggleBot();
     return;
   }
   if (hullDesigner && event.code === "KeyH" && !event.repeat) {
     openHulls();
+    return;
+  }
+  if (faceGallery && event.code === "KeyF" && !event.repeat) {
+    openFaces();
     return;
   }
   if (designer && event.code === "KeyO" && !event.repeat) {

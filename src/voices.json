@@ -1,0 +1,193 @@
+{
+  "gus": {
+    "face": {
+      "color": "#F2A623",
+      "identity": {
+        "over": [
+          { "kind": "line", "from": [28.5, 11.5], "to": [31, 20], "w": 1.6, "color": "#FFE2B4" },
+          { "kind": "line", "from": [30.5, 11], "to": [33, 19.5], "w": 1.2, "color": "#FFE2B4" }
+        ]
+      },
+      "moods": {
+        "neutral": {
+          "eyes": [
+            { "kind": "disc", "at": [34, 27], "half": 8, "depth": 5.4 },
+            { "kind": "disc", "at": [67, 26], "half": 10.5, "depth": 6.4 }
+          ],
+          "brows": [
+            { "kind": "arc", "at": [34, 24], "half": 6, "bow": 1.5, "rot": 12, "w": 4.4 },
+            { "kind": "arc", "at": [66, 23], "half": 6.5, "bow": 1.5, "rot": -12, "w": 4.4 }
+          ],
+          "mouth": [
+            { "kind": "arc", "at": [58, 48], "half": 12, "bow": 2, "bow2": 5, "rot": -4, "w": 4.2 }
+          ]
+        },
+        "happy": {
+          "eyes": [
+            { "kind": "arc", "at": [34, 31], "half": 6.5, "bow": -4.5, "w": 4.8 },
+            { "kind": "disc", "at": [67, 27], "half": 10, "depth": 5.6 }
+          ],
+          "brows": [
+            { "kind": "arc", "at": [34, 21], "half": 6, "bow": 1, "rot": 8, "w": 4 },
+            { "kind": "arc", "at": [66, 20], "half": 6.5, "bow": 1, "rot": -8, "w": 4 }
+          ],
+          "mouth": [
+            { "kind": "path", "at": [57, 45], "rot": -6, "d": "M -12 1 C -8 -4 8 -4 12 1 C 9 8 -9 8 -12 1 Z" },
+            { "kind": "poly", "at": [57, 45], "rot": -6, "points": [[-5.5, 0.5], [-2, 0.5], [-3.7, 5]], "cut": true }
+          ]
+        },
+        "annoyed": {
+          "eyes": [
+            { "kind": "disc", "at": [34, 27], "half": 8, "depth": 3 },
+            { "kind": "disc", "at": [67, 26], "half": 10.5, "depth": 3.4 }
+          ],
+          "brows": [
+            { "kind": "arc", "at": [34, 23], "half": 6, "bow": 1, "rot": 16, "w": 4.4 },
+            { "kind": "arc", "at": [66, 22], "half": 6.5, "bow": 1, "rot": -16, "w": 4.4 }
+          ],
+          "mouth": [
+            { "kind": "line", "from": [45, 49], "to": [70, 47], "w": 4 }
+          ]
+        },
+        "scared": {
+          "tilt": 6,
+          "eyes": [
+            { "kind": "ring", "at": [34, 26], "rx": 6, "ry": 6.5, "w": 3.2 },
+            { "kind": "ring", "at": [67, 25], "rx": 7.5, "ry": 8, "w": 3.2 }
+          ],
+          "brows": [
+            { "kind": "arc", "at": [34, 11], "half": 6, "bow": 0.5, "rot": 4, "w": 4 },
+            { "kind": "arc", "at": [66, 10], "half": 6.5, "bow": 0.5, "rot": -4, "w": 4 }
+          ],
+          "mouth": [
+            { "kind": "squiggle", "at": [53, 49], "half": 8, "humps": 3, "amp": 2.5, "w": 3.2 }
+          ],
+          "marks": [
+            { "kind": "path", "color": "#8FD8FF", "d": "M 85 10 C 86 13.5 90 16 90 19.5 C 90 22.4 87.8 24.5 85 24.5 C 82.2 24.5 80 22.4 80 19.5 C 80 16 84 13.5 85 10 Z" }
+          ]
+        }
+      }
+    }
+  },
+  "pip": {
+    "face": {
+      "color": "#F0709C",
+      "identity": {
+        "over": [
+          { "kind": "ring", "at": [34, 24], "rx": 7.5, "ry": 7.5, "w": 1.8 },
+          { "kind": "ring", "at": [65, 23], "rx": 8.5, "ry": 7.5, "rot": -8, "w": 1.8 }
+        ]
+      },
+      "moods": {
+        "neutral": {
+          "eyes": [
+            { "kind": "oval", "at": [34, 24], "rx": 4.5, "ry": 6, "color": "#FFB3CC" },
+            { "kind": "oval", "at": [65, 23], "rx": 5.5, "ry": 6.5, "color": "#FFB3CC" },
+            { "kind": "dot", "at": [32.6, 21.8], "r": 1.4, "cut": true },
+            { "kind": "dot", "at": [63.2, 20.8], "r": 1.6, "cut": true }
+          ],
+          "mouth": [
+            { "kind": "path", "d": "M 34 49 Q 38 45.5 42 49 Q 46 45.5 50 49", "w": 3.2 }
+          ]
+        },
+        "happy": {
+          "eyes": [
+            { "kind": "star", "at": [34, 24], "r": 6.2, "inner": 2.1 },
+            { "kind": "star", "at": [65, 23], "r": 7.2, "inner": 2.3 }
+          ],
+          "mouth": [
+            { "kind": "path", "at": [57, 44], "rot": 4, "d": "M -11 1 C -7 -4 7 -4 11 1 C 8 8 -8 8 -11 1 Z" },
+            { "kind": "cap", "at": [57, 51], "half": 3, "depth": 1.8, "color": "#FFC2D8" }
+          ],
+          "marks": [
+            { "kind": "line", "from": [14, 37], "to": [20, 39], "w": 3, "color": "#F2789C" },
+            { "kind": "line", "from": [80, 39], "to": [86, 37], "w": 3, "color": "#F2789C" },
+            { "kind": "star", "at": [83, 12], "r": 5, "inner": 1.5, "color": "#FFF3C4" }
+          ]
+        },
+        "annoyed": {
+          "eyes": [
+            { "kind": "disc", "at": [34, 23], "half": 5, "depth": 3.4 },
+            { "kind": "disc", "at": [65, 22.5], "half": 5.5, "depth": 3.8 }
+          ],
+          "mouth": [
+            { "kind": "line", "from": [41, 49], "to": [51, 48], "w": 3.2 }
+          ]
+        },
+        "scared": {
+          "tilt": 6,
+          "eyes": [
+            { "kind": "dot", "at": [34, 25], "r": 2.2 },
+            { "kind": "dot", "at": [65, 24], "r": 2.6 }
+          ],
+          "mouth": [
+            { "kind": "squiggle", "at": [50, 49], "half": 8, "humps": 3, "amp": 2.2, "w": 3 }
+          ],
+          "marks": [
+            { "kind": "path", "color": "#8FD8FF", "d": "M 85 11 C 86 14.5 90 17 90 20.5 C 90 23.4 87.8 25.5 85 25.5 C 82.2 25.5 80 23.4 80 20.5 C 80 17 84 14.5 85 11 Z" }
+          ]
+        }
+      }
+    }
+  },
+  "generic": {
+    "face": {
+      "color": "#4FE3F0",
+      "moods": {
+        "neutral": {
+          "eyes": [
+            { "kind": "square", "at": [35, 26], "half": 6, "depth": 6, "round": 2.5 },
+            { "kind": "square", "at": [65, 26], "half": 6, "depth": 6, "round": 2.5 }
+          ],
+          "mouth": [
+            { "kind": "arc", "at": [50, 49], "half": 6.5, "bow": 2.5, "w": 4 }
+          ]
+        },
+        "happy": {
+          "eyes": [
+            { "kind": "arc", "at": [35, 28], "half": 5.5, "bow": -5, "w": 4.5 },
+            { "kind": "arc", "at": [65, 28], "half": 5.5, "bow": -5, "w": 4.5 }
+          ],
+          "mouth": [
+            { "kind": "path", "at": [50, 45], "d": "M -9 1 C -6 -3.5 6 -3.5 9 1 C 7 7 -7 7 -9 1 Z" }
+          ]
+        },
+        "annoyed": {
+          "eyes": [
+            { "kind": "square", "at": [35, 26], "half": 6, "depth": 3.5, "round": 2 },
+            { "kind": "square", "at": [65, 26], "half": 6, "depth": 3.5, "round": 2 }
+          ],
+          "mouth": [
+            { "kind": "line", "from": [39, 49], "to": [61, 49], "w": 3.6 }
+          ]
+        },
+        "scared": {
+          "eyes": [
+            { "kind": "ring", "at": [35, 25], "rx": 6, "w": 3.2 },
+            { "kind": "ring", "at": [65, 25], "rx": 6.5, "ry": 7, "w": 3.2 }
+          ],
+          "mouth": [
+            { "kind": "ring", "at": [50, 49], "rx": 3.5, "ry": 4.5, "w": 2.8 }
+          ]
+        }
+      }
+    }
+  },
+  "station": {
+    "face": {
+      "color": "#7FE3D4",
+      "screen": { "radius": 3, "rim": "#3C6E74" },
+      "moods": {
+        "neutral": {
+          "eyes": [
+            { "kind": "square", "at": [33, 25], "half": 6.5, "depth": 6.5, "round": 3 },
+            { "kind": "square", "at": [67, 25], "half": 6.5, "depth": 6.5, "round": 3 }
+          ],
+          "mouth": [
+            { "kind": "arc", "at": [50, 49], "half": 7.5, "bow": 3, "w": 4.2 }
+          ]
+        }
+      }
+    }
+  }
+}

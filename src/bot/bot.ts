@@ -10,7 +10,7 @@
 import { computerSize, works, type Module, type MountId } from "../fitting";
 import { isOreItem } from "../items";
 import { isProgram, partOf, type PartId } from "../parts";
-import { TICK, type Loose, type Poi, type Rock, type Sim } from "../sim";
+import { DOCK_OFFSET, SHIP_RADIUS, STATION_HALF, TICK, type Loose, type Poi, type Rock, type Sim } from "../sim";
 import { BotLog } from "./log";
 import { currentStep, missingPart, stepName, working, type Plan } from "./plan";
 
@@ -73,6 +73,28 @@ export const SIGHT = 1200;
 export const CRUISE_SPEED = 170;
 /** How far ahead of the ship a drag's spot sits: a hand starts one just off the ship, not on it. */
 const DRAG_START = 60;
+/**
+ * How far from a station's middle the ship counts as clear of it: past every corner of the solid
+ * box, the hull's own radius, and 40 more for the curve the pilot flies getting there.
+ */
+const STATION_CLEAR = Math.hypot(STATION_HALF, STATION_HALF) + SHIP_RADIUS + 40;
+/**
+ * How far from a station's middle a trip out still counts as leaving it: the far corner of its
+ * dock, so a ship docked anywhere in the berth is leaving, and one passing further out is not.
+ */
+const STATION_NEAR = Math.hypot(DOCK_OFFSET + STATION_HALF, STATION_HALF);
+/**
+ * How fast a trip out backs away from the station it leaves, before it turns for the field: slow
+ * enough that a hull rested against the dock's edge has nothing to run into.
+ */
+export const UNDOCK_SPEED = 60;
+/** How far the solid box is padded when the way to the field is checked: the hull, and a margin. */
+const STATION_PAD = STATION_HALF + SHIP_RADIUS + 20;
+/**
+ * How far out a way round a station may take the ship before it gives up and drags for the field
+ * regardless: a field that close behind sits in the station's own shadow, and no way round.
+ */
+const STATION_GIVE_UP = STATION_CLEAR * 4;
 
 /** Everything the bot may call on the sim: player inputs, and what it reads to decide. */
 export const BOT_CALLS = {
@@ -124,6 +146,35 @@ interface Loss {
   at: number;
   ore: number;
   cost: number;
+}
+
+/** A world position in a station's own axes, so it turns with the station. */
+function stationAxes(station: Poi, x: number, y: number): { x: number; y: number } {
+  const dx = x - station.x;
+  const dy = y - station.y;
+  const cos = Math.cos(station.rotation);
+  const sin = Math.sin(station.rotation);
+  return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
+}
+
+/**
+ * Whether a straight line between two spots given in a station's own axes passes through the
+ * square `half` across at its middle: a line that starts inside counts, since it has to leave.
+ */
+function crossesBox(from: { x: number; y: number }, to: { x: number; y: number }, half: number): boolean {
+  let enter = 0;
+  let exit = 1;
+  for (const [start, span] of [[from.x, to.x - from.x], [from.y, to.y - from.y]] as const) {
+    if (span === 0) {
+      if (Math.abs(start) > half) return false;
+      continue;
+    }
+    const near = (-half - start) / span;
+    const far = (half - start) / span;
+    enter = Math.max(enter, Math.min(near, far));
+    exit = Math.min(exit, Math.max(near, far));
+  }
+  return enter <= exit;
 }
 
 export class Bot {
@@ -188,6 +239,10 @@ export class Bot {
   private dock: Poi | null = null;
   /** The field a trip out is flying to, kept until it's stopped or in: one drag a trip. */
   private outbound: Poi | null = null;
+  /** The station a trip out is still getting clear of, or null. */
+  private clearing: Poi | null = null;
+  /** Which way round that station it goes: settled once, so a field dead behind can't flap it. */
+  private exitSide = 1;
   /** Whether it was in a dock last tick, so arriving is said once. */
   private port = false;
   /** Snags already said, by part and reason: the same refusal at every dock is one finding. */
@@ -308,6 +363,7 @@ export class Bot {
     if (sim.clickPilot.active) sim.orderStop();
     this.orderAt = null;
     this.outbound = null;
+    this.clearing = null;
   }
 
   // What broke, and what the hits cost.
@@ -395,6 +451,7 @@ export class Bot {
     this.visit = null;
     this.orderAt = null;
     this.outbound = null;
+    this.clearing = null;
     this.trigger(sim, false, "");
   }
 
@@ -451,6 +508,7 @@ export class Bot {
     this.homeSaid = null;
     this.dock = null;
     this.outbound = null;
+    this.clearing = null;
   }
 
   private inDock(sim: Sim): void {
@@ -568,25 +626,93 @@ export class Bot {
   }
 
   /**
-   * Sets out for a field the way the user flies: a right drag towards its marker, a start's
-   * length long, so the ship comes up to `CRUISE_SPEED` and coasts there rather than being
-   * thrown at the rocks by a click on the far side of the field.
+   * The way out of a station's own space, before the trip out proper: back out of the dock's open
+   * side, then round the station on the side the field is on when the straight way to it crosses
+   * the hull, at the undocking speed. One drag a leg. Says whether the trip out is still waiting
+   * on it, in which case nothing is given towards the field yet.
+   *
+   * A field on the dock's own side leaves after the open-side leg alone, so there is one rule.
+   * Which side it goes round is the side the field is on, settled when the way out starts.
    */
-  private outTo(sim: Sim, what: string, again = false): void {
-    if (this.outbound && !again) return;
+  private wayOut(sim: Sim, to: { x: number; y: number }, what: string): boolean {
+    const { ship } = sim;
+    const station = this.stationLeaving(sim);
+    if (!station) {
+      this.clearing = null;
+      return false;
+    }
+    const here = stationAxes(station, ship.x, ship.y);
+    const field = stationAxes(station, to.x, to.y);
+    const out = Math.hypot(here.x, here.y);
+    // Past every corner, with a clear way to the field: the trip out proper from here.
+    if (out >= STATION_CLEAR && !crossesBox(here, field, STATION_PAD)) {
+      this.clearing = null;
+      return false;
+    }
+    // A field so close behind that no way round the near side clears it is not worth going round
+    // for ever: past this the trip out is given as it used to be.
+    if (out > STATION_GIVE_UP) {
+      this.clearing = null;
+      return false;
+    }
+    if (this.clearing !== station) {
+      this.clearing = station;
+      this.exitSide = field.y !== 0 ? Math.sign(field.y) : Math.sign(here.y) || 1;
+    }
+    // One drag a leg: while the last leg's drag is still flying, it has the work in hand. A ship
+    // still drifting out of a berth gets a leg straight away, whatever speed it drifted at.
+    if (sim.clickPilot.active) return true;
+    const cos = Math.cos(station.rotation);
+    const sin = Math.sin(station.rotation);
+    // Out of the dock's open side first, as a player backs out, then along the station's own side.
+    const backing = out < STATION_CLEAR;
+    const ux = backing ? cos : -sin * this.exitSide;
+    const uy = backing ? sin : cos * this.exitSide;
+    const base = sim.baseOf(station);
+    const name = base ? sim.baseName(base.id) : "the station";
+    this.dragAt(sim, ux, uy, UNDOCK_SPEED, `${what}, ${backing ? `out of ${name}'s dock` : `round ${name}`}`);
+    return true;
+  }
+
+  /**
+   * A drag that puts the ship on a heading at a speed of its own, rather than adding to the speed
+   * it already has: the drawn velocity is against the ship's own motion, which is what the game's
+   * `dragAbsolute` setting draws. Backing out of a station at sixty it goes sixty, and the trip
+   * out that follows is the cruising speed rather than the cruising speed plus the backing out.
+   */
+  private dragAt(sim: Sim, ux: number, uy: number, speed: number, what: string): void {
     const { ship, now } = sim;
-    const field = this.field(sim);
-    const dx = field.poi.x - ship.x;
-    const dy = field.poi.y - ship.y;
-    const out = Math.hypot(dx, dy) || 1;
-    const ux = dx / out;
-    const uy = dy / out;
     const spot = { x: ship.x + ux * DRAG_START, y: ship.y + uy * DRAG_START };
-    this.log.input(now, "move", `${what} at ${Math.round(spot.x)}, ${Math.round(spot.y)}, drifting ${Math.round(CRUISE_SPEED)}`);
-    sim.orderMove(spot.x, spot.y, ux * CRUISE_SPEED, uy * CRUISE_SPEED);
+    this.log.input(now, "move", `${what} at ${Math.round(spot.x)}, ${Math.round(spot.y)}, drifting ${speed}`);
+    sim.orderMove(spot.x, spot.y, ux * speed - ship.vx, uy * speed - ship.vy);
     this.orderAt = now;
     this.clickedAt = now;
     this.ordered = spot;
+  }
+
+  /** The station a trip out still has to clear first, or null when none is close enough to be in it. */
+  private stationLeaving(sim: Sim): Poi | null {
+    const { ship } = sim;
+    const dock = sim.nearestDock(ship.x, ship.y);
+    return Math.hypot(dock.x - ship.x, dock.y - ship.y) <= STATION_NEAR ? dock : null;
+  }
+
+  /**
+   * Sets out for a field the way the user flies: a right drag towards its marker, a start's
+   * length long, so the ship comes up to `CRUISE_SPEED` and coasts there rather than being
+   * thrown at the rocks by a click on the far side of the field.
+   *
+   * Out of a station's own space it backs clear of the hull first: see `wayOut`.
+   */
+  private outTo(sim: Sim, what: string, again = false): void {
+    if (this.outbound && !again) return;
+    const { ship } = sim;
+    const field = this.field(sim);
+    if (this.wayOut(sim, field.poi, what)) return;
+    const dx = field.poi.x - ship.x;
+    const dy = field.poi.y - ship.y;
+    const out = Math.hypot(dx, dy) || 1;
+    this.dragAt(sim, dx / out, dy / out, CRUISE_SPEED, what);
     this.outbound = field.poi;
   }
 
@@ -603,6 +729,7 @@ export class Bot {
   /** Stops the trip out where it is: the drag cancelled, then the coast braked, as two clicks do. */
   private stopOut(sim: Sim): void {
     this.outbound = null;
+    this.clearing = null;
     // A click on the ship cancels the move and leaves it coasting; the second stops the coast.
     sim.orderStop();
     sim.orderStop();
@@ -626,6 +753,11 @@ export class Bot {
     // `cargoSpace` is the room left, not the hold's size: none left and it's full.
     if (this.oreAboard > 0 && sim.cargoSpace(ship) < 1) {
       this.home(sim, "the hold is full");
+      return;
+    }
+    // Getting clear of the station it just left, before the trip out proper is given.
+    if (this.clearing) {
+      this.outTo(sim, `out to ${sim.fieldName(this.field(sim).id)}`);
       return;
     }
     // The trip out: a drag towards the field, stopped the moment a rock comes into sight.
@@ -940,6 +1072,7 @@ export class Bot {
   private home(sim: Sim, why: string): void {
     const { now } = sim;
     this.outbound = null;
+    this.clearing = null;
     // One dock, picked and kept: two of them either side of the ship would have it turning
     // for a new one every few seconds, and never arriving at either.
     const nearest = sim.nearestDock(sim.ship.x, sim.ship.y);

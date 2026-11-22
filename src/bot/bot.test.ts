@@ -3,9 +3,9 @@ import { hullMax, refresh } from "../fitting";
 import { homeSim, type Home } from "../home";
 import { partOf, type PartId } from "../parts";
 import { ClickPilot } from "../pilot";
-import { DOCK_OFFSET, TICK, type Loose, type Rock, type Ship, type Sim } from "../sim";
+import { DOCK_OFFSET, SHIP_RADIUS, STATION_HALF, TICK, type Loose, type Rock, type Ship, type Sim } from "../sim";
 import { DEFAULTS, type Tuning } from "../tuning";
-import { BOT_CALLS, Bot, CRUISE_SPEED, FIRE_CLOSE, SHIP_CLEARANCE, SIGHT } from "./bot";
+import { BOT_CALLS, Bot, CRUISE_SPEED, FIRE_CLOSE, SHIP_CLEARANCE, SIGHT, UNDOCK_SPEED } from "./bot";
 import { BotLog, type RunInfo } from "./log";
 import { FLOATER_JOURNEY, type Plan } from "./plan";
 
@@ -322,6 +322,76 @@ describe("out to the field", () => {
     const field = sim.miningFieldAt(sim.ship.x, sim.ship.y);
     expect(Math.atan2(driftY, driftX)).toBeCloseTo(Math.atan2(field.poi.y - sim.ship.y, field.poi.x - sim.ship.x), 6);
     expect(bot.log.inputs.some((input) => input.kind === "move" && input.detail.includes("drifting"))).toBe(true);
+  });
+
+  it("backs out clear of the hull with the field behind the station", () => {
+    // The station's dock facing straight away from the field, close enough in to reach, and
+    // neither of them turning: a trip out of it is a drag straight through the solid box.
+    const sim = dock(
+      world({ stationDistance: 1200, stationPhase: Math.PI, stationSpinPhase: Math.PI, orbitPeriod: 1e9, stationRotationPeriod: 1e9 }),
+    );
+    const station = sim.station;
+    const field = sim.miningFieldAt(sim.ship.x, sim.ship.y);
+    // Nothing on the way to stop for, so the station is the only thing in it.
+    sim.rocks.length = 0;
+    const cos = Math.cos(station.rotation);
+    const sin = Math.sin(station.rotation);
+    const dx = field.poi.x - sim.ship.x;
+    const dy = field.poi.y - sim.ship.y;
+    // The field straight behind the dock, in the station's own axes.
+    expect(dx * cos + dy * sin).toBeLessThan(0);
+    expect(Math.abs(-dx * sin + dy * cos)).toBeLessThan(1);
+    const bot = new Bot({ plan: FLOATER_JOURNEY, log: new BotLog() });
+    const reach = STATION_HALF + SHIP_RADIUS;
+    let closest = Infinity;
+    let reached = 0;
+    for (let i = 0; i < Math.round(20 / TICK); i++) {
+      playTick(sim, bot);
+      // The ship in the station's own axes, as the hull sweep sees it.
+      const sx = sim.ship.x - station.x;
+      const sy = sim.ship.y - station.y;
+      closest = Math.min(closest, Math.max(Math.abs(sx * cos + sy * sin), Math.abs(-sx * sin + sy * cos)) - reach);
+      if (!reached && Math.hypot(field.poi.x - sim.ship.x, field.poi.y - sim.ship.y) < field.radius) reached = i * TICK;
+    }
+    // Never within the hull's width of the solid box, and at the field inside the twenty seconds.
+    expect(closest).toBeGreaterThan(0);
+    expect(reached).toBeGreaterThan(0);
+    expect(reached).toBeLessThan(20);
+    // It went round the station, slowly, rather than dragging straight through it.
+    expect(bot.log.inputs.some((input) => input.kind === "move" && input.detail.includes("round Station"))).toBe(true);
+    expect(bot.log.inputs.some((input) => input.kind === "move" && input.detail.includes(`drifting ${UNDOCK_SPEED}`))).toBe(true);
+  });
+
+  it("backs out clear of the hull when the dock drift has already left it", () => {
+    // The drift step 1 measured: the ship is out of the berth, sideways and still moving, before
+    // `Bot.leave` ever runs, so the way out has to be given from space.
+    const sim = world({ stationDistance: 1200, stationPhase: Math.PI, stationSpinPhase: Math.PI, orbitPeriod: 1e9, stationRotationPeriod: 1e9 });
+    const station = sim.station;
+    const cos = Math.cos(station.rotation);
+    const sin = Math.sin(station.rotation);
+    const at = (x: number, y: number) => ({ x: station.x + x * cos - y * sin, y: station.y + x * sin + y * cos });
+    // Just out of the berth's side, at the dock's own distance out: inside the station's ring, and
+    // still crossing the hull on the way to the field.
+    const out = at(DOCK_OFFSET, STATION_HALF + 5);
+    Object.assign(sim.ship, { x: out.x, px: out.x, y: out.y, py: out.y, vx: -sin * 70, vy: cos * 70 });
+    expect(sim.isDocked()).toBe(false);
+    const field = sim.miningFieldAt(sim.ship.x, sim.ship.y);
+    sim.rocks.length = 0;
+    const bot = new Bot({ plan: FLOATER_JOURNEY, log: new BotLog() });
+    const reach = STATION_HALF + SHIP_RADIUS;
+    let closest = Infinity;
+    let reached = false;
+    for (let i = 0; i < Math.round(20 / TICK); i++) {
+      playTick(sim, bot);
+      const sx = sim.ship.x - station.x;
+      const sy = sim.ship.y - station.y;
+      closest = Math.min(closest, Math.max(Math.abs(sx * cos + sy * sin), Math.abs(-sx * sin + sy * cos)) - reach);
+      if (Math.hypot(field.poi.x - sim.ship.x, field.poi.y - sim.ship.y) < field.radius) reached = true;
+    }
+    expect(closest).toBeGreaterThan(0);
+    expect(reached).toBe(true);
+    // The way out was still owed, and given from space: round the station, slowly.
+    expect(bot.log.inputs.some((input) => input.kind === "move" && input.detail.includes("round Station"))).toBe(true);
   });
 
   it("stops the moment a rock is in sight, and leaves it alone", () => {

@@ -244,3 +244,21 @@ Expansion as a sim (2026-11-13, "that's then, this is now"): the start is one pl
 - area: Raised 2026-11-11
 
 Raised 2026-11-20 (targeting spec thread): a tractor tweak "drag all / drag targets", since ore B, dropped items and limited cargo make a selective tractor matter; future tractors might drag rocks or ships. Not in the targeting spec.
+
+## S-39 · Faces from a pool, not one drawing each
+- status: idea
+- area: Comms
+
+Faces are shapes with numbers in `src/voices.json`, so a new face means writing new numbers. The user's hope (2026-11-23), on seeing four of them: name the parts — lids, rings, stars, carets, brows, mouths, marks — and let a face be assembled from the pool, so hundreds of variants can be generated and the good ones kept. That is also how aliens arrive later: a species is a pool with extra shapes in it, not new art. Needs a plan of its own; step 0 of `docs/chatter-faces-plan.md` built the vocabulary it would draw from.
+
+## S-40 · Settle the face shapes
+- status: building
+- area: Comms
+
+The faces are on the radio log, but the shapes aren't settled. Gus reads as the same grump in every mood because his brows sit on his lids; plain traffic was too plain until it got a glint and a mouth with mass. The dev page (key F under `?dev`) puts the open calls side by side — Gus's brows (fixed, none, per mood), his scar (none, slash, cross, stitch, hash), Pip's lean, how much craft plain traffic gets, the station's own display — and the pick goes into `src/voices.json` by hand. Waits on the user pointing at letters.
+
+## S-41 · Regulars who remember you
+- status: specced
+- area: Comms
+
+Gus and Pip are strangers today. Step 2 of `docs/chatter-faces-plan.md`: count meetings, warm the lines up from stranger to regular to friend, save the meetings with the game, and two tweaks beside radio range so the whole arc can be seen in minutes. Their packs get regular and friend lines; a level with no line for a kind falls back a level, then to the shared list.

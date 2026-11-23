@@ -65,6 +65,10 @@ Read by `/spec` and `/build`.
   note at a time, with the user: fix it now, queue it, backlog it or drop it; delete the note in
   the same change, and name the id it became in the commit message (`inbox: I-3 → F-41`) — or in
   the handoff, where the operator owns commits.
+- **Shared files:** the commands in `.claude/commands/` and this block come from
+  `~/Desktop/vibeview`. The full check must leave
+  `node ~/Desktop/vibeview/scripts/sync-prompts.ts --check` clean (exits 1 on a drifted prompt or
+  block); fix the drift in vibeview, never in the copy here.
 <!-- vibeview:workflow end -->
 - **Commits:** the agent commits. Once a change is finished and the full check passes, commit it
   without asking, one commit per change with a clear message, and name the commit in the reply.

@@ -230,9 +230,13 @@ charges and fills (and only as far as the money goes), nothing at a dock with th
 low tank heads home instead of out to its field, and a record with a low tank picks a dock over
 its field. The save test now checks the tank round-trips too.
 
-**Open for the tune step:** `fuelPrice` 5 and `fuelReturn` 1.5 are guesses. Watch whether traffic
-spends its ore money on fuel before it can save for parts, and whether a 20 tank leaves the
-floaters turning home constantly (they burn 12.4 a trip and dock at every 20).
+**Tuned 2026-11-23.** The user played with fuel on and found it good as it stood, so the numbers
+stay: `fuelPrice` 5, `fuelReturn` 1.5, 20 a tank. Traffic still sells what it did without fuel (a
+10 game-minute census: 95 ore, against about 96 a 10 minutes before), and the per-1000 burns came
+back where step 1 measured them. Two things to keep an eye on as the supply chain lands: what a
+fill costs a trader against the money it saves for parts, and whether a floater's 20 still lets it
+work a trip, since 12.4 a trip is most of a tank.
+
 ## Step 2b: tanks as modules
 
 **Decided 2026-11-23**, after step 2: the tank becomes a module like the cargo bay, so it can be

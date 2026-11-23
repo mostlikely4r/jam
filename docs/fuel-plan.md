@@ -159,15 +159,13 @@ above the rates shows what a trip burns; keep Tab open to watch it climb.
 
 ## Step 2: tanks and refuelling
 
-- **Tank size per hull** goes in `src/hulls.json`, set from step 1's numbers. A tank that can't
-  hold a trip home from the furthest field is too small. Ships start full. **The starting hull's
-  tank is 20 fuel** (*decided* 2026-11-23): comfortable for the minimal loop, three or four of
-  the user's own trips, and to be raised later if the numbers say it should be. Proposal for
-  the rest, at about 4 typical trips by the table: racer 18, floater 50, pirate 14, defender 90.
-  The hauler's own tank comes with step 3, where it first pays for its fuel. One thing to settle
-  when tanks are per hull: 20 on the floater hull is only 1.6 of a traffic floater's trips, so
-  traffic would go home far more often than today, unless the starting 20 is an exception for
-  the player's first ship rather than the hull's number.
+- **Tank size per hull** goes in `src/hulls.json`: **20 for every hull's default layout**
+  (*decided* 2026-11-23). Everyone works the same, so a racer, a floater, a pirate, a defender
+  and a drone all start with 20, and the tank is raised later (a medium or large one, or the
+  starting number) if the numbers say it should be. Ships start full. A tank that can't hold a
+  trip home from the furthest field is too small: 20 is only 1.6 of a traffic floater's trips,
+  so if that turns out unplayable the fix is its default layout in step 2b, or `fuelReturn` here.
+  The hauler's own tank comes with step 3, where it first pays for its fuel.
 - **Visible** (*decided*):
   - Every ship draws a small fuel bar beside its hull in `src/render.ts`. Proposal: shown for
     ships near the camera, like the other ship markers.
@@ -200,6 +198,33 @@ above the rates shows what a trip burns; keep Tab open to watch it climb.
   - With the switch off, nothing burns and the existing suite passes untouched.
 - **Try in game:** turn fuel on, play a few trips, and watch your gauge and the traffic bars.
   Lower `fuelReturn` until traffic cuts trips short.
+
+## Step 2b: tanks as modules
+
+**Decided 2026-11-23**, after step 2: the tank becomes a module like the cargo bay, so it can be
+upgraded, damaged and destroyed, and so a ship's range is a fitting choice.
+
+- **Two tank mounts on every hull** (*decided*): a little either side of the cargo bay, placed by
+  eye in the hull designer. A large bay and large tanks may overlap a little: it's art, not a
+  rule. All five hulls take tanks (*decided*).
+- **Tank parts** (proposal): small 10, medium 20 and large 40 fuel, one per mount. The default
+  layout of every hull keeps **20**, as two smalls, so step 2's numbers carry over. Pirates start
+  with a medium and defenders with a large (*decided*: they may start with a medium or large
+  tank). The player's ladder: 20 → 30 → 50 (a medium beside a small) → 40 → 60 → 80.
+- **Capacity is the sum of the fitted tanks.** Every hull's bare fit carries its tanks: without
+  that, a ship has no tank and can't move. Only the upgrade needs the AI to learn to buy tanks.
+- **Damaged** (*decided*): the tank that took the hit slowly loses its fuel, a leak. The ship
+  keeps the rest: its other tank, or nothing.
+- **Destroyed** (*decided*): the fuel in that tank is gone with it.
+- **A tank is not a `section`**: `bayBox` in `src/shipArt.ts` draws a cargo well at any fitted
+  module of that kind, so a tank on its own mount would get a phantom bay.
+- **The bar moves onto the tank**: the tank art fills as it drains, and the hull's bar from step 2
+  goes. What a hull's fill level is when it has two tanks is a sum, drawn as a level in each.
+- **Tests:** capacity is the sum of the fitted tanks; a damaged tank leaks into nothing rather
+  than staying put; a destroyed one takes its fuel with it; the default layouts still hold 20.
+
+**Try in game:** fit a large tank beside a large bay and see whether the overlap reads; get a
+pump loose and watch one tank drop.
 
 ## Step 3: the supply chain
 
@@ -286,6 +311,6 @@ above the rates shows what a trip burns; keep Tab open to watch it climb.
 
 - Real gravity-well flight for landing. Landing costs a fixed amount per body.
 - Pirates answering fuel pings to hunt stranded ships. A fun idea, not part of this.
-- Extra fuel tank modules, and tanks as damageable or explosive modules. The fitting plan's
-  explosive tank can build on this later.
+- Extra fuel tank modules: those are step 2b. Tanks as explosive modules stay here, for the
+  fitting plan's explosive tank to build on later.
 - Turning fuel on for the public build before the user has played it.

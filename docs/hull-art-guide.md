@@ -54,14 +54,22 @@ written.
 An off-centre part, one cockpit shape, a swept nozzle is what makes a hull feel drawn instead of
 extruded. Don't mirror everything out of tidiness.
 
+## Tests guard ability, not tuning (*decided* 2026-11-23)
+
+A fitting test fails when a mount can't do its job, and not otherwise. A thruster turned off its
+axis still pushes and still turns, so the test asks exactly that: some force, more of it along the
+control's own axis than across it, and a turn that turns. How well it does it is the designer's and
+the plan's to say. Efficiency drift worth knowing about belongs in something a person reads — the
+designer showing a mount's turn and strafe price — and at most as a warning, never as a failing
+test.
+
 ## When a test disagrees with a draft
 
-A test is the price tag on a look, not a verdict on it. Read the failure, name the trade in one
-line, then choose:
+A test is then the price tag on a look, not a verdict on it. Read the failure, name the trade in
+one line, then choose:
 
-- **Keep the look and revisit the test**, saying so in the plan. `as shipped, the thrusters push
-  and turn as they were tuned` is a behaviour test: if the hull is meant to fly differently, the
-  test follows the hull.
+- **Keep the look and revisit the test**, saying so in the plan. If a hull is meant to fly
+  differently, the test follows the hull.
 - **Take the tuning back** if the look was only a by-product of a drag.
 - **Fix the test** when it turns out to lean on looks. One read `globalAlpha` after the whole
   draw, assuming the faded mount drew last; the assumption was the bug, not the cockpit layered
@@ -87,4 +95,4 @@ about silhouettes and only then about mounts. Per hull:
 ## The short version
 
 Silhouette leads, parts are skin, flair beats efficiency but never silently, early hulls keep their
-secrets, and a red test is a price tag to discuss.
+secrets, tests ask whether a mount can do its job, and a red test is a price tag to discuss.

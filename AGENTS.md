@@ -46,6 +46,10 @@ Read by `/spec` and `/build`.
       broken and tests missing; skip style nits. Touched: <modules and files>. Tests: <added or
       changed>."
 
+- **Queue and inbox:** `QUEUE.md` is the order tasks go to agents (top is next); `INBOX.md`
+  holds quick notes the user sent from the vibeview page. When the user asks what is open or
+  what's next, read both, then follow `~/Desktop/vibeview/FORMAT.md` for the format and for
+  triaging notes with the user.
 - **Commits:** the agent commits. Once a change is finished and the full check passes, commit it
   without asking, one commit per change with a clear message, and name the commit in the reply.
   Don't commit when checks fail, work is half done, or a decision from the user is pending.

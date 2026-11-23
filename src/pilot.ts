@@ -162,6 +162,16 @@ function pastDockFace(station: Poi, x: number, y: number): boolean {
   return toPoiAxes(station, x, y).x >= STATION_HALF + SHIP_RADIUS;
 }
 
+/** How far a route's corners run, all told. */
+function pathLength(path: Vec[]): number {
+  let length = 0;
+  for (let i = 1; i < path.length; i++) length += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+  return length;
+}
+
+/** Seconds between checks of what a trip home would cost: a route is dear to plan, and the answer moves slowly. */
+const FUEL_CHECK_SECONDS = 2;
+
 /**
  * Flying skills any automated pilot can use. It only reads what a pilot can see and
  * only sets the ship's controls, so it obeys the same physics and fit as any other ship.
@@ -174,6 +184,9 @@ class ShipPilot {
   protected correctingDirectly = false;
   /** The direction the rotation thrusters are pushing, or 0. */
   private spinPush = 0;
+  /** What the last check of a trip home came to, and when the next one is due. */
+  private fuelHome = 0;
+  private fuelCheckAt = 0;
 
   /**
    * Set while it's far from the camera: it isn't flown, just a trip from one stop to the
@@ -369,6 +382,30 @@ class ShipPilot {
   /** Where the nose stays throughout a flight, or null if it's free to turn for burns. */
   protected flightNose(_heading: { x: number; y: number }): number | null {
     return null;
+  }
+
+  /**
+   * Fuel it would burn getting home from where it is: the route planner's path there, at its
+   * hull's burn for each 1000 units.
+   */
+  burnHome(sim: Sim): number {
+    const { ship } = this;
+    const home = sim.homeOf(ship);
+    const { world } = this.plan(sim, () => ({ x: ship.x, y: ship.y }), () => ({ x: home.x, y: home.y }));
+    return (pathLength(world.path) / 1000) * sim.fuelPerLength(ship);
+  }
+
+  /**
+   * Low on fuel: less left than `fuelReturn` trips home would take. The estimate is made every
+   * couple of seconds, since it means a route and it hardly changes that fast.
+   */
+  fuelLow(sim: Sim): boolean {
+    if (!sim.tuning.fuel) return false;
+    if (sim.now >= this.fuelCheckAt) {
+      this.fuelCheckAt = sim.now + FUEL_CHECK_SECONDS;
+      this.fuelHome = this.burnHome(sim);
+    }
+    return this.ship.fuel < this.fuelHome * sim.tuning.fuelReturn;
   }
 
   /** Where the nose goes while coasting, or null to leave it. */
@@ -741,6 +778,8 @@ export class DronePilot extends ShipPilot {
     }
     const canAffordRepair = sim.oreIn(ship) > 0 || sim.canPayRepair(ship);
     if ((ship.hull < LOW_HULL || sim.crippled(ship)) && canAffordRepair) this.hauling = true;
+    // Low on fuel, it breaks off this trip and takes what it has home, where the dock fills it.
+    if (this.fuelLow(sim)) this.hauling = true;
 
     // Repairs come before shopping, so it never spends its repair money on parts.
     if (sim.oreIn(ship) === 0 && sim.canRepair(ship)) {
@@ -1907,11 +1946,11 @@ export class FighterPilot extends ShipPilot {
     return this.isPirate && sim.inGuardRange(x, y);
   }
 
-  /** Goes home to sell a full load or repair a low hull. Returns whether it's doing that. */
+  /** Goes home to sell a full load, repair a low hull or fill a low tank. Returns whether it's doing that. */
   private goHome(sim: Sim): boolean {
     const { ship } = this;
     const canPay = sim.oreIn(ship) > 0 || sim.canPayRepair(ship);
-    if (sim.oreIn(ship) >= sim.deliveryLoad(ship) || ((ship.hull < LOW_HULL || sim.crippled(ship)) && canPay)) {
+    if (sim.oreIn(ship) >= sim.deliveryLoad(ship) || ((ship.hull < LOW_HULL || sim.crippled(ship)) && canPay) || this.fuelLow(sim)) {
       this.headingHome = true;
     }
     const busy = sim.oreIn(ship) > 0 || sim.canRepair(ship);

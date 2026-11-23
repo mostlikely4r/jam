@@ -1101,7 +1101,14 @@ function buildPanel(): void {
       fuelReadout = document.createElement("p");
       fuelReadout.className = "value";
       fuelReadout.textContent = fuelText();
-      body.append(fuelReadout);
+      // Rescue doesn't exist until step 4: until then a stranded tank can be filled from here.
+      const fill = document.createElement("button");
+      fill.textContent = "Fill the tank";
+      fill.addEventListener("click", () => {
+        sim.ship.fuel = sim.fuelMax(sim.ship);
+        fill.blur();
+      });
+      body.append(fuelReadout, fill);
     }
 
     if (group.title === "Parts") {
@@ -1460,10 +1467,12 @@ function cargoText(ship: Ship): string {
   return space === Infinity ? "∞" : String(space);
 }
 
-/** The fuel burnt since the player's last dock: a reading in the tab menu, not a setting. */
+/** The fuel burnt since the player's last dock, and the tank it's out of: a reading, not a setting. */
 function fuelText(): string {
   const burned = sim.ship.burned.toFixed(1);
-  return `Burned since your last dock: ${burned}${tuning.fuel ? "" : " (fuel is off)"}`;
+  const tank = `${sim.ship.fuel.toFixed(1)}/${sim.fuelMax(sim.ship)}`;
+  const low = sim.ship.fuel <= 0 ? " - no fuel, drifting" : "";
+  return `Tank ${tank}${low}. Burned since your last dock: ${burned}${tuning.fuel ? "" : " (fuel is off)"}`;
 }
 
 function partList(ship: Ship): string {
@@ -1545,10 +1554,16 @@ function frame(now: number): void {
     const base = sim.shopBase();
     const speed = Math.hypot(sim.ship.vx, sim.ship.vy);
     const hullBars = Math.max(0, Math.ceil((sim.ship.hull / hullMax(sim.ship.model)) * 10));
+    // The tank, as a bar and a number, only while fuel is in play.
+    const fuelBars = Math.round((sim.ship.fuel / sim.fuelMax(sim.ship)) * 10);
+    const fuelLine = tuning.fuel
+      ? [`Fuel  [${"#".repeat(fuelBars)}${".".repeat(10 - fuelBars)}] ${sim.ship.fuel.toFixed(1)}/${sim.fuelMax(sim.ship)}${sim.ship.fuel <= 0 ? "  NO FUEL: drifting" : ""}`]
+      : [];
     hud.textContent = [
       `Speed ${Math.round(speed)}  (top ${Math.round(sim.stats.topSpeed)})`,
       `Spin  ${Math.round((sim.ship.spin * 180) / Math.PI)} deg/s  Retro ${sim.ship.parts.has("retro") ? (tuning.retro ? "ON" : "off") : "none"}`,
       `Hull  [${"#".repeat(hullBars)}${".".repeat(10 - hullBars)}]`,
+      ...fuelLine,
       `Ore   ${sim.oreIn(sim.ship)}/${cargoText(sim.ship)}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
       `Parts ${partList(sim.ship)}  Weight ${sim.shipWeight(sim.ship).toFixed(2)}`,
       `${frameText()}${sim.isDocked() ? "  DOCKED" : ""}${botPlay ? `  BOT: ${botPlay.where}` : ""}${sim.ship.marked ? "  MARKED by pirates" : ""}${sim.ship.wanted ? "  WANTED by the station" : ""}${sim.clickPilot.active ? `  ${sim.clickPilot.isCourse ? "Course" : "Click order"}: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < hullMax(sim.ship.model) && !sim.hasPartsFor(tuning.repairCost) ? "  No repairs: the station is out of parts" : ""}`,

@@ -1,6 +1,6 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
-import { DAMAGED_AT, facing, HULL_MOUNTS, turretMount, works, type Module } from "./fitting";
+import { DAMAGED_AT, facing, HULL_MOUNTS, hullTank, turretMount, works, type Module } from "./fitting";
 import { footprint, gridRect, type Rect } from "./grid";
 import { isItem, partOf } from "./parts";
 import { isOreItem } from "./items";
@@ -175,6 +175,8 @@ export class Renderer {
     return this.wreck !== null && this.wreck.age < WRECK_WATCH_SECONDS + WRECK_FADE_SECONDS;
   }
   private view = { camX: 0, camY: 0, scale: 1, dpr: 1, width: 0, height: 0 };
+  /** Whether tanks are in play this frame: the fuel switch is on. */
+  private showFuel = false;
   /** Where each station came out this frame, so its tooltip can be found from the pointer. */
   private stationSpots: { base: Base; x: number; y: number; rotation: number }[] = [];
   /** A right drag in progress, in screen pixels, for its preview. */
@@ -309,6 +311,7 @@ export class Renderer {
     }
 
     const { ship, tuning } = sim;
+    this.showFuel = tuning.fuel;
     const shipX = lerp(ship.px, ship.x, alpha);
     const shipY = lerp(ship.py, ship.y, alpha);
     this.sim = sim;
@@ -515,6 +518,8 @@ export class Renderer {
     ctx.strokeRect(-STATION_HALF, -STATION_HALF, size, size);
     this.drawOrePile(sim.oreCount(base.ore), STATION_HALF);
     this.drawCrates(sim.partA(base), STATION_HALF);
+    // Its own tank, out on the side away from the dock. This step's stations never run dry, so it shows full.
+    if (sim.tuning.fuel) this.drawTank(-STATION_HALF - 12, 0, 1, 10, STATION_HALF * 1.2);
     ctx.restore();
   }
 
@@ -1341,6 +1346,38 @@ export class Renderer {
     }
     ctx.restore();
     this.drawStanding(ship, x, y);
+    this.drawFuel(ship, x, y);
+  }
+
+  /**
+   * A ship's tank under its hull: a thin bar that empties as it burns, amber, and red under a
+   * quarter. An empty one is bare outline: nothing on it is going anywhere.
+   */
+  private drawFuel(ship: Ship, x: number, y: number): void {
+    if (!this.showFuel) return;
+    const { ctx } = this;
+    const share = Math.max(0, Math.min(1, ship.fuel / hullTank(ship.model)));
+    const w = SHIP_RADIUS * 1.8;
+    const h = 3;
+    const top = y + SHIP_RADIUS + 7;
+    ctx.strokeStyle = share > 0 ? "rgba(255, 176, 58, 0.7)" : "rgba(255, 107, 92, 0.85)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - w / 2, top, w, h);
+    if (share <= 0) return;
+    ctx.fillStyle = share < 0.25 ? "#ff6b5c" : "#ffb03a";
+    ctx.fillRect(x - w / 2 + 1, top + 1, (w - 2) * share, h - 2);
+  }
+
+  /** A tank standing on its end, filled from the bottom to `share` of its height. */
+  private drawTank(x: number, y: number, share: number, w: number, h: number): void {
+    const { ctx } = this;
+    ctx.strokeStyle = "rgba(200, 212, 232, 0.7)";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x, y - h / 2, w, h);
+    const fill = Math.max(0, Math.min(1, share));
+    if (fill <= 0) return;
+    ctx.fillStyle = "#ffb03a";
+    ctx.fillRect(x + 1.5, y + h / 2 - 1.5 - (h - 3) * fill, w - 3, (h - 3) * fill);
   }
 
   /** The escape pod: a small capsule with a blinking light, flying itself to a shipyard. */

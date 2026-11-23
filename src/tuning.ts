@@ -119,6 +119,13 @@ export const DEFAULTS = {
   recordFuelFloater: 0.26,
   recordFuelPirate: 0.32,
   recordFuelDefender: 0.12,
+  /** What a unit of fuel costs at a dock. Step 3 makes it the station's own price. */
+  fuelPrice: 5,
+  /**
+   * A ship heads home when its fuel is under this many trips home: the route planner's path
+   * home, at its hull's burn for each 1000 units of it. Near 1 it's cutting it fine.
+   */
+  fuelReturn: 1.5,
   /**
    * The chance each second that a pirate, then a defender, keeping watch as a record starts
    * on a ship in its field it would go after. Then both are flown, and the fight is real.
@@ -462,6 +469,8 @@ export const GROUPS: Group[] = [
     title: "Fuel",
     sliders: [
       { key: "fuelPerThrust", label: "Fuel a second of full thrust burns", min: 0.01, max: 2, step: 0.01 },
+      { key: "fuelPrice", label: "Credits a unit of fuel costs at a dock", min: 0, max: 60, step: 1 },
+      { key: "fuelReturn", label: "Go home when fuel is under: times the trip home", min: 0.5, max: 4, step: 0.1 },
       { key: "recordFuelRacer", label: "A racer record burns this much per 1000 flown", min: 0, max: 5, step: 0.01 },
       { key: "recordFuelFloater", label: "A floater record burns this much per 1000 flown", min: 0, max: 5, step: 0.01 },
       { key: "recordFuelPirate", label: "A pirate record burns this much per 1000 flown", min: 0, max: 5, step: 0.01 },

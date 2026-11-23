@@ -2,7 +2,7 @@ import { Chatter, type FaceKey } from "./chatter";
 import { type BayGrid, type BlueprintId, partFits, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
 import { hubRecipes, isOreItem, itemDef, oreItems, saleRecipes } from "./items";
 import { copyPicks, pickOf, PROGRAMS, setPick as setTweakPick } from "./programs";
-import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Mount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
+import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, hullTank, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Mount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
 import { ClickPilot, DronePilot, FacePilot, FighterPilot, LOW_HULL, type TurnAway } from "./pilot";
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
@@ -213,6 +213,8 @@ export interface Ship extends Body, Fitting {
   burned: number;
   /** All the fuel its thrusters have burned. */
   burnTotal: number;
+  /** What's left in its tank. With fuel off nothing reads it but the tab menu. */
+  fuel: number;
 }
 
 /** Where an item sits, for moving it: a mount, a place in the bay, or a place in the locker of the base the ship is at. */
@@ -2570,6 +2572,7 @@ export class Sim {
       critical: 0,
       burned: 0,
       burnTotal: 0,
+      fuel: hullTank(model),
     };
   }
 
@@ -4266,6 +4269,7 @@ export class Sim {
     this.collectOre(this.ship);
     this.unloadOre(this.ship, dt);
     this.repairHull(this.ship, dt);
+    this.refuel(this.ship);
     this.swapNews(this.ship);
     // Includes anything bought during the update above.
     for (const pilot of this.pilots) {
@@ -4273,6 +4277,7 @@ export class Sim {
       this.collectOre(pilot.ship);
       this.unloadOre(pilot.ship, dt);
       this.repairHull(pilot.ship, dt);
+      this.refuel(pilot.ship);
       this.swapNews(pilot.ship);
     }
     lap?.("fire, collect, unload");
@@ -4999,7 +5004,7 @@ export class Sim {
   private fighterGoesHome(pilot: FighterPilot): boolean {
     const { ship } = pilot;
     const canPay = this.oreIn(ship) > 0 || this.canPayRepair(ship);
-    return pilot.isHeadingHome || this.oreIn(ship) >= this.deliveryLoad(ship) || (ship.hull < LOW_HULL && canPay);
+    return pilot.isHeadingHome || this.oreIn(ship) >= this.deliveryLoad(ship) || (ship.hull < LOW_HULL && canPay) || pilot.fuelLow(this);
   }
 
   /** Sets off home, or to its field. */
@@ -5068,9 +5073,10 @@ export class Sim {
     ship.vx = ship.vy = 0;
     const most = Math.round(120 / TICK);
     let ticks = 0;
-    while ((this.oreIn(ship) > 0 || this.canRepair(ship)) && ticks < most) {
+    while ((this.oreIn(ship) > 0 || this.canRepair(ship) || this.canRefuel(ship)) && ticks < most) {
       this.unloadOre(ship, TICK);
       this.repairHull(ship, TICK);
+      this.refuel(ship);
       ticks++;
     }
     pilot.cameHome();
@@ -5172,7 +5178,7 @@ export class Sim {
       goal = "trade";
       target = String(this.deposits.indexOf(pilot.sellDeposit));
       pilot.task = "to deposit";
-    } else if (pilot.isHauling || this.oreIn(ship) >= this.deliveryLoad(ship) || lowHull) {
+    } else if (pilot.isHauling || this.oreIn(ship) >= this.deliveryLoad(ship) || lowHull || pilot.fuelLow(this)) {
       goal = "dock";
       // Turned away, it tries the station it chose; otherwise the nearest.
       const bound = pilot.sellAt !== null && this.bases.some((base) => base.id === pilot.sellAt) ? pilot.sellAt : null;
@@ -5278,8 +5284,9 @@ export class Sim {
       pilot.update(this);
       this.unloadOre(ship, TICK);
       this.repairHull(ship, TICK);
+      this.refuel(ship);
       ticks++;
-    } while ((this.oreIn(ship) > 0 || this.canRepair(ship)) && ticks < most && !pilot.leavesStop);
+    } while ((this.oreIn(ship) > 0 || this.canRepair(ship) || this.canRefuel(ship)) && ticks < most && !pilot.leavesStop);
     // Now the hold is empty: it shops and picks its next field. Turned away, it has chosen already.
     if (!pilot.leavesStop) pilot.update(this);
     return ticks * TICK;
@@ -5334,7 +5341,7 @@ export class Sim {
     this.putRecord(record, ship);
     if (record.stage !== "travel") return;
     const moved = Math.hypot(ship.x - from.x, ship.y - from.y);
-    this.spendFuel(ship, (moved / 1000) * this.fuelLength(ship));
+    this.spendFuel(ship, (moved / 1000) * this.fuelPerLength(ship));
   }
 
   /** Where a record's ship goes this tick: along its route, or at its spot in the field it mines. */
@@ -5821,8 +5828,10 @@ export class Sim {
     return { x: push.x * size, y: push.y * size };
   }
 
-  /** A control needs a working thruster on it. */
+  /** A control needs a working thruster on it, and fuel in the tank to burn. */
   private canFire(ship: Ship, thruster: ThrusterId): boolean {
+    // An empty tank fires nothing: it drifts, and keeps what it had.
+    if (this.tuning.fuel && ship.fuel <= 0) return false;
     // Any working thruster on a mount it fires.
     return mountsOf(ship).some((mount) => {
       if (mount.role !== thruster) return false;
@@ -5849,22 +5858,26 @@ export class Sim {
   }
 
   /**
-   * Burns fuel out of one tank: its meters count it, and so does the world's ledger
-   * (`itemFlow`), so a count of the fuel there still adds up.
+   * Burns fuel out of one tank: the tank gives it up, its meters count it, and so does the world's
+   * ledger (`itemFlow`), so a count of the fuel there still adds up. A tank holding less than a
+   * tick would burn is left empty, and only what it really burned is counted. The hauler has no
+   * tank of its own until step 3.
    */
-  private spendFuel(meter: { burned: number; burnTotal: number }, fuel: number): void {
-    if (fuel <= 0) return;
-    meter.burned += fuel;
-    meter.burnTotal += fuel;
-    this.flow(FUEL, -fuel);
+  private spendFuel(tank: { burned: number; burnTotal: number; fuel?: number }, fuel: number): void {
+    const spent = tank.fuel === undefined ? fuel : Math.min(fuel, tank.fuel);
+    if (spent <= 0) return;
+    tank.burned += spent;
+    tank.burnTotal += spent;
+    if (tank.fuel !== undefined) tank.fuel = Math.max(0, tank.fuel - spent);
+    this.flow(FUEL, -spent);
   }
 
   /**
-   * Fuel a hull burns for each 1000 units of path it flies: what a record's trip costs, measured
-   * from flown ships in the step-1 census. Only traffic and pirates and defenders run as records
-   * (see `recordTraffic` and `recordFighters`), so nothing else has a rate.
+   * Fuel a hull burns for each 1000 units of path it flies, at the rate its hull made flown: what
+   * a record's trip costs, and what a trip home is worth to a ship deciding whether to go. Only
+   * traffic and pirates and defenders run as records (see `recordTraffic` and `recordFighters`).
    */
-  private fuelLength(ship: Ship): number {
+  fuelPerLength(ship: Ship): number {
     if (!this.tuning.fuel) return 0;
     const { tuning } = this;
     switch (ship.model) {
@@ -7291,6 +7304,39 @@ export class Sim {
     if (ship.faction === "pirate") return this.pirateCredits >= cost;
     if (!stocked && !this.hasPartsFor(cost, ship)) return false;
     return ship.faction === "defender" || this.accountOf(ship).credits >= cost;
+  }
+
+  /** The fuel a ship's tank holds: its hull's own, until step 2b makes the tank a part. */
+  fuelMax(ship: Ship): number {
+    return hullTank(ship.model);
+  }
+
+  /** Whether the dock this ship is at would sell it any fuel right now. */
+  private canRefuel(ship: Ship): boolean {
+    const { fuelPrice } = this.tuning;
+    if (!this.tuning.fuel || ship.fuel >= this.fuelMax(ship)) return false;
+    if (fuelPrice <= 0) return true;
+    const purse = ship.faction === "pirate" ? this.pirateCredits : this.accountOf(ship).credits;
+    return purse >= fuelPrice;
+  }
+
+  /**
+   * A dock fills a ship's tank at what a unit costs, as far as it can pay: its own credits, its
+   * owner's, its base's for a defender, or the pirate base's for a pirate. In this step the fuel
+   * comes from nowhere and the base it's docked at keeps the money; step 3 brings it in by hauler.
+   */
+  private refuel(ship: Ship): void {
+    const { tuning } = this;
+    if (!this.isHome(ship) || !this.canRefuel(ship)) return;
+    const room = this.fuelMax(ship) - ship.fuel;
+    const purse = ship.faction === "pirate" ? this.pirateCredits : this.accountOf(ship).credits;
+    const units = tuning.fuelPrice > 0 ? Math.min(room, Math.floor(purse / tuning.fuelPrice)) : room;
+    const cost = Math.round(units * tuning.fuelPrice);
+    if (ship.faction === "pirate") this.pirateCredits -= cost;
+    else this.accountOf(ship).credits -= cost;
+    ship.fuel += units;
+    const base = this.baseAt(ship);
+    if (base) base.account.credits += cost;
   }
 
   /** The dock repairs a point at a time, for as long as the ship can pay, and replaces what was destroyed. */

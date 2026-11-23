@@ -61,6 +61,7 @@ export const STEP_PARTS: Record<string, FarSide> = {
   collectOre: { out: "in view only", far: "Records collect at the end of a mining stay, all at once (`takeOre`)." },
   unloadOre: { out: "in view only", far: "Records unload during their dock or home visit, run all at once." },
   repairHull: { out: "in view only", far: "As for unloading." },
+  refuel: { out: "in view only", far: "As for unloading: a record fills its tank during its dock or home visit, run all at once (`dockVisit`, `fighterArrived`). A record's tank never runs dry out there, since it only burns what its legs were charged." },
   fireGuards: { out: "in view only", far: "Turrets only fire at flown pirates; a pirate record keeps its watch out of turret range only by luck." },
   spendStationParts: { out: "everywhere", note: "Base economy." },
   buyBlueprints: { out: "everywhere", note: "Base economy." },

@@ -199,6 +199,40 @@ above the rates shows what a trip burns; keep Tab open to watch it climb.
 - **Try in game:** turn fuel on, play a few trips, and watch your gauge and the traffic bars.
   Lower `fuelReturn` until traffic cuts trips short.
 
+**Built 2026-11-23.** The tank is `fuel` on every ship, 20 by default (`TANK` in
+`src/fitting.ts`, with `hullInfo[model].tank` there for a hull to say its own). A dock fills it
+at `fuelPrice` 5 a unit, as far as the ship can pay: its own credits, its owner's, its base's
+for a defender, the pirate base's for a pirate, and the dock it filled at keeps the money. An
+empty tank fires nothing, turning included, so the ship drifts. Ships head home when their fuel
+is under `fuelReturn` 1.5 trips home, the route planner's path at the hull's per-1000 burn,
+checked every couple of seconds; it's the same rule in `src/pilot.ts` for flown ships and in the
+record legs. Every ship draws a thin tank bar under its hull and the station draws its tank, full
+for now. The tab menu's Fuel group has `fuelPrice`, `fuelReturn`, the player's tank and burn, and
+a **Fill the tank** button, since rescue is step 4. `src/farside.ts` says what refuelling does
+out of view: a record fills up during its dock visit, run all at once.
+
+Where the build differs from this section:
+
+- **`src/hulls.json` is untouched, on purpose:** the user's own uncommitted hull work is in that
+  file, so the number is the code's default instead of five hull entries. `hullInfo[model].tank`
+  is read and the designer can set it; step 2b brings the tanks that make it moot.
+- **Docking fills at once** rather than at a rate: the section says "docking fills the tank", and
+  a rate would have meant another knob for the tune step to chase.
+- **The player's gauge is the dev HUD line and the tab-menu line**, not a new always-on HUD
+  element: the game's HUD is the `?dev` one, and an always-on gauge is a public-build change that
+  waits for fuel to be on by default.
+- **The census leaves fuel off** and takes `--fuel` to turn it on, because fuel changes how ships
+  behave now and `npm run parity` has to keep comparing the world it always did. Step 1's numbers
+  come back with `npm run census -- 20 1 flown 1 --fuel`.
+
+**Tests:** five more in `src/fuel.test.ts`: no acceleration or turn on an empty tank, docking
+charges and fills (and only as far as the money goes), nothing at a dock with the switch off, a
+low tank heads home instead of out to its field, and a record with a low tank picks a dock over
+its field. The save test now checks the tank round-trips too.
+
+**Open for the tune step:** `fuelPrice` 5 and `fuelReturn` 1.5 are guesses. Watch whether traffic
+spends its ore money on fuel before it can save for parts, and whether a 20 tank leaves the
+floaters turning home constantly (they burn 12.4 a trip and dock at every 20).
 ## Step 2b: tanks as modules
 
 **Decided 2026-11-23**, after step 2: the tank becomes a module like the cargo bay, so it can be

@@ -56,6 +56,8 @@ describe("fuel metering", () => {
     expect(sim.ship.burned).toBeGreaterThan(0);
     // Nothing has reset the meter yet: it counts what the trip has burned.
     expect(sim.ship.burnTotal).toBe(sim.ship.burned);
+    // The tank gave up what it burned, and it starts full.
+    expect(sim.ship.fuel).toBeCloseTo(sim.fuelMax(sim.ship) - sim.ship.burned, 9);
     // The world's ledger has lost exactly what the tank has burned.
     expect(sim.itemFlow.get(FUEL)).toBeCloseTo(-sim.ship.burnTotal, 9);
     // Turning costs too: the main thruster alone wouldn't have burned this much.
@@ -100,8 +102,93 @@ describe("fuel metering", () => {
     roundTrip(sim, loaded);
     expect(loaded.ship.burned).toBe(sim.ship.burned);
     expect(loaded.ship.burnTotal).toBe(sim.ship.burnTotal);
+    expect(loaded.ship.fuel).toBe(sim.ship.fuel);
     expect(loaded.itemFlow.get(FUEL)).toBe(sim.itemFlow.get(FUEL));
   });
+});
+
+describe("tanks and refuelling", () => {
+  it("runs the tank dry, and then burns nothing at all", () => {
+    const sim = homeSim(1, { ...QUIET, trafficRacers: 0, trafficFloaters: 0 });
+    sim.ship.fuel = 0.05;
+    sim.controls.thrust = 1;
+    run(sim, 2);
+    // A rustle of fuel and no more: the tank is empty and the thrusters are done.
+    expect(sim.ship.fuel).toBe(0);
+    expect(sim.ship.burned).toBeCloseTo(0.05, 9);
+    expect(sim.ship.firing.size).toBe(0);
+  });
+
+  it("doesn't accelerate, or even turn, on an empty tank", () => {
+    const sim = homeSim(1, { ...QUIET, trafficRacers: 0, trafficFloaters: 0 });
+    sim.ship.fuel = 0;
+    sim.controls.thrust = 1;
+    sim.controls.turn = 1;
+    run(sim, 1);
+    expect(Math.hypot(sim.ship.vx, sim.ship.vy)).toBe(0);
+    expect(sim.ship.spin).toBe(0);
+    expect(sim.ship.firing.size).toBe(0);
+    expect(sim.ship.burned).toBe(0);
+  });
+
+  it("fills the tank at a dock, at what a unit costs, as far as the ship can pay", () => {
+    const sim = homeSim(1, { ...QUIET, trafficRacers: 0, trafficFloaters: 0, fuelPrice: 5 });
+    const base = sim.bases[0];
+    const before = base.account.credits;
+    sim.ship.fuel = 0;
+    sim.ship.credits = 200;
+    dockAt(sim, sim.ship, sim.station);
+    run(sim, 0.1);
+    expect(sim.ship.fuel).toBe(sim.fuelMax(sim.ship));
+    expect(sim.ship.credits).toBe(200 - sim.fuelMax(sim.ship) * 5);
+    // The dock it filled at is paid for it, and a full tank buys nothing more.
+    expect(base.account.credits).toBe(before + sim.fuelMax(sim.ship) * 5);
+    sim.ship.fuel = 3;
+    sim.ship.credits = 10;
+    run(sim, 0.1);
+    expect(sim.ship.fuel).toBe(5);
+    expect(sim.ship.credits).toBe(0);
+  });
+
+  it("does nothing at a dock with the switch off", () => {
+    const sim = homeSim(1, { ...QUIET, fuel: false, trafficRacers: 0, trafficFloaters: 0 });
+    sim.ship.fuel = 0;
+    sim.ship.credits = 200;
+    dockAt(sim, sim.ship, sim.station);
+    run(sim, 0.2);
+    expect(sim.ship.fuel).toBe(0);
+    expect(sim.ship.credits).toBe(200);
+  });
+
+  it("heads home with a low tank, rather than out to its field", () => {
+    const sim = homeSim(1, { ...QUIET, trafficRacers: 1, trafficFloaters: 0, trafficRecords: false });
+    const pilot = sim.traffic[0];
+    const { ship } = pilot;
+    run(sim, 3);
+    expect(sim.oreIn(ship)).toBe(0);
+    expect(pilot.isHauling).toBe(false);
+    // Nearly dry in the field: getting home is the only thing worth doing.
+    ship.fuel = 0.05;
+    run(sim, 3);
+    expect(pilot.fuelLow(sim)).toBe(true);
+    expect(pilot.isHauling).toBe(true);
+    const away = Math.hypot(ship.x - sim.station.x, ship.y - sim.station.y);
+    run(sim, 20);
+    expect(Math.hypot(ship.x - sim.station.x, ship.y - sim.station.y)).toBeLessThan(away);
+  }, 60000);
+
+  it("sends a record with a low tank to a dock instead of its field", () => {
+    const sim = homeSim(1, { ...QUIET, trafficRacers: 1, trafficFloaters: 0 });
+    parkAway(sim);
+    run(sim, 5, () => parkAway(sim));
+    const pilot = sim.traffic[0];
+    const record = pilot.record!;
+    expect(record.stage).toBe("mining");
+    pilot.ship.fuel = 0.05;
+    record.arrive = sim.now;
+    sim.step();
+    expect(pilot.record!.goal).toBe("dock");
+  }, 60000);
 });
 
 describe("fuel out of view", () => {

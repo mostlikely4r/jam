@@ -85,6 +85,8 @@ export interface HullInfo {
   weight?: number;
   /** How many hull points it has. Without one, `MAX_HULL`. */
   hull?: number;
+  /** Fuel its tank holds. Without one, `TANK`. */
+  tank?: number;
 }
 
 /**
@@ -174,11 +176,11 @@ function readHullInfo(raw: Partial<HullInfo> | undefined): HullInfo {
   const programs = strings(raw?.programs).filter((id): id is PartId => programDef(id) !== undefined);
   const usedBy = strings(raw?.usedBy).filter((use): use is HullUse => (HULL_USES as readonly string[]).includes(use));
   // The stats are always present as keys, so a file without one clears a value read before.
-  const stat = (key: "price" | "weight" | "hull"): number | undefined => {
+  const stat = (key: "price" | "weight" | "hull" | "tank"): number | undefined => {
     const value = raw?.[key];
     return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
   };
-  return { programs: [...new Set(programs)], loadouts: readLoadouts(raw?.loadouts), usedBy, price: stat("price"), weight: stat("weight"), hull: stat("hull") };
+  return { programs: [...new Set(programs)], loadouts: readLoadouts(raw?.loadouts), usedBy, price: stat("price"), weight: stat("weight"), hull: stat("hull"), tank: stat("tank") };
 }
 
 /** A hull's loadouts read from a file: a name, program ids the game knows, and no repeated names. */
@@ -321,10 +323,17 @@ export const HULL_INFO = Object.fromEntries(SHIP_MODELS.map((model) => [model, {
 
 /** The hull points every hull has unless its own say otherwise. */
 export const MAX_HULL = 100;
+/** The fuel every hull's tank holds unless its own says otherwise (docs/fuel-plan.md). */
+export const TANK = 20;
 
 /** The hull points a ship of this model has: its own, or `MAX_HULL`. */
 export function hullMax(model: ShipModel): number {
   return HULL_INFO[model].hull ?? MAX_HULL;
+}
+
+/** The fuel its tank holds: its own, or `TANK`. Until step 2b it's the hull's own, not a part. */
+export function hullTank(model: ShipModel): number {
+  return HULL_INFO[model].tank ?? TANK;
 }
 
 /** Puts a ship file into play: mount types, which parts fit them, every hull's mounts and stats. */

@@ -1,9 +1,8 @@
 /**
  * Counts what happens between pirates, defenders and traffic over a stretch of game time
- * with the camera far away: the numbers out-of-view dice have to match. It also meters the
- * fuel they burn, flown or as records: the numbers step 1 of docs/fuel-plan.md sets the
- * record rates from.
- * Run with: npm run census -- [game minutes] [seed] [flown|records] [spot chances ×] [--drones N] [--json]
+ * with the camera far away: the numbers out-of-view dice have to match. With `--fuel` it also
+ * meters what they burn, flown or as records: the numbers docs/fuel-plan.md was set from.
+ * Run with: npm run census -- [game minutes] [seed] [flown|records] [spot chances ×] [--drones=N] [--fuel] [--json]
  * With --json it prints one line of totals instead, for `npm run parity`.
  */
 import { Sim, TICK, type Ship } from "../sim";
@@ -15,8 +14,10 @@ const seed = Number(process.argv[3]) || 1;
 const records = process.argv[4] === "records";
 const spotScale = Number(process.argv[5]) || 1;
 const drones = Number(process.argv.find((arg) => arg.startsWith("--drones="))?.slice("--drones=".length)) || 0;
+/** Fuel changes how ships behave now, so a parity run has to leave it off. */
+const fuel = process.argv.includes("--fuel");
 const json = process.argv.includes("--json");
-const sim = new Sim(seed, { ...DEFAULTS, trafficRecords: records, fighterRecords: records, recordSpotPirate: DEFAULTS.recordSpotPirate * spotScale, recordSpotDefender: DEFAULTS.recordSpotDefender * spotScale, chatter: false, fuel: true, testDrones: drones });
+const sim = new Sim(seed, { ...DEFAULTS, trafficRecords: records, fighterRecords: records, recordSpotPirate: DEFAULTS.recordSpotPirate * spotScale, recordSpotDefender: DEFAULTS.recordSpotDefender * spotScale, chatter: false, fuel, testDrones: drones });
 useShippedWorld(sim, 1, seed);
 const park = () => {
   const out = Math.hypot(sim.field.x, sim.field.y) || 1;
@@ -123,8 +124,8 @@ console.log(`${minutes} min, seed ${seed}, ${records ? `records, spot ×${spotSc
 console.log(`  traffic ${sim.traffic.length} (lost waiting ${lost}), pirates ${left("pirate")}, defenders ${left("defender")}`);
 console.log(`  traffic sold ${sold.toFixed(0)} ore, pirate credits ${sim.pirateCredits.toFixed(0)}`);
 console.log(`  fields ${sim.miningFields().map((f) => f.id).join(", ")}; bases ${sim.bases.map((b) => b.id).join(", ")}`);
-console.log(`  fuel, ${records ? "records" : "flown"}${drones > 0 ? `, ${drones} drones` : ""}:`);
-for (const [kind, each] of [...burns].sort()) {
+if (fuel) console.log(`  fuel, ${records ? "records" : "flown"}${drones > 0 ? `, ${drones} drones` : ""}:`);
+for (const [kind, each] of fuel ? [...burns].sort() : []) {
   const fuel = Math.round(each.fuel);
   const trip = each.trips > 0 ? (each.fuel / each.trips).toFixed(1) : "-";
   const hour = (each.fuel / (minutes / 60)).toFixed(1);

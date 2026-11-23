@@ -6,6 +6,9 @@ targets that decide what comes next. Parked ideas live in `BACKLOG.md` (vibeview
 The repo is public and may hold plans and parked ideas; whoever reads it chooses to be spoiled.
 Only the README and what a new player sees in the game stay free of later features.
 
+Hull art has its own guide: `docs/hull-art-guide.md`, for drawing a hull, placing its mounts and
+matching a draft to a test.
+
 ## Commands
 
 - `npm run dev`: play locally

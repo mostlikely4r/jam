@@ -127,6 +127,11 @@ export const DEFAULTS = {
    */
   fuelReturn: 1.5,
   /**
+   * What a damaged fuel tank leaks in a second, as a share of what it holds full: 0.01 empties a
+   * tank in a little over a minute and a half. The ship keeps what its other tanks hold.
+   */
+  fuelLeak: 0.01,
+  /**
    * The chance each second that a pirate, then a defender, keeping watch as a record starts
    * on a ship in its field it would go after. Then both are flown, and the fight is real.
    * Measured from flown ones (`npm run census`): attacks begun per second spent calm in
@@ -471,6 +476,7 @@ export const GROUPS: Group[] = [
       { key: "fuelPerThrust", label: "Fuel a second of full thrust burns", min: 0.01, max: 2, step: 0.01 },
       { key: "fuelPrice", label: "Credits a unit of fuel costs at a dock", min: 0, max: 60, step: 1 },
       { key: "fuelReturn", label: "Go home when fuel is under: times the trip home", min: 0.5, max: 4, step: 0.1 },
+      { key: "fuelLeak", label: "A damaged tank leaks a second, of what it holds", min: 0, max: 0.1, step: 0.002 },
       { key: "recordFuelRacer", label: "A racer record burns this much per 1000 flown", min: 0, max: 5, step: 0.01 },
       { key: "recordFuelFloater", label: "A floater record burns this much per 1000 flown", min: 0, max: 5, step: 0.01 },
       { key: "recordFuelPirate", label: "A pirate record burns this much per 1000 flown", min: 0, max: 5, step: 0.01 },

@@ -15,7 +15,7 @@ import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartIcon, type PartId } from "./parts";
 import { ITEMS, itemDef } from "./items";
 import { PROGRAM_PARTS } from "./programs";
-import { computerSize, hullMax, mountsHolding, owns } from "./fitting";
+import { computerSize, hullMax, mountsHolding, owns, tankMounts } from "./fitting";
 import { blueprintIcon, iconEl } from "./icons";
 import { partCategory, shopCellState, SHOP_CATEGORIES, type ShopBadge } from "./shop";
 import { setTip } from "./tooltip";
@@ -1105,7 +1105,7 @@ function buildPanel(): void {
       const fill = document.createElement("button");
       fill.textContent = "Fill the tank";
       fill.addEventListener("click", () => {
-        sim.ship.fuel = sim.fuelMax(sim.ship);
+        sim.fillTank(sim.ship);
         fill.blur();
       });
       body.append(fuelReadout, fill);
@@ -1467,12 +1467,15 @@ function cargoText(ship: Ship): string {
   return space === Infinity ? "∞" : String(space);
 }
 
-/** The fuel burnt since the player's last dock, and the tank it's out of: a reading, not a setting. */
+/** The fuel burnt since the player's last dock, and the tanks it's out of: a reading, not a setting. */
 function fuelText(): string {
   const burned = sim.ship.burned.toFixed(1);
   const tank = `${sim.ship.fuel.toFixed(1)}/${sim.fuelMax(sim.ship)}`;
+  // Each tank on its own, so a leak shows as one of them running down.
+  const tanks = tankMounts(sim.ship).map(({ mount }) => (sim.ship.tankFuel[mount.id] ?? 0).toFixed(1));
+  const split = tanks.length > 1 ? ` (${tanks.join(" + ")})` : "";
   const low = sim.ship.fuel <= 0 ? " - no fuel, drifting" : "";
-  return `Tank ${tank}${low}. Burned since your last dock: ${burned}${tuning.fuel ? "" : " (fuel is off)"}`;
+  return `Tank ${tank}${split}${low}. Burned since your last dock: ${burned}${tuning.fuel ? "" : " (fuel is off)"}`;
 }
 
 function partList(ship: Ship): string {

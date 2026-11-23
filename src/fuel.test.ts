@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { newFitting, tankCapacity } from "./fitting";
 import { homeSim } from "./home";
-import type { PartId } from "./parts";
+import type { PartId, ShipModel } from "./parts";
 import { roundTrip } from "./save";
 import { type Poi, type Sim, TICK } from "./sim";
 import { DEFAULTS } from "./tuning";
@@ -189,6 +190,101 @@ describe("tanks and refuelling", () => {
     sim.step();
     expect(pilot.record!.goal).toBe("dock");
   }, 60000);
+});
+
+describe("tanks as modules", () => {
+  /** A hull of its own, with no traffic about: the ship to look at what is fitted. */
+  const hull = (model: "racer" | "floater" | "defender" | "drone" | "pirate") =>
+    homeSim(1, { ...QUIET, trafficRacers: 0, trafficFloaters: 0, pirates: 0, defenders: 0, floaterStart: model === "floater", askHull: false });
+
+  it("holds what its tanks hold between them, and every bare hull comes with its own", () => {
+    // The hulls that work the field come with two smalls, so step 2's numbers carry over.
+    const racer = hull("racer");
+    expect(racer.fuelMax(racer.ship)).toBe(20);
+    expect(racer.ship.fuel).toBe(20);
+    expect(racer.ship.tankFuel.tankLeft).toBe(10);
+    expect(racer.ship.tankFuel.tankRight).toBe(10);
+    // A medium beside a small is thirty.
+    racer.devSet(racer.ship, "mediumTank", true);
+    expect(racer.fuelMax(racer.ship)).toBe(30);
+    // Every bare hull, as the yard hands it over: pirates carry a medium either side, defenders a large.
+    const capacity = (model: ShipModel) => tankCapacity({ model, ...newFitting(model) });
+    expect(["racer", "floater", "drone"].map((model) => capacity(model as ShipModel))).toEqual([20, 20, 20]);
+    expect(capacity("pirate")).toBe(40);
+    expect(capacity("defender")).toBe(80);
+  });
+
+  it("leaks a damaged tank into nothing, and the other keeps what it holds", () => {
+    // A fast leak, so the test doesn't wait a minute and a half.
+    const sim = homeSim(1, { ...QUIET, trafficRacers: 0, trafficFloaters: 0, fuelLeak: 0.1 });
+    const { ship } = sim;
+    // Ten a side, and the left one takes a hit.
+    ship.tankFuel = { tankLeft: 10, tankRight: 10 };
+    ship.fuel = 20;
+    ship.fit.tankLeft!.wear = 0.6;
+    run(sim, 20);
+    // It leaked out of the damaged one alone, and stopped at nothing rather than draining the ship.
+    expect(ship.tankFuel.tankLeft).toBe(0);
+    expect(ship.tankFuel.tankRight).toBe(10);
+    expect(ship.fuel).toBeCloseTo(10, 6);
+    // The ledger has lost what leaked, and the tanks still add up to what the ship has.
+    expect(sim.itemFlow.get(FUEL)).toBeCloseTo(-10, 6);
+  });
+
+  it("loses the fuel in a destroyed tank with it, and the room it held", () => {
+    const sim = hull("racer");
+    const { ship } = sim;
+    ship.tankFuel = { tankLeft: 10, tankRight: 10 };
+    ship.fuel = 20;
+    sim.damageModule(ship, 0, -0.35 * 12, 1000);
+    expect(ship.fit.tankLeft!.wear).toBe(1);
+    expect(ship.tankFuel.tankLeft).toBeUndefined();
+    expect(ship.tankFuel.tankRight).toBe(10);
+    expect(ship.fuel).toBeCloseTo(10, 9);
+    expect(sim.fuelMax(ship)).toBe(10);
+    expect(sim.itemFlow.get(FUEL)).toBeCloseTo(-10, 9);
+  });
+
+  it("takes a bigger tank aboard empty, and keeps the fuel when it goes", () => {
+    const sim = hull("racer");
+    const { ship } = sim;
+    ship.tankFuel = { tankLeft: 10, tankRight: 10 };
+    ship.fuel = 20;
+    dockAt(sim, ship, sim.station);
+    sim.devSet(ship, "mediumTank", true);
+    // One of the smalls made way for it: the ship's fuel is still what its tanks hold.
+    expect(sim.fuelMax(ship)).toBe(30);
+    expect(ship.fuel).toBe(20);
+    expect(Object.values(ship.tankFuel).reduce<number>((sum, held) => sum + (held ?? 0), 0)).toBeCloseTo(20, 9);
+    // The dock fills the room the new tank brought.
+    ship.credits = 1000;
+    run(sim, 0.1);
+    expect(ship.fuel).toBe(30);
+    expect(ship.tankFuel.tankLeft! + ship.tankFuel.tankRight!).toBeCloseTo(30, 9);
+  });
+
+  it("keeps tanks out of the shop and off the boards while the switch is off", () => {
+    // The public build is the game it was: no tanks to sell, and no station spending on them.
+    const off = homeSim(1, { ...QUIET, trafficRacers: 0, trafficFloaters: 0, fuel: false });
+    expect(off.shopLists("smallTank")).toBe(false);
+    expect(off.shopLists("mediumTank")).toBe(false);
+    // A part that isn't a tank is listed as it always was.
+    expect(off.shopLists("bay")).toBe(true);
+    const on = homeSim(1, { ...QUIET, trafficRacers: 0, trafficFloaters: 0 });
+    expect(on.shopLists("smallTank")).toBe(true);
+    expect(on.shopLists("mediumTank")).toBe(true);
+  });
+
+  it("keeps each tank's fuel in a save", () => {
+    const sim = hull("racer");
+    sim.ship.tankFuel = { tankLeft: 2.5, tankRight: 7 };
+    sim.ship.fuel = 9.5;
+    const loaded = hull("racer");
+    roundTrip(sim, loaded);
+    expect(loaded.ship.tankFuel).toEqual({ tankLeft: 2.5, tankRight: 7 });
+    expect(loaded.ship.fuel).toBe(9.5);
+    expect(loaded.fuelMax(loaded.ship)).toBe(20);
+  });
 });
 
 describe("fuel out of view", () => {

@@ -45,13 +45,15 @@ function docked(model: "racer" | "floater"): Sim {
 }
 
 describe("mounts", () => {
-  it("each hull comes with three of its six thrusters, a gun, a computer and its small bay", () => {
+  it("each hull comes with three of its six thrusters, a gun, a computer, its small bay and its tanks", () => {
     const racer = newFitting("racer");
     expect(Object.keys(racer.fit).sort()).toEqual(
-      ["computer", "gun", "section", "thrusterMain", "thrusterRotateLeft", "thrusterRotateRight"].sort(),
+      ["computer", "gun", "section", "tankLeft", "tankRight", "thrusterMain", "thrusterRotateLeft", "thrusterRotateRight"].sort(),
     );
     expect(racer.fit.computer!.part).toBe("basicComputer");
     expect(racer.fit.section!.part).toBe("smallBay");
+    expect(racer.fit.tankLeft!.part).toBe("smallTank");
+    expect(racer.fit.tankRight!.part).toBe("smallTank");
     expect(newFitting("floater").fit.computer!.part).toBe("flightComputer");
   });
 
@@ -608,6 +610,8 @@ describe("hulls, defaults and decals", () => {
       gun: "gun1",
       computer: "basicComputer",
       section: "smallBay",
+      tankLeft: "smallTank",
+      tankRight: "smallTank",
     });
     withFile(
       () => (mountOf("racer", "gun")!.default = "gun2"),

@@ -1,6 +1,6 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
-import { DAMAGED_AT, facing, HULL_MOUNTS, hullTank, turretMount, works, type Module } from "./fitting";
+import { DAMAGED_AT, facing, HULL_MOUNTS, tankCapacity, turretMount, works, type Module } from "./fitting";
 import { footprint, gridRect, type Rect } from "./grid";
 import { isItem, partOf } from "./parts";
 import { isOreItem } from "./items";
@@ -1316,7 +1316,7 @@ export class Renderer {
 
     const damage = 1 - Math.max(0, ship.hull) / 100;
     const tint = [red + damage * 55, green - damage * 120, blue - damage * 150].map((v) => Math.round(Math.max(0, Math.min(255, v)))) as [number, number, number];
-    const broken = drawVectorShip(ctx, ship, tint);
+    const broken = drawVectorShip(ctx, ship, tint, this.tankFill(ship));
     for (const [bx, by] of broken) this.drawSparks(bx, by);
     this.drawCargo(ship);
     // Critical: it's coming apart.
@@ -1346,26 +1346,16 @@ export class Renderer {
     }
     ctx.restore();
     this.drawStanding(ship, x, y);
-    this.drawFuel(ship, x, y);
   }
 
   /**
-   * A ship's tank under its hull: a thin bar that empties as it burns, amber, and red under a
-   * quarter. An empty one is bare outline: nothing on it is going anywhere.
+   * How full a ship's tanks read, for their art: what it holds against what it has fitted. With
+   * fuel off there's no level to show, so no tank art either, and the game looks as it always did.
    */
-  private drawFuel(ship: Ship, x: number, y: number): void {
-    if (!this.showFuel) return;
-    const { ctx } = this;
-    const share = Math.max(0, Math.min(1, ship.fuel / hullTank(ship.model)));
-    const w = SHIP_RADIUS * 1.8;
-    const h = 3;
-    const top = y + SHIP_RADIUS + 7;
-    ctx.strokeStyle = share > 0 ? "rgba(255, 176, 58, 0.7)" : "rgba(255, 107, 92, 0.85)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x - w / 2, top, w, h);
-    if (share <= 0) return;
-    ctx.fillStyle = share < 0.25 ? "#ff6b5c" : "#ffb03a";
-    ctx.fillRect(x - w / 2 + 1, top + 1, (w - 2) * share, h - 2);
+  private tankFill(ship: Ship): number | null {
+    if (!this.showFuel) return null;
+    const capacity = tankCapacity(ship);
+    return capacity > 0 ? ship.fuel / capacity : 0;
   }
 
   /** A tank standing on its end, filled from the bottom to `share` of its height. */

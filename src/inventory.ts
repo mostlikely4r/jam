@@ -1,4 +1,4 @@
-import { computerSize, DAMAGED_AT, mountsOf, programSlots, tweakMounts, type Module, type Mount, type MountId } from "./fitting";
+import { computerSize, DAMAGED_AT, mountsOf, programSlots, tankCapacity, tweakMounts, type Module, type Mount, type MountId } from "./fitting";
 import { canPlace, entryCells, fits, footprint, reachable, sticks, type GridSpec, type Placed } from "./grid";
 import { isItem, partOf, PARTS, type PartId } from "./parts";
 import { pickOf, programDef, PROGRAM_PARTS, type ProgramTweak } from "./programs";
@@ -235,7 +235,9 @@ export class Inventory {
       ctx.translate(PRINT / 2, PRINT / 2);
       ctx.rotate(-Math.PI / 2);
       ctx.scale(scale, scale);
-      drawVectorShip(ctx, ship, [111, 122, 140]);
+      // Its tanks, at how full they are: out of play they aren't drawn at all, as in the game.
+      const capacity = tankCapacity(ship);
+      drawVectorShip(ctx, ship, [111, 122, 140], sim.tuning.fuel ? (capacity > 0 ? ship.fuel / capacity : 0) : null);
     }
     print.append(canvas);
     const mounts = mountsOf(ship).filter((mount) => !mount.decal && (ship.fit[mount.id] || mount.id !== "turretGun"));

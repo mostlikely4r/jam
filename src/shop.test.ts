@@ -37,6 +37,7 @@ describe("the shop grid", () => {
       "Tractors",
       "Computers",
       "Cargo bays",
+      "Fuel tanks",
       "Cockpits",
       "Programs",
       "Station",

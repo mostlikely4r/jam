@@ -2,7 +2,7 @@ import { Chatter, type FaceKey } from "./chatter";
 import { type BayGrid, type BlueprintId, partFits, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
 import { hubRecipes, isOreItem, itemDef, oreItems, saleRecipes } from "./items";
 import { copyPicks, pickOf, PROGRAMS, setPick as setTweakPick } from "./programs";
-import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, hullTank, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Mount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
+import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Mount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works, fullTanks, shareTanks, tankCapacity, tankMounts } from "./fitting";
 import { ClickPilot, DronePilot, FacePilot, FighterPilot, LOW_HULL, type TurnAway } from "./pilot";
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
@@ -213,8 +213,10 @@ export interface Ship extends Body, Fitting {
   burned: number;
   /** All the fuel its thrusters have burned. */
   burnTotal: number;
-  /** What's left in its tank. With fuel off nothing reads it but the tab menu. */
+  /** What's left in its tanks together. With fuel off nothing reads it but the tab menu. */
   fuel: number;
+  /** How much of that each tank holds. A tank's own fuel leaks when the tank is damaged. */
+  tankFuel: Partial<Record<MountId, number>>;
 }
 
 /** Where an item sits, for moving it: a mount, a place in the bay, or a place in the locker of the base the ship is at. */
@@ -1222,6 +1224,8 @@ export class Sim {
       ship.targets = [];
       // And a saved ship without picks gets its own, not the one shared by every ship.
       ship.tweaks = copyPicks(ship.tweaks);
+      // A save from before the tanks were modules kept only the total: share it over them.
+      if ((ship as Partial<Ship>).tankFuel === undefined) ship.tankFuel = shareTanks(ship, ship.fuel);
       return ship;
     };
     this.controls = data.controls;
@@ -2520,6 +2524,8 @@ export class Sim {
   }
 
   private makeShip(x: number, y: number, controls: Controls, model: ShipModel = "racer"): Ship {
+    const fitting = newFitting(model, () => nextRandom(this.lookState));
+    const tanks = fullTanks({ model, ...fitting });
     return {
       model,
       faction: null,
@@ -2531,7 +2537,7 @@ export class Sim {
       vx: 0,
       vy: 0,
       controls,
-      ...newFitting(model, () => nextRandom(this.lookState)),
+      ...fitting,
       owner: null,
       credits: 0,
       earned: 0,
@@ -2572,7 +2578,8 @@ export class Sim {
       critical: 0,
       burned: 0,
       burnTotal: 0,
-      fuel: hullTank(model),
+      fuel: Object.values(tanks).reduce<number>((sum, held) => sum + (held ?? 0), 0),
+      tankFuel: tanks,
     };
   }
 
@@ -2698,6 +2705,9 @@ export class Sim {
     if (id === "depositGuards" && !this.unlocked("deposit", base)) return false;
     if (this.unlocked(id, base) || base.blueprintsOrdered.has(id)) return false;
     if (itemDef(id)?.type === "module" && !base.wanted.has(id as PartId)) return false;
+    // A station doesn't spend its credits on tank blueprints while fuel is off: the game is the
+    // game it was (see docs/fuel-plan.md), and the switch is what puts tanks on the boards.
+    if (!this.tuning.fuel && itemDef(id)?.type === "module" && partOf(id as PartId).kind === "tank") return false;
     return true;
   }
 
@@ -2707,6 +2717,8 @@ export class Sim {
    */
   shopLists(id: PartId, base: Base = this.shopBase()): boolean {
     if (itemDef(id)?.type !== "module") return true;
+    // Fuel tanks are the fuel experiment's: off, the shop is the shop it always was.
+    if (!this.tuning.fuel && partOf(id).kind === "tank") return false;
     return this.unlocked(id, base) || base.blueprintsOrdered.has(id) || base.wanted.has(id);
   }
 
@@ -3576,6 +3588,7 @@ export class Sim {
     if (base) this.stow(ship, off, base);
     if (partOf(id).kind === "computer") trimPrograms(ship);
     this.settleHold(ship, base);
+    this.settleTanks(ship);
   }
 
   /** Modules that came off a ship in a dock: into the player's locker, or sold to the base by anyone else. */
@@ -3767,6 +3780,7 @@ export class Sim {
       fitPart(ship, id);
     }
     trimPrograms(ship);
+    this.settleTanks(ship);
   }
 
   /** Where an item is, for moving it about: on a mount, loose in the bay, or in the locker where the ship is docked. */
@@ -3802,6 +3816,13 @@ export class Sim {
    * where it came from, or into the locker; if there's no room there either, nothing changes.
    */
   fitItem(ship: Ship, from: ItemPlace, mount?: MountId): boolean {
+    const done = this.fitItemNow(ship, from, mount);
+    if (done) this.settleTanks(ship);
+    return done;
+  }
+
+  /** The fitting itself: where a tank goes on or comes off, `fitItem` settles the fuel after it. */
+  private fitItemNow(ship: Ship, from: ItemPlace, mount?: MountId): boolean {
     const base = this.baseAt(ship);
     const item = this.itemAt(ship, from);
     if (!base || !item || item.wear >= 1) return false;
@@ -4073,6 +4094,7 @@ export class Sim {
       trimPrograms(ship);
     } else for (const mount of mountsHolding(ship, id)) unfit(ship, mount);
     this.settleHold(ship, this.baseAt(ship));
+    this.settleTanks(ship);
   }
 
   /** Any ship in the dock can pay for a new drone, which starts there and earns for itself. */
@@ -5339,9 +5361,11 @@ export class Sim {
   private placeRecord(record: TripRecord, ship: Ship): void {
     const from = { x: ship.x, y: ship.y };
     this.putRecord(record, ship);
+    // A damaged tank leaks out there too: a record's fitting changes only when it's woken.
+    this.leakFuel(ship, TICK);
     if (record.stage !== "travel") return;
     const moved = Math.hypot(ship.x - from.x, ship.y - from.y);
-    this.spendFuel(ship, (moved / 1000) * this.fuelPerLength(ship));
+    this.burnTanks(ship, (moved / 1000) * this.fuelPerLength(ship));
   }
 
   /** Where a record's ship goes this tick: along its route, or at its spot in the field it mines. */
@@ -5841,15 +5865,36 @@ export class Sim {
   }
 
   /**
-   * What the thrusters that fired this tick took out of a ship's tank. `firing` is every
+   * What the thrusters that fired this tick took out of a ship's tanks. `firing` is every
    * thruster that really pushed, at the share of its full output it pushed with, so this is
    * the one burn rule for every thruster on every ship: the AI and the player pay alike.
    */
   private burnFuel(ship: Ship, dt: number): void {
-    if (!this.tuning.fuel || ship.firing.size === 0) return;
+    if (!this.tuning.fuel) return;
+    this.leakFuel(ship, dt);
+    if (ship.firing.size === 0) return;
     let output = 0;
     for (const share of ship.firing.values()) output += share;
-    this.spendFuel(ship, this.fuelBurn(output, dt));
+    this.burnTanks(ship, this.fuelBurn(output, dt));
+  }
+
+  /**
+   * A damaged tank leaks: it slowly loses what it holds, until it has nothing left. The ship keeps
+   * what its other tanks hold. The ledger loses what leaked, though the meters don't: a leak isn't
+   * a thruster burning fuel.
+   */
+  private leakFuel(ship: Ship, dt: number): void {
+    const rate = this.tuning.fuelLeak;
+    if (!this.tuning.fuel || rate <= 0) return;
+    for (const tank of tankMounts(ship)) {
+      if (tank.wear < DAMAGED_AT) continue;
+      const held = ship.tankFuel[tank.mount.id] ?? 0;
+      const leak = Math.min(held, tank.capacity * rate * dt);
+      if (leak <= 0) continue;
+      ship.tankFuel[tank.mount.id] = held - leak;
+      ship.fuel = Math.max(0, ship.fuel - leak);
+      this.flow(FUEL, -leak);
+    }
   }
 
   /** Fuel a thruster's output burns over a tick: the one rate every thruster burns at. */
@@ -5858,18 +5903,48 @@ export class Sim {
   }
 
   /**
-   * Burns fuel out of one tank: the tank gives it up, its meters count it, and so does the world's
-   * ledger (`itemFlow`), so a count of the fuel there still adds up. A tank holding less than a
-   * tick would burn is left empty, and only what it really burned is counted. The hauler has no
-   * tank of its own until step 3.
+   * Burns fuel out of a ship's tanks: they give it up between them, its meters count it, and so
+   * does the world's ledger (`itemFlow`), so a count of the fuel there still adds up. A ship with
+   * less than a tick would burn is left empty, and only what it really burned is counted.
    */
-  private spendFuel(tank: { burned: number; burnTotal: number; fuel?: number }, fuel: number): void {
-    const spent = tank.fuel === undefined ? fuel : Math.min(fuel, tank.fuel);
+  private burnTanks(ship: Ship, fuel: number): void {
+    if (!this.tuning.fuel) return;
+    // In case the total was set from outside the tanks (a save, a test, the tab menu).
+    this.settleTanks(ship);
+    const spent = Math.min(fuel, ship.fuel);
     if (spent <= 0) return;
-    tank.burned += spent;
-    tank.burnTotal += spent;
-    if (tank.fuel !== undefined) tank.fuel = Math.max(0, tank.fuel - spent);
+    this.drainTanks(ship, spent);
+    ship.burned += spent;
+    ship.burnTotal += spent;
     this.flow(FUEL, -spent);
+  }
+
+  /** Takes fuel out of a ship's tanks, each giving up its share of what it holds. */
+  private drainTanks(ship: Ship, fuel: number): void {
+    const spent = Math.min(fuel, ship.fuel);
+    if (spent <= 0) return;
+    const before = ship.fuel;
+    let given = 0;
+    const mounts = Object.keys(ship.tankFuel) as MountId[];
+    mounts.forEach((mount, i) => {
+      const held = ship.tankFuel[mount] ?? 0;
+      // The last tank takes what's left, so rounding never leaves a drop behind or takes one too many.
+      const take = i === mounts.length - 1 ? spent - given : (held * spent) / before;
+      ship.tankFuel[mount] = Math.max(0, held - take);
+      given += take;
+    });
+    ship.fuel = Math.max(0, ship.fuel - spent);
+  }
+
+  /**
+   * Burns fuel out of the hauler's own tank: the tank it comes in with, which only it has to
+   * keep. The meters count it and the ledger loses it, as for a ship.
+   */
+  private spendFuel(tank: { burned: number; burnTotal: number }, fuel: number): void {
+    if (fuel <= 0) return;
+    tank.burned += fuel;
+    tank.burnTotal += fuel;
+    this.flow(FUEL, -fuel);
   }
 
   /**
@@ -7306,9 +7381,70 @@ export class Sim {
     return ship.faction === "defender" || this.accountOf(ship).credits >= cost;
   }
 
-  /** The fuel a ship's tank holds: its hull's own, until step 2b makes the tank a part. */
+  /** The fuel a ship's tanks hold between them: the sum of what it has fitted. */
   fuelMax(ship: Ship): number {
-    return hullTank(ship.model);
+    return tankCapacity(ship);
+  }
+
+  /** Fills a ship's tanks to the brim, for the tab menu's button until rescue exists (step 4). */
+  fillTank(ship: Ship): void {
+    this.settleTanks(ship);
+    const before = ship.fuel;
+    ship.tankFuel = fullTanks(ship);
+    ship.fuel = this.fuelMax(ship);
+    if (ship.fuel > before) this.flow(FUEL, ship.fuel - before);
+  }
+
+  /**
+   * Brings a ship's tanks back in step with what it has fitted, after its fitting changed: a tank
+   * that came off keeps nothing, and one that came aboard starts empty. What no tank can hold any
+   * more is lost, and handed back for the ledger.
+   */
+  /**
+   * Brings a ship's tanks in step with what it has fitted and with the fuel its own total says it
+   * holds: a tank that came off keeps nothing, one that came aboard starts empty, and a total
+   * that was set from somewhere else (an older save, a test) is shared over the tanks. Fuel no
+   * tank can hold any more is gone, and handed back for the ledger.
+   */
+  private settleFuel(ship: Ship): number {
+    const tanks = tankMounts(ship);
+    const held: Partial<Record<MountId, number>> = {};
+    let kept = 0;
+    let lost = 0;
+    for (const tank of tanks) {
+      const amount = ship.tankFuel[tank.mount.id] ?? 0;
+      const keep = Math.max(0, Math.min(tank.capacity, amount));
+      held[tank.mount.id] = keep;
+      kept += keep;
+      lost += Math.max(0, amount - keep);
+    }
+    // A tank that's gone takes what it held with it.
+    for (const [mount, amount] of Object.entries(ship.tankFuel) as [MountId, number][]) {
+      if (held[mount] === undefined) lost += Math.max(0, amount);
+    }
+    if (Math.abs(kept + lost - ship.fuel) <= 1e-9) {
+      // The tanks add up to what the ship has: they keep their own, so a leak stays lopsided.
+      ship.tankFuel = held;
+      ship.fuel = kept;
+      return lost;
+    }
+    // The total is the ship's own truth: share it out, and lose what no tank can hold.
+    const capacity = tanks.reduce((sum, tank) => sum + tank.capacity, 0);
+    const tooMuch = Math.max(0, ship.fuel - capacity);
+    const fuel = Math.min(Math.max(0, ship.fuel), capacity);
+    ship.tankFuel = shareTanks(ship, fuel);
+    ship.fuel = fuel;
+    return lost + tooMuch;
+  }
+
+  /**
+   * After anything that changes what a ship can hold: what no tank can hold any more leaves the
+   * world, so the ledger still adds up. Also run before fuel is spent, so a total set from outside
+   * the tanks (a save, a test, the tab menu) lands in them first.
+   */
+  private settleTanks(ship: Ship): void {
+    const lost = this.settleFuel(ship);
+    if (lost > 0) this.flow(FUEL, -lost);
   }
 
   /** Whether the dock this ship is at would sell it any fuel right now. */
@@ -7328,13 +7464,24 @@ export class Sim {
   private refuel(ship: Ship): void {
     const { tuning } = this;
     if (!this.isHome(ship) || !this.canRefuel(ship)) return;
+    // A tank that's come off has taken nothing with it, and one just fitted starts empty.
+    this.settleTanks(ship);
     const room = this.fuelMax(ship) - ship.fuel;
     const purse = ship.faction === "pirate" ? this.pirateCredits : this.accountOf(ship).credits;
     const units = tuning.fuelPrice > 0 ? Math.min(room, Math.floor(purse / tuning.fuelPrice)) : room;
     const cost = Math.round(units * tuning.fuelPrice);
     if (ship.faction === "pirate") this.pirateCredits -= cost;
     else this.accountOf(ship).credits -= cost;
-    ship.fuel += units;
+    // Into the tanks, each filling its own room: a big one beside a full small one takes it all.
+    let left = units;
+    for (const tank of tankMounts(ship)) {
+      const held = ship.tankFuel[tank.mount.id] ?? 0;
+      const fill = Math.min(left, tank.capacity - held);
+      if (fill <= 0) continue;
+      ship.tankFuel[tank.mount.id] = held + fill;
+      left -= fill;
+    }
+    ship.fuel += units - Math.max(0, left);
     const base = this.baseAt(ship);
     if (base) base.account.credits += cost;
   }
@@ -7388,6 +7535,8 @@ export class Sim {
     if (module.wear >= 1) {
       if (partOf(module.part).bay) this.settleHold(ship, null);
       this.dropOre(ship, this.cargoSpace(ship));
+      // A destroyed tank takes the fuel in it with it. A damaged one keeps leaking (see `leakFuel`).
+      this.settleTanks(ship);
     }
   }
 

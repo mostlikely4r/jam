@@ -2,15 +2,6 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-4 · Fuel step 2b: tanks as modules · build
-- state: in progress
-- backlog: S-13
-- plan: docs/fuel-plan.md
-- added: 2026-11-23
-
-Two tank mounts on every hull; small 10, medium 20, large 40. A damaged tank leaks, a destroyed one
-loses its fuel. Every hull's default layout still holds 20.
-
 ## Q-5 · Clamp tow, first slice · build
 - state: queued
 - plan: docs/clamp-tow-plan.md
@@ -67,6 +58,12 @@ two tweaks. Regular and friend lines go into the two packs in `src/voices.json`.
 `SAVE_VERSION`.
 
 ## Done
+
+## Q-4 · Fuel step 2b: tanks as modules · build
+- state: done
+- done: 2026-11-23
+- backlog: S-13
+- plan: docs/fuel-plan.md
 
 ## Q-2 · Fuel step 2: tune · other
 - state: done

@@ -357,6 +357,87 @@
       }
     },
     {
+      "id": "smallTank",
+      "name": "Small fuel tank",
+      "type": "module",
+      "description": "Holds 10 fuel. The tank a bare hull comes with",
+      "shape": {
+        "w": 2,
+        "h": 2
+      },
+      "price": 160,
+      "blueprintPrice": 120,
+      "icon": {
+        "glyph": "gauge",
+        "primary": "#6a5a3a",
+        "secondary": "#ffd479",
+        "border": "#e0a83a",
+        "mark": "10"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 8
+          }
+        ]
+      }
+    },
+    {
+      "id": "mediumTank",
+      "name": "Fuel tank",
+      "type": "module",
+      "description": "Holds 20 fuel: twice the trip before you go home for more",
+      "shape": {
+        "w": 2,
+        "h": 2
+      },
+      "price": 320,
+      "blueprintPrice": 240,
+      "icon": {
+        "glyph": "gauge",
+        "primary": "#6a5a3a",
+        "secondary": "#ffd479",
+        "border": "#e0a83a",
+        "mark": "20"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 16
+          }
+        ]
+      }
+    },
+    {
+      "id": "largeTank",
+      "name": "Large fuel tank",
+      "type": "module",
+      "description": "Holds 40 fuel: a long haul without a dock",
+      "shape": {
+        "w": 3,
+        "h": 3
+      },
+      "price": 640,
+      "blueprintPrice": 480,
+      "icon": {
+        "glyph": "gauge",
+        "primary": "#6a5a3a",
+        "secondary": "#ffd479",
+        "border": "#e0a83a",
+        "mark": "40"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 32
+          }
+        ]
+      }
+    },
+    {
       "id": "flightComputer",
       "name": "Flight computer",
       "type": "module",

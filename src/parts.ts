@@ -36,6 +36,9 @@ export type PartId =
   | "bay"
   | "largeBay"
   | "smallBay"
+  | "smallTank"
+  | "mediumTank"
+  | "largeTank"
   | "starmap"
   | "autopilot"
   | "targeting"
@@ -61,7 +64,7 @@ export type PartId =
  * Programs are software: they belong to the pilot, not the ship, and have their own records
  * (see src/programs.ts).
  */
-export const PART_KINDS = ["thruster", "gun", "turret", "tractor", "computer", "section", "program", "cockpit", "item"] as const;
+export const PART_KINDS = ["thruster", "gun", "turret", "tractor", "computer", "section", "tank", "program", "cockpit", "item"] as const;
 export type PartKind = (typeof PART_KINDS)[number];
 
 /**
@@ -101,6 +104,8 @@ export interface Part {
   weight: number;
   /** A cargo bay: the grid it holds, in cells, with the one cell on its edge everything comes in through. */
   bay?: BayGrid;
+  /** A fuel tank: how much fuel it holds (docs/fuel-plan.md). A ship's tank is the sum of its own. */
+  tank?: number;
   description: string;
   /** The ships it can be fitted to. Without this, any ship. */
   fits?: ShipModel[];
@@ -147,6 +152,7 @@ const GUN_COLORS: PartIcon = { glyph: "gun", primary: "#5a6272", secondary: "#be
 const TRACTOR_COLORS: PartIcon = { glyph: "coneBeam", primary: "#467870", secondary: "#96e6d2", border: "#7fdfe6" };
 const COMPUTER_COLORS: PartIcon = { glyph: "chip", primary: "#2e3d59", secondary: "#8fb4ff", border: "#8fb4ff" };
 const BAY_COLORS: PartIcon = { glyph: "crate", primary: "#566274", secondary: "#c8d4e8", border: "#f0d86a" };
+const TANK_COLORS: PartIcon = { glyph: "gauge", primary: "#6a5a3a", secondary: "#ffd479", border: "#e0a83a" };
 const COCKPIT_COLORS: PartIcon = { glyph: "kite", primary: "#2b4a74", secondary: "#a0d7ff", border: "#a0d7ff" };
 
 export const PARTS: Part[] = [
@@ -267,6 +273,48 @@ export const PARTS: Part[] = [
     description: "The bay a bare hull comes with. Room for 10 ore",
     tier: 0,
     icon: { ...BAY_COLORS, glyph: "crate", mark: "-" },
+  },
+  // Fuel tanks: how far a ship gets between docks. Every hull comes with two, and what it holds
+  // is their sum (docs/fuel-plan.md, step 2b). They weigh nothing until the tune says otherwise.
+  {
+    id: "smallTank",
+    kind: "tank",
+    tank: 10,
+    builtIn: true,
+    shape: { w: 2, h: 2 },
+    label: "Small fuel tank",
+    short: "tank-",
+    price: 160,
+    weight: 0,
+    description: "Holds 10 fuel. The tank a bare hull comes with",
+    tier: 0,
+    icon: { ...TANK_COLORS, mark: "10" },
+  },
+  {
+    id: "mediumTank",
+    kind: "tank",
+    tank: 20,
+    shape: { w: 2, h: 2 },
+    label: "Fuel tank",
+    short: "tank",
+    price: 320,
+    weight: 0,
+    description: "Holds 20 fuel: twice the trip before you go home for more",
+    tier: 1,
+    icon: { ...TANK_COLORS, mark: "20" },
+  },
+  {
+    id: "largeTank",
+    kind: "tank",
+    tank: 40,
+    shape: { w: 3, h: 3 },
+    label: "Large fuel tank",
+    short: "tank+",
+    price: 640,
+    weight: 0,
+    description: "Holds 40 fuel: a long haul without a dock",
+    tier: 2,
+    icon: { ...TANK_COLORS, mark: "40" },
   },
   {
     id: "flightComputer",

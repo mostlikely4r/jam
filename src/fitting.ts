@@ -85,8 +85,6 @@ export interface HullInfo {
   weight?: number;
   /** How many hull points it has. Without one, `MAX_HULL`. */
   hull?: number;
-  /** Fuel its tank holds. Without one, `TANK`. */
-  tank?: number;
 }
 
 /**
@@ -176,11 +174,11 @@ function readHullInfo(raw: Partial<HullInfo> | undefined): HullInfo {
   const programs = strings(raw?.programs).filter((id): id is PartId => programDef(id) !== undefined);
   const usedBy = strings(raw?.usedBy).filter((use): use is HullUse => (HULL_USES as readonly string[]).includes(use));
   // The stats are always present as keys, so a file without one clears a value read before.
-  const stat = (key: "price" | "weight" | "hull" | "tank"): number | undefined => {
+  const stat = (key: "price" | "weight" | "hull"): number | undefined => {
     const value = raw?.[key];
     return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
   };
-  return { programs: [...new Set(programs)], loadouts: readLoadouts(raw?.loadouts), usedBy, price: stat("price"), weight: stat("weight"), hull: stat("hull"), tank: stat("tank") };
+  return { programs: [...new Set(programs)], loadouts: readLoadouts(raw?.loadouts), usedBy, price: stat("price"), weight: stat("weight"), hull: stat("hull") };
 }
 
 /** A hull's loadouts read from a file: a name, program ids the game knows, and no repeated names. */
@@ -323,17 +321,10 @@ export const HULL_INFO = Object.fromEntries(SHIP_MODELS.map((model) => [model, {
 
 /** The hull points every hull has unless its own say otherwise. */
 export const MAX_HULL = 100;
-/** The fuel every hull's tank holds unless its own says otherwise (docs/fuel-plan.md). */
-export const TANK = 20;
 
 /** The hull points a ship of this model has: its own, or `MAX_HULL`. */
 export function hullMax(model: ShipModel): number {
   return HULL_INFO[model].hull ?? MAX_HULL;
-}
-
-/** The fuel its tank holds: its own, or `TANK`. Until step 2b it's the hull's own, not a part. */
-export function hullTank(model: ShipModel): number {
-  return HULL_INFO[model].tank ?? TANK;
 }
 
 /** Puts a ship file into play: mount types, which parts fit them, every hull's mounts and stats. */
@@ -360,6 +351,66 @@ export function shipFileNow(): ShipFile {
   return JSON.parse(
     JSON.stringify({ mountTypes: MOUNT_TYPES, partMounts: PART_MOUNTS, decalParts: DECAL_PARTS, hulls: HULL_MOUNTS, hullInfo: HULL_INFO, partStats: partStatsNow() }),
   ) as ShipFile;
+}
+
+/** Whether a ship has no tank fitted at all: nothing to burn, and nothing to fill. */
+export function tankless(ship: Fitting & { model: ShipModel }): boolean {
+  return tankMounts(ship).length === 0;
+}
+
+/** A fuel tank on a mount: how much it holds, and how worn it is (from a leak to gone). */
+export interface TankMount {
+  mount: Mount;
+  /** The fuel it holds, full. */
+  capacity: number;
+  wear: number;
+}
+
+/**
+ * The fuel tanks a ship has fitted and not destroyed, in the hull's order. A damaged one is still
+ * a tank: it holds fuel, and slowly loses it (see the leak in `Sim`). A destroyed one is a stub
+ * that holds nothing, so its room is gone with its fuel.
+ */
+export function tankMounts(ship: Fitting & { model: ShipModel }): TankMount[] {
+  const tanks: TankMount[] = [];
+  for (const mount of HULL_MOUNTS[ship.model]) {
+    const module = ship.fit[mount.id];
+    if (!module || module.wear >= 1) continue;
+    const capacity = partOf(module.part).tank ?? 0;
+    if (capacity > 0) tanks.push({ mount, capacity, wear: module.wear });
+  }
+  return tanks;
+}
+
+/** How much fuel a ship's tanks hold between them: its range in one number. */
+export function tankCapacity(ship: Fitting & { model: ShipModel }): number {
+  return tankMounts(ship).reduce((held, tank) => held + tank.capacity, 0);
+}
+
+/** What a ship's tanks hold, full, as the amount in each mount. */
+export function fullTanks(ship: Fitting & { model: ShipModel }): Partial<Record<MountId, number>> {
+  const held: Partial<Record<MountId, number>> = {};
+  for (const tank of tankMounts(ship)) held[tank.mount.id] = tank.capacity;
+  return held;
+}
+
+/**
+ * The same fuel, shared out over the tanks as they are now: each takes a share in proportion to
+ * what it holds. Used when a ship's fuel arrives without its tanks (an older save), and when the
+ * fitting changes under it.
+ */
+export function shareTanks(ship: Fitting & { model: ShipModel }, fuel: number): Partial<Record<MountId, number>> {
+  const tanks = tankMounts(ship);
+  const capacity = tanks.reduce((held, tank) => held + tank.capacity, 0);
+  const held: Partial<Record<MountId, number>> = {};
+  let left = Math.max(0, fuel);
+  tanks.forEach((tank, i) => {
+    const share = i === tanks.length - 1 ? left : capacity > 0 ? (fuel * tank.capacity) / capacity : 0;
+    const amount = Math.max(0, Math.min(tank.capacity, share, left));
+    held[tank.mount.id] = amount;
+    left -= amount;
+  });
+  return held;
 }
 
 /** Whether a part is a decal: it shows on decal mounts for looks only, and is never fitted for real. */

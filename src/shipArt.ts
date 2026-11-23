@@ -32,6 +32,9 @@ export interface ArtShip {
   decals?: Partial<Record<MountId, PartId>>;
 }
 
+/** How the fuel in a ship's tanks reads: how full they are, 0 to 1, or null to draw no tank at all. */
+export type TankFill = number | null;
+
 const METAL: Color = [111, 122, 140];
 const RIM: Color = [190, 200, 216];
 const HOT: Color = [255, 138, 58];
@@ -54,7 +57,7 @@ function outsideParts(ship: ArtShip): { id: MountId; x: number; y: number; angle
     const module = ship.fit[mount.id];
     if (!module) continue;
     const kind = partOf(module.part).kind;
-    if (kind === "computer" || kind === "section" || kind === "turret" || mount.id === "turretGun") continue;
+    if (kind === "computer" || kind === "section" || kind === "tank" || kind === "turret" || mount.id === "turretGun") continue;
     // Destroyed, a bay carries nothing any more: see `bayBox`.
     out.push({ id: mount.id, x: mount.x * R, y: mount.y * R, angle: facing(mount), scale: mount.scale, kind, wear: module.wear, alpha: mount.alpha ?? 1, order: mount.order ?? 0 });
   }
@@ -131,11 +134,12 @@ export function drawPart(ctx: CanvasRenderingContext2D, kind: PartKind, wear: nu
       ctx.arc(0.4, 0, 0.55, 0, Math.PI * 2);
       ctx.fill();
     }
-  } else if (kind === "computer" || kind === "section") {
+  } else if (kind === "computer" || kind === "section" || kind === "tank") {
     // Inside the hull: only the designer shows these, as an outline.
     ctx.strokeStyle = "rgba(200,215,240,0.7)";
     ctx.lineWidth = 0.5;
     if (kind === "computer") ctx.strokeRect(-2, -2, 4, 4);
+    else if (kind === "tank") ctx.strokeRect(-2.2, -1.4, 4.4, 2.8);
     else ctx.strokeRect(-3, -2.2, 6, 4.4);
   }
 }
@@ -291,8 +295,67 @@ export function drawBay(ctx: CanvasRenderingContext2D, box: Box & { part: PartId
   ctx.restore();
 }
 
+/** A tank's box on the hull: where its mount sits, how big what it holds draws, and how full it is. */
+export interface TankBox extends Box {
+  /** How much fuel it holds, full: a bigger tank draws bigger. */
+  capacity: number;
+  /** How full the ship's tanks are, 0 to 1: a hull with two of them shows the same level in each. */
+  fill: number;
+  alpha: number;
+}
+
+/**
+ * The fuel tanks a ship has fitted and not destroyed, each where its mount sits, in the ship's
+ * frame. `fill` is the ship's own level: what its tanks hold between them, against all they could.
+ */
+export function tankBoxes(ship: ArtShip, fill: number): TankBox[] {
+  const boxes: TankBox[] = [];
+  for (const mount of HULL_MOUNTS[ship.model]) {
+    const module = ship.fit[mount.id];
+    if (!module || module.wear >= 1) continue;
+    const capacity = partOf(module.part).tank ?? 0;
+    if (capacity <= 0) continue;
+    boxes.push({
+      x: mount.x * R,
+      y: mount.y * R,
+      angle: facing(mount),
+      // Drawn a little bigger the more it holds, as a bay is.
+      w: (1.9 + Math.min(1.5, capacity * 0.035)) * mount.scale,
+      h: (1.4 + Math.min(1.0, capacity * 0.02)) * mount.scale,
+      capacity,
+      fill: Math.max(0, Math.min(1, fill)),
+      alpha: mount.alpha ?? 1,
+    });
+  }
+  return boxes;
+}
+
+/**
+ * Each tank's box on the hull: a dark well filled amber from the bottom as it holds fuel, red when
+ * nearly empty. It sits inside the hull, faded by its mount, so the level reads through it.
+ */
+export function drawTanks(ctx: CanvasRenderingContext2D, boxes: TankBox[]): void {
+  for (const box of boxes) {
+    ctx.save();
+    if (box.alpha < 1) ctx.globalAlpha = box.alpha;
+    ctx.translate(box.x, box.y);
+    ctx.rotate(box.angle);
+    ctx.fillStyle = "rgba(14, 18, 28, 0.8)";
+    ctx.fillRect(-box.w / 2, -box.h / 2, box.w, box.h);
+    const inner = { w: box.w - 0.7, h: box.h - 0.7 };
+    if (box.fill > 0) {
+      ctx.fillStyle = box.fill < 0.25 ? "#ff6b5c" : "#ffb03a";
+      ctx.fillRect(-inner.w / 2, inner.h / 2 - inner.h * box.fill, inner.w, inner.h * box.fill);
+    }
+    ctx.strokeStyle = "rgba(200, 212, 232, 0.75)";
+    ctx.lineWidth = 0.45;
+    ctx.strokeRect(-box.w / 2, -box.h / 2, box.w, box.h);
+    ctx.restore();
+  }
+}
+
 /** Draws a ship. Returns where broken-but-not-gone parts are, for sparks and smoke. */
-export function drawVectorShip(ctx: CanvasRenderingContext2D, ship: ArtShip, hull: Color): Point[] {
+export function drawVectorShip(ctx: CanvasRenderingContext2D, ship: ArtShip, hull: Color, tankFill: TankFill = null): Point[] {
   const parts = outsideParts(ship);
   const drawn: Point[] = [];
   // What sits under the hull itself, then the hull, then everything at the hull level and above,
@@ -305,6 +368,7 @@ export function drawVectorShip(ctx: CanvasRenderingContext2D, ship: ArtShip, hul
   drawHull(ctx, ship.model, hull);
   drawDecals(ctx, ship.model, (mount) => decalOf(ship, mount), "above");
   drawBay(ctx, bayBox(ship));
+  if (tankFill !== null) drawTanks(ctx, tankBoxes(ship, tankFill));
   for (const part of parts.filter((each) => each.order >= 0).sort((a, b) => a.order - b.order)) {
     const spot = drawFitted(ctx, part);
     if (spot) drawn.push(spot);

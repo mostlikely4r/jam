@@ -12,6 +12,7 @@ export const SHOP_CATEGORIES = [
   "Tractors",
   "Computers",
   "Cargo bays",
+  "Fuel tanks",
   "Cockpits",
   "Programs",
   "Station",
@@ -32,6 +33,8 @@ export function partCategory(part: Part): ShopCategory {
       return "Computers";
     case "section":
       return "Cargo bays";
+    case "tank":
+      return "Fuel tanks";
     case "cockpit":
       return "Cockpits";
     case "program":

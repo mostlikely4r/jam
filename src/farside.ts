@@ -48,7 +48,7 @@ export const STEP_PARTS: Record<string, FarSide> = {
   pullOre: { out: "in view only", far: "Records mine by the clock: `recordOre*` rates, measured from flown ships." },
   pullTowardBodies: { out: "in view only", far: "Records fly the route planner's path, which keeps out of every body's pull." },
   moveOres: { out: "in view only", far: "Loose ore out of view just lies there until someone flown comes by." },
-  moveShip: { out: "in view only", far: "Records are placed along their route by the clock (`placeRecord`)." },
+  moveShip: { out: "in view only", far: "Records are placed along their route by the clock (`placeRecord`). A damaged tank leaks out there too: `placeRecord` leaks it each tick, as `moveShip` does flown." },
   touchBodies: { out: "in view only", far: "Record routes never touch a body." },
   burnDown: {
     out: "in view only",

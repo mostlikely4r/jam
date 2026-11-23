@@ -78,6 +78,15 @@ one line, then choose:
 Never make a test green by quietly moving a draft back. A working tree holding someone's
 hand-made draft is a question to ask them, not a work order.
 
+## Fuel tanks on a hull (*decided* 2026-11-23)
+
+Every hull has two `fuel tank` mounts, a little either side of the cargo bay, placed by eye. A tank
+is drawn inside the hull as a small well with the ship's fuel level in it, so its mount is faded —
+`alpha` 0.45 as shipped — and the level reads through the hull rather than painted on it. Drawn
+solid, a tank hides the ship's own fuel. A large bay and large tanks may overlap a little: it's
+art, not a rule. A tank's art grows a little with what it holds (`tankBoxes` in `src/shipArt.ts`),
+so a large tank looks like more than a small one.
+
 ## Designing new hulls at scale
 
 Today a hull is one polygon in `HULL` plus eleven or so mounts, so 200+ hulls is first a question

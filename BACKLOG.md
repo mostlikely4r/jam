@@ -84,10 +84,13 @@ New game with a choice of starting ship. Today it's a panel switch.
 Built since: the start menu picks a ship to begin.
 
 ## S-13 · Fuel and cargo tradeoffs, drone upgrades
-- status: parked
+- status: building
 - area: Ships and gear
 
 Fuel and cargo tradeoffs, drone upgrades such as cargo. A stronger gun, even though parts should mainly make the game different.
+
+Being built in `docs/fuel-plan.md`: steps 1, 2 and 2b (tanks as modules) are built; step 3, the
+supply chain, waits in the queue as Q-7, and step 4, running dry, after it.
 
 ## S-14 · Tractor beam balance
 - status: parked

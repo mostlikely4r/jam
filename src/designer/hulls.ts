@@ -61,7 +61,7 @@ import { PROGRAMS, PROGRAM_PARTS, programDef, programsFileNow, SHIPPED_PROGRAMS,
 import type { GlyphId } from "../glyphs";
 import { EVERY_GLYPH, glyphIcon, iconEl } from "../icons";
 import { DEFAULTS } from "../tuning";
-import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPart } from "../shipArt";
+import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPart, drawTanks, tankBoxes } from "../shipArt";
 
 const R = 12;
 const DRAFT_KEY = "jam-ships-draft";
@@ -1812,6 +1812,7 @@ export class HullDesigner {
     if (kind === "tractor") lines.push(side(mount.angle, "A tractor here catches ore") + " (the all-round one all round).");
     if (kind === "computer") lines.push("A computer sits inside the hull and shows nothing.");
     if (kind === "section") lines.push("A cargo bay shows as a box; the ore rides in it.");
+    if (kind === "tank") lines.push("A fuel tank shows as a small box either side of the bay, filled to the ship's level.");
     if (kind === "thruster" && !mount.role) lines.push("No control fires it: a thruster here does nothing.");
     lines.push("Hits land on whatever is mounted nearest them.");
     return lines.join("\n");
@@ -2089,6 +2090,14 @@ export class HullDesigner {
         shown && partOf(shown).kind === "section" ? { [spot.id]: { part: shown, wear: 0 } } : {};
       drawBay(ctx, bayBox({ model, fit }));
     }
+    // The fuel tanks, full: what each preview shows on its mount, in its mount's transparency.
+    const tanks: Partial<Record<MountId, Module>> = {};
+    for (const mount of mounts) {
+      if (!mount.types.includes("fuel tank")) continue;
+      const shown = this.previewOf(model, mount);
+      if (shown && mountTakes(mount, shown)) tanks[mount.id] = { part: shown, wear: 0 };
+    }
+    drawTanks(ctx, tankBoxes({ model, fit: tanks }, 1));
     for (const mount of mounts.filter((each) => (each.order ?? 0) >= 0).sort(byOrder)) this.drawPreview(ctx, model, mount);
     ctx.restore();
 
@@ -2184,7 +2193,7 @@ export class HullDesigner {
     const id = this.previewOf(model, mount);
     if (!id) return;
     const part = partOf(id);
-    if (part.kind === "section") return;
+    if (part.kind === "section" || part.kind === "tank") return;
     ctx.save();
     ctx.translate(mount.x * R, mount.y * R);
     ctx.rotate(facing(mount));

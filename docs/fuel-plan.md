@@ -1,6 +1,6 @@
 # Fuel plan
 
-Written 2026-11-20. Step 1 (meter only) is built, 2026-11-23. Steps 2 to 4 are not built.
+Written 2026-11-20. Steps 1, 2 and 2b are built, 2026-11-23. Steps 3 and 4 are not built.
 
 This is an experiment. Every ship and station gets a visible fuel tank, and thrusters burn fuel.
 Fuel costs credits and flows from the haulers that bring it to stations, then to ships, then
@@ -247,8 +247,17 @@ upgraded, damaged and destroyed, and so a ship's range is a fitting choice.
   rule. All five hulls take tanks (*decided*).
 - **Tank parts** (proposal): small 10, medium 20 and large 40 fuel, one per mount. The default
   layout of every hull keeps **20**, as two smalls, so step 2's numbers carry over. Pirates start
-  with a medium and defenders with a large (*decided*: they may start with a medium or large
-  tank). The player's ladder: 20 → 30 → 50 (a medium beside a small) → 40 → 60 → 80.
+  with a medium either side (**40**) and defenders with a large either side (**80**) (*decided*
+  2026-11-23: both mounts carry the same tank). The player's ladder: 20 → 30 → 50 (a medium
+  beside a small) → 40 → 60 → 80.
+
+  **Built 2026-11-23.** Two mounts on every hull, `tankLeft` and `tankRight`, either side of the
+  cargo bay and faded to `alpha` 0.45 so the level reads through the hull; `smallTank`, `mediumTank`
+  and `largeTank` are parts of their own kind, `tank`, with item entries and recipes of their own.
+  A bare hull carries two smalls (pirates a medium each, defenders a large each). The tanks weigh
+  nothing for now, so nothing anyone flies handles differently from step 2: a tank's weight is a
+  lever left for the tune, not one taken by surprise.
+
 - **Capacity is the sum of the fitted tanks.** Every hull's bare fit carries its tanks: without
   that, a ship has no tank and can't move. Only the upgrade needs the AI to learn to buy tanks.
 - **Damaged** (*decided*): the tank that took the hit slowly loses its fuel, a leak. The ship
@@ -260,6 +269,43 @@ upgraded, damaged and destroyed, and so a ship's range is a fitting choice.
   goes. What a hull's fill level is when it has two tanks is a sum, drawn as a level in each.
 - **Tests:** capacity is the sum of the fitted tanks; a damaged tank leaks into nothing rather
   than staying put; a destroyed one takes its fuel with it; the default layouts still hold 20.
+
+**Built 2026-11-23.** `Sim.fuelMax` is the sum of a ship's working tanks, and each ship keeps its
+fuel per tank (`tankFuel`), the total in `fuel` as before so everything that reads it, the
+planner included, is untouched. Burning drains the tanks in proportion, so they stay level; a
+damaged tank leaks its own fuel at `fuelLeak` (0.01 a second of what it holds, in the tab menu's
+Fuel group) until it is empty, and the other tank keeps what it has; a destroyed tank's fuel is
+gone with it, and both losses go into `itemFlow`, so the ledger still adds up. `src/shipArt.ts`
+draws a tank on its mount, filled to the hull's own level, in its mount's transparency; a tank
+whose mount is faded is a ghost inside the hull. The step 2 bar under the hull is gone, the dock
+fills each tank's room, and the ship screen's Fuel tanks row and the shop's new header sell them.
+
+Where the build differs from this section:
+
+- **The tanks are drawn only with fuel on.** With the switch off the game is the one before fuel,
+  tanks and all: no tank art on a ship, no tanks in a station's shop, and no station spending its
+  credits on a tank blueprint. That's the same rule as everything else in the plan.
+- **The leak is a share of the tank a second**, not a fixed rate: a large tank leaks faster in
+  absolute terms, at the same fraction. It is in the tab menu's Fuel group, so the tune can move
+  it. A leak isn't counted in a ship's own burn meters: those count what its thrusters burned.
+- **Nothing re-fills a destroyed tank's fuel**, and nothing needs to: a dock replaces the tank and
+  then fills it, as it fills any tank that's come aboard.
+- **The AI doesn't buy tanks yet.** It keeps the tanks its hull came with; only the player
+  upgrades. That was the section's own point (`Only the upgrade needs the AI to learn to buy tanks`).
+- **Tanks weigh nothing.** A hull's tanks are in everyone's bare fit, so weight there would have
+  re-tuned every ship in the game. The bays keep their weight; a tank's is the tune's to add.
+
+**Tests:** six in `src/fuel.test.ts`'s "tanks as modules": every bare hull's tanks and what they
+add up to (20 for the three working hulls, 40 for pirates, 80 for defenders), a medium fitted
+alongside a small making 30, a damaged tank leaking to nothing while the other keeps its fuel, a
+destroyed one losing its fuel and its room, no tanks in the shop while the switch is off, and each
+tank's fuel in a save. Two fitting tests now name the tanks in a bare hull's fit.
+
+**Not in this build:**
+
+- The AI buying or upgrading tanks, and the shop pricing that would need: step 3 or later.
+- Tanks weighing anything: the tune's, if the numbers say.
+- The station's tank drawing its real fill: step 3 makes it finite.
 
 **Try in game:** fit a large tank beside a large bay and see whether the overlap reads; get a
 pump loose and watch one tank drop.

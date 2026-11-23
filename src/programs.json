@@ -71,6 +71,88 @@
       ]
     },
     {
+      "id": "turretTracking",
+      "name": "Turret tracking",
+      "short": "trk",
+      "description": "Turns the turret to the rock you've picked. Needs Targeting loaded",
+      "price": 250,
+      "tier": 0,
+      "icon": { "glyph": "turret", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" },
+      "needs": ["targeting"]
+    },
+    {
+      "id": "autoMine",
+      "name": "Auto-mine",
+      "short": "mine",
+      "description": "Fires a gun when it's lined up on a rock you've picked. Never at ships. Needs Targeting loaded",
+      "price": 400,
+      "tier": 1,
+      "icon": { "glyph": "gun", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" },
+      "needs": ["targeting"],
+      "tweaks": [
+        {
+          "id": "shootsAt",
+          "name": "Shoots at",
+          "default": "any",
+          "options": [
+            { "id": "primary", "name": "Primary only" },
+            { "id": "any", "name": "Any picked" }
+          ]
+        },
+        {
+          "id": "fires",
+          "name": "Fires",
+          "each": "gun",
+          "default": "on",
+          "options": [
+            { "id": "on", "name": "On" },
+            { "id": "off", "name": "Off" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "faceTarget",
+      "name": "Face target",
+      "short": "face",
+      "description": "Turns the nose to the rock you've picked while nothing else steers. Needs Targeting loaded",
+      "price": 300,
+      "tier": 1,
+      "icon": { "glyph": "turn", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" },
+      "needs": ["targeting"]
+    },
+    {
+      "id": "autoMine2",
+      "name": "Auto-mine II",
+      "short": "mine2",
+      "description": "As Auto-mine, and holds a shot that would miss a moving rock. Needs Targeting loaded",
+      "price": 750,
+      "tier": 2,
+      "icon": { "glyph": "gun", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0", "mark": "II" },
+      "needs": ["targeting"],
+      "tweaks": [
+        {
+          "id": "shootsAt",
+          "name": "Shoots at",
+          "default": "any",
+          "options": [
+            { "id": "primary", "name": "Primary only" },
+            { "id": "any", "name": "Any picked" }
+          ]
+        },
+        {
+          "id": "fires",
+          "name": "Fires",
+          "each": "gun",
+          "default": "on",
+          "options": [
+            { "id": "on", "name": "On" },
+            { "id": "off", "name": "Off" }
+          ]
+        }
+      ]
+    },
+    {
       "id": "meters",
       "name": "Speed and distance meters",
       "short": "meters",

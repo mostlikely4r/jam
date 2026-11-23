@@ -124,6 +124,8 @@ export class BotLog {
   fired: number[] = [];
   /** The ship's credits earned, sampled as it grew: the report's credits an hour come from it. */
   earned: { at: number; total: number }[] = [];
+  /** When Auto-mine was first working, on the game's clock, or null if the run never got there. */
+  autoMineAt: number | null = null;
   end: RunEnd | null = null;
   /** Where each line goes as it happens, for watching a run: the headless one keeps quiet. */
   private print: ((line: string) => void) | null;
@@ -189,6 +191,27 @@ export class BotLog {
     return gaps;
   }
 
+  /**
+   * Inputs an hour before and after Auto-mine was first working, and the longest quiet gap after
+   * it: the road's minutes between decisions. Null when the run never got there.
+   */
+  autoMineSplit(): { before: number; after: number; longestGap: number } | null {
+    const at = this.autoMineAt;
+    if (at === null) return null;
+    const endAt = Math.max(this.endAt(), at);
+    const before = this.inputs.filter((input) => input.at < at);
+    const after = this.inputs.filter((input) => input.at >= at);
+    const rate = (count: number, seconds: number) => (seconds > 0 ? Math.round((count * 3600) / seconds) : 0);
+    // The quiet runs from the moment it started working to the first input, and between each after.
+    let longestGap = 0;
+    let last = at;
+    for (const input of after) {
+      longestGap = Math.max(longestGap, input.at - last);
+      last = input.at;
+    }
+    return { before: rate(before.length, at - this.start), after: rate(after.length, endAt - at), longestGap };
+  }
+
   /** How many whole and part hours the run ran, from its first event to its end. */
   private hours(endAt: number): number {
     const last = this.events.length > 0 ? this.events[this.events.length - 1].at : this.start;
@@ -238,6 +261,10 @@ export class BotLog {
     const credits = this.perHour("credits");
     const perHour = this.perHour("inputs");
     lines.push(`Per hour: credits earned ${credits.join(", ")} | inputs ${perHour.join(", ")}`);
+    const split = this.autoMineSplit();
+    if (split) {
+      lines.push(`Auto-mine: from ${clock(this.since(this.autoMineAt!))}, inputs an hour ${thousands(split.before)} before, ${thousands(split.after)} after | longest gap after ${span(split.longestGap)}`);
+    }
     lines.push(`Mining: fires from a median ${Math.round(median(this.fired))} | own shots freed ${thousands(this.own.freed)} ore, ${thousands(this.own.picked)} of it picked up`);
     lines.push(`Damage: ${thousands(this.damage.hullLost)} hull lost, ${thousands(this.damage.repairCredits)} cr on repairs`);
     if (this.breaks.length > 0) {
@@ -273,6 +300,12 @@ export class BotLog {
     }
     this.perHour("credits").forEach((value, hour) => (flat[`credits.h${hour + 1}`] = value));
     this.perHour("inputs").forEach((value, hour) => (flat[`inputs.h${hour + 1}`] = value));
+    const split = this.autoMineSplit();
+    if (split) {
+      flat.inputsPerHourBeforeAutoMine = split.before;
+      flat.inputsPerHourAfterAutoMine = split.after;
+      flat.longestGapAfterAutoMine = Math.round(split.longestGap);
+    }
     flat.wrecks = this.wrecks.length;    this.wrecks.forEach((wreck, index) => {
       flat[`wreck${index + 1}.at`] = Math.round(this.since(wreck.at));
       flat[`wreck${index + 1}.minutes`] = wreck.back === null ? 0 : Math.round((wreck.back - wreck.at) / 60);

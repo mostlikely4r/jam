@@ -2,8 +2,8 @@ import { Chatter, type FaceKey } from "./chatter";
 import { type BayGrid, type BlueprintId, partFits, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
 import { hubRecipes, isOreItem, itemDef, oreItems, saleRecipes } from "./items";
 import { copyPicks, pickOf, PROGRAMS, setPick as setTweakPick } from "./programs";
-import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
-import { ClickPilot, DronePilot, FighterPilot, LOW_HULL } from "./pilot";
+import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Mount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
+import { ClickPilot, DronePilot, FacePilot, FighterPilot, LOW_HULL } from "./pilot";
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
 import { orbitState } from "./kepler";
@@ -162,7 +162,10 @@ export interface Ship extends Body, Fitting {
   prevAngle: number;
   spin: number;
   hull: number;
+  /** Seconds until the guns fire together again, on Space: they wait on the slowest. */
   cooldown: number;
+  /** Seconds until each gun mount may fire on its own, as auto-mine fires them. Not saved. */
+  gunCooldowns: Map<MountId, number>;
   /** Which way the turret points, relative to the nose. 0 without a turret. */
   turretAngle: number;
   prevTurretAngle: number;
@@ -803,6 +806,11 @@ export type Loot = Loose;
 /** Something a ship can pick as a target: a rock, a ship, a station, or something loose in space. */
 export type Targetable = Rock | Loose | Ship | Base;
 
+/** Whether a target is a rock: not a ship, a station, or something loose. */
+export function isRock(target: Targetable): target is Rock {
+  return !("model" in target) && !("spec" in target) && !("item" in target);
+}
+
 /** How a targetable thing reads: where it is this tick and last, how big, and how it moves. */
 export interface TargetSpot extends Body {
   radius: number;
@@ -1045,6 +1053,8 @@ export class Sim {
   }
   /** When each ship was hit by each other ship, for the hits not yet forgotten. */
   private grudges = new WeakMap<Ship, Map<Ship, number[]>>();
+  /** The hands of each ship's Face target program, made the first time it turns that ship. */
+  private facePilots = new WeakMap<Ship, FacePilot>();
   /** Flies the player's ship to a clicked spot, if it has the part. */
   clickPilot!: ClickPilot;
   rocks: Rock[] = [];
@@ -1851,12 +1861,12 @@ export class Sim {
 
   /**
    * The pilot changes how one of its programs works, loaded or only owned. This is not a dock
-   * act: a pick can change in flight. False when the pilot doesn't own the program, or the
-   * tweak or the option doesn't exist.
+   * act: a pick can change in flight. A tweak that repeats per mount takes the mount it's for.
+   * False when the pilot doesn't own the program, or the tweak or the option doesn't exist.
    */
-  setTweak(ship: Ship, programId: PartId, tweakId: string, optionId: string): boolean {
+  setTweak(ship: Ship, programId: PartId, tweakId: string, optionId: string, mount?: MountId): boolean {
     if (!ship.software.has(programId)) return false;
-    return setTweakPick(ship.tweaks, programId, tweakId, optionId);
+    return setTweakPick(ship.tweaks, programId, tweakId, optionId, mount);
   }
 
   /** The pilots whose ships are flown tick by tick: a record far off isn't one. */
@@ -2514,6 +2524,7 @@ export class Sim {
       spin: 0,
       hull: hullMax(model),
       cooldown: 0,
+      gunCooldowns: new Map(),
       turretAngle: 0,
       prevTurretAngle: 0,
       aim: null,
@@ -2548,6 +2559,7 @@ export class Sim {
     ship.spin = 0;
     ship.hull = hullMax(ship.model);
     ship.cooldown = 0;
+    ship.gunCooldowns.clear();
     ship.hold = [];
     ship.unloadTimer = 0;
     ship.firing.clear();
@@ -5502,6 +5514,8 @@ export class Sim {
     if (ship.critical > 0) Object.assign(ship.controls, { thrust: 0, strafe: 0, turn: 0, fire: false, retro: false, stabilize: false });
     // On a click order the pilot decides, or the retro switch would fight its coasting.
     const usesSwitch = ship === this.ship && !this.clickPilot.flying;
+    // Face target turns the nose for this tick only: the pilot's own controls are put back after.
+    const handsFree = this.faceTarget(ship);
     const retro = ship.parts.has("retro") && (usesSwitch ? tuning.retro : controls.retro);
     const spinAssist = retro || (ship.parts.has("spinStabilizer") && controls.stabilize);
 
@@ -5524,6 +5538,7 @@ export class Sim {
     if (turnedBy < 0 && controls.turn === 0) ship.firing.delete(turned > 0 ? "thrusterRotateRight" : "thrusterRotateLeft");
     else ship.spin += turned * Math.sign(turnedBy);
     ship.angle += ship.spin * dt;
+    if (handsFree) Object.assign(controls, handsFree);
 
     const cos = Math.cos(ship.angle);
     const sin = Math.sin(ship.angle);
@@ -5566,6 +5581,7 @@ export class Sim {
       this.stats.topSpeed = Math.max(this.stats.topSpeed, Math.hypot(ship.vx, ship.vy));
     }
     ship.cooldown = Math.max(0, ship.cooldown - dt);
+    for (const [mount, left] of ship.gunCooldowns) ship.gunCooldowns.set(mount, Math.max(0, left - dt));
     this.turnTurret(ship, dt);
   }
 
@@ -5577,7 +5593,9 @@ export class Sim {
       return;
     }
     const wrap = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
-    const want = ship.aim ? wrap(Math.atan2(ship.aim.y - ship.y, ship.aim.x - ship.x) - ship.angle) : wrap(facing(turretMount(ship) ?? { x: 0, y: 0, angle: 0, scale: 1 }));
+    // Turret tracking turns it to the picked rock; with none, it follows the aim as ever.
+    const aim = this.trackedRock(ship) ?? ship.aim;
+    const want = aim ? wrap(Math.atan2(aim.y - ship.y, aim.x - ship.x) - ship.angle) : wrap(facing(turretMount(ship) ?? { x: 0, y: 0, angle: 0, scale: 1 }));
     const step = ((this.tuning.turretTurnSpeed * Math.PI) / 180) * dt;
     const change = Math.max(-step, Math.min(step, wrap(want - ship.turretAngle)));
     ship.turretAngle = wrap(ship.turretAngle + change);
@@ -6621,42 +6639,188 @@ export class Sim {
     return attacker.wanted;
   }
 
+  /**
+   * The ship's guns. On Space every working gun fires together and they wait on the slowest, as
+   * they always have. Without it, an auto-mine program fires each gun on its own, when that gun
+   * is lined up on a rock it may shoot.
+   */
   private fireShots(ship: Ship): void {
-    const { tuning } = this;
-    if (!ship.controls.fire || ship.cooldown > 0) return;
-    // Every working gun fires, each the way it faces, from the line through its mount, just
-    // clear of the hull. They wait on the slowest. No working gun, no shot.
-    const guns = mountsOf(ship).filter((mount) => {
+    const guns = this.workingGuns(ship);
+    if (guns.length === 0) return;
+    if (ship.controls.fire) {
+      if (ship.cooldown > 0) return;
+      let wait = 0;
+      for (const mount of guns) wait = Math.max(wait, this.fireGun(ship, mount));
+      ship.cooldown = wait;
+      for (const mount of guns) ship.gunCooldowns.set(mount.id, wait);
+      return;
+    }
+    this.autoMine(ship, guns);
+  }
+
+  /** The mounts holding a working gun, a turret's gun among them. */
+  private workingGuns(ship: Ship): Mount[] {
+    return mountsOf(ship).filter((mount) => {
       const module = ship.fit[mount.id];
       return works(module) && partOf(module.part).kind === "gun";
     });
-    if (guns.length === 0) return;
-    let wait = 0;
-    for (const mount of guns) {
-      const precise = ship.fit[mount.id]!.part === "gun2";
-      const turret = mount.id === "turretGun";
-      wait = Math.max(wait, 1 / (precise ? tuning.gun2ShotsPerSecond : tuning.shotsPerSecond));
-      const aim = turret ? ship.turretAngle : facing(mount);
-      const angle = ship.angle + aim;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      const aside = (-mount.x * Math.sin(aim) + mount.y * Math.cos(aim)) * SHIP_RADIUS;
-      const x = ship.x + cos * (SHIP_RADIUS + 4) - sin * aside;
-      const y = ship.y + sin * (SHIP_RADIUS + 4) + cos * aside;
-      this.shots.push({
-        x,
-        y,
-        px: x,
-        py: y,
-        vx: ship.vx + cos * tuning.shotSpeed,
-        vy: ship.vy + sin * tuning.shotSpeed,
-        life: tuning.shotLife * (turret ? tuning.turretRange : 1),
-        precise,
-        from: ship,
-      });
-      this.events.push({ type: "shot", x, y });
+  }
+
+  /**
+   * Where one gun's shot starts and which way it flies: from the line through its mount, just
+   * clear of the hull, the way the gun faces (a turret's gun, the way the turret points), and
+   * how far it carries against the ship.
+   */
+  private gunLine(ship: Ship, mount: Mount): { x: number; y: number; angle: number; reach: number; turret: boolean } {
+    const { tuning } = this;
+    const turret = mount.id === "turretGun";
+    const aim = turret ? ship.turretAngle : facing(mount);
+    const angle = ship.angle + aim;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const aside = (-mount.x * Math.sin(aim) + mount.y * Math.cos(aim)) * SHIP_RADIUS;
+    return {
+      x: ship.x + cos * (SHIP_RADIUS + 4) - sin * aside,
+      y: ship.y + sin * (SHIP_RADIUS + 4) + cos * aside,
+      angle,
+      reach: tuning.shotSpeed * tuning.shotLife * (turret ? tuning.turretRange : 1),
+      turret,
+    };
+  }
+
+  /** One gun fires one shot. Returns the wait its own rate of fire sets. */
+  private fireGun(ship: Ship, mount: Mount): number {
+    const { tuning } = this;
+    const precise = ship.fit[mount.id]!.part === "gun2";
+    const line = this.gunLine(ship, mount);
+    const cos = Math.cos(line.angle);
+    const sin = Math.sin(line.angle);
+    this.shots.push({
+      x: line.x,
+      y: line.y,
+      px: line.x,
+      py: line.y,
+      vx: ship.vx + cos * tuning.shotSpeed,
+      vy: ship.vy + sin * tuning.shotSpeed,
+      life: tuning.shotLife * (line.turret ? tuning.turretRange : 1),
+      precise,
+      from: ship,
+    });
+    this.events.push({ type: "shot", x: line.x, y: line.y });
+    return 1 / (precise ? tuning.gun2ShotsPerSecond : tuning.shotsPerSecond);
+  }
+
+  /** The auto-mine program running on a ship: II rules when both are, and Targeting must be loaded. */
+  autoMineOf(ship: Ship): "autoMine" | "autoMine2" | null {
+    if (!ship.parts.has("targeting")) return null;
+    if (ship.parts.has("autoMine2")) return "autoMine2";
+    if (ship.parts.has("autoMine")) return "autoMine";
+    return null;
+  }
+
+  /** Whether the ship is in a state to work its programs at all: whole, flying, not in a dock. */
+  private programsFly(ship: Ship): boolean {
+    return ship.hull > 0 && ship.critical <= 0 && !this.isDocked(ship);
+  }
+
+  /**
+   * The picked rocks an auto-mine program may shoot, in queue order: rocks only, never a ship,
+   * a station or loose ore. Under "Primary only", just the main target, when it's a rock.
+   */
+  private minable(ship: Ship, program: "autoMine" | "autoMine2"): Rock[] {
+    if (pickOf(ship.tweaks, program, "shootsAt") === "primary") {
+      const main = ship.targets[0];
+      return main && isRock(main) ? [main] : [];
     }
-    ship.cooldown = wait;
+    return ship.targets.filter(isRock);
+  }
+
+  /**
+   * Auto-mine: each gun whose "Fires" is on, whose own wait is over, and that is likely to hit a
+   * rock it may shoot, fires on its own. It also holds Space's shared wait, so a press of Space
+   * right after doesn't double the rate.
+   */
+  private autoMine(ship: Ship, guns: Mount[]): void {
+    const program = this.autoMineOf(ship);
+    if (!program || !this.programsFly(ship)) return;
+    const rocks = this.minable(ship, program);
+    if (rocks.length === 0) return;
+    for (const mount of guns) {
+      if ((ship.gunCooldowns.get(mount.id) ?? 0) > 0) continue;
+      if (pickOf(ship.tweaks, program, "fires", mount.id) !== "on") continue;
+      const line = this.gunLine(ship, mount);
+      if (!rocks.some((rock) => this.likelyHit(ship, line, rock, program === "autoMine2"))) continue;
+      const wait = this.fireGun(ship, mount);
+      ship.gunCooldowns.set(mount.id, wait);
+      ship.cooldown = Math.max(ship.cooldown, wait);
+    }
+  }
+
+  /**
+   * Whether a shot from this gun now would likely hit the rock: the rock lies ahead along the
+   * gun's line, within its reach, and the line passes within its radius. With `lead` (Auto-mine
+   * II), the rock must also still be on the line by the time the shot gets there, moving as it
+   * moves against the ship, since the shots carry the ship's own drift. Never through another
+   * ship: one on the line nearer than the rock (for II, than where the rock will be) holds the gun.
+   */
+  private likelyHit(ship: Ship, line: { x: number; y: number; angle: number; reach: number }, rock: Rock, lead: boolean): boolean {
+    const cos = Math.cos(line.angle);
+    const sin = Math.sin(line.angle);
+    const onLine = (dx: number, dy: number, radius: number): number | null => {
+      const along = dx * cos + dy * sin;
+      const across = -dx * sin + dy * cos;
+      return along + radius > 0 && along - radius <= line.reach && Math.abs(across) < radius ? along : null;
+    };
+    const dx = rock.x - line.x;
+    const dy = rock.y - line.y;
+    let along = onLine(dx, dy, rock.radius);
+    if (along === null) return false;
+    if (lead) {
+      // Where the rock will be when the shot gets there: a ship in the way is judged against that.
+      const flight = Math.max(0, along) / this.tuning.shotSpeed;
+      along = onLine(dx + (rock.vx - ship.vx) * flight, dy + (rock.vy - ship.vy) * flight, rock.radius);
+      if (along === null) return false;
+    }
+    for (const other of this.ships) {
+      if (other === ship || other.hull <= 0) continue;
+      const nearer = onLine(other.x - line.x, other.y - line.y, SHIP_RADIUS);
+      if (nearer !== null && nearer < along) return false;
+    }
+    return true;
+  }
+
+  /**
+   * The rock Turret tracking turns the turret to, or null to follow the aim as ever. The first
+   * rock the loaded auto-mine program may shoot (without one, the first picked rock) within the
+   * turret gun's reach; with none in reach, the first of them, so the turret is already turned
+   * when it comes in.
+   */
+  private trackedRock(ship: Ship): Rock | null {
+    if (!ship.parts.has("turretTracking") || !ship.parts.has("targeting") || !this.programsFly(ship)) return null;
+    const program = this.autoMineOf(ship);
+    const rocks = program ? this.minable(ship, program) : ship.targets.filter(isRock);
+    if (rocks.length === 0) return null;
+    const { tuning } = this;
+    const reach = tuning.shotSpeed * tuning.shotLife * tuning.turretRange;
+    return rocks.find((rock) => Math.hypot(rock.x - ship.x, rock.y - ship.y) - rock.radius <= reach) ?? rocks[0];
+  }
+
+  /**
+   * Face target: while nothing else steers (no click order or course, no turn key, not in a
+   * dock), turns the nose toward the main target when it's a rock. It sets the turn for this tick
+   * only, and hands back what the controls held before, to be put back once the turn is applied.
+   */
+  private faceTarget(ship: Ship): Pick<Controls, "turn" | "stabilize"> | null {
+    if (!ship.parts.has("faceTarget") || !ship.parts.has("targeting") || !this.programsFly(ship)) return null;
+    if (ship.controls.turn !== 0) return null;
+    if (ship === this.ship && this.clickPilot.active) return null;
+    const main = ship.targets[0];
+    if (!main || !isRock(main)) return null;
+    let pilot = this.facePilots.get(ship);
+    if (!pilot) this.facePilots.set(ship, (pilot = new FacePilot(ship)));
+    const held = { turn: ship.controls.turn, stabilize: ship.controls.stabilize };
+    pilot.face(this, Math.atan2(main.y - ship.y, main.x - ship.x));
+    return held;
   }
 
   /** A precision hit: ore comes loose where the shot landed and drifts on with the rock. */

@@ -577,6 +577,19 @@ class ShipPilot {
   }
 }
 
+/**
+ * The Face target program's hands: turns the nose toward a spot with the turning thrusters the
+ * ship owns, the way a click order's facing hold does, and never thrusts. Once the nose is there
+ * and the spin is quiet it lets go, as the click pilot's own facing does.
+ */
+export class FacePilot extends ShipPilot {
+  face(sim: Sim, angle: number): void {
+    const { ship } = this;
+    if (Math.abs(wrapAngle(angle - ship.angle)) < FACING_ANGLE && Math.abs(ship.spin) < FACING_SPIN) return;
+    this.turnTo(sim, angle);
+  }
+}
+
 /** Flies a ship through the mining loop: shoot rocks, gather ore, haul it to the dock, and go back. */
 export class DronePilot extends ShipPilot {
   /** What the drone is doing, in words for the display. */

@@ -101,6 +101,12 @@ describe("save and load", () => {
     const into = homeSim(2, { ...DEFAULTS });
     roundTrip(sim, into);
     expect(into.ship.tweaks.targeting?.boxPicks).toBe("ships");
+    // A pick that belongs to a mount comes back with it.
+    sim.devSet(sim.ship, "autoMine", true);
+    expect(sim.setTweak(sim.ship, "autoMine", "fires", "off", "turretGun")).toBe(true);
+    const again = homeSim(5, { ...DEFAULTS });
+    roundTrip(sim, again);
+    expect(again.ship.tweaks.autoMine?.["fires@turretGun"]).toBe("off");
 
     // A save from before tweaks existed: every ship comes back without one, and each gets its
     // own empty picks rather than one object shared by all of them.

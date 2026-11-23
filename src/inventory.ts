@@ -1,7 +1,7 @@
-import { computerSize, DAMAGED_AT, mountsOf, programSlots, type Module, type Mount, type MountId } from "./fitting";
+import { computerSize, DAMAGED_AT, mountsOf, programSlots, tweakMounts, type Module, type Mount, type MountId } from "./fitting";
 import { canPlace, entryCells, fits, footprint, reachable, sticks, type GridSpec, type Placed } from "./grid";
 import { isItem, partOf, PARTS, type PartId } from "./parts";
-import { pickOf, programDef, PROGRAM_PARTS } from "./programs";
+import { pickOf, programDef, PROGRAM_PARTS, type ProgramTweak } from "./programs";
 import { partIcon } from "./icons";
 import { setTip } from "./tooltip";
 import { drawVectorShip } from "./shipArt";
@@ -394,25 +394,18 @@ export class Inventory {
       menu.append(note);
     }
     for (const tweak of tweaks) {
-      const row = document.createElement("div");
-      row.className = "tweak";
-      const name = document.createElement("span");
-      name.textContent = tweak.name;
-      row.append(name);
-      const picked = pickOf(ship.tweaks, id, tweak.id);
-      for (const option of tweak.options) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = option.name;
-        if (option.id === picked) button.className = "on";
-        button.addEventListener("click", () => {
-          this.sim.setTweak(ship, id, tweak.id, option.id);
-          this.openTweaks(id, clientX, clientY);
-          this.redraw();
-        });
-        row.append(button);
+      // A tweak that repeats per mount is a row for each mount it covers: "Fires: Turret gun".
+      if (tweak.each) {
+        const mounts = tweakMounts(ship, tweak);
+        if (mounts.length === 0) {
+          const note = document.createElement("span");
+          note.textContent = `${tweak.name}: ${tweak.each === "gun" ? "No guns fitted" : "Nothing it applies to is fitted"}`;
+          menu.append(note);
+        }
+        for (const mount of mounts) menu.append(this.tweakRow(id, tweak, `${tweak.name}: ${mount.name}`, mount.id, clientX, clientY));
+        continue;
       }
-      menu.append(row);
+      menu.append(this.tweakRow(id, tweak, tweak.name, undefined, clientX, clientY));
     }
     document.body.append(menu);
     // Keeps the whole menu on the screen, wherever the click was.
@@ -420,6 +413,30 @@ export class Inventory {
     menu.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - box.width - 8))}px`;
     menu.style.top = `${Math.max(8, Math.min(clientY, window.innerHeight - box.height - 8))}px`;
     this.menu = menu;
+  }
+
+  /** One row of the tweak menu: its name and a button for each option, the current pick lit. */
+  private tweakRow(id: PartId, tweak: ProgramTweak, label: string, mount: MountId | undefined, clientX: number, clientY: number): HTMLElement {
+    const { ship } = this.sim;
+    const row = document.createElement("div");
+    row.className = "tweak";
+    const name = document.createElement("span");
+    name.textContent = label;
+    row.append(name);
+    const picked = pickOf(ship.tweaks, id, tweak.id, mount);
+    for (const option of tweak.options) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = option.name;
+      if (option.id === picked) button.className = "on";
+      button.addEventListener("click", () => {
+        this.sim.setTweak(ship, id, tweak.id, option.id, mount);
+        this.openTweaks(id, clientX, clientY);
+        this.redraw();
+      });
+      row.append(button);
+    }
+    return row;
   }
 
   private closeTweaks(): void {

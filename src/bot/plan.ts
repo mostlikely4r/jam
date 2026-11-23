@@ -34,7 +34,15 @@ export const FLOATER_JOURNEY: Plan = {
     { label: "turret", parts: ["turret"] },
     { label: "tractor, cone", parts: ["tractor"] },
     { label: "targeting", parts: ["targeting"] },
+    // The basic computer runs two programs; the floater's own click-to-move, Targeting and the
+    // two below make four.
+    { label: "flight computer", parts: ["flightComputer"] },
+    { label: "turret tracking", parts: ["turretTracking"] },
+    // The trigger finger goes: the gaps between inputs should open from here.
+    { label: "auto-mine", parts: ["autoMine"] },
     { label: "large bay", parts: ["largeBay"] },
+    // Six programs: the chart and the autopilot fill it exactly.
+    { label: "navigation computer", parts: ["navComputer"] },
     // The chart and the autopilot are one step: a course is picked on the chart, so the
     // autopilot is no use without it. The route planner leaves the journey: it only routes
     // click moves, and a course already routes itself. It stays in the shop.

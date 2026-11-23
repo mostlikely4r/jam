@@ -55,4 +55,4 @@ Update as steps are specced and built.
 
 | Step | Plan | Status |
 |---|---|---|
-| Keeps mining | `docs/keeps-mining-plan.md` | specced 2026-11-20, unbuilt |
+| Keeps mining | `docs/keeps-mining-plan.md` | built 2026-11-23; bot numbers pending |

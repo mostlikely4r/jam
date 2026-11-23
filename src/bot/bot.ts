@@ -10,7 +10,7 @@
 import { computerSize, works, type Module, type MountId } from "../fitting";
 import { isOreItem } from "../items";
 import { isProgram, partOf, type PartId } from "../parts";
-import { DOCK_OFFSET, SHIP_RADIUS, STATION_HALF, TICK, type Loose, type Poi, type Rock, type Sim } from "../sim";
+import { DOCK_OFFSET, isRock, SHIP_RADIUS, STATION_HALF, TICK, type Loose, type Poi, type Rock, type Sim } from "../sim";
 import { BotLog } from "./log";
 import { currentStep, missingPart, stepName, working, type Plan } from "./plan";
 
@@ -99,7 +99,7 @@ const STATION_GIVE_UP = STATION_CLEAR * 4;
 /** Everything the bot may call on the sim: player inputs, and what it reads to decide. */
 export const BOT_CALLS = {
   /** What a click, a keypress or a shop click does. */
-  inputs: ["orderMove", "orderMoveStraight", "orderTravel", "orderStop", "buyPart", "fitItem", "setProgram", "chooseHull"],
+  inputs: ["orderMove", "orderMoveStraight", "orderTravel", "orderStop", "buyPart", "fitItem", "setProgram", "chooseHull", "selectTarget", "setTweak"],
   /** The ship's own screens: what a player can see before deciding. */
   reads: [
     "isDocked",
@@ -277,6 +277,10 @@ export class Bot {
     this.noteBack(sim);
     this.track(sim);
     if (this.end) return;
+    if (this.log.autoMineAt === null && this.autoMines(sim)) {
+      this.log.autoMineAt = sim.now;
+      this.log.event(sim.now, "auto-mine working: the trigger is the program's from here");
+    }
     const docked = sim.isDocked();
     if (docked && !this.port) this.arrive(sim);
     this.port = docked;
@@ -781,6 +785,12 @@ export class Bot {
       this.outbound = null;
     }
     this.noteRocks(sim);
+    // With Auto-mine the program pulls the trigger: while a rock it picked is still in reach, the
+    // hold fills on its own, and there is nothing to do but wait.
+    if (this.autoMines(sim)) {
+      this.trigger(sim, false, "");
+      if (ship.targets.some((target) => isRock(target) && this.inReach(sim, target))) return;
+    }
     const rock = this.nearestRock(sim);
     const ore = this.nearestOre(sim);
     // Ore its own shots freed is the work it set in motion: back for that before it breaks
@@ -1036,6 +1046,16 @@ export class Bot {
       sim.orderStop();
       this.orderAt = null;
     }
+    if (this.autoMines(sim)) {
+      // The program fires: the bot picks the rock, once, and its pieces join the picks as it breaks.
+      if (!ship.targets.includes(rock)) {
+        sim.selectTarget(ship, rock);
+        this.log.input(now, "pick", "a rock to mine");
+      }
+      // A turret that tracks needs no hull turned under it; the hull's own gun does.
+      if (!this.tracks(sim)) this.turnTo(sim, Math.atan2(rock.y - ship.y, rock.x - ship.x));
+      return;
+    }
     this.turnTo(sim, Math.atan2(rock.y - ship.y, rock.x - ship.x));
     if (!ship.parts.has("turret")) {
       // The hull's own gun shoots where the nose points, so the nose has to point at it.
@@ -1219,13 +1239,28 @@ export class Bot {
     ship.controls.turn = push;
   }
 
-  /** Where the turret, or the player's mouse, is pointed. */
+  /** Where the turret, or the player's mouse, is pointed. With Turret tracking, the program aims instead. */
   private aimAt(sim: Sim, x: number, y: number): void {
+    if (this.tracks(sim)) return;
     sim.ship.aim = { x, y };
+  }
+
+  /** Whether Turret tracking is working: a turret, the program, and Targeting it needs. */
+  private tracks(sim: Sim): boolean {
+    const { parts } = sim.ship;
+    return parts.has("turret") && parts.has("turretTracking") && parts.has("targeting");
+  }
+
+  /** Whether Auto-mine is working: the program and Targeting it needs. The trigger is then its. */
+  private autoMines(sim: Sim): boolean {
+    const { parts } = sim.ship;
+    return parts.has("autoMine") && parts.has("targeting");
   }
 
   /** Fire is one input a burst: pressing it counts, holding it doesn't. */
   private trigger(sim: Sim, on: boolean, what: string, from = 0): void {
+    // With Auto-mine working the bot never presses fire: the program shoots.
+    if (on && this.autoMines(sim)) return;
     if (on === this.firing) return;
     this.firing = on;
     sim.controls.fire = on;

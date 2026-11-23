@@ -1,6 +1,7 @@
 # Keeps mining plan
 
-Written 2026-11-20, talked through with the user the same day. Nothing here is built yet. It is
+Written 2026-11-20, talked through with the user the same day. *Built* 2026-11-23 (see **What
+changed from the plan** at the end). It is
 the first bundle of `docs/idle-mining-road.md`: auto-fire plus measurement.
 
 ## Why
@@ -62,7 +63,7 @@ for a combat version some day.
 
 ## What to build
 
-### 1. Per-mount tweaks: `src/programs.ts`, `src/programs.json`, `src/inventory.ts`
+### 1. Per-mount tweaks: `src/programs.ts`, `src/programs.json`, `src/inventory.ts` (*built*)
 
 - `ProgramTweak` gains an optional `each?: PartKind` (the part kind it repeats for: `"gun"` now;
   any kind later). `readTweaks` (`programs.ts` ~line 90) reads and checks it: a known part kind,
@@ -87,7 +88,7 @@ for a combat version some day.
   Picks for mounts the current hull doesn't have are kept, not pruned, so a hull swap back
   finds them.
 
-### 2. The four programs: `src/programs.json`
+### 2. The four programs: `src/programs.json` (*built*)
 
 Prices and tiers are proposals, to be tuned by play and by the bot's report.
 
@@ -103,7 +104,7 @@ Prices and tiers are proposals, to be tuned by play and by the bot's report.
 - Auto-mine II doesn't need Auto-mine. If both are loaded, II rules and plain Auto-mine does
   nothing (proposal). Each keeps its own picks.
 
-### 3. Shooting gun by gun: `src/sim.ts`
+### 3. Shooting gun by gun: `src/sim.ts` (*built*)
 
 Today every working gun fires together on one ship cooldown, waiting on the slowest
 (`fireShots`, ~line 6576).
@@ -138,7 +139,7 @@ predicted spot is still within the rock's radius of the line and within reach.
 player's own) lies on its line closer than the rock, within that ship's radius. Rocks only must
 not turn into hitting a trader that drifted across.
 
-### 4. Turret tracking: `src/sim.ts`
+### 4. Turret tracking: `src/sim.ts` (*built*)
 
 In `turnTurret` (~line 5525): when Turret tracking is loaded and working and there is a rock to
 track, the turret turns toward it instead of `ship.aim`. Otherwise `ship.aim` as today (the mouse
@@ -151,7 +152,7 @@ in the game, the bot's aim in a run).
 - It turns at the turret's normal speed toward the rock's current spot. No leading (*decided* for
   Auto-mine II: it holds fire, it doesn't aim ahead; the turret follows the same idea).
 
-### 5. Face target: `src/sim.ts`
+### 5. Face target: `src/sim.ts` (*built*)
 
 Each tick for a ship with Face target loaded and working, when nothing else steers (*decided*):
 
@@ -166,7 +167,7 @@ ship owns, the way the click pilot's face hold does (`orderFace` → `clickPilot
 thrusts. Turning stops when the nose is within a small angle (proposal: the click pilot's own
 settle tolerance).
 
-### 6. The bot and the measurement: `src/bot/`
+### 6. The bot and the measurement: `src/bot/` (*built*)
 
 The bot (`src/bot/`, from `docs/no-player-runs-plan.md`) is in the working tree, uncommitted at
 the time of writing. Build on it as it stands.
@@ -266,6 +267,40 @@ keys, and the nose swings onto it and the gun fires; touch a turn key and you ha
 journey; the report shows steps 5 to 7 bought and fitted, inputs per hour dropping after
 Auto-mine, and a longest gap that is the first measured "minutes between decisions". Write the
 numbers into the Progress table of `docs/idle-mining-road.md`; they never gate done.
+
+## What changed from the plan
+
+Built 2026-11-23. Where the code differs from the text above:
+
+- **Journey step 10 is the system chart and the autopilot, without the route planner.** The route
+  planner left the journey later on 2026-11-20 (commit d01bed8: it only routes click moves, and a
+  course routes itself). With it gone, the navigation computer's six slots fill exactly: click to
+  move, Targeting, Turret tracking, Auto-mine, chart, autopilot.
+- **A per-mount tweak covers mounts with a *working* part**, not just a non-destroyed one, so a
+  broken gun neither fires nor shows a row, as the edge cases say. Its pick is kept.
+- **"Likely to hit" takes the rock's near edge within reach**, not its centre: a big rock whose
+  edge the shot reaches is fired at.
+- **An auto-mine shot also holds Space's shared wait**, so a press of Space right after doesn't
+  double the rate of fire. Space held is unchanged, checked against a snapshot of the old code.
+- **Auto-mine II judges a ship in the way against where the rock will be**, not where it is (from
+  the review).
+- **`gunCooldowns` goes into saves**, since a save keeps the whole ship (so does `cooldown`). It's
+  harmless, and an older save gets an empty one from the load's template.
+- **Face target** sets the turn for its tick only and puts the pilot's controls back after, so a
+  pilot's key is never mistaken for its own turn on the next tick. Its hands are a `FacePilot`
+  (`src/pilot.ts`) reusing the shared turning code; `src/farside.ts` lists it as flown wherever
+  its ship is.
+- **The bot** picks with `selectTarget` alone (no box): one pick per rock, the pieces join by
+  themselves. While any rock it picked is within its close firing distance it waits, with no
+  moves, turns or fetches; with Turret tracking it stops turning the hull under the turret, and
+  stops setting the aim. `selectTarget` and `setTweak` are on its allowed list.
+- **Icons:** Turret tracking uses the turret glyph, both auto-mines the gun glyph (II marked
+  "II"), Face target the turn glyph.
+
+## Not in this build
+
+- **Played by hand:** the "In the game" checks above are for the user.
+- **The bot's numbers** go in the Progress table of `docs/idle-mining-road.md` once a run lands.
 
 ## Next, not in this step
 

@@ -1,6 +1,6 @@
 import file from "./programs.json";
 import { hasGlyph } from "./glyphs";
-import { forgetThing, registerThing, type Part, type PartIcon, type PartId } from "./parts";
+import { forgetThing, PART_KINDS, registerThing, type Part, type PartIcon, type PartId, type PartKind } from "./parts";
 
 /**
  * Programs: what a pilot buys, owns and loads into a computer. They are not items and not
@@ -27,11 +27,17 @@ export interface ProgramTweak {
   options: ProgramTweakOption[];
   /** The option a pilot gets without picking one. Always one of `options`. */
   default: string;
+  /**
+   * A tweak that repeats per mount: one pick for each mount of the ship holding a working part
+   * of this kind ("Fires" once per gun). Without it, the tweak is one pick for the program.
+   */
+  each?: PartKind;
 }
 
 /**
  * A pilot's picks: program id, then tweak id, then the option id picked. A program or tweak
- * without a pick reads as its default, so only the changes have to be kept.
+ * without a pick reads as its default, so only the changes have to be kept. A tweak that repeats
+ * per mount keeps each mount's pick under `<tweak>@<mount>` (see `tweakKey`).
  */
 export type TweakPicks = Partial<Record<string, Record<string, string>>>;
 
@@ -96,10 +102,12 @@ function readTweaks(raw: unknown): ProgramTweak[] {
     if (!each || typeof each.id !== "string" || each.id === "" || taken.has(each.id)) continue;
     const options = readTweakOptions(each.options);
     if (options.length === 0) continue;
-    taken.add(each.id);
     const name = typeof each.name === "string" && each.name ? each.name : each.id;
+    // A tweak that repeats over a kind of part the game doesn't have is bad data, and goes.
+    if (each.each != null && !(PART_KINDS as readonly unknown[]).includes(each.each)) continue;
+    taken.add(each.id);
     const picked = options.some((option) => option.id === each.default) ? each.default! : options[0].id;
-    tweaks.push({ id: each.id, name, options, default: picked });
+    tweaks.push({ id: each.id, name, options, default: picked, ...(each.each ? { each: each.each } : {}) });
   }
   return tweaks;
 }
@@ -174,19 +182,36 @@ export function tweakOf(programId: string, tweakId: string): ProgramTweak | unde
   return programDef(programId)?.tweaks?.find((tweak) => tweak.id === tweakId);
 }
 
-/** The option a pilot has picked for a tweak, or its default when they've picked none. */
-export function pickOf(picks: TweakPicks | undefined, programId: string, tweakId: string): string {
+/**
+ * Where a pick is kept among a program's picks: the tweak's id, or for a tweak that repeats per
+ * mount, `<tweak>@<mount>`, so the pick stays with the mount whatever is fitted on it.
+ */
+export function tweakKey(tweakId: string, mount?: string): string {
+  return mount ? `${tweakId}@${mount}` : tweakId;
+}
+
+/**
+ * The option a pilot has picked for a tweak, or its default when they've picked none. A tweak
+ * that repeats per mount reads the given mount's pick; without a mount, it reads its default. A
+ * plain tweak ignores the mount.
+ */
+export function pickOf(picks: TweakPicks | undefined, programId: string, tweakId: string, mount?: string): string {
   const tweak = tweakOf(programId, tweakId);
   if (!tweak) return "";
-  const pick = picks?.[programId]?.[tweakId];
+  if (tweak.each && !mount) return tweak.default;
+  const pick = picks?.[programId]?.[tweakKey(tweakId, tweak.each ? mount : undefined)];
   return tweak.options.some((option) => option.id === pick) ? pick! : tweak.default;
 }
 
-/** Puts a pilot's pick for a tweak in place. False when the tweak or the option doesn't exist. */
-export function setPick(picks: TweakPicks, programId: string, tweakId: string, optionId: string): boolean {
+/**
+ * Puts a pilot's pick for a tweak in place. False when the tweak or the option doesn't exist, or
+ * the tweak repeats per mount and no mount is given.
+ */
+export function setPick(picks: TweakPicks, programId: string, tweakId: string, optionId: string, mount?: string): boolean {
   const tweak = tweakOf(programId, tweakId);
   if (!tweak || !tweak.options.some((option) => option.id === optionId)) return false;
-  (picks[programId] ??= {})[tweakId] = optionId;
+  if (tweak.each && !mount) return false;
+  (picks[programId] ??= {})[tweakKey(tweakId, tweak.each ? mount : undefined)] = optionId;
   return true;
 }
 

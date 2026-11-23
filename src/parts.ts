@@ -40,6 +40,10 @@ export type PartId =
   | "autopilot"
   | "targeting"
   | "relativeLines"
+  | "turretTracking"
+  | "autoMine"
+  | "autoMine2"
+  | "faceTarget"
   | "racerMain"
   | "floaterMain"
   | "turnThrusters"
@@ -57,7 +61,8 @@ export type PartId =
  * Programs are software: they belong to the pilot, not the ship, and have their own records
  * (see src/programs.ts).
  */
-export type PartKind = "thruster" | "gun" | "turret" | "tractor" | "computer" | "section" | "program" | "cockpit" | "item";
+export const PART_KINDS = ["thruster", "gun", "turret", "tractor", "computer", "section", "program", "cockpit", "item"] as const;
+export type PartKind = (typeof PART_KINDS)[number];
 
 /**
  * The hulls there are. The racer is the quick ship with an arrow shape. The floater is slow and

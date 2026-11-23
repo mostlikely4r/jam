@@ -55,7 +55,7 @@ import {
   type ShipFile,
   itemOwned,
 } from "../fitting";
-import { partFits, partOf, PARTS, SHIP_MODELS, type PartIcon, type PartId, type ShipModel, type ThrusterRole } from "../parts";
+import { PART_KINDS, partFits, partOf, PARTS, SHIP_MODELS, type PartIcon, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "../parts";
 import { ITEMS, ITEM_TYPES, itemDef, itemsFileNow, SHIPPED_ITEMS, useItemsFile, type ItemDef, type ItemType } from "../items";
 import { PROGRAMS, PROGRAM_PARTS, programDef, programsFileNow, SHIPPED_PROGRAMS, useProgramsFile, needsMet, type ProgramDef } from "../programs";
 import type { GlyphId } from "../glyphs";
@@ -1587,6 +1587,23 @@ export class HullDesigner {
             (value) => {
               const live = liveTweak(tweak.id);
               if (live) live.default = value;
+              this.programsChanged();
+            },
+          ),
+        ),
+      );
+      // A tweak can repeat per mount: one pick for each mount holding a working part of a kind.
+      block.append(
+        this.labelled(
+          "Per mount",
+          this.dropdown(
+            [["", "No: one pick"] as [string, string], ...PART_KINDS.filter((kind) => kind !== "program" && kind !== "item").map((kind): [string, string] => [kind, `Each ${kind}`])],
+            tweak.each ?? "",
+            (value) => {
+              const live = liveTweak(tweak.id);
+              if (!live) return;
+              if (value) live.each = value as PartKind;
+              else delete live.each;
               this.programsChanged();
             },
           ),

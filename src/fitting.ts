@@ -2,7 +2,7 @@ import { isProgram, partFits, partOf, PARTS, SHIP_MODELS, type Part, type PartIc
 import shipFile from "./hulls.json";
 import { hasGlyph } from "./glyphs";
 import { itemDef } from "./items";
-import { programDef, type TweakPicks } from "./programs";
+import { programDef, type ProgramTweak, type TweakPicks } from "./programs";
 import type { Placed } from "./grid";
 
 /**
@@ -495,6 +495,19 @@ export function mountsOf(ship: Fitting & { model: ShipModel }): Mount[] {
   const base = turretMount(ship);
   if (!base) return mounts;
   return [...mounts, { id: "turretGun", name: "Turret gun", types: ["gun"], x: base.x, y: base.y, angle: base.angle, scale: base.scale }];
+}
+
+/**
+ * The mounts a tweak that repeats per mount covers on this ship: each mount holding a working
+ * part of the tweak's kind, a turret's gun mount included. A plain tweak covers none. The menu
+ * shows a row for each, and the sim reads each one's pick.
+ */
+export function tweakMounts(ship: Fitting & { model: ShipModel }, tweak: Pick<ProgramTweak, "each">): Mount[] {
+  if (!tweak.each) return [];
+  return mountsOf(ship).filter((mount) => {
+    const module = ship.fit[mount.id];
+    return works(module) && partOf(module.part).kind === tweak.each;
+  });
 }
 
 export function works(module: Module | undefined): module is Module {

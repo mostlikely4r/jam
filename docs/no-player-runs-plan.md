@@ -68,8 +68,15 @@ life" is a separate, shorter scenario that starts with the full kit (later, equa
 | 2 | Turret (`turret`) | 300 | Shoot without turning the slow hull |
 | 3 | Tractor, cone (`tractor`) | 300 | Ore comes to you |
 | 4 | Targeting (program `targeting`) | 250 | Pick the rock, systems aim |
-| 5 | Large bay (`largeBay`) | 600 | Longer gaps between trips home |
-| 6 | Route planner, system chart, autopilot (programs `clickRoute`, `starmap`, `autopilot`) | 200, 350, 800 | Click the map to go home |
+| 5 | Flight computer (`flightComputer`) | 500 | The basic computer runs 2 programs; the journey needs more |
+| 6 | Turret tracking (program `turretTracking`) | 250 | The turret aims at the picked rock |
+| 7 | Auto-mine (program `autoMine`) | 400 | The trigger finger goes: the gaps should open here |
+| 8 | Large bay (`largeBay`) | 600 | Longer gaps between trips home |
+| 9 | Navigation computer (`navComputer`) | 1200 | Six programs: the next step fills it exactly |
+| 10 | System chart, autopilot (programs `starmap`, `autopilot`) | 350, 800 | Click the map to go home |
+
+Steps 5 to 7 came with `docs/keeps-mining-plan.md` (2026-11-23). The route planner left step 10
+on 2026-11-20: it only routes click moves, and a course routes itself.
 
 The all-round tractor at the far base is left out (*decided*). If the floater's computer has no
 slots for all these programs (`computerSize`, `programSlots` in `src/fitting.ts`), the bot does
@@ -211,8 +218,8 @@ hands control back. Game speed stays whatever the game offers; no new fast-forwa
 
 `src/bot/`, and the one thing that reaches the game, the dev switch in `main.ts`.
 
-- **`plan.ts`** — the journey as data: six steps (bay, turret, tractor, targeting, large bay,
-  and route planner + system chart + autopilot as one step, as in the table above). `working()`
+- **`plan.ts`** — the journey as data: the ten steps of the table above (six until
+  `docs/keeps-mining-plan.md`). `working()`
   is `ship.parts.has`, so a program only counts when it is loaded *and running*.
 - **`bot.ts`** — the bot. `step(sim)` once a tick before `sim.step()`, as the plan said. It keeps
   to a documented surface: `BOT_CALLS` lists every method it may call, split into the inputs a

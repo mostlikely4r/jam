@@ -79,6 +79,10 @@ export const PILOTS: Record<string, FarSide> = {
     note: "Traffic becomes a record out of view. The player's drones stay flown: they work near the player.",
   },
   FighterPilot: { out: "records", note: "Pirates and defenders become records out of view." },
+  FacePilot: {
+    out: "everywhere",
+    note: "Face target's hands: it turns a flown ship's nose within its own tick, so it goes wherever that ship is flown.",
+  },
 };
 
 /** Calls in the step that aren't world systems at all. */

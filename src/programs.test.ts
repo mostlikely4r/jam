@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { copyPicks, needsMet, pickOf, programDef, programsFileNow, setPick, useProgramsFile, type ProgramDef, type ProgramsFile } from "./programs";
+import { copyPicks, needsMet, pickOf, programDef, programsFileNow, setPick, tweakKey, useProgramsFile, type ProgramDef, type ProgramsFile } from "./programs";
 
 /** Runs `body` with the programs file changed, and puts the shipped one back after. */
 function withFile(body: () => void): void {
@@ -90,5 +90,63 @@ describe("program tweaks", () => {
     copy.targeting!.boxPicks = "everything";
     expect(pickOf(picks, "targeting", "boxPicks")).toBe("ships");
     expect(copyPicks(undefined)).toEqual({});
+  });
+});
+
+describe("per-mount tweaks", () => {
+  const onOff = [
+    { id: "on", name: "On" },
+    { id: "off", name: "Off" },
+  ];
+
+  it("reads `each` when it names a part kind, and drops a tweak that names an unknown one", () => {
+    withFile(() => {
+      useProgramsFile(
+        file([
+          {
+            id: "test",
+            tweaks: [
+              { id: "fires", name: "Fires", default: "on", options: onOff, each: "gun" },
+              { id: "bad", name: "Bad", default: "on", options: onOff, each: "noSuchKind" as never },
+              { id: "plain", name: "Plain", default: "on", options: onOff },
+            ],
+          },
+        ]),
+      );
+      const tweaks = programDef("test")!.tweaks!;
+      expect(tweaks.map((tweak) => tweak.id)).toEqual(["fires", "plain"]);
+      expect(tweaks[0].each).toBe("gun");
+      expect("each" in tweaks[1]).toBe(false);
+    });
+  });
+
+  it("a mount without a pick reads the default, a set one its own pick, and each mount apart", () => {
+    const picks = {};
+    expect(pickOf(picks, "autoMine", "fires", "turretGun")).toBe("on");
+    expect(setPick(picks, "autoMine", "fires", "off", "turretGun")).toBe(true);
+    expect(pickOf(picks, "autoMine", "fires", "turretGun")).toBe("off");
+    expect(pickOf(picks, "autoMine", "fires", "gun")).toBe("on");
+    expect(picks).toEqual({ autoMine: { [tweakKey("fires", "turretGun")]: "off" } });
+    expect(tweakKey("fires", "turretGun")).toBe("fires@turretGun");
+  });
+
+  it("a per-mount tweak needs a mount to be set; a plain one ignores it", () => {
+    const picks = {};
+    expect(setPick(picks, "autoMine", "fires", "off")).toBe(false);
+    expect(pickOf(picks, "autoMine", "fires")).toBe("on");
+    expect(setPick(picks, "autoMine", "shootsAt", "primary", "turretGun")).toBe(true);
+    expect(pickOf(picks, "autoMine", "shootsAt")).toBe("primary");
+    expect(picks).toEqual({ autoMine: { shootsAt: "primary" } });
+  });
+
+  it("the four mining programs ship as planned: each needs Targeting, both auto-mines carry Fires per gun", () => {
+    for (const id of ["turretTracking", "autoMine", "faceTarget", "autoMine2"]) expect(programDef(id)?.needs).toEqual(["targeting"]);
+    for (const id of ["autoMine", "autoMine2"]) {
+      const tweaks = programDef(id)!.tweaks!;
+      expect(tweaks.map((tweak) => [tweak.id, tweak.default, tweak.each ?? null])).toEqual([
+        ["shootsAt", "any", null],
+        ["fires", "on", "gun"],
+      ]);
+    }
   });
 });

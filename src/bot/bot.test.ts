@@ -131,11 +131,58 @@ describe("the bot's hands", () => {
   });
 });
 
+describe("auto-mine in the bot's hands", () => {
+  it("may change a program's tweaks, as a player's right click does", () => {
+    expect(BOT_CALLS.inputs).toContain("setTweak");
+    expect(BOT_CALLS.inputs).toContain("selectTarget");
+  });
+
+  it("once Auto-mine works, it picks the rock and never touches the trigger, and the report says when", () => {
+    const sim = world();
+    sim.rocks.length = 0;
+    const rock: Rock = sim.makeRock(2, sim.ship.x + 200, sim.ship.y, 0, 0);
+    rock.hp = 1000;
+    sim.rocks.push(rock);
+    Object.assign(sim.ship, { angle: 0, spin: 0, vx: 0, vy: 0 });
+    for (const part of ["turret", "targeting", "turretTracking", "autoMine"] as PartId[]) sim.devSet(sim.ship, part, true);
+    expect(sim.ship.parts.has("autoMine")).toBe(true);
+    const bot = new Bot({ plan: FLOATER_JOURNEY, log: new BotLog() });
+    const hands = watched(sim);
+    const seen = new Set(sim.shots);
+    let shots = 0;
+    for (let i = 0; i < Math.round(5 / TICK); i++) {
+      playTick(sim, bot, hands);
+      expect(sim.controls.fire).toBe(false);
+      for (const shot of sim.shots) {
+        if (seen.has(shot)) continue;
+        seen.add(shot);
+        if (shot.from === sim.ship) shots++;
+      }
+    }
+    expect(shots).toBeGreaterThan(0);
+    expect(bot.log.inputs.some((input) => input.kind === "fire")).toBe(false);
+    expect(bot.log.inputs.filter((input) => input.kind === "pick")).toHaveLength(1);
+    expect(bot.log.autoMineAt).not.toBeNull();
+    const flat = JSON.parse(bot.log.json({ title: "t", track: "floater", seed: 1, hours: 1, world: "w" } satisfies RunInfo));
+    expect(flat).toHaveProperty("inputsPerHourBeforeAutoMine");
+    expect(flat).toHaveProperty("inputsPerHourAfterAutoMine");
+    expect(flat).toHaveProperty("longestGapAfterAutoMine");
+  }, 30000);
+});
+
 describe("the journey", () => {
-  it("ends on the chart and the autopilot, in six steps, and not the route planner", () => {
-    expect(FLOATER_JOURNEY.steps).toHaveLength(6);
-    expect(FLOATER_JOURNEY.steps[5]).toEqual({ label: "system chart, autopilot", parts: ["starmap", "autopilot"] });
+  it("ends on the chart and the autopilot, in ten steps, and not the route planner", () => {
+    expect(FLOATER_JOURNEY.steps).toHaveLength(10);
+    expect(FLOATER_JOURNEY.steps[9]).toEqual({ label: "system chart, autopilot", parts: ["starmap", "autopilot"] });
     expect(FLOATER_JOURNEY.steps.flatMap((step) => step.parts)).not.toContain("clickRoute");
+  });
+
+  it("buys Turret tracking right before Auto-mine, after Targeting and a computer with room for them", () => {
+    const order = FLOATER_JOURNEY.steps.flatMap((step) => step.parts);
+    expect(order.slice(3, 7)).toEqual(["targeting", "flightComputer", "turretTracking", "autoMine"]);
+    // Auto-mine II and Face target are the racer's: not on this journey.
+    expect(order).not.toContain("autoMine2");
+    expect(order).not.toContain("faceTarget");
   });
 });
 

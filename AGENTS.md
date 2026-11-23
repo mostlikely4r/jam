@@ -21,6 +21,12 @@ matching a draft to a test.
   Run it after editing the world file by hand or by script.
 - `npm run parity` and the other `src/profile` scripts are slow checks. Run them in the
   background; they log results and never gate done.
+<!-- vibeview:commands start -->
+- **Project files:** `QUEUE.md` (the order tasks go to agents), `BACKLOG.md` (the pool of ideas
+  and features) and `INBOX.md` (quick notes) are plain markdown, edited by hand or from the
+  vibeview page. Format and agent rules: `~/Desktop/vibeview/FORMAT.md`; check a file with
+  `node ~/Desktop/vibeview/scripts/check.ts <file>`.
+<!-- vibeview:commands end -->
 
 ## Sessions
 
@@ -51,10 +57,15 @@ Read by `/spec` and `/build`.
       broken and tests missing; skip style nits. Touched: <modules and files>. Tests: <added or
       changed>."
 
-- **Queue and inbox:** `QUEUE.md` is the order tasks go to agents (top is next); `INBOX.md`
-  holds quick notes the user sent from the vibeview page. When the user asks what is open or
-  what's next, read both, then follow `~/Desktop/vibeview/FORMAT.md` for the format and for
-  triaging notes with the user.
+<!-- vibeview:workflow start -->
+- **Queue and inbox:** `QUEUE.md` is the order tasks go to agents (top is next); `BACKLOG.md`
+  holds the pool of ideas and features; `INBOX.md` holds quick notes the user sent from the
+  vibeview page. When the user asks what is open or what's next, read all three, then follow
+  `~/Desktop/vibeview/FORMAT.md` for the format and for triaging notes with the user. Triage one
+  note at a time, with the user: fix it now, queue it, backlog it or drop it; delete the note in
+  the same change, and name the id it became in the commit message (`inbox: I-3 → F-41`) — or in
+  the handoff, where the operator owns commits.
+<!-- vibeview:workflow end -->
 - **Commits:** the agent commits. Once a change is finished and the full check passes, commit it
   without asking, one commit per change with a clear message, and name the commit in the reply.
   Don't commit when checks fail, work is half done, or a decision from the user is pending.

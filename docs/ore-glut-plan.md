@@ -261,8 +261,8 @@ Step 4, as built (`src/pilot.ts`, `src/sim.ts`, `src/chatter.ts`, `src/radio.ts`
 - **Saving a turned-away choice.** Pilot state isn't saved, so a load reloaded mid-detour goes
   to the nearest dock and may be turned away again.
 - **Where ore finally ends.** Two kinds of sink were raised: burn (ore → fuel, wear, ships lost)
-  and build (stations and projects that grow the world, the expansion-as-sim idea in
-  `docs/maybe-later.md`). Undecided which carries most. 4× room only buys time against the big
+  and build (stations and projects that grow the world, the expansion-as-sim idea, S-37 in
+  `BACKLOG.md`). Undecided which carries most. 4× room only buys time against the big
   30-minute hull.
 - **Factories at the far end of the hauler route.** Today haulers unload into an abstract hub.
   Real factories would fill up the same way unless a sink exists.

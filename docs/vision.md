@@ -137,7 +137,7 @@ How a target moves up. A revisit asks what stands between a target and its next 
 3. Play it, and write down what it felt like.
 4. The gaps per link to the next level.
 5. Ideas and already specced features matched to gaps, ranked, **at most three**. The top one
-   goes to `/spec`, the rest to `docs/maybe-later.md`.
+   goes to `/spec`, the rest to `BACKLOG.md` as `parked` items.
 
 Update the target's rating and stand here afterwards. The first revisit is free-form; it becomes a
 `/revisit` command only once it has worked.

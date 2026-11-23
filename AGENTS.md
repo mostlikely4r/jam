@@ -1,7 +1,7 @@
 # JAM
 
 Browser game, TypeScript + Vite. Read `docs/vision.md` first: the pillars and the experience
-targets that decide what comes next. Parked ideas live in `docs/maybe-later.md`.
+targets that decide what comes next. Parked ideas live in `BACKLOG.md` (vibeview format).
 
 The repo is public and may hold plans and parked ideas; whoever reads it chooses to be spoiled.
 Only the README and what a new player sees in the game stay free of later features.

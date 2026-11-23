@@ -189,7 +189,7 @@ credits, breaks), and where the wall is next. Update the journey line in
 
 - **A way back from a broken module you can't pay for** (raised by the user 2026-11-21): "we might
   need some recovery system since a broken gun or thruster at start really kills a run (but then
-  you can always kill yourself and go in debt)". Parked in `docs/maybe-later.md`. Step 1 makes the
+  you can always kill yourself and go in debt)". Parked as S-15 in `BACKLOG.md`. Step 1 makes the
   bot report the case instead of hiding it, and the measurement below is that case: step 1's run
   ends at 0:45 with a gun broken and −252 cr in hand.
 - **The trip home and moves inside the field** keep today's orders. Measured: 9 of the 28 hits

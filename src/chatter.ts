@@ -3,7 +3,8 @@ import type { Mood, Voice } from "./faces";
 // SAFETY: hand-authored data in the same file the faces live in. A pack only writes the kinds it
 // has an opinion about, and anything missing falls back to the shared list.
 import packFile from "./voices.json";
-import type { Base, Ore, Poi, Report, Ship, Sim } from "./sim";
+import type { TurnAway } from "./pilot";
+import type { Base, Ore, Poi, Report, Ship, Sim, Target } from "./sim";
 
 /** What a line is about. A voice pack writes its own lines for the kinds it cares to. */
 export type LineKind =
@@ -55,6 +56,8 @@ export interface ChatterLine {
   mayday: boolean;
   /** Station news for everyone: heard at any distance, without the alarm. */
   broadcast: boolean;
+  /** Where the speaker is going, for a button on the line that points the destination there. */
+  link?: Target;
 }
 
 /** A pack's written lines per kind: what a regular says instead of the shared list. */
@@ -144,6 +147,21 @@ const NEWS = ["Word from {base}: they sell {item}, {price} credits.", "Heard at 
 const NEWS_FOR_PLAYER = ["On the board: {base} sells {item}, {price} credits.", "News on the board for you: {item} at {base}, {price} credits."];
 const NEWS_REPLY = ["Thanks, {name}. It's on the board.", "Noted, {name}. Putting it up on the board."];
 const GREETING = ["Welcome back.", "Good to see you again.", "Dock's open when you need it.", "Welcome home."];
+/** Turned away at a full store: what it does instead, and why. `{eta}` is the hauler's time, `{station}` where it goes. */
+const WAIT_SOON = ["Store's full. Hauler's {eta} out, I'll wait.", "No room yet. Hauler's due in {eta}, I'll sit tight."];
+const WAIT_LONG = ["Store's full. I'll wait it out, nothing better to do.", "No room here. Guess I'm waiting."];
+const TO_DEPOSIT_BROKE = ["Selling at the deposit, need the cash.", "Store's full and I'm short. Deposit it is."];
+const TO_DEPOSIT_SELL = ["Store's full. Taking my load to the deposit.", "No room here. The deposit will take it."];
+const BACK_TO_ROCKS = ["Full up here. Back to the rocks till the hauler's been.", "No room for my load. I'll top it up and come back."];
+const TO_STATION = ["No room here. Trying {station}.", "Store's full. Taking my load to {station}."];
+/** A wait in words, as a pilot would say it: "under a minute", "a minute", "3 minutes". */
+function minutes(seconds: number): string {
+  const whole = Math.round(seconds / 60);
+  if (seconds < 45) return "under a minute";
+  return whole <= 1 ? "a minute" : `${whole} minutes`;
+}
+/** Seconds before the same ship says why it was turned away again. */
+const TURNED_AWAY_COOLDOWN = 30;
 
 const DOCKING_COOLDOWN = 60;
 const OUTBOUND_COOLDOWN = 60;
@@ -442,6 +460,30 @@ export class Chatter {
     this.stationSays(sim, `${this.nameOf(sim, ship)}, you're cleared for departure. Welcome back.`, false, from);
   }
 
+  /** Traffic turned away at a full store says what it'll do instead, and why, with where it's going. */
+  turnedAway(sim: Sim, ship: Ship, choice: TurnAway, base: Base, link: Target | null): void {
+    if (!this.ready(ship, "turned away", TURNED_AWAY_COOLDOWN)) return;
+    let text: string;
+    let mood: Mood = "neutral";
+    if (choice === "wait") {
+      const eta = sim.haulerEta(base);
+      text = eta !== null && eta < 600 ? this.pick(WAIT_SOON).replace("{eta}", minutes(eta)) : this.pick(WAIT_LONG);
+      mood = "tired";
+    } else if (choice === "deposit") {
+      const next = sim.wishlistFor(ship)[0];
+      const broke = sim.accountOf(ship).credits < (next ? sim.partPrice(next) : 100);
+      text = this.pick(broke ? TO_DEPOSIT_BROKE : TO_DEPOSIT_SELL);
+    } else if (choice === "mine") {
+      text = this.pick(BACK_TO_ROCKS);
+      mood = "tired";
+    } else {
+      const to = link?.poi ? sim.bases.find((each) => each.poi === link.poi) : undefined;
+      text = this.pick(TO_STATION).replace("{station}", to ? sim.baseName(to.id) : "the next station");
+      mood = "annoyed";
+    }
+    this.sayText(sim, ship, text, mood, false, link ?? undefined);
+  }
+
   private fieldTalk(sim: Sim, ship: Ship): void {
     const next = this.nextFieldTalk.get(ship);
     if (next === undefined) {
@@ -469,7 +511,7 @@ export class Chatter {
     this.sayText(sim, ship, shape(this.pick(pool)), MOOD_OF[kind], mayday);
   }
 
-  private sayText(sim: Sim, ship: Ship, text: string, mood: Mood, mayday = false): void {
+  private sayText(sim: Sim, ship: Ship, text: string, mood: Mood, mayday = false, link?: Target): void {
     sim.events.push({
       type: "chatter",
       speaker: ship,
@@ -480,6 +522,7 @@ export class Chatter {
       face: { voice: this.voiceOf(sim, ship), mood },
       mayday,
       broadcast: false,
+      ...(link ? { link } : {}),
     });
   }
 

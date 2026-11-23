@@ -1455,7 +1455,8 @@ function partList(ship: Ship): string {
 }
 
 let lastTime = performance.now();
-const radio = new Radio(document.getElementById("chatter")!);
+// A line's button points the destination where the speaker is going, as the news board's ore lines do.
+const radio = new Radio(document.getElementById("chatter")!, (target) => sim.toggleDestination(target));
 let accumulator = 0;
 let fps = 60;
 let hudTimer = 0;

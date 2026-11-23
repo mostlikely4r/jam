@@ -175,6 +175,8 @@ export class Renderer {
     return this.wreck !== null && this.wreck.age < WRECK_WATCH_SECONDS + WRECK_FADE_SECONDS;
   }
   private view = { camX: 0, camY: 0, scale: 1, dpr: 1, width: 0, height: 0 };
+  /** Where each station came out this frame, so its tooltip can be found from the pointer. */
+  private stationSpots: { base: Base; x: number; y: number; rotation: number }[] = [];
   /** A right drag in progress, in screen pixels, for its preview. */
   drag: {
     fromX: number;
@@ -335,6 +337,7 @@ export class Renderer {
       Math.abs(x - camX) < halfW + r && Math.abs(y - camY) < halfH + r;
 
     this.drawBodies(sim, alpha, visible);
+    this.stationSpots = [];
     for (const base of sim.bases) this.drawStation(sim, base, alpha);
     this.drawDeposits(sim, alpha);
     this.drawGuards(sim, alpha);
@@ -373,6 +376,7 @@ export class Renderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.drawEdgePings(alpha);
     this.drawPointers(sim, width, height, scale, dpr, pointer);
+    this.stationTip(sim, pointer, dpr);
     this.drawDrag(sim, scale, dpr, shipX, shipY, alpha);
     this.drawSelectBox(dpr);
     if (this.wreck) {
@@ -490,7 +494,9 @@ export class Renderer {
 
     ctx.save();
     ctx.translate(x, y);
-    ctx.rotate(lerp(station.prevRotation, station.rotation, alpha));
+    const rotation = lerp(station.prevRotation, station.rotation, alpha);
+    ctx.rotate(rotation);
+    this.stationSpots.push({ base, x, y, rotation });
 
     const dockX = DOCK_OFFSET - STATION_HALF;
     const dockY = -STATION_HALF;
@@ -1620,6 +1626,23 @@ export class Renderer {
     canvasTip({ x: arrow.nose.x / dpr, y: arrow.nose.y / dpr }, () => `${arrow.label}\n${arrow.name}`);
   }
 
+  /**
+   * The tooltip for a station the mouse is over: its name, what it holds, when its hauler comes
+   * and what it would pay for the ore in the hold, with a red cross when it's full. Asked every
+   * frame, so it follows the station round its orbit and goes when the pointer does.
+   */
+  private stationTip(sim: Sim, pointer: { x: number; y: number } | null, dpr: number): void {
+    if (!pointer) return;
+    const { camX, camY, scale, width, height } = this.view;
+    const at = { x: camX + (pointer.x * dpr - width / 2) / scale, y: camY + (pointer.y * dpr - height / 2) / scale };
+    for (const spot of this.stationSpots) {
+      if (!onStation(spot, at)) continue;
+      const tip = sim.stationTip(spot.base);
+      canvasTip(pointer, () => tip.text, tip.full);
+      return;
+    }
+  }
+
   private tracePointerMark(x: number, dpr: number): void {
     const { ctx } = this;
     ctx.beginPath();
@@ -1628,6 +1651,19 @@ export class Renderer {
     ctx.lineTo(x - 3 * dpr, 5 * dpr);
     ctx.closePath();
   }
+}
+
+/** Whether a world point is on a station drawn at `spot`: its body, or the dock beside it. */
+function onStation(spot: { x: number; y: number; rotation: number }, at: { x: number; y: number }): boolean {
+  const dx = at.x - spot.x;
+  const dy = at.y - spot.y;
+  const cos = Math.cos(spot.rotation);
+  const sin = Math.sin(spot.rotation);
+  // Back into the station's own frame, where both boxes sit square.
+  const x = dx * cos + dy * sin;
+  const y = -dx * sin + dy * cos;
+  const on = (left: number) => Math.abs(left) <= STATION_HALF && Math.abs(y) <= STATION_HALF;
+  return on(x) || on(x - DOCK_OFFSET);
 }
 
 /** A module's colour: its own while it works, orange once damaged, near black once destroyed. */

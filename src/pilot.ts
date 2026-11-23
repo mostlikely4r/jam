@@ -1,6 +1,7 @@
 import { DRONE_BUY_ORDER, type PartId } from "./parts";
 import { planRoute, type Route, type Vec } from "./route";
 import {
+  type Base,
   type Body,
   type Deposit,
   DOCK_OFFSET,
@@ -590,6 +591,40 @@ export class FacePilot extends ShipPilot {
   }
 }
 
+/** What traffic turned away at a full station does instead: wait, a deposit, more mining, or the next station over. */
+export type TurnAway = "wait" | "deposit" | "mine" | "station";
+export const TURN_AWAYS: TurnAway[] = ["wait", "deposit", "mine", "station"];
+
+/** The hauler is close enough to be worth waiting for, or so far off it isn't. Seconds. */
+const HAULER_SOON = 120;
+const HAULER_LATE = 360;
+/** Traffic with fewer credits than this, and nothing left to buy, is short of money. */
+const SHORT_CREDITS = 100;
+/** A trip to the next station over this long, in seconds, puts traffic off it. */
+const LONG_TRIP = 180;
+/** How many times one load may be turned away and still try another station. */
+const MOST_TRIES = 2;
+
+/**
+ * Picks one choice by its weight, with a roll from 0 to 1. With every weight 0 it waits, so a
+ * ship never wanders for want of anything better.
+ */
+export function pickTurnAway(weights: Record<TurnAway, number>, roll: number): TurnAway {
+  const total = TURN_AWAYS.reduce((sum, choice) => sum + Math.max(0, weights[choice]), 0);
+  if (!(total > 0)) return "wait";
+  let left = roll * total;
+  let last: TurnAway = "wait";
+  for (const choice of TURN_AWAYS) {
+    const weight = Math.max(0, weights[choice]);
+    if (weight <= 0) continue;
+    if (left < weight) return choice;
+    left -= weight;
+    last = choice;
+  }
+  // A roll of exactly 1: the last one with any weight.
+  return last;
+}
+
 /** Flies a ship through the mining loop: shoot rocks, gather ore, haul it to the dock, and go back. */
 export class DronePilot extends ShipPilot {
   /** What the drone is doing, in words for the display. */
@@ -625,6 +660,22 @@ export class DronePilot extends ShipPilot {
   private retarget = 0;
   private targetAge = 0;
   private ignored = new WeakSet<object>();
+  /** Seconds it has sat at this stop with ore the station has no room for. */
+  private turnedFor = 0;
+  /** Turned away at this stop, it chose to wait for room: no new roll until it leaves. */
+  private waitsHere = false;
+  /** Turned away at this stop, it chose to go elsewhere: a record's stay ends there. */
+  private leftStop = false;
+  /** Times this load has been turned away, and by which bases (by id). */
+  private turnAways = 0;
+  private turnedAwayBy = new Set<string>();
+  /** The base this load goes to instead of the nearest (by id), or the deposit it sells at. */
+  sellAt: string | null = null;
+  sellDeposit: Deposit | null = null;
+  /** Back to the field with ore aboard, to mine a fuller load: it flies there even laden. */
+  private backToRocks = false;
+  /** What it chose the last time it was turned away, for the tests. */
+  lastTurnAway: TurnAway | null = null;
   /** Running from danger or home to report: it stays a ship until that's over. */
   get busy(): boolean {
     return this.fleeing || this.reporting !== null;
@@ -639,6 +690,12 @@ export class DronePilot extends ShipPilot {
   newStay(): void {
     this.decidedField = false;
     this.decidedTrade = false;
+    this.leftStop = false;
+  }
+
+  /** Turned away at this stop and leaving for elsewhere with its ore: a record's stay is over. */
+  get leavesStop(): boolean {
+    return this.leftStop;
   }
 
   /** Done mining this load, full or not: it takes what it has home. */
@@ -669,8 +726,16 @@ export class DronePilot extends ShipPilot {
     if (sim.oreIn(ship) === 0) {
       this.hauling = false;
       this.dropsThisLoad = false;
+      this.endLoad();
+    }
+    // Out of the dock, the next dock is a new stop.
+    if (!sim.isDocked(ship)) {
+      this.turnedFor = 0;
+      this.waitsHere = false;
+      this.leftStop = false;
     }
     if (sim.oreIn(ship) >= sim.deliveryLoad(ship) && !this.hauling) {
+      this.backToRocks = false;
       this.hauling = true;
       this.dropsThisLoad = sim.deposits.length > 0 && sim.roll() < sim.tuning.depositDropChance;
     }
@@ -892,34 +957,147 @@ export class DronePilot extends ShipPilot {
     else sim.buyDrone(ship);
   }
 
-  /** Takes its ore to a deposit nearer than the dock, if there is one. Returns whether it's doing that. */
+  /** The load is sold or lost: what it chose for that load is over too. */
+  private endLoad(): void {
+    this.turnAways = 0;
+    this.turnedAwayBy.clear();
+    this.sellAt = null;
+    this.sellDeposit = null;
+    this.backToRocks = false;
+  }
+
+  /**
+   * Takes its ore to a deposit: the one it chose when turned away, or one nearer than the dock.
+   * Returns whether it's doing that. What the chosen one won't take goes to a dock as usual.
+   */
   private dropLoad(sim: Sim): boolean {
     const { ship } = this;
     if (sim.oreIn(ship) === 0) return false;
-    const deposit = sim.depositFor(ship);
+    if (this.sellDeposit && (!sim.deposits.includes(this.sellDeposit) || sim.depositRoom(this.sellDeposit) <= 0)) this.sellDeposit = null;
+    const deposit = this.sellDeposit ?? sim.depositFor(ship);
     if (!deposit) return false;
     this.task = "to deposit";
-    if (sim.depositAt(ship) === deposit) sim.sellToDeposit(ship, deposit);
-    else this.travel(sim, deposit, DEPOSIT_ARRIVAL, 0, null);
+    if (sim.depositAt(ship) === deposit) {
+      sim.sellToDeposit(ship, deposit);
+      if (deposit === this.sellDeposit) {
+        this.sellDeposit = null;
+        this.dropsThisLoad = false;
+      }
+    } else this.travel(sim, deposit, DEPOSIT_ARRIVAL, 0, null);
     return true;
+  }
+
+  /** The station this load is bound for instead of the nearest, while that base still stands. */
+  private boundFor(sim: Sim): Poi | null {
+    if (this.sellAt === null) return null;
+    const base = sim.bases.find((each) => each.id === this.sellAt);
+    if (!base) this.sellAt = null;
+    return base?.poi ?? null;
   }
 
   private haul(sim: Sim): void {
     const { ship } = this;
+    if (this.sellDeposit && this.dropLoad(sim)) return;
     // A damaged ship is going to the station for repairs anyway, so it sells its load there too.
     if (this.dropsThisLoad && ship.hull >= LOW_HULL && this.dropLoad(sim)) return;
+    const bound = this.boundFor(sim);
     const docked = sim.dockedAt(ship);
-    if (docked) {
+    if (docked && (!bound || docked === bound)) {
       this.task = "unloading";
+      if (this.turnsAway(sim, docked)) return;
       this.hold(sim, sim.dockPoint(false, docked), sim.dockPoint(true, docked));
       return;
     }
-    // Sells at whichever station is nearest.
+    // Sells at whichever station is nearest, or the one it chose when turned away.
     this.task = "to station";
-    const station = sim.nearestDock(ship.x, ship.y);
+    const station = bound ?? sim.nearestDock(ship.x, ship.y);
     const dock = sim.dockPoint(false, station);
     const before = sim.dockPoint(true, station);
     this.travel(sim, { x: dock.x, y: dock.y, px: before.x, py: before.y }, DOCK_ARRIVAL_SLACK, 0, null);
+  }
+
+  /**
+   * Traffic docked with ore the station has no room for holds a few seconds, then rolls once for
+   * this stop: wait, a deposit, back to mining, or the next station over. Returns whether it's
+   * leaving, in which case it's already on its way.
+   */
+  private turnsAway(sim: Sim, docked: Poi): boolean {
+    const { ship } = this;
+    if (ship.owner || this.buys !== "upgrades" || this.waitsHere) return false;
+    const base = sim.baseOf(docked);
+    if (!base || sim.oreSale(base, ship).takes) {
+      this.turnedFor = 0;
+      return false;
+    }
+    this.turnedFor += TICK;
+    if (this.turnedFor < sim.tuning.turnAwaySeconds) return false;
+    this.turnedFor = 0;
+    this.turnAways++;
+    this.turnedAwayBy.add(base.id);
+    const { weights, deposit, station } = this.turnAwayWeights(sim, base);
+    const choice = pickTurnAway(weights, sim.roll());
+    this.lastTurnAway = choice;
+    if (choice === "wait") {
+      this.waitsHere = true;
+      sim.turnedAway(this, choice, base, null);
+      return false;
+    }
+    this.leftStop = true;
+    if (choice === "deposit" && deposit) {
+      this.sellDeposit = deposit;
+      sim.turnedAway(this, choice, base, { deposit });
+      this.dropLoad(sim);
+      return true;
+    }
+    if (choice === "station" && station) {
+      this.sellAt = station.id;
+      sim.turnedAway(this, choice, base, { poi: station.poi });
+      return true;
+    }
+    // Back to the rocks with what it has: a field picked as on any stay.
+    this.hauling = false;
+    this.dropsThisLoad = false;
+    this.backToRocks = true;
+    this.retarget = 0;
+    this.decidedField = false;
+    this.chooseField(sim);
+    sim.turnedAway(this, "mine", base, { poi: this.workingField(sim).poi });
+    this.mine(sim);
+    return true;
+  }
+
+  /**
+   * How much each choice appeals to a ship turned away at a base, and where a deposit or another
+   * station would take it. Each reason shows: a hauler due soon is worth waiting for, a ship
+   * short of money takes the deposit's price, a ship with room mines more, and a long trip puts
+   * it off another station.
+   */
+  turnAwayWeights(sim: Sim, base: Base): { weights: Record<TurnAway, number>; deposit: Deposit | null; station: Base | null } {
+    const { ship } = this;
+    const weights: Record<TurnAway, number> = { wait: 1, deposit: 1, mine: 1, station: 1 };
+
+    const eta = sim.haulerEta(base);
+    if (eta !== null && eta < HAULER_SOON) weights.wait *= 4;
+    else if (eta === null || eta > HAULER_LATE) weights.wait *= 0.3;
+
+    const deposit = sim.depositWithRoom(ship);
+    if (!deposit) weights.deposit = 0;
+    else {
+      const next = sim.wishlistFor(ship)[0];
+      const credits = sim.accountOf(ship).credits;
+      if (credits < (next ? sim.partPrice(next) : SHORT_CREDITS)) weights.deposit *= 3;
+    }
+
+    const ore = sim.oreIn(ship);
+    // A damaged ship turns for the dock again at once, so it doesn't go mining.
+    if (ore >= sim.deliveryLoad(ship) || ship.hull < LOW_HULL || sim.crippled(ship)) weights.mine = 0;
+    else if (ore < sim.cargoSpace(ship) / 2) weights.mine *= 2;
+
+    const station = this.turnAways > MOST_TRIES ? null : sim.otherBase(base, this.turnedAwayBy);
+    if (!station) weights.station = 0;
+    else if (this.tripSeconds(sim, base.poi, station.poi) > LONG_TRIP) weights.station *= 0.5;
+
+    return { weights, deposit, station };
   }
 
   private mine(sim: Sim): void {
@@ -932,12 +1110,13 @@ export class DronePilot extends ShipPilot {
       (sim.miningFieldAt(ship.x, ship.y).id !== field.id ||
         sim.sleeping.has(field.id) ||
         sim.cornerToward(ship.x, ship.y, field.poi.x, field.poi.y) !== null);
-    if (away && sim.oreIn(ship) === 0) {
+    if (away && (sim.oreIn(ship) === 0 || this.backToRocks)) {
       this.task = field.id === sim.ownField(ship).id ? "to field" : "to far field";
       this.travel(sim, field.poi, field.radius * FIELD_ARRIVAL_SHARE, 0, null);
       return;
     }
     this.habit = field.id;
+    this.backToRocks = false;
     this.chooseTargets(sim, field);
 
     if (this.ore) {

@@ -1,5 +1,5 @@
 import { renderFaceSvg, type Mood, type Voice } from "./faces";
-import type { Ship } from "./sim";
+import type { Ship, Target } from "./sim";
 
 /** How long a line stays on screen, and how many show at once. */
 const LINE_SECONDS = 14;
@@ -39,7 +39,11 @@ const COMPASS = ["east", "south-east", "south", "south-west", "west", "north-wes
 export class Radio {
   private lines: Shown[] = [];
 
-  constructor(private readonly box: HTMLElement) {}
+  /** `follow` is what a line's button does with where the speaker is going. */
+  constructor(
+    private readonly box: HTMLElement,
+    private readonly follow: (target: Target) => void = () => {},
+  ) {}
 
   add(
     line: {
@@ -50,6 +54,7 @@ export class Radio {
       y: number;
       face: { voice: Voice; mood: Mood };
       mayday: boolean;
+      link?: Target;
     },
     player: Ship,
   ): void {
@@ -61,6 +66,21 @@ export class Radio {
     who.textContent = `${line.name}: `;
     const text = document.createElement("span");
     element.append(faceElement(line.face.voice, line.face.mood), who, text);
+    // Only the button takes the mouse: the log never blocks clicks in space.
+    const { link } = line;
+    if (link) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "follow";
+      button.textContent = "Point there";
+      button.title = "Set your destination to where it's going";
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.follow(link);
+        button.blur();
+      });
+      element.append(button);
+    }
     this.box.append(element);
 
     let full = line.text;

@@ -75,6 +75,9 @@
       #chatter .station .who { color: #8fe3a1; }
       #chatter .mayday { color: #ff8a7c; }
       #chatter .mayday .who { color: #ff6b5c; }
+      #chatter button.follow { pointer-events: auto; flex: none; background: #1a2233; color: #a8d8ff; border: 1px solid #33405a;
+                               padding: 0 6px; font: inherit; font-size: 11px; cursor: pointer; }
+      #chatter button.follow:hover { background: #26324a; }
       body:has(#panel:not([hidden])) #shop { right: 302px; }
       #shop h2.news { margin-top: 12px; }
       #shop p.news { margin: 0 0 4px; font-size: 12px; color: #b8c3d4; }
@@ -188,6 +191,7 @@
                  background: #0b0f18f2; border: 1px solid #33405a; font-size: 12px; line-height: 1.45; color: #cfd8e6; }
       .tooltip[hidden] { display: none; }
       .tooltip b { display: block; color: #8fe3a1; }
+      .tooltip.warn b { color: #ff6b5c; }
       .tooltip span { display: block; white-space: pre-line; }
       body.dragging { cursor: grabbing; user-select: none; }
       body.dragging [data-drop]:hover { outline: 1px solid #8fe3a1; background: #14261b; }

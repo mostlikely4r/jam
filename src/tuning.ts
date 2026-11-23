@@ -36,10 +36,10 @@ export const DEFAULTS = {
   stationShipyard: true,
   /**
    * Cells of storage at a base whose spec doesn't say. The player's lockers, its store of whole
-   * modules and the ore it holds for the hauler all come out of it. 300, up from 200, because ore
-   * and parts A are counted in it now.
+   * modules and the ore it holds for the hauler all come out of it. 1200, up from 300: a hull
+   * that mines on its own comes back with more ore than a station used to hold at all.
    */
-  stationStorage: 300,
+  stationStorage: 1200,
   /** How many cells across a locker is. */
   lockerWidth: 6,
   /** The rows of locker every base gives the player for free. */
@@ -125,6 +125,12 @@ export const DEFAULTS = {
   trafficStartShare: 0.4,
   /** The chance that traffic leaving the station with money makes a buying run instead of mining. */
   tradeChance: 0.5,
+  /**
+   * Seconds traffic sits at a full station with ore it can't sell before it decides what to do
+   * instead: wait, a deposit, more mining, or the next station over. Long enough not to flicker
+   * on a store that's emptying anyway.
+   */
+  turnAwaySeconds: 5,
   /** Seconds news of what's sold where is trusted, from when it was seen. */
   newsLife: 7200,
   /** After pirates kill a ship, how many seconds before it will buy from them again. */
@@ -185,10 +191,11 @@ export const DEFAULTS = {
   haulerInterval: 600,
   /** What a hauler pays a station for an ore, over the item's own price. */
   haulerMarkup: 1.5,
-  haulerLoadRate: 2,
-  /** Room a hauler has for items, in volume (an item's volume starts as the area of its shape). 120 so a
-   * station's whole stock of parts A can come in on one visit. */
-  haulerVolume: 120,
+  haulerLoadRate: 8,
+  /** Room a hauler has for items, in volume (an item's volume starts as the area of its shape). 480,
+   * four times what it was: a station's whole stock of parts A still comes in on one visit, and the
+   * ore going out fills the hold in the same minute as before. */
+  haulerVolume: 480,
   /** A base asks for a part while it holds fewer of it than this. */
   itemTarget: 4,
   chatterRange: 1500,
@@ -508,12 +515,13 @@ export const GROUPS: Group[] = [
       { key: "haulerFirst", label: "First arrival (s, on restart)", min: 0, max: 3600, step: 30 },
       { key: "haulerInterval", label: "Time between visits (s)", min: 60, max: 3600, step: 30 },
       { key: "haulerMarkup", label: "What a hauler pays: times the ore's price", min: 0, max: 5, step: 0.05 },
-      { key: "haulerLoadRate", label: "Ore and parts moved per second", min: 0.5, max: 20, step: 0.5 },
-      { key: "haulerVolume", label: "Room a hauler has for items (volume)", min: 0, max: 400, step: 5 },
+      { key: "haulerLoadRate", label: "Ore and parts moved per second", min: 0.5, max: 40, step: 0.5 },
+      { key: "haulerVolume", label: "Room a hauler has for items (volume)", min: 0, max: 2000, step: 10 },
       { key: "itemTarget", label: "Parts a base holds before it stops asking", min: 0, max: 50, step: 1 },
       { key: "stationCashBuffer", label: "Credits the station holds back from blueprints", min: 0, max: 5000, step: 50 },
       { key: "trafficBuffer", label: "Credits traffic keeps before buying parts", min: 0, max: 3000, step: 50 },
       { key: "tradeChance", label: "Chance traffic leaves the station to buy a load", min: 0, max: 1, step: 0.05 },
+      { key: "turnAwaySeconds", label: "Seconds traffic waits at a full store before choosing", min: 0, max: 120, step: 1 },
       { key: "newsLife", label: "Seconds news of what's sold where is trusted", min: 600, max: 36000, step: 600 },
       { key: "pirateGrudgeSeconds", label: "Seconds traffic won't buy from pirates after they kill it", min: 0, max: 3600, step: 60 },
       { key: "trafficPatience", label: "Hits from one ship before traffic reports it", min: 1, max: 10, step: 1 },

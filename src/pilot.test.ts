@@ -2173,6 +2173,18 @@ describe("pirate and defender", () => {
       expect(ship.hull).toBe(MAX_HULL);
     });
 
+    it("a rebuilt traffic ship spends the yard's parts A, as any service does", () => {
+      const sim = traffic();
+      const { ship } = sim.traffic[0];
+      const yard = sim.nearestBase(ship.x, ship.y, true);
+      const before = sim.partA(yard);
+      ship.credits = 500;
+      wreck(sim, ship);
+      expect(sim.traffic.length).toBe(1);
+      // The 300-credit hull is 15 parts A, at 20 credits of service a part.
+      expect(before - sim.partA(yard)).toBe(15);
+    });
+
     it("traffic that can't pay is gone for good, and early death means no ship", () => {
       const sim = traffic();
       wreck(sim, sim.traffic[0].ship);

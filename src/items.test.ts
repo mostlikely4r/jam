@@ -517,6 +517,59 @@ describe("pickup and sale", () => {
   });
 });
 
+describe("a station's tooltip", () => {
+  /** A station with `free` cells left, and a hold of the ore named. */
+  function stationWith(free: number, hold: PartId[] = []): { sim: Sim; base: Sim["bases"][number] } {
+    const { sim } = world({}, { storage: 400 });
+    const base = sim.bases[1];
+    base.stock.set(PART, sim.storageFree(base) - free);
+    expect(sim.storageFree(base)).toBe(free);
+    for (const id of hold) sim.ship.hold.push(sim.holdSpotFor(sim.ship, { part: id, wear: 0 })!);
+    return { sim, base };
+  }
+
+  it("pays for as much of the hold as its free room takes, and says how much of it", () => {
+    const { sim, base } = stationWith(volumeOf(PLAIN) + volumeOf(ORE), [PLAIN, ORE, PLAIN]);
+    const sale = sim.oreSale(base, sim.ship);
+    expect(sale).toMatchObject({ sold: 2, total: 3, credits: itemDef(PLAIN)!.price + itemDef(ORE)!.price, takes: true });
+    const paid = (itemDef(PLAIN)!.price + itemDef(ORE)!.price).toLocaleString("en-US");
+    const lines = sim.stationTip(base, sim.ship).text.split("\n");
+    expect(lines[0]).toBe("Outpost");
+    expect(lines).toContain(`pays ${paid} for 2 of 3 ore`);
+    expect(lines).toContain(`Room: ${volumeOf(PLAIN) + volumeOf(ORE)} free of 400`);
+    // With no haulers running, none is coming.
+    expect(lines).toContain("Hauler: none coming");
+  });
+
+  it("says what a whole hold would fetch, and what the station holds", () => {
+    const { sim, base } = stationWith(200, [ORE, ORE]);
+    base.account.credits = -250;
+    const lines = sim.stationTip(base, sim.ship).text.split("\n");
+    expect(lines).toContain(`pays ${(2 * itemDef(ORE)!.price).toLocaleString("en-US")} for 2 ore`);
+    // A station buys on credit, so it can be in the red: the number shows as it is.
+    expect(lines).toContain("Credits: -250");
+    expect(sim.stationTip(base, sim.ship).full).toBe(false);
+  });
+
+  it("puts a red cross on a full station, with an empty hold as well", () => {
+    const { sim, base } = stationWith(volumeOf(PLAIN) - 1);
+    const tip = sim.stationTip(base, sim.ship);
+    expect(tip.full).toBe(true);
+    expect(tip.text.split("\n")[0]).toBe("\u2715 Outpost");
+    expect(tip.text).toContain("Your hold: empty");
+    // One cell more and a plain ore would go in.
+    const room = stationWith(volumeOf(PLAIN));
+    expect(room.sim.stationTip(room.base, room.sim.ship).full).toBe(false);
+  });
+
+  it("crosses out a station with no room for the ore aboard, and says so", () => {
+    const { sim, base } = stationWith(0, [PLAIN]);
+    const tip = sim.stationTip(base, sim.ship);
+    expect(tip.full).toBe(true);
+    expect(tip.text).toContain("No room for your 1 ore");
+  });
+});
+
 describe("the hauler and the hub", () => {
   const HAULERS = { haulers: true, haulerFirst: 1, haulerInterval: 100000 };
 
@@ -581,6 +634,32 @@ describe("the hauler and the hub", () => {
     expect(untilLeft(sim, base)).toBe(true);
     // 10 credits of ore, times 1.5: the old 15 a hauler paid for every ore.
     expect(base.account.credits).toBe(before + 4 * 15);
+  });
+
+  it("fills a hold four times the size in the same minute at the berth, and takes a station's whole store of that much ore", () => {
+    // The bigger store and the bigger hold went up together, and so did the rate: 120 at 2 a
+    // second was a minute, and 480 at 8 is the same minute.
+    expect(DEFAULTS.stationStorage).toBe(1200);
+    expect(DEFAULTS.haulerVolume).toBe(480);
+    expect(DEFAULTS.haulerLoadRate).toBe(8);
+    const { sim } = world({ ...HAULERS, stationPartsTarget: 0, itemTarget: 0 }, { items: [] });
+    const base = sim.bases[1];
+    base.ore = new Map([[PLAIN, DEFAULTS.haulerVolume]]);
+    expect(untilBerthed(sim, base)).toBe(true);
+    let loading = 0;
+    while (base.hauler?.stage === "loading" && loading < 300) {
+      sim.step();
+      sim.events.length = 0;
+      loading += TICK;
+    }
+    expect(loading).toBeGreaterThan(55);
+    expect(loading).toBeLessThan(65);
+    // The whole store went aboard, and the hold was full to the last cell.
+    expect(base.ore.get(PLAIN) ?? 0).toBe(0);
+    expect(base.hauler).not.toBeNull();
+    let used = 0;
+    for (const [id, count] of base.hauler!.items) used += volumeOf(id) * count;
+    expect(used).toBe(DEFAULTS.haulerVolume);
   });
 
   it("never carries past its volume", () => {

@@ -153,7 +153,7 @@
                         "carryNone": 6000,
                         "spawns": [],
                         "shipyard": true,
-                        "storage": 200,
+                        "storage": 800,
                         "unlocked": [
                           "reverse",
                           "strafe",
@@ -365,7 +365,7 @@
                 "carryNone": 6000,
                 "spawns": [],
                 "shipyard": true,
-                "storage": 300,
+                "storage": 1200,
                 "unlocked": [
                   "reverse",
                   "strafe",
@@ -1575,7 +1575,7 @@
                     "carryNone": 6000,
                     "spawns": [],
                     "shipyard": true,
-                    "storage": 300,
+                    "storage": 1200,
                     "unlocked": [
                       "reverse",
                       "strafe",

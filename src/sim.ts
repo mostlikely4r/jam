@@ -3,7 +3,7 @@ import { type BayGrid, type BlueprintId, partFits, isGear, isItem, isProgram, is
 import { hubRecipes, isOreItem, itemDef, oreItems, saleRecipes } from "./items";
 import { copyPicks, pickOf, PROGRAMS, setPick as setTweakPick } from "./programs";
 import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Mount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works } from "./fitting";
-import { ClickPilot, DronePilot, FacePilot, FighterPilot, LOW_HULL } from "./pilot";
+import { ClickPilot, DronePilot, FacePilot, FighterPilot, LOW_HULL, type TurnAway } from "./pilot";
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
 import { orbitState } from "./kepler";
@@ -63,6 +63,8 @@ const BLUEPRINT_SHARE = 0.75;
 /** The station and dock together, along the station's own x axis. */
 const STATION_SHAPE_CENTER = DOCK_OFFSET / 2;
 const STATION_SHAPE_HALF = STATION_HALF + DOCK_OFFSET / 2;
+/** Before a full station's name in its tooltip: the store has no room for your ore. */
+const FULL_CROSS = "\u2715";
 const STILL = { vx: 0, vy: 0 };
 const UNLOAD_SECONDS = 0.1;
 /** How far outside the field a drifting-in rock starts, and how fast it comes. */
@@ -71,6 +73,12 @@ const INFLOW_SPEED = 25;
 /** A rock doesn't start closer to the player than this, so none appears on screen. */
 const INFLOW_CLEAR_OF_PLAYER = 2000;
 const INFLOW_TIER = 2;
+
+/** Seconds as a clock reading, for a wait that's coming: "3:20". */
+function clockText(seconds: number): string {
+  const whole = Math.max(0, Math.ceil(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
 
 export interface Controls {
   /** -1 (reverse) to 1 (forward). */
@@ -890,6 +898,8 @@ export type SimEvent =
       mayday: boolean;
       /** Station news for everyone: heard at any distance, without the alarm. */
       broadcast: boolean;
+      /** Where the speaker is going, for a button on the line that points the destination there. */
+      link?: Target;
     };
 
 export interface Stats {
@@ -2979,6 +2989,53 @@ export class Sim {
     return found;
   }
 
+  /**
+   * The nearest open deposit with room for at least one of the ore items a ship holds, however
+   * far: for traffic turned away at a full dock, where `depositFor`'s "nearer than the dock" never holds.
+   */
+  depositWithRoom(ship: Ship): Deposit | null {
+    const sizes = ship.hold.filter((placed) => isOreItem(placed.module.part)).map((placed) => volumeOf(placed.module.part));
+    if (sizes.length === 0) return null;
+    const smallest = Math.min(...sizes);
+    let best = Infinity;
+    let found: Deposit | null = null;
+    for (const deposit of this.deposits) {
+      const distance = Math.hypot(deposit.x - ship.x, deposit.y - ship.y);
+      if (deposit.partsLeft <= 0 && this.depositRoom(deposit) >= smallest && distance < best) {
+        best = distance;
+        found = deposit;
+      }
+    }
+    return found;
+  }
+
+  /**
+   * The base nearest this one, not counting it or those named: where traffic turned away tries
+   * next. A guess, not knowledge: it can't see that store from here.
+   */
+  otherBase(from: Base, excluded: ReadonlySet<string> = new Set()): Base | null {
+    let best = Infinity;
+    let found: Base | null = null;
+    for (const base of this.bases) {
+      if (base === from || excluded.has(base.id)) continue;
+      const distance = Math.hypot(base.poi.x - from.poi.x, base.poi.y - from.poi.y);
+      if (distance < best) {
+        best = distance;
+        found = base;
+      }
+    }
+    return found;
+  }
+
+  /**
+   * Traffic turned away at a full store has chosen what to do: it says so on the radio, with
+   * where it's going. Out of view, as a record, it says nothing.
+   */
+  turnedAway(pilot: DronePilot, choice: TurnAway, base: Base, target: Target | null): void {
+    if (!this.tuning.chatter || pilot.record) return;
+    this.chatter.turnedAway(this, pilot.ship, choice, base, target);
+  }
+
   /** How much room a deposit has left, in volume. */
   depositRoom(deposit: Deposit): number {
     let used = 0;
@@ -3105,10 +3162,15 @@ export class Sim {
 
   /** The modules in the bay that would be left floating if the one at this index came out. */
   floatingWithout(ship: Ship, index: number): Module[] {
+    return this.floatingIn(ship, ship.hold, index);
+  }
+
+  /** The same for a bay that isn't the ship's own: a copy of its hold, taken down to what's left. */
+  private floatingIn(ship: Ship, hold: Placed[], index: number): Module[] {
     const grid = this.bayGrid(ship);
-    const item = ship.hold[index];
+    const item = hold[index];
     if (!grid || !item) return [];
-    return floatsAfterRemoval(grid, this.packed(ship), item).map((each) => each.module);
+    return floatsAfterRemoval(grid, hold, item).map((each) => each.module);
   }
 
   /** Puts as many of an item into a ship's bay as fit, and returns how many went in. Works in flight too. */
@@ -3353,6 +3415,34 @@ export class Sim {
   /** The cells of a base's storage still free. */
   storageFree(base: Base): number {
     return this.storageOf(base) - this.storageUsed(base);
+  }
+
+  /**
+   * What a base would pay for the ore a ship holds, worked out as its dock would sell it: one at
+   * a time, in bay order, as much as its free room takes. `sold` of the hold's `total`, and their
+   * `credits`. `takes` is false when not one of them would go now, or, with an empty hold, not
+   * even one plain ore: the sale would sit and wait for room.
+   */
+  oreSale(base: Base, ship: Ship = this.ship): { sold: number; total: number; credits: number; takes: boolean } {
+    let room = Math.max(0, this.storageFree(base));
+    const hold = [...ship.hold];
+    const total = hold.filter((placed) => isOreItem(placed.module.part)).length;
+    if (total === 0) return { sold: 0, total, credits: 0, takes: room >= volumeOf(PLAIN_ORE) };
+    let sold = 0;
+    let credits = 0;
+    for (;;) {
+      // The one the dock takes next: the first ore aboard that isn't holding something up.
+      const at = hold.findIndex((placed, index) => isOreItem(placed.module.part) && this.floatingIn(ship, hold, index).length === 0);
+      if (at < 0) break;
+      const id = hold[at].module.part;
+      const size = volumeOf(id);
+      if (size > room + 1e-9) break;
+      room -= size;
+      sold++;
+      credits += partOf(id).price;
+      hold.splice(at, 1);
+    }
+    return { sold, total, credits, takes: sold > 0 };
   }
 
   /** Rents one more row of the locker where the player is docked, for good. Refused when the base's storage has no room. */
@@ -4610,6 +4700,34 @@ export class Sim {
     return target.poi ? this.placeName(target.poi) : null;
   }
 
+  /**
+   * What a station's tooltip says in flight: its name, its credits, when its hauler comes, what
+   * it would pay for the ore in your hold, and its room. `full` puts a red cross before the name:
+   * the store has no room for your ore, or, with an empty hold, for one plain ore.
+   */
+  stationTip(base: Base, ship: Ship = this.ship): { text: string; full: boolean } {
+    const sale = this.oreSale(base, ship);
+    const eta = this.haulerEta(base);
+    const credits = sale.credits.toLocaleString("en-US");
+    const hauler = eta === null ? "none coming" : eta <= 0 ? "at the berth" : `in ${clockText(eta)}`;
+    const hold =
+      sale.total === 0
+        ? "Your hold: empty"
+        : sale.sold === 0
+          ? `No room for your ${sale.total} ore`
+          : sale.sold < sale.total
+            ? `pays ${credits} for ${sale.sold} of ${sale.total} ore`
+            : `pays ${credits} for ${sale.sold} ore`;
+    const lines = [
+      `${sale.takes ? "" : `${FULL_CROSS} `}${this.placeName(base.poi)}`,
+      `Credits: ${base.account.credits.toLocaleString("en-US")}`,
+      `Hauler: ${hauler}`,
+      hold,
+      `Room: ${this.storageFree(base)} free of ${this.storageOf(base)}`,
+    ];
+    return { text: lines.join("\n"), full: !sale.takes };
+  }
+
   /** What a place is called, as the chart and the arrows' tooltips show it. */
   placeName(poi: Poi): string {
     if (poi === this.pirateBase) return "Pirate base";
@@ -4979,7 +5097,8 @@ export class Sim {
     ship.vx = ship.vy = 0;
     ship.spin = 0;
     const dock = this.dockedAt(ship);
-    if (dock) {
+    // Turned away and leaving, it's already on its next leg, not a stay.
+    if (dock && !pilot.leavesStop) {
       const at = { x: ship.x, y: ship.y };
       const target = this.baseOf(dock)!.id;
       pilot.record = { goal: "dock", target, stage: "travel", depart: this.clock, arrive: this.clock, path: [at], aim: at };
@@ -5026,9 +5145,16 @@ export class Sim {
       goal = "trade";
       target = pilot.trading === "pirate base" ? "pirate base" : String(this.deposits.indexOf(pilot.trading));
       pilot.task = "to buy";
+    } else if (pilot.sellDeposit && this.deposits.includes(pilot.sellDeposit) && this.oreIn(ship) > 0) {
+      // Turned away, it sells at a deposit: a stop its pilot runs, as for a buying run.
+      goal = "trade";
+      target = String(this.deposits.indexOf(pilot.sellDeposit));
+      pilot.task = "to deposit";
     } else if (pilot.isHauling || this.oreIn(ship) >= this.deliveryLoad(ship) || lowHull) {
       goal = "dock";
-      target = this.nearestBase(ship.x, ship.y).id;
+      // Turned away, it tries the station it chose; otherwise the nearest.
+      const bound = pilot.sellAt !== null && this.bases.some((base) => base.id === pilot.sellAt) ? pilot.sellAt : null;
+      target = bound ?? this.nearestBase(ship.x, ship.y).id;
       pilot.task = "to station";
     } else {
       goal = "field";
@@ -5131,9 +5257,9 @@ export class Sim {
       this.unloadOre(ship, TICK);
       this.repairHull(ship, TICK);
       ticks++;
-    } while ((this.oreIn(ship) > 0 || this.canRepair(ship)) && ticks < most);
-    // Now the hold is empty: it shops and picks its next field.
-    pilot.update(this);
+    } while ((this.oreIn(ship) > 0 || this.canRepair(ship)) && ticks < most && !pilot.leavesStop);
+    // Now the hold is empty: it shops and picks its next field. Turned away, it has chosen already.
+    if (!pilot.leavesStop) pilot.update(this);
     return ticks * TICK;
   }
 

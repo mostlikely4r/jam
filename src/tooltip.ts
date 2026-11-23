@@ -18,6 +18,7 @@ let read: (() => string) | null = null;
 let onCanvas = false;
 /** What the canvas last asked for, so a frame that changes nothing doesn't touch the page. */
 let canvasSaid = "";
+let canvasWarn = false;
 let canvasAt: { x: number; y: number } | null = null;
 
 function ensure(): HTMLDivElement {
@@ -40,11 +41,12 @@ function place(x: number, y: number): void {
   t.style.top = `${top}px`;
 }
 
-/** Fills the tooltip in: the name line, then the rest. */
-function fill(text: string): void {
+/** Fills the tooltip in: the name line, then the rest. `warn` paints the name red, with its cross. */
+function fill(text: string, warn = false): void {
   const [name, ...rest] = text.split("\n");
   const t = ensure();
   t.replaceChildren();
+  t.classList.toggle("warn", warn);
   const head = document.createElement("b");
   head.textContent = name;
   t.append(head);
@@ -60,6 +62,7 @@ function hide(): void {
   read = null;
   onCanvas = false;
   canvasSaid = "";
+  canvasWarn = false;
   canvasAt = null;
   if (tip) tip.hidden = true;
 }
@@ -93,9 +96,10 @@ export function setTip(element: HTMLElement, content: () => string): void {
 /**
  * The tooltip for something drawn on a canvas, which has no element to hang it off: the renderer
  * calls this every frame with the screen point it belongs to and what to say, or null when the
- * pointer is over nothing of its. It comes and goes with the frame, not with an event.
+ * pointer is over nothing of its. It comes and goes with the frame, not with an event. `warn`
+ * paints the name red: a station with no room, with its cross.
  */
-export function canvasTip(anchor: { x: number; y: number } | null, content: () => string): void {
+export function canvasTip(anchor: { x: number; y: number } | null, content: () => string, warn = false): void {
   if (document.body.classList.contains("dragging")) anchor = null;
   if (!anchor) {
     if (onCanvas) hide();
@@ -108,10 +112,11 @@ export function canvasTip(anchor: { x: number; y: number } | null, content: () =
   }
   onCanvas = true;
   // The canvas asks on every frame: only touch the page when what it says or where changes.
-  if (canvasSaid !== text || canvasAt === null || tip?.hidden !== false) {
+  if (canvasSaid !== text || canvasWarn !== warn || canvasAt === null || tip?.hidden !== false) {
     canvasSaid = text;
+    canvasWarn = warn;
     canvasAt = anchor;
-    fill(text);
+    fill(text, warn);
     ensure().hidden = false;
     place(anchor.x, anchor.y);
     return;

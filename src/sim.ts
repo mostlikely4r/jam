@@ -58,6 +58,8 @@ const POINTER_SCREENS = 2;
 const PLAIN_ORE = "ore" as PartId;
 /** Part A: what every service and every module's recipe uses. */
 const PART_A = "partA" as PartId;
+/** Fuel: what every thruster burns, and what the haulers bring in (see docs/fuel-plan.md). */
+const FUEL = "fuel" as PartId;
 /** A program's blueprint, as a share of what the program sells for. */
 const BLUEPRINT_SHARE = 0.75;
 /** The station and dock together, along the station's own x axis. */
@@ -207,6 +209,10 @@ export interface Ship extends Body, Fitting {
   oreField: string | null;
   /** Seconds left before it explodes, once its hull has given out: out of control meanwhile. 0 while it's whole. */
   critical: number;
+  /** Fuel its thrusters have burned since it was last in a dock. */
+  burned: number;
+  /** All the fuel its thrusters have burned. */
+  burnTotal: number;
 }
 
 /** Where an item sits, for moving it: a mount, a place in the bay, or a place in the locker of the base the ship is at. */
@@ -264,6 +270,9 @@ export interface Hauler {
   items: Map<PartId, number>;
   /** Credits paid for ore this visit and not yet spent on parts. Below zero while parts were paid with ore still to come. */
   earned: number;
+  /** Fuel its thrusters have burned on this visit, and in all: a hauler only lasts the one. */
+  burned: number;
+  burnTotal: number;
   /** Seconds at the berth with nothing to load. */
   idle: number;
   loadTimer: number;
@@ -1477,7 +1486,7 @@ export class Sim {
       ore: saved.ore ?? base.ore,
       partCarry: saved.partCarry ?? 0,
       stock: saved.stock ?? new Map(),
-      hauler: saved.hauler ?? null,
+      hauler: saved.hauler ? { ...saved.hauler, burned: saved.hauler.burned ?? 0, burnTotal: saved.hauler.burnTotal ?? 0 } : null,
       haulerTimer: saved.haulerTimer ?? base.haulerTimer,
       lostTraffic: saved.lostTraffic ?? [],
       blueprints: saved.blueprints ?? base.blueprints,
@@ -2006,9 +2015,18 @@ export class Sim {
    * A hauler sets out on a schedule. It comes in from beyond the station, braking all the
    * way, then matches the station's turn and locks on. It loads ore above what the station
    * keeps back and pays for it, then unlocks, pushes clear, turns away from the field and
-   * leaves slowly.
+   * leaves slowly. Whatever it fired on the way is metered when the leg is over.
    */
   private moveHauler(base: Base, dt: number): void {
+    this.flyHauler(base, dt);
+    const { hauler } = base;
+    if (!hauler || !this.tuning.fuel) return;
+    const fired = Math.abs(hauler.thrust.forward) + Math.abs(hauler.thrust.side) + Math.abs(hauler.thrust.turn);
+    this.spendFuel(hauler, this.fuelBurn(fired, dt));
+  }
+
+  /** The hauler's legs: coming in, docking, loading, undocking and leaving. */
+  private flyHauler(base: Base, dt: number): void {
     const { tuning } = this;
     const station = base.poi;
     // Each base's blueprints come in on its own haulers.
@@ -2042,6 +2060,8 @@ export class Sim {
         thrust: { forward: 0, side: 0, turn: 0 },
         items: this.loadFromHub(base),
         earned: 0,
+        burned: 0,
+        burnTotal: 0,
         idle: 0,
         loadTimer: 0,
       };
@@ -2548,6 +2568,8 @@ export class Sim {
       destination: null,
       oreField: null,
       critical: 0,
+      burned: 0,
+      burnTotal: 0,
     };
   }
 
@@ -5302,8 +5324,21 @@ export class Sim {
     return placed;
   }
 
-  /** Where a record puts its ship now: along its route, or at its spot in the field it mines. */
+  /**
+   * Where a record puts its ship now: along its route, or at its spot in the field it mines. The
+   * fuel it burned getting there is metered by how far it moved, so a leg re-planned without
+   * moving a step costs nothing, and a trip costs the burn its hull makes for that much path.
+   */
   private placeRecord(record: TripRecord, ship: Ship): void {
+    const from = { x: ship.x, y: ship.y };
+    this.putRecord(record, ship);
+    if (record.stage !== "travel") return;
+    const moved = Math.hypot(ship.x - from.x, ship.y - from.y);
+    this.spendFuel(ship, (moved / 1000) * this.fuelLength(ship));
+  }
+
+  /** Where a record's ship goes this tick: along its route, or at its spot in the field it mines. */
+  private putRecord(record: TripRecord, ship: Ship): void {
     ship.px = ship.x;
     ship.py = ship.y;
     if (record.stage === "mining") {
@@ -5690,6 +5725,8 @@ export class Sim {
     );
     const forward = this.pushOf(ship, thrust, forwardChange, "thrusterMain", "thrusterReverse", 1, 0, controls.thrust);
     const side = this.pushOf(ship, thrust, sideChange, "thrusterStrafeRight", "thrusterStrafeLeft", 0, 1, controls.strafe);
+    // Whatever fired for real this tick, the turn thrusters included, has burned its fuel.
+    this.burnFuel(ship, dt);
     const along = forward.x + side.x;
     const across = forward.y + side.y;
     ship.vx += cos * along - sin * across;
@@ -5792,6 +5829,56 @@ export class Sim {
       const module = ship.fit[mount.id];
       return works(module) && partOf(module.part).kind === "thruster";
     });
+  }
+
+  /**
+   * What the thrusters that fired this tick took out of a ship's tank. `firing` is every
+   * thruster that really pushed, at the share of its full output it pushed with, so this is
+   * the one burn rule for every thruster on every ship: the AI and the player pay alike.
+   */
+  private burnFuel(ship: Ship, dt: number): void {
+    if (!this.tuning.fuel || ship.firing.size === 0) return;
+    let output = 0;
+    for (const share of ship.firing.values()) output += share;
+    this.spendFuel(ship, this.fuelBurn(output, dt));
+  }
+
+  /** Fuel a thruster's output burns over a tick: the one rate every thruster burns at. */
+  private fuelBurn(output: number, dt: number): number {
+    return output * this.tuning.fuelPerThrust * dt;
+  }
+
+  /**
+   * Burns fuel out of one tank: its meters count it, and so does the world's ledger
+   * (`itemFlow`), so a count of the fuel there still adds up.
+   */
+  private spendFuel(meter: { burned: number; burnTotal: number }, fuel: number): void {
+    if (fuel <= 0) return;
+    meter.burned += fuel;
+    meter.burnTotal += fuel;
+    this.flow(FUEL, -fuel);
+  }
+
+  /**
+   * Fuel a hull burns for each 1000 units of path it flies: what a record's trip costs, measured
+   * from flown ships in the step-1 census. Only traffic and pirates and defenders run as records
+   * (see `recordTraffic` and `recordFighters`), so nothing else has a rate.
+   */
+  private fuelLength(ship: Ship): number {
+    if (!this.tuning.fuel) return 0;
+    const { tuning } = this;
+    switch (ship.model) {
+      case "racer":
+        return tuning.recordFuelRacer;
+      case "floater":
+        return tuning.recordFuelFloater;
+      case "pirate":
+        return tuning.recordFuelPirate;
+      case "defender":
+        return tuning.recordFuelDefender;
+      default:
+        return 0;
+    }
   }
 
   private moveShipWithCollision(ship: Ship, dt: number): void {
@@ -7122,6 +7209,8 @@ export class Sim {
       ship.unloadTimer = 0;
       return;
     }
+    // In a dock the meter starts again: the fuel a ship counts is the trip since the last one.
+    ship.burned = 0;
     ship.unloadTimer += dt;
     let sold = false;
     while (ship.unloadTimer >= UNLOAD_SECONDS) {

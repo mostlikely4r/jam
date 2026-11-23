@@ -1,10 +1,12 @@
 /**
  * Counts what happens between pirates, defenders and traffic over a stretch of game time
- * with the camera far away: the numbers out-of-view dice have to match.
- * Run with: npm run census -- [game minutes] [seed] [flown|records] [spot chances ×] [--json]
+ * with the camera far away: the numbers out-of-view dice have to match. It also meters the
+ * fuel they burn, flown or as records: the numbers step 1 of docs/fuel-plan.md sets the
+ * record rates from.
+ * Run with: npm run census -- [game minutes] [seed] [flown|records] [spot chances ×] [--drones N] [--json]
  * With --json it prints one line of totals instead, for `npm run parity`.
  */
-import { Sim, TICK } from "../sim";
+import { Sim, TICK, type Ship } from "../sim";
 import { DEFAULTS } from "../tuning";
 import { useShippedWorld } from "./world";
 
@@ -12,8 +14,9 @@ const minutes = Number(process.argv[2]) || 30;
 const seed = Number(process.argv[3]) || 1;
 const records = process.argv[4] === "records";
 const spotScale = Number(process.argv[5]) || 1;
+const drones = Number(process.argv.find((arg) => arg.startsWith("--drones="))?.slice("--drones=".length)) || 0;
 const json = process.argv.includes("--json");
-const sim = new Sim(seed, { ...DEFAULTS, trafficRecords: records, fighterRecords: records, recordSpotPirate: DEFAULTS.recordSpotPirate * spotScale, recordSpotDefender: DEFAULTS.recordSpotDefender * spotScale, chatter: false });
+const sim = new Sim(seed, { ...DEFAULTS, trafficRecords: records, fighterRecords: records, recordSpotPirate: DEFAULTS.recordSpotPirate * spotScale, recordSpotDefender: DEFAULTS.recordSpotDefender * spotScale, chatter: false, fuel: true, testDrones: drones });
 useShippedWorld(sim, 1, seed);
 const park = () => {
   const out = Math.hypot(sim.field.x, sim.field.y) || 1;
@@ -23,6 +26,29 @@ const park = () => {
 };
 const count = new Map<string, number>();
 const add = (key: string, n = 1) => count.set(key, (count.get(key) ?? 0) + n);
+/**
+ * What each kind of ship burned: how much, how far it went and how many trips it made by it.
+ * The player is left out (the census parks the camera), and a drone is named by what flies it,
+ * a test drone being a racer hull.
+ */
+const burns = new Map<string, { fuel: number; distance: number; trips: number }>();
+/** Where each ship or hauler was last tick, and what its meters said, so each tick adds its share. */
+const seen = new WeakMap<object, { x: number; y: number; fuel: number; trips: number }>();
+function meter(thing: { x: number; y: number; burnTotal: number }, kind: string, trips: number): void {
+  const each = burns.get(kind) ?? { fuel: 0, distance: 0, trips: 0 };
+  burns.set(kind, each);
+  const was = seen.get(thing);
+  each.fuel += thing.burnTotal - (was?.fuel ?? 0);
+  each.distance += was ? Math.hypot(thing.x - was.x, thing.y - was.y) : 0;
+  each.trips += trips - (was?.trips ?? 0);
+  seen.set(thing, { x: thing.x, y: thing.y, fuel: thing.burnTotal, trips });
+}
+/** Every ship there is but the player's, records included (`sim.ships` leaves those out), with its kind. */
+const everyone = (): [Ship, string][] => [
+  ...sim.drones.map((pilot): [Ship, string] => [pilot.ship, "drone"]),
+  ...sim.traffic.map((pilot): [Ship, string] => [pilot.ship, pilot.ship.model]),
+  ...sim.fighters.map((pilot): [Ship, string] => [pilot.ship, pilot.ship.faction ?? pilot.ship.model]),
+];
 // Why records wake: dice, a call for help, or a flown ship near enough to fight.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const inner = sim as any;
@@ -55,6 +81,9 @@ for (let i = 0; i < Math.round((minutes * 60) / TICK); i++) {
     }
   }
   sim.step();
+  // Fuel: every ship's own meter, and the hauler's, whose visit is one trip.
+  for (const [ship, kind] of everyone()) meter(ship, kind, ship.trips);
+  for (const base of sim.bases) if (base.hauler) meter(base.hauler, "hauler", 1);
   for (const pilot of sim.fighters) {
     if (pilot.task === "attacking" && tasks.get(pilot) !== "attacking" && tasks.get(pilot) !== "searching") add(`attacks begun by ${pilot.ship.faction}`);
   }
@@ -76,6 +105,7 @@ const sold = sim.traffic.reduce((sum, p) => sum + p.ship.earned, 0) / sim.plainO
 const left = (faction: string | null) => sim.fighters.filter((p) => p.ship.faction === faction).length;
 if (json) {
   const totals: Record<string, number> = Object.fromEntries(count);
+  for (const [kind, each] of burns) Object.assign(totals, { [`burn ${kind}`]: Math.round(each.fuel), [`trips ${kind}`]: each.trips });
   Object.assign(totals, {
     "traffic left": sim.traffic.length,
     "pirates left": left("pirate"),
@@ -93,6 +123,14 @@ console.log(`${minutes} min, seed ${seed}, ${records ? `records, spot ×${spotSc
 console.log(`  traffic ${sim.traffic.length} (lost waiting ${lost}), pirates ${left("pirate")}, defenders ${left("defender")}`);
 console.log(`  traffic sold ${sold.toFixed(0)} ore, pirate credits ${sim.pirateCredits.toFixed(0)}`);
 console.log(`  fields ${sim.miningFields().map((f) => f.id).join(", ")}; bases ${sim.bases.map((b) => b.id).join(", ")}`);
+console.log(`  fuel, ${records ? "records" : "flown"}${drones > 0 ? `, ${drones} drones` : ""}:`);
+for (const [kind, each] of [...burns].sort()) {
+  const fuel = Math.round(each.fuel);
+  const trip = each.trips > 0 ? (each.fuel / each.trips).toFixed(1) : "-";
+  const hour = (each.fuel / (minutes / 60)).toFixed(1);
+  const per = each.distance > 0 ? `${((each.fuel / each.distance) * 1000).toFixed(2)} per 1000 flown` : "not flown";
+  console.log(`  ${kind}: ${fuel} all, ${trip} a trip, ${hour} an hour, ${per}, trips ${each.trips}`);
+}
 for (const [key, value] of [...count].sort()) console.log(`  ${key}: ${value}`);
 const where = (ship: { x: number; y: number }) => sim.miningFieldAt(ship.x, ship.y).id;
 console.log(`  fighters: ${sim.fighters.map((p) => `${p.ship.faction}@${where(p.ship)} ${p.task}`).join("; ")}`);

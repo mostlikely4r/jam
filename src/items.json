@@ -96,6 +96,25 @@
       }
     },
     {
+      "id": "fuel",
+      "name": "Fuel",
+      "type": "part",
+      "description": "Tank fuel, refined at a planet or moon and hauled to a station. Thrusters burn it",
+      "shape": {
+        "w": 1,
+        "h": 1
+      },
+      "price": 5,
+      "blueprintPrice": 0,
+      "icon": {
+        "glyph": "gauge",
+        "primary": "#6a5a3a",
+        "secondary": "#ffd479",
+        "border": "#e0a83a",
+        "glow": "#ffb03a"
+      }
+    },
+    {
       "id": "reverse",
       "name": "Reverse thruster",
       "type": "module",

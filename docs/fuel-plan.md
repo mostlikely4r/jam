@@ -1,6 +1,6 @@
 # Fuel plan
 
-Written 2026-11-20. Nothing here is built yet.
+Written 2026-11-20. Step 1 (meter only) is built, 2026-11-23. Steps 2 to 4 are not built.
 
 This is an experiment. Every ship and station gets a visible fuel tank, and thrusters burn fuel.
 Fuel costs credits and flows from the haulers that bring it to stations, then to ships, then
@@ -72,6 +72,82 @@ Fuel is counted and nothing else changes. Ships fly exactly as today, switch on 
 - **Done when:** a table of the measured numbers is written into this plan: burn per typical
   trip for traffic racer and floater, drone, pirate, defender and hauler, plus the user's own
   burn per trip from a play session. Records must come within about 20% of flown.
+
+**Built 2026-11-23.** `fuel` in `src/items.json`; the switch `fuel` (off by default) and
+`fuelPerThrust` 0.1 in `src/tuning.ts`, with a "Fuel" group in the tab menu: the switch, the
+rates, and a line of the player's burn since their last dock, kept current by the frame loop.
+`src/sim.ts` meters every thruster that fired, and the hauler's, and takes the same off
+`itemFlow`; each ship keeps `burned` (since its last dock, started again in `unloadOre`) and
+`burnTotal`. Records burn as they fly, at `recordFuel*` per 1000 units of path. `npm run census`
+prints fuel per kind: all, a trip, an hour, per 1000 flown, flown or as records, and
+`--drones=N` puts test drones in the world. New tests in `src/fuel.test.ts`: what fires burns,
+the ledger counts it, nothing burns with the switch off or while coasting, a dock starts the
+meter again, the meters save, a record burns its path at its hull's rate, and the hauler burns
+on its way in.
+
+Where the build differs from this section:
+
+- **Fuel is a `part`, not a type of its own.** `ITEM_TYPES` drives a test that lists the three
+types, and *every test that exists today must not change*. Nothing reads a part's type unless
+it has a recipe, so fuel is never mined, never made and never asked for by a base: it sits in
+a store and a hauler's hold like any item, ready to be stocked and priced in steps 2–3.
+- **Metered once, at the end of `moveShip`, from `ship.firing`,** rather than in each `pushOf`
+call. That one line covers the main, reverse, strafe and both turning thrusters, counts only
+what really pushed (a steadying push that doesn't, or a control with no thruster behind it,
+costs nothing), and the same `fuelBurn` rule burns the hauler's thrust after its tick.
+- **A record is charged as it flies** (`placeRecord`), not its whole leg as it sets out: a leg
+re-planned before the ship had moved a step was charging a trip never made, which showed in the
+first census as four times the fuel of the path actually flown.
+- **The black market freighter isn't metered.** It isn't in the picture's list of tanks, and
+step 3 gives it fuel for the pirate base.
+
+**Measured 2026-11-23**, `npm run census`, the shipped world, camera parked, two seeds of 20
+game minutes each, flown. Per-1000 is what the record rates are set from, averaged over the two
+seeds, and the two agree within 30%.
+
+| Kind | Burn a trip | Burn an hour | Burn per 1000 flown | Trips an hour |
+|---|---:|---:|---:|---:|
+| Traffic, racer | 4.5 | 380 | 0.21 | 85 |
+| Traffic, floater | 12.4 | 260 | 0.26 | 21 |
+| Drone (a racer hull, `--drones=2`) | 4.9 | 250 | 0.33 | 51 |
+| Pirate | 3.5 | 310 | 0.32 | 88 |
+| Defender | 23 | 180 | 0.12 | 9 |
+| Hauler | 18.2 | 327 | 0.58 | 18 |
+
+The drone row is one run with two test drones, which are racer hulls, not the drone hull. The
+hauler's "trip" is one visit, from coming in to leaving.
+
+The same two seeds as records, with the rates above:
+
+| Kind | Burn a trip | Burn an hour | Trips an hour |
+|---|---:|---:|---:|
+| Traffic, racer | 4.9 | 238 | 17 |
+| Traffic, floater | 15.2 | 91 | 2 |
+| Pirate | 4.2 | 164 | 13 |
+| Defender | 17 | 42 | 0.5 |
+| Hauler | 18.2 | 327 | 18 |
+
+**On the 20% the section asks for:** a trip comes close (racer +9%, floater +23%, pirate +20%,
+defender -26%), but an hour does not: records burn 30–65% less, because a flown ship also
+moves about inside its field, and that wandering is both distance and fuel, while a record's
+path is only travel between places. A single per-path rate can't match both: matching the hour
+would put a record's trip about 80% above a flown one. Left as it is, for the user to decide
+(the options are under "Not in this build"): step 2's tank sizing only needs the trip numbers,
+and the per-hour gap is the record/travel difference the parity log already tracks, not
+something fuel introduced.
+
+**Not in this build:**
+
+- The player's own burn per trip, the last row of the table above: it needs a play session.
+- Tanks, the visible bars, refuelling, `fuelReturn`, and the save of a tank: step 2.
+- Haulers going to a body, the station's fuel stock, prices and markups: step 3.
+- Running dry, the ping, rescue and transfer: step 4.
+- A tank for the black market freighter, and any decision on the per-hour gap above. The
+  question for the user: leave records cheaper per hour, or add a burn for a record's time in
+  its field, the way `recordOreRacer` stands in for mining it?
+
+**Try it:** turn `fuel` on in the Fuel group of the tab menu (`?dev`, then Tab) and the line
+above the rates shows what a trip burns; keep Tab open to watch it climb.
 
 ## Step 2: tanks and refuelling
 

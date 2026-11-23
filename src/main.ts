@@ -1014,6 +1014,9 @@ function saveTuning(): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(changedTuning(tuning)));
 }
 
+/** The tab menu's line of the player's burn, while it's built: the frame loop keeps it current. */
+let fuelReadout: HTMLParagraphElement | null = null;
+
 function setRetro(on: boolean): void {
   tuning.retro = on;
   saveTuning();
@@ -1091,6 +1094,14 @@ function buildPanel(): void {
       });
       toggle.append(box, ` ${text}`);
       body.append(toggle);
+    }
+
+    if (group.title === "Fuel") {
+      // A reading of the player's own burn, kept up to date by the frame loop below.
+      fuelReadout = document.createElement("p");
+      fuelReadout.className = "value";
+      fuelReadout.textContent = fuelText();
+      body.append(fuelReadout);
     }
 
     if (group.title === "Parts") {
@@ -1449,6 +1460,12 @@ function cargoText(ship: Ship): string {
   return space === Infinity ? "∞" : String(space);
 }
 
+/** The fuel burnt since the player's last dock: a reading in the tab menu, not a setting. */
+function fuelText(): string {
+  const burned = sim.ship.burned.toFixed(1);
+  return `Burned since your last dock: ${burned}${tuning.fuel ? "" : " (fuel is off)"}`;
+}
+
 function partList(ship: Ship): string {
   const owned = [...PARTS, ...PROGRAM_PARTS].filter((part) => ship.parts.has(part.id) && !part.builtIn);
   return owned.length > 0 ? owned.map((part) => part.short).join(" ") : "none";
@@ -1523,6 +1540,7 @@ function frame(now: number): void {
   hudTimer -= seconds;
   if (dev && hudTimer <= 0) {
     hudTimer = 0.1;
+    if (fuelReadout) fuelReadout.textContent = fuelText();
     // The base the player is docked at, or the nearest.
     const base = sim.shopBase();
     const speed = Math.hypot(sim.ship.vx, sim.ship.vy);

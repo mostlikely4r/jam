@@ -103,6 +103,22 @@ export const DEFAULTS = {
   fighterRecords: true,
   /** Ore a minute a pirate mines in its field while it's a record. */
   recordOrePirate: 4.6,
+
+  /**
+   * Fuel: every thruster that fires burns it, on every ship and on the hauler. Off, nothing
+   * burns anywhere and the game is the game it was before fuel (see docs/fuel-plan.md).
+   */
+  fuel: false,
+  /** Fuel one thruster burns in a second at full output, so one half open burns half of it. */
+  fuelPerThrust: 0.1,
+  /**
+   * What a ship out of view burns for each 1000 units of its trip: the flown burn per 1000 the
+   * same hull made, measured in the step-1 census. A record costs what a flown ship would.
+   */
+  recordFuelRacer: 0.21,
+  recordFuelFloater: 0.26,
+  recordFuelPirate: 0.32,
+  recordFuelDefender: 0.12,
   /**
    * The chance each second that a pirate, then a defender, keeping watch as a record starts
    * on a ship in its field it would go after. Then both are flown, and the fight is real.
@@ -441,6 +457,17 @@ export const GROUPS: Group[] = [
       { key: "haulers", label: "Haulers buy station ore" },
       { key: "stationUnlocks", label: "Shop needs blueprints the station pays for" },
     ],
+  },
+  {
+    title: "Fuel",
+    sliders: [
+      { key: "fuelPerThrust", label: "Fuel a second of full thrust burns", min: 0.01, max: 2, step: 0.01 },
+      { key: "recordFuelRacer", label: "A racer record burns this much per 1000 flown", min: 0, max: 5, step: 0.01 },
+      { key: "recordFuelFloater", label: "A floater record burns this much per 1000 flown", min: 0, max: 5, step: 0.01 },
+      { key: "recordFuelPirate", label: "A pirate record burns this much per 1000 flown", min: 0, max: 5, step: 0.01 },
+      { key: "recordFuelDefender", label: "A defender record burns this much per 1000 flown", min: 0, max: 5, step: 0.01 },
+    ],
+    switches: [{ key: "fuel", label: "Fuel: thrusters burn it (the fuel experiment)" }],
   },
   {
     title: "Pirate and defender",

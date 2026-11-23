@@ -117,6 +117,11 @@ seeds, and the two agree within 30%.
 The drone row is one run with two test drones, which are racer hulls, not the drone hull. The
 hauler's "trip" is one visit, from coming in to leaving.
 
+**The player's own burn, from the first play session (2026-11-23): 5–8 fuel a trip.** Not a
+census number: a person at the controls, in the starter ship, on short first trips. It is well
+under the floater traffic's 12.4, which is a good sign for the plan's reason for fuel, that a
+good coast should be worth something.
+
 The same two seeds as records, with the rates above:
 
 | Kind | Burn a trip | Burn an hour | Trips an hour |
@@ -138,7 +143,6 @@ something fuel introduced.
 
 **Not in this build:**
 
-- The player's own burn per trip, the last row of the table above: it needs a play session.
 - Tanks, the visible bars, refuelling, `fuelReturn`, and the save of a tank: step 2.
 - Haulers going to a body, the station's fuel stock, prices and markups: step 3.
 - Running dry, the ping, rescue and transfer: step 4.
@@ -146,14 +150,24 @@ something fuel introduced.
   question for the user: leave records cheaper per hour, or add a burn for a record's time in
   its field, the way `recordOreRacer` stands in for mining it?
 
+**Tuned 2026-11-23.** The user flew the first few trips with the switch on: 5–8 fuel a trip, so
+the scale stands (`fuelPerThrust` 0.1, a tenth of a unit a second at full thrust), and the four
+record rates stay as measured. The one number they settled on for step 2 is the starting tank.
+
 **Try it:** turn `fuel` on in the Fuel group of the tab menu (`?dev`, then Tab) and the line
 above the rates shows what a trip burns; keep Tab open to watch it climb.
 
 ## Step 2: tanks and refuelling
 
-- **Tank size per hull** goes in `src/hulls.json`, set from step 1's numbers. Proposal: about
-  4 typical trips for traffic, with the player's starter hull the same as a traffic racer's.
-  A tank that can't hold a trip home from the furthest field is too small. Ships start full.
+- **Tank size per hull** goes in `src/hulls.json`, set from step 1's numbers. A tank that can't
+  hold a trip home from the furthest field is too small. Ships start full. **The starting hull's
+  tank is 20 fuel** (*decided* 2026-11-23): comfortable for the minimal loop, three or four of
+  the user's own trips, and to be raised later if the numbers say it should be. Proposal for
+  the rest, at about 4 typical trips by the table: racer 18, floater 50, pirate 14, defender 90.
+  The hauler's own tank comes with step 3, where it first pays for its fuel. One thing to settle
+  when tanks are per hull: 20 on the floater hull is only 1.6 of a traffic floater's trips, so
+  traffic would go home far more often than today, unless the starting 20 is an exception for
+  the player's first ship rather than the hull's number.
 - **Visible** (*decided*):
   - Every ship draws a small fuel bar beside its hull in `src/render.ts`. Proposal: shown for
     ships near the camera, like the other ship markers.

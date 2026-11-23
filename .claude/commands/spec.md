@@ -24,5 +24,14 @@ code.
   exists) and **Not in this build** (open items left for later), so the build doesn't guess.
 - Keep out anything `AGENTS.md` says must stay private, or ask first.
 
-Save the plan, and commit it if `AGENTS.md` says the agent commits. Reply with its path and the
-line to start the build, `/build <path>`, to paste into a new thread.
+If the project has a `QUEUE.md` (format: `~/Desktop/vibeview/FORMAT.md`):
+
+- When you start, set the queue entry for this work to `state: in progress`, if there is one.
+- When the plan is saved, move that entry to the top of `## Done` (`state: done`,
+  `done: <YYYY-MM-DD>`), and add a `build` entry for the same work at the top of the queue, with
+  `plan:` set to the plan path (and `backlog:` if it has an item).
+- Give the backlog item `status: specced` and `plan: <path>`.
+
+Save the plan, and commit it if `AGENTS.md` says the agent commits, with the queue and backlog
+changes in the same commit. Reply with its path and the line to start the build,
+`/build <path>`, to paste into a new thread.

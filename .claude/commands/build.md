@@ -12,6 +12,10 @@ commit rule; read it first.
 - Check the plan's **Needs first**. If something there isn't built, stop and say so.
 - If the plan has *built* marks already, this is a continuation: read the marks and
   `git status`, and pick up where it stopped.
+- If the project has a `QUEUE.md` (format: `~/Desktop/vibeview/FORMAT.md`), set the queue entry for
+  this plan (its `plan:` is this path, or it is the `build` entry for the same backlog item) to
+  `state: in progress`. If there is none, don't add one. A backlog item at `specced` becomes
+  `building`.
 
 ## While building
 
@@ -47,7 +51,12 @@ rounds is the limit.
 
 - Update the plan: *built* marks, what changed from the plan, and what is left under **Not in
   this build**. Don't delete it.
-- Follow the commit rule in `AGENTS.md`. Where the agent commits, the code and the plan update go
-  in one commit. Where the user owns commits, leave it uncommitted and list the files.
+- Queue and backlog, if the project has them: move the queue entry to the top of `## Done`
+  (`state: done`, `done: <YYYY-MM-DD>`), and set the backlog item to `status: built` (`building`
+  if this was one slice of more). If the plan stopped for the user to try, the entry stays
+  `in progress` until they have.
+- Follow the commit rule in `AGENTS.md`. Where the agent commits, the code, the plan update and
+  the queue and backlog changes go in one commit. Where the user owns commits, leave it
+  uncommitted and list the files.
 - Reply with: what was built, the review (raised, fixed, dismissed and why), anything still
   running in the background, and the plan's **Try it** line.

@@ -30,6 +30,9 @@
     "tractorAll": [
       "tractor"
     ],
+    "clamp": [
+      "tractor"
+    ],
     "turret": [
       "turret"
     ],

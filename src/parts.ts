@@ -31,6 +31,7 @@ export type PartId =
   | "clickRoute"
   | "tractor"
   | "tractorAll"
+  | "clamp"
   | "clickTurn"
   | "turret"
   | "bay"
@@ -218,6 +219,19 @@ export const PARTS: Part[] = [
     tier: 2,
     held: true,
     icon: { ...TRACTOR_COLORS, glyph: "ringBeam", mark: "360" },
+  },
+  {
+    id: "clamp",
+    kind: "tractor",
+    shape: { w: 2, h: 2 },
+    label: "Clamp",
+    short: "clamp",
+    price: 350,
+    weight: 0.1,
+    description: "Holds one rock and flies it with you. G grabs and lets go",
+    fits: ["floater"],
+    tier: 2,
+    icon: { ...TRACTOR_COLORS, glyph: "magnet" },
   },
   {
     id: "turret",

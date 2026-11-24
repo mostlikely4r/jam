@@ -49,6 +49,14 @@ export const STEP_PARTS: Record<string, FarSide> = {
   pullTowardBodies: { out: "in view only", far: "Records fly the route planner's path, which keeps out of every body's pull." },
   moveOres: { out: "in view only", far: "Loose ore out of view just lies there until someone flown comes by." },
   moveShip: { out: "in view only", far: "Records are placed along their route by the clock (`placeRecord`). A damaged tank leaks out there too: `placeRecord` leaks it each tick, as `moveShip` does flown." },
+  towRocks: {
+    out: "in view only",
+    far: "Only a flown ship's clamp holds anything: a clamp is the player's, and nobody tows out of view yet. A held rock keeps its place beside its ship, so nothing is lost either way.",
+  },
+  catchRocks: {
+    out: "in view only",
+    far: "A rock let go of drifts on at the same speed out of view, so a catch there would take a rock nobody let go of nearby. Its refinery runs everywhere on what it already holds.",
+  },
   touchBodies: { out: "in view only", far: "Record routes never touch a body." },
   burnDown: {
     out: "in view only",
@@ -68,6 +76,7 @@ export const STEP_PARTS: Record<string, FarSide> = {
   buildProjects: { out: "everywhere", note: "Base economy." },
   spendPirateCredits: { out: "everywhere", note: "Pirate base economy." },
   moveHauler: { out: "everywhere", note: "One hauler per base, flown always: few enough not to matter yet." },
+  refineBase: { out: "everywhere", note: "Base economy: a whole rock keeps refining while nobody is near." },
   moveBlackMarket: { out: "everywhere", note: "One ship, flown always." },
   "chatter.update": { out: "everywhere", note: "Radio: it only speaks of what's near the player." },
 };

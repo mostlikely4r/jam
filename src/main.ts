@@ -1223,7 +1223,7 @@ window.addEventListener("keydown", (event) => {
   if (!startOverlay.hidden) return;
   // The designer has its own keys, and the game holds still behind it.
   if (designer?.isOpen || hullDesigner?.isOpen || faceGallery?.isOpen) return;
-  if (event.code === "KeyG" && dev && !event.repeat) {
+  if (event.code === "KeyJ" && dev && !event.repeat) {
     void toggleBot();
     return;
   }
@@ -1269,6 +1269,11 @@ window.addEventListener("keydown", (event) => {
   }
   // The menu is up: the game waits.
   if (paused) return;
+  // The clamp's key: grabs a rock, or lets go of the one held.
+  if (event.code === "KeyG" && !event.repeat) {
+    sim.toggleClamp();
+    return;
+  }
   // The chart needs its part. Without it the key does nothing: JAM is meant to be discovered.
   if (event.code === "KeyI" && !event.repeat) inventory().toggleShip();
   if (event.code === "KeyL" && !event.repeat) inventory().toggleLocker();

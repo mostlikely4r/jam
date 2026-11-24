@@ -349,7 +349,10 @@ export class Renderer {
     this.drawPirateBase(sim, alpha);
     if (tuning.showPoiZones) this.drawPoiZones(sim, alpha);
     this.drawClickTarget(sim, alpha);
+    // The clamp arms go under the rocks they hold, so only the gap between shows.
+    for (const other of sim.ships) this.drawClamp(sim, other, alpha);
     this.drawRocks(sim, alpha, visible);
+    for (const base of sim.bases) this.drawRefining(sim, base, alpha);
     this.drawOres(sim, alpha, visible);
     this.drawLoot(sim, alpha, visible);
     this.drawShots(sim, alpha);
@@ -372,6 +375,7 @@ export class Renderer {
       this.drawDrone(sim, drone, alpha);
     }
     if (!sim.down?.exploded) this.drawShip(ship, shipX, shipY, alpha, [200, 215, 235]);
+    this.drawNote(sim, shipX, shipY);
     if (sim.down && sim.down.stage === "pod") this.drawPod(sim.down, alpha);
     this.drawRelative(sim, alpha);
     this.drawTargets(sim, alpha);
@@ -884,28 +888,72 @@ export class Renderer {
     alpha: number,
     visible: (x: number, y: number, r: number) => boolean,
   ): void {
-    const { ctx } = this;
     for (const rock of sim.rocks) {
       const x = lerp(rock.px, rock.x, alpha);
       const y = lerp(rock.py, rock.y, alpha);
       if (!visible(x, y, rock.radius * 1.2)) continue;
-      const angle = lerp(rock.prevAngle, rock.angle, alpha);
-      ctx.beginPath();
-      for (let i = 0; i < rock.shape.length; i++) {
-        const a = angle + (i / rock.shape.length) * Math.PI * 2;
-        const r = rock.radius * rock.shape[i];
-        const px = x + Math.cos(a) * r;
-        const py = y + Math.sin(a) * r;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      }
-      ctx.closePath();
-      ctx.fillStyle = rock.tier === 2 ? "#3c424e" : rock.tier === 1 ? "#4a505d" : "#5a606d";
-      ctx.fill();
-      ctx.strokeStyle = "#7c8494";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      this.drawRockShape(x, y, lerp(rock.prevAngle, rock.angle, alpha), rock.radius, rock.shape, rock.tier);
     }
+  }
+
+  /** One rock's outline, as its dice shaped it, filled by its tier. */
+  private drawRockShape(x: number, y: number, angle: number, radius: number, shape: number[], tier: number): void {
+    const { ctx } = this;
+    ctx.beginPath();
+    for (let i = 0; i < shape.length; i++) {
+      const a = angle + (i / shape.length) * Math.PI * 2;
+      const r = radius * shape[i];
+      const px = x + Math.cos(a) * r;
+      const py = y + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = tier === 2 ? "#3c424e" : tier === 1 ? "#4a505d" : "#5a606d";
+    ctx.fill();
+    ctx.strokeStyle = "#7c8494";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  /** A clamp's arm: a line from the mount on the hull to the rock it holds. */
+  private drawClamp(sim: Sim, ship: Ship, alpha: number): void {
+    const rock = ship.tow;
+    if (!rock) return;
+    const { ctx } = this;
+    const mount = sim.clampMount(ship);
+    const x = lerp(ship.px, ship.x, alpha);
+    const y = lerp(ship.py, ship.y, alpha);
+    const angle = lerp(ship.prevAngle, ship.angle, alpha);
+    const mx = (mount?.x ?? 0) * SHIP_RADIUS;
+    const my = (mount?.y ?? 0) * SHIP_RADIUS;
+    ctx.strokeStyle = "rgba(111, 224, 200, 0.8)";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(x + Math.cos(angle) * mx - Math.sin(angle) * my, y + Math.sin(angle) * mx + Math.cos(angle) * my);
+    ctx.lineTo(lerp(rock.px, rock.x, alpha), lerp(rock.py, rock.y, alpha));
+    ctx.stroke();
+  }
+
+  /** The whole rock a station's refinery is working through, shrinking beside it as the ore comes out. */
+  private drawRefining(sim: Sim, base: Base, alpha: number): void {    const refining = base.refining;
+    if (!refining) return;
+    const at = sim.refinerySpot(base);
+    const was = sim.refinerySpot(base, true);
+    this.drawRockShape(lerp(was.x, at.x, alpha), lerp(was.y, at.y, alpha), refining.angle, refining.radius, refining.shape, refining.tier);
+  }
+
+  /** A short word to the player, over the ship, for something they just did that didn't happen. */
+  private drawNote(sim: Sim, x: number, y: number): void {
+    const note = sim.note;
+    if (!note) return;
+    const { ctx } = this;
+    ctx.globalAlpha = Math.min(1, note.left * 2);
+    ctx.fillStyle = "#ffd8a8";
+    ctx.font = "14px Consolas, monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(note.text, x, y - SHIP_RADIUS - 14);
+    ctx.globalAlpha = 1;
   }
 
   private drawOres(

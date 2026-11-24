@@ -55,9 +55,27 @@ rethink what is worth towing.
 
 ## The build
 
-### 1. Clamp, tow, release, refinery
+### 1. Clamp, tow, release, refinery (*built 2026-11-24*)
 
-The smallest version the player can try, flown by hand.
+The smallest version the player can try, flown by hand. Built in `src/sim.ts`, `src/parts.ts`,
+`src/items.json`, `src/hulls.json`, `src/tuning.ts`, `src/render.ts`, `src/main.ts` and
+`src/designer/world.json`, with `src/tow.test.ts` beside them. What differs from the plan:
+
+- **The key is `G`** as proposed. It was the dev bot's key, so the bot moved to `J`.
+- **The catch only takes a rock that was let go of** at some point (`rock.releasedBy`, which also
+  names who the refinery pays). That is what keeps a caught rock's broken pieces from being
+  caught in their turn, and a rock nobody ever towed is left as it was.
+- **The refinery's record keeps the rock's tier and outline**, not a `kind`: it's drawn as the
+  same rock, shrinking by the square root of the share left.
+- **The caught rock's approach is steered**, not just pulled: its speed is turned toward the
+  refinery spot with no more than `catchPull` of acceleration, at a speed that falls off near the
+  spot, so it lands slowly and a rock let go fast still can't be stopped in time.
+- **The clamp is sold wherever a station sells the tractor** (`unlocked` and `wanted` in
+  `src/designer/world.json`), so it's a swap on the same mount.
+- A held rock that runs into something knocks the pair and the other thing apart by their masses:
+  other rocks, ships, stations and solid ground, its path swept as a fast ship's is, so nothing is
+  stepped over at speed. It takes the bump's damage; the ground that kills takes it as it takes
+  loose ore. A caught rock's bump on the station's box is worked out along its path the same way.
 
 **The clamp module** (proposals throughout this step).
 
@@ -127,6 +145,8 @@ The smallest version the player can try, flown by hand.
 
 *Played for:* tow a big rock from the home field to the station by hand. Is it weighty and
 calm, or slow and dull? Does watching it shrink while the credits come in feel like a payoff?
+
+**Stop here for the user to try.** Not built: the notes below are for the next step.
 
 **Stop here for the user to try.**
 

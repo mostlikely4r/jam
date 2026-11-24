@@ -251,6 +251,32 @@
       }
     },
     {
+      "id": "clamp",
+      "name": "Clamp",
+      "type": "module",
+      "description": "Holds one rock and flies it with you. G grabs and lets go",
+      "shape": {
+        "w": 2,
+        "h": 2
+      },
+      "price": 350,
+      "blueprintPrice": 263,
+      "icon": {
+        "glyph": "magnet",
+        "primary": "#467870",
+        "secondary": "#96e6d2",
+        "border": "#7fdfe6"
+      },
+      "recipe": {
+        "from": [
+          {
+            "item": "partA",
+            "n": 18
+          }
+        ]
+      }
+    },
+    {
       "id": "turret",
       "name": "Turret mount",
       "type": "module",

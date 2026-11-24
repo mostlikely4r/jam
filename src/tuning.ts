@@ -83,6 +83,22 @@ export const DEFAULTS = {
   tractorPull: 120,
   tractorSpeed: 100,
 
+  /** A clamp grabs a rock whose edge is this close to the ship's edge (see `docs/clamp-tow-plan.md`). */
+  clampRange: 40,
+  /** ...and only when it's this slow against the ship. Faster than that, the clamp is refused. */
+  clampSpeed: 30,
+  /** How much of a towed rock's mass adds to the ship's weight: all of it, unless this is turned down. */
+  towMassScale: 1,
+  /** The share of a bump's damage a towed rock takes: what hurts it as it would a ship. */
+  towDamageScale: 1,
+  /** What a whole rock is worth in ore, over what mining it would give: the refinery gets all of it. */
+  wholeRockBonus: 2,
+  /** How near a station its catch picks up a rock let go of, and how hard it pulls it in, at most. */
+  catchRange: 900,
+  catchPull: 15,
+  /** Seconds the refinery takes over each ore of a whole rock. */
+  refineSeconds: 4,
+
   /** How far from the ship a target stays picked. Past it, it drops and doesn't come back on its own. */
   targetRange: 1500,
   /** Seconds of relative drift a relative line shows: a long line is fast, none is matched. */
@@ -432,6 +448,14 @@ export const GROUPS: Group[] = [
       { key: "tractorCone", label: "Tractor cone (degrees)", min: 5, max: 360, step: 5 },
       { key: "tractorPull", label: "Tractor pull strength", min: 10, max: 600, step: 10 },
       { key: "tractorSpeed", label: "Tractor ore speed", min: 10, max: 400, step: 10 },
+      { key: "clampRange", label: "Clamp reach past the ship (40)", min: 0, max: 400, step: 5 },
+      { key: "clampSpeed", label: "Clamp: fastest the rock may drift", min: 5, max: 200, step: 5 },
+      { key: "towMassScale", label: "Towed rock's mass, as a share of its own", min: 0, max: 3, step: 0.1 },
+      { key: "towDamageScale", label: "Towed rock's damage share", min: 0, max: 3, step: 0.1 },
+      { key: "wholeRockBonus", label: "Whole rock ore, over mining it", min: 1, max: 5, step: 0.25 },
+      { key: "catchRange", label: "Station catch range", min: 100, max: 3000, step: 50 },
+      { key: "catchPull", label: "Catch pull strength", min: 1, max: 200, step: 1 },
+      { key: "refineSeconds", label: "Refinery: seconds an ore", min: 0.5, max: 30, step: 0.5 },
     ],
     switches: [
       { key: "floaterStart", label: "Start in the new ship (on restart)" },

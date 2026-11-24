@@ -30,6 +30,13 @@ const FOREVER = 1e9;
 const WARM_UP_AWAY = 4e6;
 export const TRAFFIC_SLEEP_DISTANCE = 12000;
 export const SHIP_RADIUS = 12;
+/** How far a held rock's edge stays from the ship's own: the clamp arm's length. */
+export const TOW_GAP = 6;
+/** The fastest a caught rock is steered in at, and how near the refinery spot counts as arrived. */
+const CATCH_LANDING = 20;
+const CATCH_ARRIVE = 60;
+/** How long a word to the player stays on the screen. */
+const NOTE_SECONDS = 2.5;
 const ORE_RADIUS = 5;
 const PICKUP_MARGIN = 10;
 const TIER_RADIUS = [18, 34, 60];
@@ -207,6 +214,8 @@ export interface Ship extends Body, Fitting {
   destination: Target | null;
   /** The field the ore aboard was mined in, for the news a sale puts up. Null: not mined. */
   oreField: string | null;
+  /** The rock its clamp is holding and flying with it, or null (`docs/clamp-tow-plan.md`). */
+  tow: Rock | null;
   /** Seconds left before it explodes, once its hull has given out: out of control meanwhile. 0 while it's whole. */
   critical: number;
   /** Fuel its thrusters have burned since it was last in a dock. */
@@ -248,6 +257,15 @@ export interface Rock extends Body {
   spin: number;
   /** Radius multipliers around the outline. */
   shape: number[];
+  /**
+   * Set while the clamp or a station's catch holds it: it's in no field, nothing moves it but
+   * whatever holds it, and it can't be picked (`docs/clamp-tow-plan.md`).
+   */
+  held?: "tow" | "catch";
+  /** The base whose catch has it, while `held` is "catch". */
+  catcher?: string;
+  /** The ship that last let it go, if one did: whoever the refinery pays for a whole rock. */
+  releasedBy?: Ship;
 }
 
 /**
@@ -580,6 +598,28 @@ export interface Base {
   blueprintsOrdered: Set<BlueprintId>;
   /** The news board in its dock: what ships have told it, and what it tells them. */
   board: Report[];
+  /** A whole rock its refinery is working through, or null. One at a time (`docs/clamp-tow-plan.md`). */
+  refining: Refining | null;
+}
+
+/**
+ * A whole rock a station's refinery is working through, once the catch has brought it in. It
+ * pays out one ore at a time, to whoever let the rock go.
+ */
+export interface Refining {
+  /** Ore still to come out of it, and how much the whole rock held at the start. */
+  left: number;
+  total: number;
+  /** How far out it's drawn now: the rock's radius, by the square root of the share left. */
+  radius: number;
+  /** Its tier and outline, so it looks like the rock that was let go. */
+  tier: number;
+  shape: number[];
+  angle: number;
+  /** Seconds until the next ore comes out. */
+  timer: number;
+  /** Paid as the ore comes out: whoever let the rock go. */
+  owner: Ship | null;
 }
 
 /** What a base holds, as saved. */
@@ -598,6 +638,7 @@ type BaseState = Pick<
   | "blueprintPaid"
   | "blueprintsOrdered"
   | "board"
+  | "refining"
 >;
 
 /**
@@ -920,6 +961,17 @@ export interface Stats {
   topSpeed: number;
 }
 
+/**
+ * What mining a rock of this tier gives on average, as `breakRock` rolls it: its own rolls, then
+ * the pieces it breaks into, all the way down. With `oreChance` 0.45 that's about 0.45, 2.0 and
+ * 6.4 for tiers 0, 1 and 2. A whole rock holds this times the whole-rock bonus instead.
+ */
+export function expectedOre(tier: number, oreChance: number): number {
+  let ore = 0;
+  for (let t = 0; t <= tier; t++) ore = (t + 1) * oreChance + 2.5 * ore;
+  return ore;
+}
+
 /** Small seeded generator, so a given seed always builds the same field. */
 /** The next number from 0 to 1 for a generator's state, which it moves on. */
 function nextRandom(state: { a: number }): number {
@@ -1178,8 +1230,8 @@ export class Sim {
       fighterRecords: this.fighters.map((each) => each.record),
 
       bases: this.bases.map(
-        ({ id, account, ore, partCarry, stock, hauler, haulerTimer, lostTraffic, blueprints, wanted, blueprintPaid, blueprintsOrdered, board }): BaseState => ({
-          id, account, ore, partCarry, stock, hauler, haulerTimer, lostTraffic, blueprints, wanted, blueprintPaid, blueprintsOrdered, board,
+        ({ id, account, ore, partCarry, stock, hauler, haulerTimer, lostTraffic, blueprints, wanted, blueprintPaid, blueprintsOrdered, board, refining }): BaseState => ({
+          id, account, ore, partCarry, stock, hauler, haulerTimer, lostTraffic, blueprints, wanted, blueprintPaid, blueprintsOrdered, board, refining,
         }),
       ),
       deposits: this.deposits,
@@ -1283,6 +1335,7 @@ export class Sim {
     this.itemFlow = new Map();
     this.down = null;
     this.events = [];
+    this.note = null;
     this.stats = { bestOre: this.stats.bestOre, topSpeed: 0 };
     this.discovered = new Set();
     this.lockers = new Map();
@@ -1479,6 +1532,7 @@ export class Sim {
       blueprintPaid: new Map(),
       blueprintsOrdered: new Set(),
       board: [],
+      refining: null,
     };
   }
 
@@ -1500,6 +1554,7 @@ export class Sim {
       blueprintPaid: saved.blueprintPaid ?? base.blueprintPaid,
       blueprintsOrdered: saved.blueprintsOrdered ?? base.blueprintsOrdered,
       board: saved.board ?? [],
+      refining: saved.refining ?? null,
     });
     return true;
   }
@@ -1796,9 +1851,10 @@ export class Sim {
       .sort((a, b) => near(a) - near(b));
   }
 
-  /** Every pickable thing in the world: rocks, stations, loose ore and items, and ships. */
+  /** Every pickable thing in the world: rocks, stations, loose ore and items, and ships. A rock a
+   * clamp or a catch holds is nobody's to pick. */
   targetables(): Targetable[] {
-    return [...this.rocks, ...this.bases, ...this.ores, ...this.loot, ...this.ships];
+    return [...this.rocks.filter((rock) => !rock.held), ...this.bases, ...this.ores, ...this.loot, ...this.ships];
   }
 
   /** Whether a thing is still in the world to be picked, and so still worth keeping as a target. */
@@ -1813,6 +1869,14 @@ export class Sim {
   inRange(ship: Ship, target: Targetable): boolean {
     const spot = targetSpot(target);
     return Math.hypot(spot.x - ship.x, spot.y - ship.y) <= this.tuning.targetRange;
+  }
+
+  /**
+   * Whether a ship may pick this: anything in the world but a rock a clamp or a station's catch
+   * holds, which isn't its to shoot at (`docs/clamp-tow-plan.md`).
+   */
+  pickable(target: Targetable): boolean {
+    return !isRock(target) || !target.held;
   }
 
   /** The main target: the first picked, or null when there's none. */
@@ -1831,7 +1895,7 @@ export class Sim {
       return;
     }
     // A thing out of the lock range, or gone, isn't picked; it doesn't clear what is.
-    if (target === ship || !this.targetAlive(target) || !this.inRange(ship, target)) return;
+    if (target === ship || !this.pickable(target) || !this.targetAlive(target) || !this.inRange(ship, target)) return;
     const at = ship.targets.indexOf(target);
     if (at < 0) {
       ship.targets = [target];
@@ -1850,7 +1914,7 @@ export class Sim {
       ship.targets.splice(at, 1);
       return;
     }
-    if (!this.targetAlive(target) || !this.inRange(ship, target)) return;
+    if (!this.pickable(target) || !this.targetAlive(target) || !this.inRange(ship, target)) return;
     ship.targets.push(target);
   }
 
@@ -2575,6 +2639,7 @@ export class Sim {
       home: null,
       destination: null,
       oreField: null,
+      tow: null,
       critical: 0,
       burned: 0,
       burnTotal: 0,
@@ -2605,12 +2670,14 @@ export class Sim {
     ship.hold = [];
     ship.unloadTimer = 0;
     ship.firing.clear();
+    // A wrecked ship isn't holding anything any more.
+    this.letGoTow(ship);
     // A new ship starts with a clean name.
     ship.marked = false;
     ship.wanted = false;
   }
 
-  /** Every part adds weight, which divides all of the ship's thrust. */
+  /** Every part adds weight, which divides all of the ship's thrust. A towed rock adds all of its own. */
   shipWeight(ship: Ship): number {
     let weight = HULL_INFO[ship.model].weight ?? this.tuning.weight;
     for (const module of Object.values(ship.fit)) {
@@ -2618,7 +2685,14 @@ export class Sim {
       const part = partOf(module.part);
       weight += (part.weight / (part.set ?? 1)) * this.tuning.partWeightScale;
     }
+    const tow = ship.tow;
+    if (tow) weight += this.rockMass(tow) * this.tuning.towMassScale;
     return weight;
+  }
+
+  /** How heavy a rock is on a ship's thrust: its size and nothing else. */
+  rockMass(rock: { radius: number }): number {
+    return (rock.radius * rock.radius) / 400;
   }
 
   /** Acceleration per unit of thrust: the ship's engine power divided by its weight. */
@@ -4239,6 +4313,10 @@ export class Sim {
     const dt = TICK;
     const lap = this.profile ? this.profile.begin() : null;
     this.clock += dt;
+    if (this.note) {
+      this.note.left -= dt;
+      if (this.note.left <= 0) this.note = null;
+    }
     this.discover();
     if (this.distress) {
       this.distress.age += dt;
@@ -4279,6 +4357,8 @@ export class Sim {
     lap?.("ore");
     this.moveShip(this.ship, dt);
     for (const pilot of pilots) this.moveShip(pilot.ship, dt);
+    this.towRocks();
+    this.catchRocks(dt);
     this.touchBodies(this.ship, dt);
     for (const pilot of pilots) this.touchBodies(pilot.ship, dt);
     this.burnDown(dt);
@@ -4309,6 +4389,7 @@ export class Sim {
     this.buildProjects(dt);
     this.spendPirateCredits();
     for (const base of this.bases) this.moveHauler(base, dt);
+    for (const base of this.bases) this.refineBase(base, dt);
     this.moveBlackMarket(dt);
     lap?.("economy");
     if (this.tuning.chatter) this.chatter.update(this, dt);
@@ -4774,6 +4855,11 @@ export class Sim {
       hold,
       `Room: ${this.storageFree(base)} free of ${this.storageOf(base)}`,
     ];
+    // A whole rock in its refinery, and whether there's room for what's still to come out of it.
+    if (base.refining) {
+      const left = `${base.refining.left} ore`;
+      lines.push(this.storageFree(base) < volumeOf(PLAIN_ORE) ? `Refinery: ${left} to go, no room` : `Refinery: ${left} to go`);
+    }
     return { text: lines.join("\n"), full: !sale.takes };
   }
 
@@ -5466,6 +5552,11 @@ export class Sim {
     const kept: Rock[] = [];
     const asleep = new Map(falling.map((field) => [field, [] as Rock[]]));
     for (const rock of this.rocks) {
+      // A held rock is nowhere near its field: it stays out of the sleeping with nothing done to it.
+      if (rock.held) {
+        kept.push(rock);
+        continue;
+      }
       const field = fields[this.fieldAt(fields, rock.x, rock.y)];
       const into = asleep.get(field);
       if (!into) {
@@ -5574,12 +5665,14 @@ export class Sim {
    * Rocks fly on as they go. One that drifts out of its field slowly is pulled gently back in. One
    * knocked out fast isn't: pulled back, it would come swinging through the lanes at speed. It
    * flies on, and after a while it's gone for good, even should it come back through the field.
+   * A rock a clamp or a catch holds is in no field: nothing moves it but its holder.
    */
   private moveRocks(dt: number): void {
     const { rockStraySpeed, rockStraySeconds } = this.tuning;
     const fields = this.awakeRockFields();
     let gone = false;
     for (const rock of this.rocks) {
+      if (rock.held) continue;
       const { poi, radius } = fields[this.fieldAt(fields, rock.x, rock.y)];
       const outside = Math.hypot(rock.x - poi.x, rock.y - poi.y) > radius;
       if (rock.arriving) rock.arriving = outside;
@@ -5602,6 +5695,483 @@ export class Sim {
   /** How wide a ship's beam catches, in degrees: the all-round tractor's all the way round. */
   tractorCone(ship: Ship): number {
     return ship.parts.has("tractorAll") ? 360 : this.tuning.tractorCone;
+  }
+
+  // The clamp: one outside thing held and flown with the ship (docs/clamp-tow-plan.md).
+
+  /** The mount a ship's clamp sits on, if it has one that still works. */
+  clampMount(ship: Ship): Mount | null {
+    for (const mount of mountsOf(ship)) {
+      if (ship.fit[mount.id]?.part === "clamp" && works(ship.fit[mount.id])) return mount;
+    }
+    return null;
+  }
+
+  /** Whether a ship carries a clamp that still works. */
+  hasClamp(ship: Ship = this.ship): boolean {
+    return this.clampMount(ship) !== null;
+  }
+
+  /**
+   * The clamp's key: with a rock held it lets go, and without one it grabs the nearest it can
+   * reach. Answers whether it's holding a rock afterwards.
+   */
+  toggleClamp(ship: Ship = this.ship): boolean {
+    if (ship.tow) {
+      this.letGoTow(ship);
+      return false;
+    }
+    return this.grabRock(ship);
+  }
+
+  /** Where a held rock's centre sits: this far from the ship's, the way the clamp looks. */
+  holdDistance(rock: { radius: number }): number {
+    return SHIP_RADIUS + rock.radius + TOW_GAP;
+  }
+
+  /** The nearest rock with its edge within the clamp's reach of the ship's edge, or null. */
+  private nearestClampable(ship: Ship): Rock | null {
+    const { clampRange } = this.tuning;
+    let best: Rock | null = null;
+    let nearest = Infinity;
+    for (const rock of this.rocks) {
+      if (rock.held) continue;
+      const gap = Math.hypot(rock.x - ship.x, rock.y - ship.y) - rock.radius - SHIP_RADIUS;
+      if (gap > clampRange || gap >= nearest) continue;
+      best = rock;
+      nearest = gap;
+    }
+    return best;
+  }
+
+  /** Grabs the nearest rock the clamp can reach, if it's slow enough; says why not when it can't. */
+  private grabRock(ship: Ship): boolean {
+    if (!this.hasClamp(ship)) return false;
+    const rock = this.nearestClampable(ship);
+    if (!rock) return this.refuse(ship, "Nothing in reach of the clamp");
+    if (Math.hypot(rock.vx - ship.vx, rock.vy - ship.vy) > this.tuning.clampSpeed) {
+      return this.refuse(ship, "That rock is moving too fast to clamp");
+    }
+    this.holdRock(ship, rock);
+    return true;
+  }
+
+  /** A word to the player about something they just did that didn't happen. */
+  note: { text: string; left: number } | null = null;
+
+  private refuse(ship: Ship, text: string): boolean {
+    if (ship === this.ship) this.note = { text, left: NOTE_SECONDS };
+    return false;
+  }
+
+  /** Takes a rock up in the clamp: from now on it flies where the clamp puts it. */
+  private holdRock(ship: Ship, rock: Rock): void {
+    ship.tow = rock;
+    rock.held = "tow";
+    delete rock.catcher;
+    this.placeTow(ship, rock);
+    // Picked up on the spot: it doesn't fly in from where it was.
+    rock.px = rock.x;
+    rock.py = rock.y;
+  }
+
+  /** Puts a held rock where its clamp holds it, from where the ship is now. */
+  private placeTow(ship: Ship, rock: Rock): void {
+    const mount = this.clampMount(ship);
+    const angle = ship.angle + (mount ? facing(mount) : 0);
+    const out = this.holdDistance(rock);
+    rock.px = rock.x;
+    rock.py = rock.y;
+    rock.x = ship.x + Math.cos(angle) * out;
+    rock.y = ship.y + Math.sin(angle) * out;
+    rock.prevAngle = rock.angle;
+    rock.angle = ship.angle;
+    rock.vx = ship.vx;
+    rock.vy = ship.vy;
+  }
+
+  /**
+   * Lets go of the rock the clamp holds. It keeps the ship's motion at its spot, and remembers
+   * who let go of it: that's who the refinery pays.
+   */
+  letGoTow(ship: Ship): void {
+    const rock = ship.tow;
+    ship.tow = null;
+    if (!rock) return;
+    if (rock.held === "tow") delete rock.held;
+    // The ship's velocity where the rock sits, so a turning ship carries the rock round with it.
+    const rx = rock.x - ship.x;
+    const ry = rock.y - ship.y;
+    rock.vx = ship.vx - ship.spin * ry;
+    rock.vy = ship.vy + ship.spin * rx;
+    rock.releasedBy = ship;
+  }
+
+  /**
+   * Flies every held rock: the clamp puts it where it hangs, and it hits what it runs into.
+   * Losing the clamp, or a rock no longer in the world, lets it go.
+   */
+  private towRocks(): void {
+    for (const ship of this.ships) {
+      const rock = ship.tow;
+      if (!rock) continue;
+      if (rock.held !== "tow" || !this.rocks.includes(rock)) {
+        ship.tow = null;
+        if (rock.held === "tow") delete rock.held;
+        continue;
+      }
+      // A clamp shot off, or a ship that isn't flying, holds nothing.
+      if (!this.hasClamp(ship) || ship.hull <= 0 || ship.critical > 0) {
+        this.letGoTow(ship);
+        continue;
+      }
+      this.placeTow(ship, rock);
+      this.towBumps(ship, rock);
+    }
+  }
+
+  /**
+   * Everything a held rock runs into this tick: other rocks, ships, stations, and solid ground.
+   * Its path this tick is swept, as a fast ship's is, so nothing is stepped over at speed.
+   */
+  private towBumps(ship: Ship, rock: Rock): void {
+    // Where the clamp carried the rock this tick: from where it hung to where it hangs now.
+    const wasX = rock.px;
+    const wasY = rock.py;
+    const moveX = rock.x - wasX;
+    const moveY = rock.y - wasY;
+    /** Stops the pair at the point the rock touched, backing it off along this tick's move. */
+    const touch = (t: number) => {
+      ship.x -= moveX * (1 - t);
+      ship.y -= moveY * (1 - t);
+      if (ship.tow === rock) this.placeTow(ship, rock);
+    };
+    /** Pushes the pair out of whatever it's inside, so it isn't hit again next tick. */
+    const clear = (nx: number, ny: number, depth: number) => {
+      if (depth <= 0) return;
+      ship.x += nx * depth;
+      ship.y += ny * depth;
+      if (ship.tow === rock) this.placeTow(ship, rock);
+    };
+    /** Bumps the pair against something round, if this tick's path meets it. Answers whether to go on. */
+    const against = (from: Body & { px: number; py: number }, reach: number, mass: number | null): boolean => {
+      const t = sweepCircle(
+        wasX - from.px,
+        wasY - from.py,
+        moveX - (from.x - from.px),
+        moveY - (from.y - from.py),
+        reach,
+      );
+      if (t === null) return true;
+      touch(t);
+      const dx = rock.x - from.x;
+      const dy = rock.y - from.y;
+      const distance = Math.hypot(dx, dy);
+      const nx = distance > 0 ? dx / distance : 1;
+      const ny = distance > 0 ? dy / distance : 0;
+      clear(nx, ny, reach - distance);
+      const held = this.towImpact(ship, rock, nx, ny, from, mass);
+      return held && ship.tow === rock;
+    };
+
+    for (const other of this.rocks) {
+      if (other === rock || other.held) continue;
+      if (!against(other, rock.radius + other.radius, this.rockMass(other))) return;
+    }
+
+    for (const other of this.ships) {
+      if (other === ship) continue;
+      if (!against(other, rock.radius + SHIP_RADIUS, this.shipWeight(other))) return;
+    }
+
+    for (const dock of this.docks) {
+      const hit = this.stationHit(rock, wasX, wasY, moveX, moveY, dock);
+      if (!hit) continue;
+      touch(hit.t);
+      clear(hit.nx, hit.ny, hit.out);
+      if (!this.towImpact(ship, rock, hit.nx, hit.ny, STILL, null)) return;
+      if (ship.tow !== rock) return;
+    }
+
+    for (const { body, x, y, vx, vy } of this.bodySpots) {
+      if (body.surface === "none") continue;
+      // Where the body was when the tick began, and what it did since.
+      const was = { x: x - vx * TICK, y: y - vy * TICK };
+      const reach = body.radius + rock.radius;
+      const t = sweepCircle(wasX - was.x, wasY - was.y, moveX - (x - was.x), moveY - (y - was.y), reach);
+      if (t === null) continue;
+      // Deadly ground takes a rock as it takes loose ore.
+      if (body.surface === "death") {
+        this.letGoTow(ship);
+        this.rocks.splice(this.rocks.indexOf(rock), 1);
+        return;
+      }
+      touch(t);
+      const dx = rock.x - x;
+      const dy = rock.y - y;
+      const distance = Math.hypot(dx, dy);
+      const nx = distance > 0 ? dx / distance : 1;
+      const ny = distance > 0 ? dy / distance : 0;
+      clear(nx, ny, reach - distance);
+      if (!this.towImpact(ship, rock, nx, ny, { vx, vy }, null)) return;
+      if (ship.tow !== rock) return;
+    }
+  }
+
+  /**
+   * A held rock hits something: both are knocked apart by the closing speed and how heavy each
+   * is, and over the safe speed the rock takes the damage, at `towDamageScale`. At no hp it comes
+   * apart. Answers whether it held together.
+   */
+  private towImpact(
+    ship: Ship,
+    rock: Rock,
+    nx: number,
+    ny: number,
+    other: { vx: number; vy: number },
+    otherMass: number | null,
+  ): boolean {
+    const { tuning } = this;
+    const closing = (rock.vx - other.vx) * nx + (rock.vy - other.vy) * ny;
+    if (closing >= 0) return true;
+    // The ship and the rock it flies are one body: whatever it hits moves both.
+    const pairInverse = 1 / Math.max(0.01, this.shipWeight(ship));
+    const otherInverse = otherMass === null ? 0 : 1 / Math.max(0.01, otherMass);
+    const impulse = (-(1 + tuning.bounce) * closing) / (pairInverse + otherInverse);
+    ship.vx += impulse * pairInverse * nx;
+    ship.vy += impulse * pairInverse * ny;
+    other.vx -= impulse * otherInverse * nx;
+    other.vy -= impulse * otherInverse * ny;
+    // Nothing takes the damage but the rock: it's what touched.
+    const damage = Math.max(0, -closing - tuning.safeImpactSpeed) * tuning.damagePerSpeed * tuning.towDamageScale;
+    if (damage <= 0) return true;
+    rock.hp -= damage;
+    if (rock.hp > 0) return true;
+    this.breakTow(ship, rock);
+    return false;
+  }
+
+  /**
+   * A held rock comes apart. Its pieces are ordinary rocks, and the clamp keeps the biggest one
+   * it can still reach, or holds nothing.
+   */
+  private breakTow(ship: Ship, rock: Rock): void {
+    this.letGoTow(ship);
+    const before = new Set(this.rocks);
+    this.breakRock(rock, ship);
+    const pieces = this.rocks.filter((each) => !before.has(each)).sort((a, b) => b.radius - a.radius);
+    const piece = pieces.find((each) => this.inClampReach(ship, each));
+    if (piece) this.holdRock(ship, piece);
+  }
+
+  /** Whether a rock's edge is close enough to the ship's for the clamp to take it. */
+  inClampReach(ship: Ship, rock: { x: number; y: number; radius: number }): boolean {
+    return Math.hypot(rock.x - ship.x, rock.y - ship.y) - rock.radius - SHIP_RADIUS <= this.tuning.clampRange;
+  }
+
+  /**
+   * Stations catch a rock let go of near them, one at a time, if their refinery is free, and pull
+   * it in to the refinery spot. Too fast to be stopped in time, it hits the station's box as
+   * anything does, and may crack on it.
+   */
+  private catchRocks(dt: number): void {
+    for (const base of this.bases) {
+      if (base.refining) continue;
+      if (this.rocks.some((rock) => rock.held === "catch" && rock.catcher === base.id)) continue;
+      const rock = this.catchable(base);
+      if (!rock) continue;
+      rock.held = "catch";
+      rock.catcher = base.id;
+    }
+    for (const rock of [...this.rocks]) {
+      if (rock.held !== "catch") continue;
+      const base = this.bases.find((each) => each.id === rock.catcher);
+      if (!base) {
+        delete rock.held;
+        delete rock.catcher;
+        continue;
+      }
+      this.pullCaught(base, rock, dt);
+    }
+  }
+
+  /** The nearest rock let go of near a station, within its catch's reach, or null. */
+  private catchable(base: Base): Rock | null {
+    const { catchRange } = this.tuning;
+    let best: Rock | null = null;
+    let nearest = catchRange;
+    for (const rock of this.rocks) {
+      if (rock.held || !rock.releasedBy) continue;
+      const distance = Math.hypot(rock.x - base.poi.x, rock.y - base.poi.y);
+      if (distance > nearest) continue;
+      best = rock;
+      nearest = distance;
+    }
+    return best;
+  }
+
+  /**
+   * Pulls a caught rock toward its station's refinery spot, at no more than `catchPull`, and
+   * hands it to the refinery when it gets there slowly. A rock that hits the station's box takes
+   * it as a ship would and may break there: its pieces are nobody's catch.
+   */
+  private pullCaught(base: Base, rock: Rock, dt: number): void {
+    const { catchPull, clampSpeed } = this.tuning;
+    const spot = this.refinerySpot(base);
+    const dx = spot.x - rock.x;
+    const dy = spot.y - rock.y;
+    const distance = Math.hypot(dx, dy);
+    // The speed it wants to carry at the spot: fast far out, slow by the time it's there.
+    const want = Math.min(CATCH_LANDING, Math.sqrt(2 * catchPull * distance));
+    const changeX = (distance > 0 ? (dx / distance) * want : 0) - rock.vx;
+    const changeY = (distance > 0 ? (dy / distance) * want : 0) - rock.vy;
+    const change = Math.hypot(changeX, changeY);
+    const most = catchPull * dt;
+    const share = change > most ? most / change : 1;
+    rock.vx += changeX * share;
+    rock.vy += changeY * share;
+
+    const fromX = rock.x;
+    const fromY = rock.y;
+    rock.px = rock.x;
+    rock.py = rock.y;
+    const moveX = rock.vx * dt;
+    const moveY = rock.vy * dt;
+    rock.x += moveX;
+    rock.y += moveY;
+
+    const hit = this.stationHit(rock, fromX, fromY, moveX, moveY);
+    if (hit) {
+      rock.x -= moveX * (1 - hit.t);
+      rock.y -= moveY * (1 - hit.t);
+      // Already inside the box: it comes back out the face it's nearest, not through the station.
+      rock.x += hit.nx * hit.out;
+      rock.y += hit.ny * hit.out;
+      if (!this.caughtImpact(rock, hit.nx, hit.ny)) return;
+    }
+
+    // Deadly ground takes it, as it takes loose ore.
+    for (const { body, x, y } of this.bodySpots) {
+      if (body.surface !== "death") continue;
+      if (Math.hypot(rock.x - x, rock.y - y) >= body.radius + rock.radius) continue;
+      delete rock.held;
+      delete rock.catcher;
+      this.rocks.splice(this.rocks.indexOf(rock), 1);
+      return;
+    }
+
+    if (Math.hypot(spot.x - rock.x, spot.y - rock.y) > CATCH_ARRIVE) return;
+    if (Math.hypot(rock.vx, rock.vy) > clampSpeed) return;
+    this.takeIn(base, rock);
+  }
+
+  /**
+   * Where a rock's path first touches a station's box: how far along it, the normal there
+   * (pointing out of the station), and how far it was already inside when it began. Without a
+   * `dock`, the nearest of every station.
+   */
+  private stationHit(
+    rock: { radius: number },
+    fromX: number,
+    fromY: number,
+    dx: number,
+    dy: number,
+    dock?: Poi,
+  ): { t: number; nx: number; ny: number; out: number } | null {
+    let best: { t: number; nx: number; ny: number; out: number } | null = null;
+    for (const station of dock ? [dock] : this.docks) {
+      const from = this.toStationAxes(fromX - station.x, fromY - station.y, station);
+      const move = this.toStationAxes(dx, dy, station);
+      const reach = STATION_HALF + rock.radius;
+      const hit = sweepBox(from.x, from.y, move.x, move.y, reach, reach);
+      if (!hit || (best && hit.t >= best.t)) continue;
+      const normal = this.fromStationAxes(hit.nx, hit.ny, station);
+      // Already inside when the tick began: it comes back out the way it went in, as far as the
+      // nearer face, which is where the box's own nearest exit would put it.
+      const inside = hit.t === 0 ? reach - Math.min(Math.abs(from.x), Math.abs(from.y)) : 0;
+      best = { t: hit.t, nx: normal.x, ny: normal.y, out: inside };
+    }
+    return best;
+  }
+
+  /** A caught rock against a station's box: it knocks off and takes the damage, at no hp breaking. */
+  private caughtImpact(rock: Rock, nx: number, ny: number): boolean {
+    const { tuning } = this;
+    const closing = rock.vx * nx + rock.vy * ny;
+    if (closing >= 0) return true;
+    const impulse = (1 + tuning.bounce) * -closing;
+    rock.vx += impulse * nx;
+    rock.vy += impulse * ny;
+    const damage = Math.max(0, -closing - tuning.safeImpactSpeed) * tuning.damagePerSpeed * tuning.towDamageScale;
+    if (damage <= 0) return true;
+    rock.hp -= damage;
+    if (rock.hp > 0) return true;
+    delete rock.held;
+    delete rock.catcher;
+    this.breakRock(rock);
+    return false;
+  }
+
+  /** A caught rock has arrived: the refinery takes it over, and pays its owner as the ore comes out. */
+  private takeIn(base: Base, rock: Rock): void {
+    const ore = this.wholeOre(rock.tier);
+    base.refining = {
+      left: ore,
+      total: ore,
+      radius: rock.radius,
+      tier: rock.tier,
+      shape: rock.shape,
+      angle: rock.angle,
+      timer: this.tuning.refineSeconds,
+      owner: rock.releasedBy ?? null,
+    };
+    this.rocks.splice(this.rocks.indexOf(rock), 1);
+  }
+
+  /**
+   * Where a station's refinery works a caught rock: beside the station, on the side away from its
+   * dock. `previous` is the tick before, for drawing between the two.
+   */
+  refinerySpot(base: Base, previous = false): { x: number; y: number } {
+    const { poi } = base;
+    const rotation = previous ? poi.prevRotation : poi.rotation;
+    const x = previous ? poi.px : poi.x;
+    const y = previous ? poi.py : poi.y;
+    return { x: x - Math.cos(rotation) * DOCK_OFFSET, y: y - Math.sin(rotation) * DOCK_OFFSET };
+  }
+
+  /** The ore a whole rock holds: what mining it would give, times the whole-rock bonus. */
+  wholeOre(tier: number): number {
+    return Math.max(1, Math.round(expectedOre(tier, this.tuning.oreChance) * this.tuning.wholeRockBonus));
+  }
+
+  /**
+   * A station's refinery works an ore out of the rock it holds every so often, while there's room
+   * for it: plain ore into its store, paid to whoever let the rock go, as a dock sale pays.
+   */
+  private refineBase(base: Base, dt: number): void {
+    const refining = base.refining;
+    if (!refining) return;
+    refining.timer -= dt;
+    if (refining.timer > 0) return;
+    // A full station stops the refinery where it stands until there's room again.
+    if (this.storageFree(base) < volumeOf(PLAIN_ORE)) {
+      refining.timer = 0;
+      return;
+    }
+    const price = partOf(PLAIN_ORE).price;
+    refining.timer += this.tuning.refineSeconds;
+    refining.left -= 1;
+    refining.radius *= Math.sqrt(Math.max(0, refining.left) / (refining.left + 1));
+    this.addTo(base.ore, PLAIN_ORE, 1);
+    this.flow(PLAIN_ORE, 1);
+    base.account.credits -= price;
+    const { owner } = refining;
+    if (owner) {
+      this.accountOf(owner).credits += price;
+      owner.earned += price;
+    }
+    if (refining.left <= 0) base.refining = null;
   }
 
   /** Lets go of caught ore whose ship can't hold it any more: out of range, full, or no beam. */
@@ -5974,6 +6544,8 @@ export class Sim {
     let hitT = Infinity;
 
     for (const rock of this.rocks) {
+      // A ship flies with its own towed rock: it's held where it is, and no bump comes of that.
+      if (rock === ship.tow) continue;
       const relX = ship.x - rock.x;
       const relY = ship.y - rock.y;
       const dx = (ship.vx - rock.vx) * dt;

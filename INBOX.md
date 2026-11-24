@@ -19,3 +19,6 @@ All news board lines with a 'place' should have a click link that sets the desti
 - added: 2026-11-24 09:56
 
 Program face target only faces asteroids. Needs to face any target and a tweak to 'face main target' vs 'face closest target'
+
+## I-5 · Cargo bays don't auto-replace
+- added: 2026-11-24 10:01

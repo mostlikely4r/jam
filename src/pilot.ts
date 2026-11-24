@@ -10,6 +10,7 @@ import {
   type Ore,
   type Poi,
   type Rock,
+  REFINERY_OFFSET,
   SHIP_RADIUS,
   type Ship,
   type Sim,
@@ -162,6 +163,20 @@ function pastDockFace(station: Poi, x: number, y: number): boolean {
   return toPoiAxes(station, x, y).x >= STATION_HALF + SHIP_RADIUS;
 }
 
+/** Whether a trip is to this station's refinery pad: the spot beside it, away from the dock. */
+function aimsAtPad(station: Poi, target: { x: number; y: number }): boolean {
+  const local = toPoiAxes(station, target.x, target.y);
+  return Math.abs(local.x - REFINERY_OFFSET) <= STATION_HALF && Math.abs(local.y) <= STATION_HALF;
+}
+
+/**
+ * Whether a spot is out past a station's pad face, in the station's own axes. From there the
+ * straight line to the pad can't touch the solid box, so the ring has nothing left to guard.
+ */
+function pastPadFace(station: Poi, x: number, y: number): boolean {
+  return toPoiAxes(station, x, y).x <= -STATION_HALF - SHIP_RADIUS;
+}
+
 /** How far a route's corners run, all told. */
 function pathLength(path: Vec[]): number {
   let length = 0;
@@ -291,11 +306,14 @@ class ShipPilot {
     exclude: object | null,
   ): void {
     const { ship } = this;
-    const distance = Math.max(0, Math.hypot(target.x - ship.x, target.y - ship.y) - slack);
+    // A load in the clamp is the front of the pair: it's the load that arrives, and is stopped.
+    const distance = Math.max(0, Math.hypot(target.x - ship.x, target.y - ship.y) - slack - this.loadReach());
     const { vx, vy } = this.relativeVelocity(target);
-    const limit = Math.min(this.speedLimitHere(sim), this.stoppingSpeed(sim, distance));
-    const speed = Math.max(limit, arrivalSpeed);
     const heading = this.routeAround(sim, target, exclude);
+    // Tow control: the speed the pair can still be stopped at, short of what's ahead of it.
+    const tow = this.towLimit(sim, heading, target);
+    const limit = Math.min(this.speedLimitHere(sim), this.stoppingSpeed(sim, distance), tow ?? Infinity);
+    const speed = Math.max(limit, tow === null ? arrivalSpeed : Math.min(arrivalSpeed, tow));
 
     // Split the motion into along the heading and across it. Being a bit slow is fine.
     const along = vx * heading.x + vy * heading.y;
@@ -320,7 +338,8 @@ class ShipPilot {
    */
   protected travel(sim: Sim, target: Mover, slack: number, arrivalSpeed: number, exclude: object | null): void {
     const { ship } = this;
-    const corner = sim.cornerToward(ship.x, ship.y, target.x, target.y);
+    // Round a body with room for the load, when there's a load and Tow control to keep it safe.
+    const corner = sim.cornerToward(ship.x, ship.y, target.x, target.y, this.loadReach());
     if (!corner) {
       this.flyTo(sim, target, slack, arrivalSpeed, exclude);
       return;
@@ -413,6 +432,66 @@ class ShipPilot {
     return null;
   }
 
+  /**
+   * Tow control: how far past the ship's centre the load in its clamp reaches, or 0 when it holds
+   * nothing or the program isn't loaded. What the routing gives room for, and the front of the
+   * pair for the speed cap.
+   */
+  protected loadReach(): number {
+    const { ship } = this;
+    const { tow } = ship;
+    if (!tow || !ship.parts.has("towControl")) return 0;
+    return Math.hypot(tow.x - ship.x, tow.y - ship.y) + tow.radius;
+  }
+
+  /**
+   * Tow control's cap: the fastest the pair may fly along `heading` and still be stopped short of
+   * whatever lies ahead. Worked out from both circles of the pair, the ship and the load, since
+   * the load is what touches first. Null with nothing held, or without the program loaded.
+   */
+  protected towLimit(sim: Sim, heading: { x: number; y: number }, toward: { x: number; y: number }): number | null {
+    const { ship } = this;
+    const { tow } = ship;
+    if (!tow || !ship.parts.has("towControl")) return null;
+    let room = Infinity;
+    /** The room left before something round, seen from one circle of the pair. */
+    const roomTo = (x: number, y: number, radius: number, cx: number, cy: number, cr: number) => {
+      const dx = x - cx;
+      const dy = y - cy;
+      const along = dx * heading.x + dy * heading.y;
+      if (along <= 0) return;
+      // Already touching it: there's nothing left to stop before, and capping there would pin
+      // the pair against it. Clearing that is the routing's job.
+      if (Math.hypot(dx, dy) <= radius + cr) return;
+      if (Math.abs(dx * heading.y - dy * heading.x) >= radius + cr) return;
+      room = Math.min(room, along - radius - cr);
+    };
+    const consider = (x: number, y: number, radius: number) => {
+      roomTo(x, y, radius, ship.x, ship.y, SHIP_RADIUS);
+      roomTo(x, y, radius, tow.x, tow.y, tow.radius);
+    };
+    for (const rock of sim.rocks) {
+      if (rock === tow || rock.held) continue;
+      consider(rock.x, rock.y, rock.radius);
+    }
+    for (const other of sim.ships) {
+      if (other === ship || other.hull <= 0) continue;
+      consider(other.x, other.y, SHIP_RADIUS);
+    }
+    for (const station of sim.docks) {
+      // A trip to a station's own pad is the routing's to keep clear of that station: the pad is
+      // inside its ring, so a cap for the station itself would stop the pair short of it for good.
+      if (aimsAtPad(station, toward)) continue;
+      consider(station.x, station.y, Math.hypot(STATION_HALF, STATION_HALF));
+    }
+    for (const body of sim.bodies) {
+      const circle = sim.keepOutAt(body);
+      consider(circle.x, circle.y, circle.radius);
+    }
+    // Nothing in the way for as far as it can see: only the way to its own target sets the pace.
+    return room === Infinity ? null : this.stoppingSpeed(sim, room);
+  }
+
   /** Slower inside the field and when coming up on it, so an impact is only a dent. */
   protected speedLimitHere(sim: Sim): number {
     const { ship } = this;
@@ -488,18 +567,22 @@ class ShipPilot {
     };
 
     // The station is big enough to plan around from further away.
-    // Clears its corners, while the dock's center stays outside this radius.
-    const stationRadius = Math.hypot(STATION_HALF, STATION_HALF) + SHIP_RADIUS + 30;
+    // Clears its corners, while the dock's center stays outside this radius. With a load out in
+    // front, the ring has to clear that too.
+    const front = this.loadReach() || SHIP_RADIUS;
+    const stationRadius = Math.hypot(STATION_HALF, STATION_HALF) + front + 30;
     for (const station of sim.docks) {
       // Coming in to a station's own berth, its ring stops guarding once the way in is clear:
       // past the dock's face the straight run in clears the solid box, so holding the ship out
       // on the ring there only keeps it off the dock. Other stations keep their rings.
       if (aimsAtBerth(station, target) && pastDockFace(station, ship.x, ship.y)) continue;
+      // A trip to the refinery pad has the same deal: past that face, the way in is clear.
+      if (aimsAtPad(station, target) && pastPadFace(station, ship.x, ship.y)) continue;
       consider(station.x, station.y, stationRadius, Math.min(distance, Math.max(AVOID_LOOK_AHEAD * 3, lookAhead)));
     }
     for (const rock of sim.rocks) {
-      if (!rocks || rock === exclude) continue;
-      consider(rock.x, rock.y, rock.radius + SHIP_RADIUS + AVOID_MARGIN, along);
+      if (!rocks || rock === exclude || rock === ship.tow) continue;
+      consider(rock.x, rock.y, rock.radius + front + AVOID_MARGIN, along);
     }
     if (blockRadius === 0) return { x: dirX, y: dirY };
 
@@ -1296,6 +1379,8 @@ interface ClickOrder {
   trip?: number;
   /** Flies the straight line whatever is in the way, even with the route planner. */
   straight?: boolean;
+  /** Tow control's hand-over: the station the rock in the clamp is to be given to. */
+  deliver?: Poi;
 }
 
 /** A click move's speed ceiling, as a share of the peak it would reach burning full to the halfway point. */
@@ -1310,6 +1395,17 @@ export class ClickPilot extends ShipPilot {
   private order: ClickOrder | null = null;
   /** Seconds until the order takes back over from the keys. */
   private handsOff = 0;
+  /** A delivery is holding off by the pad while the refinery works another rock. */
+  private towWait = false;
+  /** How near the refinery pad a delivery lets go of its rock: close enough to be a hand-over. */
+  private get handOverReach(): number {
+    return DOCK_OFFSET;
+  }
+
+  /** How much further out than the pad a delivery holds off while the refinery is busy. */
+  private get waitOffset(): number {
+    return DOCK_OFFSET * 1.4;
+  }
 
   get active(): boolean {
     return this.order !== null;
@@ -1330,6 +1426,7 @@ export class ClickPilot extends ShipPilot {
     const { order } = this;
     if (!order) return "";
     if (this.handsOff > 0) return "waiting for the keys";
+    if (order.deliver) return this.towWait ? "waiting for the refinery" : "delivering";
     if (order.follow) return order.stage === "flying" ? "on course" : "coming in";
     return order.stage;
   }
@@ -1406,6 +1503,62 @@ export class ClickPilot extends ShipPilot {
   }
 
   /**
+   * Tow control's hand-over: flies the pair to a station's refinery pad and lets the rock in the
+   * clamp go there. The order ends when the rock is handed over, or the player orders something
+   * else; either way the rock stays in the clamp until it's really let go of.
+   */
+  deliverTo(poi: Poi): void {
+    const { ship } = this;
+    const pad = poiSpot(poi, REFINERY_OFFSET, 0);
+    this.order = {
+      spot: { x: pad.x, y: pad.y, px: pad.x, py: pad.y, vx: 0, vy: 0 },
+      deliver: poi,
+      drifts: false,
+      move: true,
+      face: this.order?.face ?? null,
+      stage: "flying",
+      closest: Infinity,
+      stuck: 0,
+      trip: Math.hypot(pad.x - ship.x, pad.y - ship.y),
+    };
+    this.handsOff = 0;
+    this.towWait = false;
+  }
+
+  /**
+   * The delivery, tick by tick: closes on the pad and lets the rock go once it's there, slow and
+   * on a clear line. While the refinery works another rock it holds off clear of the pad and
+   * says so, and hands over as soon as the pad is free.
+   */
+  private handOver(sim: Sim, order: ClickOrder): void {
+    const { ship } = this;
+    const base = sim.baseOf(order.deliver!);
+    const rock = ship.tow;
+    // Nothing to hand over, or nowhere to hand it: the order is done. The rock stays held.
+    if (!base || !rock || !ship.parts.has("towControl")) {
+      this.cancel();
+      return;
+    }
+    const busy = sim.catchBusy(base);
+    this.towWait = busy;
+    if (!busy) {
+      const pad = sim.refinerySpot(base);
+      const slow = Math.hypot(rock.vx, rock.vy) <= sim.tuning.clampSpeed;
+      const near = Math.hypot(ship.x - pad.x, ship.y - pad.y) <= this.handOverReach;
+      if (slow && near && sim.clearOfStations(rock.x, rock.y, pad.x, pad.y)) {
+        sim.releaseTow(ship);
+        this.cancel();
+        return;
+      }
+    } else sim.say("Waiting for the refinery");
+    // The pad, or clear of it while another rock is being pulled in there.
+    const spot = poiSpot(order.deliver!, busy ? REFINERY_OFFSET - this.waitOffset : REFINERY_OFFSET, 0);
+    // The destination the ring and the sim follow: the pad as the station carries it.
+    order.spot = { x: spot.x, y: spot.y, px: spot.px, py: spot.py, vx: 0, vy: 0 };
+    this.travel(sim, spot, 0, 0, null);
+  }
+
+  /**
    * Corrects the destination's drift by a small velocity, without starting over. Says the
    * same thing whatever the ship is doing, since it's measured against the destination.
    */
@@ -1471,6 +1624,7 @@ export class ClickPilot extends ShipPilot {
   cancel(): void {
     this.order = null;
     this.handsOff = 0;
+    this.towWait = false;
     this.burning = false;
     this.thrusting = false;
     this.clearControls();
@@ -1517,6 +1671,11 @@ export class ClickPilot extends ShipPilot {
 
     this.clearControls();
     this.correctingDirectly = false;
+    // Tow control's hand-over runs the pair in to the pad itself, and ends the order when done.
+    if (order.deliver) {
+      this.handOver(sim, order);
+      return;
+    }
     const target = order.follow ? this.courseSpot(order.follow) : order.spot;
     const distance = Math.hypot(target.x - ship.x, target.y - ship.y);
     const { vx, vy } = this.relativeVelocity(target);
@@ -1728,6 +1887,11 @@ export class ClickPilot extends ShipPilot {
     if ((ship.parts.has("clickRoute") && !this.order?.straight) || this.order?.follow) return super.routeAround(sim, target, exclude);
     if (!this.order?.straight && sim.docks.some((station) => aimsAtBerth(station, target))) {
       return super.routeAround(sim, target, exclude, false);
+    }
+    // A hand-over goes to a pad on the far side of the station, so it goes round it as a dock's
+    // berth does. The load comes with it, so rocks are given room too.
+    if (this.order?.deliver && sim.docks.some((station) => aimsAtPad(station, target))) {
+      return super.routeAround(sim, target, exclude);
     }
     const dx = target.x - ship.x;
     const dy = target.y - ship.y;

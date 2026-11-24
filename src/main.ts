@@ -10,7 +10,7 @@ import { layoutKey, loadGame, loadStart, saveGame, saveInfo, type SaveSlot, type
 import { stringifyWorld } from "./designer/world";
 import { Audio } from "./audio";
 import { Radio } from "./radio";
-import { type Base, type Deposit, SHIP_RADIUS, type Ship, Sim, TICK, targetSpot, type Targetable } from "./sim";
+import { type Base, type Deposit, SHIP_RADIUS, type Ship, Sim, STATION_HALF, TICK, targetSpot, type Targetable } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartIcon, type PartId } from "./parts";
 import { ITEMS, itemDef } from "./items";
@@ -388,6 +388,7 @@ const HELP: [string, HelpLine[]][] = [
     [
       ["G", "Grab the nearest rock in reach that isn't drifting too fast, or let go of the one held", has("clamp")],
       ["Let go near a station", "Its catch pulls the rock to the refinery pad beside it, and pays as it works", has("clamp")],
+      ["Right click a station", "With a rock in the clamp and Tow control loaded, it flies the pair to the refinery pad and hands it over", has("towControl")],
     ],
   ],
   [
@@ -1374,6 +1375,19 @@ function dragStart(clientX: number, clientY: number): DragStart {
   return "space";
 }
 
+/** The nearest station a screen point lands on, if any: a right click there can mean a hand-over. */
+function stationAt(clientX: number, clientY: number): Base | null {
+  let best: Base | null = null;
+  let closest = Infinity;
+  for (const base of sim.bases) {
+    const distance = screenDistance(clientX, clientY, base.poi.x, base.poi.y);
+    if (distance >= reachScreen(STATION_HALF) || distance >= closest) continue;
+    best = base;
+    closest = distance;
+  }
+  return best;
+}
+
 /**
  * What a left click lands on: the nearest targetable thing the pointer is over, by the same
  * reach the right button uses. Nothing: empty space, which clears the picks.
@@ -1451,6 +1465,11 @@ window.addEventListener("mouseup", (event) => {
     return;
   }
   const spot = renderer.screenToWorld(fromX, fromY);
+  // A click on a station with a rock in the clamp is a hand-over, if Tow control can fly it.
+  if (!dragged) {
+    const station = stationAt(fromX, fromY);
+    if (station && sim.orderDeliver(station)) return;
+  }
   if (dragged) sim.orderMove(spot.x, spot.y, dx / tuning.dragSeconds, dy / tuning.dragSeconds);
   else sim.orderTranslate(spot.x, spot.y);
 });

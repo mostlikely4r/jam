@@ -177,7 +177,7 @@ rock home is worth the trip, and the hand-over reads.
 ## Second slice: safe towing, tow traffic, and blocks
 
 Written 2026-11-24, from a short talk with the user after the first slice was played and
-approved. Nothing in this section is built yet.
+approved. Step 2 (safe towing) is built, 2026-11-24; steps 3 and 4 are not built yet.
 
 **Why.** The first slice answered its question (towing a rock home feels weighty and worth it).
 The user asked for the next slice to be *both* halves left open: the autopilot keeping the load
@@ -209,10 +209,12 @@ Items marked *decided* are the user's calls. The rest is my proposal, open to ve
   autopilot keeps a towed load from bumping hard and does the hand-over itself. Tow traffic buys
   it before it buys the clamp, so the ships you watch don't smash their loads.
 
-### 2. Safe towing: the `towControl` program
+### 2. Safe towing: the `towControl` program (*built 2026-11-24*)
 
 The smallest piece the user can try, flown by the player's own autopilot. It also is what the
-tow traffic in steps 3 and 4 flies with.
+tow traffic in steps 3 and 4 flies with. Built in `src/programs.json`, `src/glyphs.ts`,
+`src/parts.ts`, `src/pilot.ts`, `src/sim.ts`, `src/main.ts`, with `src/tow.test.ts` beside them.
+The proposals as written:
 
 - **The program** (proposal): `towControl`, "Tow control", in `src/programs.json` like the
   others (price proposal 400, tier 1, an icon with the existing program colours; glyph: pick or
@@ -235,6 +237,43 @@ tow traffic in steps 3 and 4 flies with.
   A normal click elsewhere cancels the delivery and keeps the rock.
 - **Manual flight is untouched**: the program only governs the autopilot. Flying by hand you can
   still smash a rock (pillar 2: skill optional, never required).
+
+What the code settled, and what differs from those proposals:
+
+- **The cap measures the pair, not the hull.** `towLimit` takes the room ahead of both circles
+  of the pair (the ship and the rock), along the way it's going, and answers the speed it could
+  still stop from (`stoppingSpeed`, the same sums `flyTo` already brakes with). `flyTo` takes
+  the smaller of that, its own stopping distance and `speedLimitHere`, and `flyTo`'s distance to
+  the target is less the load's reach too, so the pair stops with the rock at the spot, not the
+  ship over it. Nothing measured from nothing: a rock's far edge is the reach, as proposed.
+- **Deposits are left out of the cap.** A held rock doesn't collide with a deposit (step 4 makes
+  the site's catch, and that's when the deposit becomes something to stop short of). A station
+  is taken as its own box's half-width from the middle, and a body as its keep-out ring. A thing
+  the pair is already touching is skipped, or the cap would pin it there.
+- **The station a delivery aims at is left out of the cap entirely.** Its pad sits inside the
+  ring the routing keeps clear of, so capping for the station itself stopped the pair short of
+  the pad for good (the routing did the steering, the cap took all the speed). The routing keeps
+  the pair off the box; the pad's own stopping distance sets the last of the pace.
+- **ClickPilot's own `routeAround` had to learn about the pad.** It flies a plain click straight
+  at the spot unless the spot is a dock's berth, so the delivery took the straight line through
+  the station. A pad trip now gets the ring, with rocks given room too, and `pastPadFace` stops
+  the ring guarding once the ship is out past the pad's face, exactly as the berth does.
+- **Where it releases:** within `DOCK_OFFSET` of the pad, at `clampSpeed` or under, on a line
+  from the rock to the pad that clears every station's box, and with the refinery free. Then it
+  lets go and says so. It waits `DOCK_OFFSET * 1.4` further out along the pad's line while the
+  refinery is busy, so the rock the catch is pulling in has the room.
+- **The waiting word** is `Sim.say`, the same short word over the ship the clamp's refusals use,
+  said every tick it's waiting; `ClickPilot.task` also says "waiting for the refinery".
+- **The order** is a click order, so it needs `clickMove` (not the autopilot): a right click on a
+  station in the world, or a station picked in the chart with `orderTravel`. It keeps running
+  until the rock is handed over, the rock is let go of by hand, the program is unloaded, or the
+  player clicks elsewhere.
+- **A trap worth knowing:** both distances were first written as class fields holding
+  `DOCK_OFFSET`, and in this build they came out `undefined` (only the first field, and only
+  when it read the imported constant), so the delivery never released. They are getters now.
+- The test list below is what `src/tow.test.ts` now checks. Without the program the same trip
+  flies the straight line as before (measurably nearer the station), and a click on a station is
+  an ordinary move.
 
 *Played for:* buy the program, clamp a big rock, click the station and look away. Does it arrive
 whole every time, and is the drift home calm, not slow to the point of dull?
@@ -349,10 +388,10 @@ follow? Does placing a block feel like a payoff, like the refinery does?
 
 - **Unit tests** (`src/tow.test.ts`, plus a new `src/blocks.test.ts`; fast suite where they can
   be):
-  - Step 2: with `towControl`, a towed rock flown at a station or a rock field never closes
-    faster than `safeImpactSpeed`; without it, slice 1 behaviour is unchanged. Deliver releases
-    inside the catch at under `clampSpeed`, and waits while the refinery is busy. The route
-    clears a body by the load's radius.
+  - Step 2 (*written 2026-11-24*, in `src/tow.test.ts`): with `towControl`, a towed rock flown
+    at a station never closes faster than `safeImpactSpeed`; without it, slice 1 behaviour is
+    unchanged. Deliver releases inside the catch at under `clampSpeed`, and waits while the
+    refinery is busy. The route clears a body by the load's radius.
   - Step 3: a floater rolled a tow ship buys `towControl` then the clamp, losing its tractor; the
     share cap holds; a tow ship takes a rock and is paid by the refinery; two tow ships never pick
     the same rock; a fleeing tow ship lets go; a `"tow"` record takes a rock from a sleeping
@@ -393,6 +432,8 @@ follow? Does placing a block feel like a payoff, like the refinery does?
 
 ## Not in this build
 
+- Steps 3 and 4: tow traffic, blocks, and projects built from carried blocks (Q-22). They wait on
+  the user trying step 2.
 - Special rocks that only survive whole, and a way to see them (*decided* for later).
 - Towing a stranded ship home (think of it with the rescue AI in `docs/fuel-plan.md`).
 - Pirates stealing a towed rock or block, or hunting tow ships.

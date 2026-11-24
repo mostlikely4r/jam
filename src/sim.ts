@@ -60,6 +60,8 @@ export const PIRATE_BASE_RADIUS = 200;
 const WRECK_ORE_SPEED = 15;
 /** The dock box sits directly beside the solid box. */
 export const DOCK_OFFSET = STATION_HALF * 2;
+/** Where a station's refinery pad sits, on its own axis away from the dock. */
+export const REFINERY_OFFSET = -DOCK_OFFSET;
 /** Far enough from the station's center to clear both boxes at any rotation. */
 export const STATION_REACH = 450;
 /** A deposit's size, for pointing at it and picking it: its ring around the middle. */
@@ -1705,14 +1707,15 @@ export class Sim {
   /**
    * Where to steer for on the way from one spot to another so as to stay out of every
    * body's pull, or null if the straight line is clear. It's the next corner of a path
-   * round the first body in the way, from where the bodies are now.
+   * round the first body in the way, from where the bodies are now. `extra` widens the keep-out
+   * by that much, for a ship flying wider than its own hull, such as one with a rock in its clamp.
    */
-  cornerToward(fromX: number, fromY: number, toX: number, toY: number): { x: number; y: number } | null {
+  cornerToward(fromX: number, fromY: number, toX: number, toY: number, extra = 0): { x: number; y: number } | null {
     let best: { x: number; y: number } | null = null;
     let bestAhead = Infinity;
     for (const body of this.bodies) {
       const at = bodyAt(body, this.clock);
-      const keepOut = keepOutRadius(body);
+      const keepOut = keepOutRadius(body) + extra;
       const from = { x: fromX - at.x, y: fromY - at.y };
       const to = { x: toX - at.x, y: toY - at.y };
       const ahead = Math.hypot(from.x, from.y);
@@ -2546,11 +2549,14 @@ export class Sim {
   /**
    * Sets a course for a place, if the ship has the autopilot: for the dock, at its berth;
    * for a field, just inside its edge; for the pirate base, inside its ring. The course
-   * chases the place as it moves. Returns whether it did.
+   * chases the place as it moves. With a rock in the clamp and Tow control loaded, a station
+   * means its refinery pad instead. Returns whether it did.
    */
   orderTravel(poi: Poi): boolean {
     if (!this.ship.parts.has("autopilot")) return false;
     if (poi.name === "station") {
+      const base = this.baseOf(poi);
+      if (base && this.orderDeliver(base)) return true;
       this.clickPilot.travelTo(poi, DOCK_OFFSET, 0);
     } else if (poi.name === "pirate base") {
       this.clickPilot.travelTo(poi, 0, 0, poi.reach / 2);
@@ -2565,6 +2571,18 @@ export class Sim {
   orderTravelDeposit(deposit: Deposit): boolean {
     if (!this.ship.parts.has("autopilot")) return false;
     this.clickPilot.travelTo(deposit, 0, 0, 60);
+    return true;
+  }
+
+  /**
+   * Hands a station the rock in the clamp: Tow control flies the pair to its refinery pad and
+   * lets go there. Answers whether that's what the click meant, which with a rock held and the
+   * program loaded it does.
+   */
+  orderDeliver(base: Base): boolean {
+    const { ship } = this;
+    if (!ship.tow || !ship.parts.has("towControl") || !ship.parts.has("clickMove")) return false;
+    this.clickPilot.deliverTo(base.poi);
     return true;
   }
 
@@ -5725,15 +5743,27 @@ export class Sim {
    * reach. Answers whether it's holding a rock afterwards.
    */
   toggleClamp(ship: Ship = this.ship): boolean {
-    const rock = ship.tow;
-    if (rock) {
-      const word = ship === this.ship ? this.releaseWord(rock) : "";
-      this.letGoTow(ship);
-      // What happens to it now, said at once: a hand-over shouldn't be a guess.
-      if (word) this.note = { text: word, left: NOTE_SECONDS };
+    if (ship.tow) {
+      this.releaseTow(ship);
       return false;
     }
     return this.grabRock(ship);
+  }
+
+  /** Lets go of the rock the clamp holds, saying what becomes of it. Answers whether it let go. */
+  releaseTow(ship: Ship = this.ship): boolean {
+    const rock = ship.tow;
+    if (!rock) return false;
+    // What happens to it now, said at once: a hand-over shouldn't be a guess.
+    const word = ship === this.ship ? this.releaseWord(rock) : "";
+    this.letGoTow(ship);
+    if (word) this.say(word);
+    return true;
+  }
+
+  /** A short word over the player's ship: what just happened, or what the autopilot is waiting for. */
+  say(text: string): void {
+    this.note = { text, left: NOTE_SECONDS };
   }
 
   /** What becomes of a rock let go of where it is: which station's catch takes it, or why none does. */
@@ -5748,8 +5778,14 @@ export class Sim {
     }
     if (!near) return "Nothing here takes it: it drifts";
     const station = near;
-    const busy = station.refining !== null || this.rocks.some((each) => each.held === "catch" && each.catcher === station.id);
-    return busy ? `${this.placeName(station.poi)} is still working one: it drifts on` : `${this.placeName(station.poi)} is taking it in`;
+    return this.catchBusy(station)
+      ? `${this.placeName(station.poi)} is still working one: it drifts on`
+      : `${this.placeName(station.poi)} is taking it in`;
+  }
+
+  /** Whether a station's catch is taken: its refinery is working a rock, or pulling one in. */
+  catchBusy(base: Base): boolean {
+    return base.refining !== null || this.rocks.some((rock) => rock.held === "catch" && rock.catcher === base.id);
   }
 
   /** Where a held rock's centre sits: this far from the ship's, the way the clamp looks. */
@@ -5792,7 +5828,7 @@ export class Sim {
   note: { text: string; left: number } | null = null;
 
   private refuse(ship: Ship, text: string): boolean {
-    if (ship === this.ship) this.note = { text, left: NOTE_SECONDS };
+    if (ship === this.ship) this.say(text);
     return false;
   }
 
@@ -6008,8 +6044,7 @@ export class Sim {
    */
   private catchRocks(dt: number): void {
     for (const base of this.bases) {
-      if (base.refining) continue;
-      if (this.rocks.some((rock) => rock.held === "catch" && rock.catcher === base.id)) continue;
+      if (this.catchBusy(base)) continue;
       const rock = this.catchable(base);
       if (!rock) continue;
       rock.held = "catch";
@@ -6149,6 +6184,11 @@ export class Sim {
     return best;
   }
 
+  /** Whether the straight line from one spot to another keeps clear of every station's box. */
+  clearOfStations(fromX: number, fromY: number, toX: number, toY: number): boolean {
+    return this.stationHit({ radius: 0 }, fromX, fromY, toX - fromX, toY - fromY) === null;
+  }
+
   /** A caught rock against a station's box: it knocks off and takes the damage, at no hp breaking. */
   private caughtImpact(rock: Rock, nx: number, ny: number): boolean {
     const { tuning } = this;
@@ -6192,7 +6232,7 @@ export class Sim {
     const rotation = previous ? poi.prevRotation : poi.rotation;
     const x = previous ? poi.px : poi.x;
     const y = previous ? poi.py : poi.y;
-    return { x: x - Math.cos(rotation) * DOCK_OFFSET, y: y - Math.sin(rotation) * DOCK_OFFSET };
+    return { x: x + Math.cos(rotation) * REFINERY_OFFSET, y: y + Math.sin(rotation) * REFINERY_OFFSET };
   }
 
   /** The ore a whole rock holds: what mining it would give, times the whole-rock bonus. */

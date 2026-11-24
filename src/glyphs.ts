@@ -274,6 +274,16 @@ export const GLYPHS: readonly { id: string; draw: GlyphDraw }[] = [
       svg.append(el("circle", { cx: 9, cy: 9, r: 3.2, fill: p, stroke: s, "stroke-width": 1.1 }));
     },
   },
+  {
+    id: "tow",
+    draw(svg, p, s) {
+      // A ship with its load out in front, and the clamp arm between them.
+      svg.append(el("polygon", { points: "3,7.4 9.4,12 3,16.6", fill: p, stroke: s, "stroke-width": 1.2, "stroke-linejoin": "round" }));
+      svg.append(el("path", { d: "M10 12 h3.4", fill: "none", stroke: s, "stroke-width": 1.8, "stroke-linecap": "round" }));
+      svg.append(el("path", { d: "M13 9.2 l2 2.8 l-2 2.8", fill: "none", stroke: s, "stroke-width": 1.5, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+      svg.append(el("circle", { cx: 18.4, cy: 12, r: 3.4, fill: p, stroke: s, "stroke-width": 1.3 }));
+    },
+  },
   // Station.
   {
     id: "drone",

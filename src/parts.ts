@@ -48,6 +48,7 @@ export type PartId =
   | "autoMine"
   | "autoMine2"
   | "faceTarget"
+  | "towControl"
   | "racerMain"
   | "floaterMain"
   | "turnThrusters"

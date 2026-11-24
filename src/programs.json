@@ -198,6 +198,15 @@
       "icon": { "glyph": "chart", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
     },
     {
+      "id": "towControl",
+      "name": "Tow control",
+      "short": "tow",
+      "description": "With a rock in the clamp, flies it home gently: keeps it under the safe speed, gives it room, and hands it over at the refinery pad. Click a station to deliver",
+      "price": 400,
+      "tier": 1,
+      "icon": { "glyph": "tow", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+    },
+    {
       "id": "autopilot",
       "name": "Autopilot",
       "short": "auto",

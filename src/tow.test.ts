@@ -479,3 +479,142 @@ function takeIn(sim: Sim, tier: number): void {
   run(sim, TICK * 2);
   expect(base.refining).not.toBeNull();
 }
+
+describe("tow control", () => {
+  /** A world with the player's ship at the clamp's own fit: the program loaded, well out from the station. */
+  function towShip(settings: Partial<typeof WORLD> = {}): Sim {
+    const sim = world(settings);
+    sim.giveProgram(sim.ship, "towControl");
+    // Well out from the station, on the dock's side of it, so the pad is round the far side.
+    const station = sim.bases[0].poi;
+    Object.assign(sim.ship, { x: station.x + 2500, y: station.y, px: station.x + 2500, py: station.y });
+    return sim;
+  }
+
+  /**
+   * Flies the held rock to the station and reports what the trip came to: the fastest it ever
+   * closed on the station, its speed and distance to the pad when it was let go of, and whether
+   * the refinery took it.
+   */
+  function deliver(sim: Sim, seconds: number) {
+    const base = sim.bases[0];
+    const held = sim.ship.tow!;
+    let worst = 0;
+    let released: { speed: number; toPad: number } | null = null;
+    for (let i = 0; i < Math.round(seconds / TICK); i++) {
+      sim.step();
+      sim.events.length = 0;
+      const dx = base.poi.x - held.x;
+      const dy = base.poi.y - held.y;
+      const distance = Math.hypot(dx, dy) || 1;
+      // Closing on the station, in the frame it stands still in.
+      worst = Math.max(worst, (dx * held.vx + dy * held.vy) / distance);
+      if (!released && sim.ship.tow !== held) {
+        const pad = sim.refinerySpot(base);
+        released = { speed: Math.hypot(sim.ship.vx, sim.ship.vy), toPad: Math.hypot(pad.x - held.x, pad.y - held.y) };
+      }
+      if (base.refining) break;
+    }
+    return { worst, released, refining: base.refining, held };
+  }
+
+  it("keeps a held rock under the safe speed on the way to the station, and hands it over", () => {
+    const sim = towShip();
+    const base = sim.bases[0];
+    const held = beside(sim, 2, 10);
+    expect(sim.toggleClamp()).toBe(true);
+    expect(sim.orderDeliver(base)).toBe(true);
+
+    const trip = deliver(sim, 240);
+    expect(trip.released, "the clamp let go").not.toBeNull();
+    expect(trip.worst, "closed on the station").toBeLessThan(DEFAULTS.safeImpactSpeed);
+    // It reaches the pad under the speed the catch can take it at, on the station's own side.
+    expect(trip.released!.speed).toBeLessThanOrEqual(DEFAULTS.clampSpeed);
+    expect(trip.released!.toPad).toBeLessThan(DEFAULTS.catchRange);
+    expect(held.hp).toBe(6);
+    expect(trip.refining?.total).toBe(sim.wholeOre(2));
+  });
+
+  it("without the program the same trip takes the straight line it always did, with no room for the load", () => {
+    /** Flies the pair past the station to a spot beyond it, and says how near the rock came. */
+    const passStation = (program: boolean) => {
+      const sim = world();
+      const base = sim.bases[0];
+      const station = base.poi;
+      // Well out on the dock's side of the station, as `towShip` puts it.
+      Object.assign(sim.ship, { x: station.x + 2500, y: station.y, px: station.x + 2500, py: station.y });
+      const held = beside(sim, 2, 10);
+      if (program) sim.giveProgram(sim.ship, "towControl");
+      expect(sim.toggleClamp()).toBe(true);
+      // A click on a station is a hand-over only with the program loaded.
+      expect(sim.orderDeliver(base)).toBe(program);
+      expect(sim.orderMove(station.x - 2500, station.y)).toBe(true);
+      const reach = Math.hypot(held.x - sim.ship.x, held.y - sim.ship.y) + held.radius;
+      let closest = Infinity;
+      for (let i = 0; i < Math.round(160 / TICK); i++) {
+        sim.step();
+        sim.events.length = 0;
+        closest = Math.min(closest, Math.hypot(station.x - held.x, station.y - held.y));
+        if (held.x < station.x - 500) break;
+      }
+      return { closest, reach, hp: held.hp };
+    };
+
+    const plain = passStation(false);
+    const wide = passStation(true);
+    // Slice 1's straight line takes the load well inside the ring the program keeps it out of.
+    expect(plain.closest).toBeLessThan(Math.hypot(STATION_HALF, STATION_HALF) + plain.reach + 30);
+    expect(wide.closest).toBeGreaterThan(plain.closest + 50);
+    // Neither bumps the station on its way past: the room is the point, not the damage.
+    expect(plain.hp).toBe(6);
+    expect(wide.hp).toBe(6);
+  });
+
+  it("waits beside the pad while the refinery works another rock, then hands over", () => {
+    const sim = towShip();
+    const base = sim.bases[0];
+    // Its refinery is busy with a rock for the length of the test.
+    takeIn(sim, 1);
+    sim.tuning.refineSeconds = 1000;
+    const held = beside(sim, 1, 10);
+    expect(sim.toggleClamp()).toBe(true);
+    expect(sim.orderDeliver(base)).toBe(true);
+
+    const waiting = deliver(sim, 200);
+    expect(waiting.released).toBeNull();
+    expect(sim.ship.tow).toBe(held);
+    expect(base.refining!.total).toBe(sim.wholeOre(1));
+    // The player is told what it's waiting for, over the ship.
+    expect(sim.note?.text).toMatch(/Waiting for the refinery/);
+    expect(sim.clickPilot.task).toBe("waiting for the refinery");
+    // Held off the pad, not sitting on it, so the rock the refinery is pulling in has the room.
+    expect(Math.hypot(sim.ship.x - base.poi.x, sim.ship.y - base.poi.y)).toBeGreaterThan(DOCK_OFFSET);
+
+    // The pad comes free: it flies the last of the way in and lets go.
+    base.refining = null;
+    sim.tuning.refineSeconds = 4;
+    const done = deliver(sim, 200);
+    expect(done.released).not.toBeNull();
+    expect(base.refining).not.toBeNull();
+    expect(sim.ship.tow).toBeNull();
+  });
+
+  it("routes round a body with room for the load, and plain without it", () => {
+    const sim = towShip();
+    // The home has no body of its own: put one across the way, as a planet would be.
+    sim.bodies = [{ name: "Planet", kind: "planet", radius: 4000, surface: "death", pullStart: 9000, pullFull: 5000, pullAccel: 150, atmosphere: 4600, burnSpeed: 300, spinPeriod: 0, orbits: [] }];
+    const circle = sim.keepOutAt(sim.bodies[0]);
+    const from = { x: circle.x - circle.radius * 3, y: circle.y };
+    const to = { x: circle.x + circle.radius * 3, y: circle.y };
+    const plain = sim.cornerToward(from.x, from.y, to.x, to.y)!;
+    const plainFar = Math.hypot(plain.x - circle.x, plain.y - circle.y);
+    expect(plainFar).toBeGreaterThanOrEqual(circle.radius);
+
+    // With a load held and the program loaded, the same way round keeps clear of that much more.
+    beside(sim, 2, 10);
+    expect(sim.toggleClamp()).toBe(true);
+    const reach = Math.hypot(sim.ship.tow!.x - sim.ship.x, sim.ship.tow!.y - sim.ship.y) + sim.ship.tow!.radius;
+    const wide = sim.cornerToward(from.x, from.y, to.x, to.y, reach)!;
+    expect(Math.hypot(wide.x - circle.x, wide.y - circle.y) - plainFar).toBeCloseTo(reach, -1);
+  });
+});

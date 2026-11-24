@@ -3,7 +3,7 @@
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
 ## Q-21 · Clamp tow, slice 2, step 2: safe towing program · build
-- state: queued
+- state: in progress
 - plan: docs/clamp-tow-plan.md
 - added: 2026-11-24
 

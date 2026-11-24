@@ -2,6 +2,14 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-5 · Clamp tow, first slice · build
+- state: queued
+- plan: docs/clamp-tow-plan.md
+- added: 2026-11-23
+
+Tow a whole rock to a station for more ore than mining it gives: the cheap test of whether towing
+feels good. Nothing built yet.
+
 ## Q-11 · Clouds, step 1: clouds you can see · build
 - state: queued
 - backlog: S-42
@@ -19,14 +27,6 @@ front layer. Visuals only, no effects, no AI. Stops for the user to fly through 
 
 The effect machinery, a gap that turns with the cloud, dampening as the penalty and nanites as the
 gift. Ships fly straight through. Waits on the user flying step 1 (Q-11).
-
-## Q-5 · Clamp tow, first slice · build
-- state: queued
-- plan: docs/clamp-tow-plan.md
-- added: 2026-11-23
-
-Tow a whole rock to a station for more ore than mining it gives: the cheap test of whether towing
-feels good. Nothing built yet.
 
 ## Q-6 · Route: the ring round the station, then look ahead · build
 - state: queued

@@ -123,6 +123,12 @@ message on a real courier ship with the answer coming back later.
 - **Your work becomes something:** hauled ore visibly turns into a deposit, turrets, a big miner.
 - **Who was that?** Follow any ship to its errand and its cargo's origin.
 - **Hiding from the pirate:** early warning, holding still behind a rock until it passes.
+- **The hunt** (named 2026-11-24): both the finding and the fight, slow and methodical like EVE
+  PvE. Won by the fit (damage types and resistances, speed to outrun slow turrets, or just range):
+  target, course and reason over aim, dodge and react. Large, meaningful targets over fodder,
+  except drones and fighters. A way to escape and means to prevent one. A bit of OP tactics is
+  fine. First link: a laser that hits by range and tracking, built to mine first (idle mining is
+  the target being pushed). It mirrors "Hiding from the pirate".
 - **The world opens up:** "warning: gravity well", a giant planet, leaving in a bigger ship.
 
 The first two may be one target, and together they are the heart of pillar 3.

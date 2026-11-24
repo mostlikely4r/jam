@@ -335,3 +335,66 @@ Four independent fixes, one change each.
 - **Longer tank art (I-3).** *Decided:* fuel tanks draw twice as long on the ship
   (`src/shipArt.ts`). Visual only: grid shape, inventory and fuel held stay the same. Check the
   hulls in the designer that the longer tank still sits on the hull.
+
+## S-46 · Designer comforts: deselect, zoom, undo, layers, multi-select, part art, turret
+- status: specced
+- area: Ships and gear
+- effort: M
+- plan: docs/designer-comforts-plan.md
+
+From the user's own use of the hull designer, 2026-11-24. Deselect a mount, wheel zoom, Ctrl-Z
+undo, show/hide layers, a multi-select drop-down for long id lists, per-part x/y scale, alpha and
+base colours, and the turret drawn as a circle with its gun turning.
+
+## S-47 · Hulls as data, and a shape editor for hulls and parts
+- status: specced
+- area: Ships and gear
+- effort: L
+- plan: docs/hull-drawing-plan.md
+
+Hull shapes move from code into `src/hulls.json`, a model becomes a name, one edge polygon per
+hull plus visual shapes with colour roles, mirror drawing and Shift snap, copy hull, optional
+drawn part art. Groundwork for S-48 and S-49.
+
+## S-48 · Hulls for sale at stations, with a trade-in
+- status: specced
+- area: Ships and gear
+- effort: M
+- plan: docs/hull-buying-plan.md
+
+Per-station lists of the items, programs and hulls it sells; buying a hull replaces yours, the
+old one is traded in at full price, your parts move over where they fit, the rest to the locker.
+
+## S-49 · AI ships on real hulls: templates, spawn points, station rebuilds
+- status: specced
+- area: World
+- effort: XL
+- plan: docs/ai-hulls-plan.md
+
+One kind of ship; AI-only hulls and parts; general loadouts; templates as a role plus a weighted
+hull pool; spawn points with faction and home lock; station rebuild entries paid by the owner
+first; minimal and complex cargo; today's AI moved onto templates.
+
+## S-50 · Damage levels: damaged, broken, destroyed
+- status: specced
+- area: Ships and gear
+- effort: M
+- plan: docs/damage-levels-plan.md
+
+Per-part thresholds for a middle "works, but worse" level, a look per level, a weaker damaged
+thruster first and other kinds after.
+
+## S-51 · Endless spawning from a spawn point
+- status: parked
+- area: World
+
+From the 2026-11-24 hull designer talk: a spawn point that keeps its count topped up (pirates,
+creatures), not just seeding the new game. Waits on S-49's one-shot spawn points.
+
+## S-52 · Repair damaged parts in flight
+- status: parked
+- area: Ships and gear
+
+From the 2026-11-24 hull designer talk: a damaged part (S-50's middle level) can be fixed in
+flight. Open: what does the repairing (a repair part, a program, a drone) and what it costs
+(time, parts, power). Broken parts still need a station.

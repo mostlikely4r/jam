@@ -2,6 +2,48 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-16 · Designer comforts · build
+- state: queued
+- backlog: S-46
+- plan: docs/designer-comforts-plan.md
+- added: 2026-11-24
+
+Editor only: deselect, wheel zoom, undo, layer toggles, the multi-select, part art, the turret circle.
+Stands alone; the drawing plan leans on its undo and layers.
+
+## Q-17 · Hulls as data, and the shape editor · build
+- state: queued
+- backlog: S-47
+- plan: docs/hull-drawing-plan.md
+- added: 2026-11-24
+
+Shapes into src/hulls.json, a model becomes a name, then the editor. Today's hulls must look the
+same. Waits on Q-16.
+
+## Q-18 · Hull buying · build
+- state: queued
+- backlog: S-48
+- plan: docs/hull-buying-plan.md
+- added: 2026-11-24
+
+Station sell lists, then buying with trade-in. Step 2 waits on Q-17. Stops for the user to try.
+
+## Q-19 · AI hulls: templates and spawn points · build
+- state: queued
+- backlog: S-49
+- plan: docs/ai-hulls-plan.md
+- added: 2026-11-24
+
+Step 1 (templates and a spawn point) stops for the user to try. Waits on Q-17.
+
+## Q-20 · Damage levels · build
+- state: queued
+- backlog: S-50
+- plan: docs/damage-levels-plan.md
+- added: 2026-11-24
+
+Stands alone. Step 1 (thresholds, looks, weaker thruster) stops for the user to try.
+
 ## Q-5 · Clamp tow, first slice · build
 - state: queued
 - plan: docs/clamp-tow-plan.md

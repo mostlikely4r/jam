@@ -22,3 +22,6 @@ Program face target only faces asteroids. Needs to face any target and a tweak t
 
 ## I-5 · Cargo bays don't auto-replace
 - added: 2026-11-24 10:01
+
+## I-6 · Cargo bays should empty from the top.
+- added: 2026-11-24 10:01

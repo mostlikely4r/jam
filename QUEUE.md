@@ -2,14 +2,6 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-5 · Clamp tow, first slice · build
-- state: in progress
-- plan: docs/clamp-tow-plan.md
-- added: 2026-11-23
-
-Tow a whole rock to a station for more ore than mining it gives: the cheap test of whether towing
-feels good. Nothing built yet.
-
 ## Q-16 · Designer comforts · build
 - state: queued
 - backlog: S-46
@@ -142,6 +134,11 @@ The decided spec is the S-44 text in BACKLOG.md: a bigger bay bought replaces th
 moves over, the old bay to the locker; ore nearest the entry sells first.
 
 ## Done
+
+## Q-5 · Clamp tow, first slice · build
+- state: done
+- done: 2026-11-24
+- plan: docs/clamp-tow-plan.md
 
 ## Q-4 · Fuel step 2b: tanks as modules · build
 - state: done

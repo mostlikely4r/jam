@@ -170,9 +170,9 @@ calm, or slow and dull? Does watching it shrink while the credits come in feel l
 notes are fixed (pad, going round, taking it back, the payout's sound and credits). The fourth,
 the refinery cutting into the rock with a laser and the ore flowing out, is parked as S-53.
 
-**Stop here for the user to try.** Not built: the notes below are for the next step.
-
-**Stop here for the user to try.**
+*Played again after those fixes, 2026-11-24:* "looks good". This slice is done (Q-5): hauling a
+rock home is worth the trip, and the hand-over reads. Step 2 below is not built and not queued;
+it waits on a word that towing is worth taking further.
 
 ### 2. The autopilot keeps the load safe
 

@@ -2,6 +2,14 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-5 · Clamp tow, first slice · build
+- state: in progress
+- plan: docs/clamp-tow-plan.md
+- added: 2026-11-23
+
+Tow a whole rock to a station for more ore than mining it gives: the cheap test of whether towing
+feels good. Nothing built yet.
+
 ## Q-16 · Designer comforts · build
 - state: queued
 - backlog: S-46
@@ -43,14 +51,6 @@ Step 1 (templates and a spawn point) stops for the user to try. Waits on Q-17.
 - added: 2026-11-24
 
 Stands alone. Step 1 (thresholds, looks, weaker thruster) stops for the user to try.
-
-## Q-5 · Clamp tow, first slice · build
-- state: queued
-- plan: docs/clamp-tow-plan.md
-- added: 2026-11-23
-
-Tow a whole rock to a station for more ore than mining it gives: the cheap test of whether towing
-feels good. Nothing built yet.
 
 ## Q-11 · Clouds, step 1: clouds you can see · build
 - state: queued

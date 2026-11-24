@@ -120,6 +120,34 @@ describe("construction blocks", () => {
     expect(sim.ship.earned).toBeGreaterThanOrEqual(1000);
   });
 
+  it("takes the block by the pad, and says where it waits from too far off", () => {
+    const sim = building({ depositParts: 10, blockParts: 10 });
+    expect(sim.takeBlockJob(sim.ship)).not.toBeNull();
+    // Far out, G says where the block is instead of just "nothing in reach".
+    Object.assign(sim.ship, { x: 40000, y: 40000, px: 40000, py: 40000, vx: 0, vy: 0 });
+    expect(sim.toggleClamp()).toBe(false);
+    expect(sim.note?.text).toMatch(/block pad/);
+    // By the dock, a short hop off the pad, it takes it.
+    dock(sim);
+    expect(sim.toggleClamp()).toBe(true);
+    expect(sim.ship.tow).not.toBeNull();
+    expect(isBlock(sim.ship.tow!)).toBe(true);
+  });
+
+  it("takes a block back from where it was let go of", () => {
+    const sim = building({ depositParts: 10, blockParts: 10 });
+    expect(sim.takeBlockJob(sim.ship)).not.toBeNull();
+    const pad = sim.blockSpot(sim.bases[0]);
+    Object.assign(sim.ship, { x: pad.x, y: pad.y, px: pad.x, py: pad.y, vx: 0, vy: 0 });
+    expect(sim.grabPadBlock(sim.ship)).toBe(true);
+    const block = sim.blocks[0];
+    sim.releaseTow(sim.ship);
+    // It drifts where it was let go of; coming back to it, the clamp takes it again.
+    Object.assign(sim.ship, { x: block.x, y: block.y, px: block.x, py: block.y, vx: 0, vy: 0 });
+    expect(sim.toggleClamp()).toBe(true);
+    expect(sim.ship.tow).toBe(block);
+  });
+
   it("keeps the deposit with the base when a block breaks, and loses its parts", () => {
     const sim = building({ depositParts: 10, blockParts: 10 });
     const base = sim.bases[0];

@@ -420,6 +420,10 @@ projects' purses. Bump `SAVE_VERSION`, with a round-trip test.
   fast knocks on the frame and may break.
 - **The job is on the dock's Station row** (`main.ts`), with the blocks to go, the deposit and
   the pay. A right click on the deposit while holding its block is a place, through Tow control.
+- **The block pad is a short hop off the dock** (`BLOCK_PAD` in `src/sim.ts`), clear of both
+  boxes and of the dock's approach, and the grab reach is the pad's whole working area, so `G`
+  at the dock side takes the block without nosing onto the cross. Out of reach, `G` says where
+  the block is waiting rather than "nothing in reach".
 - **A record takes the job and the block at the pad** and places it at the site, then docks for
   its next stay (`towArrived`).
 

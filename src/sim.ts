@@ -64,8 +64,10 @@ export const DOCK_OFFSET = STATION_HALF * 2;
 export const REFINERY_OFFSET = -DOCK_OFFSET;
 /** A construction block's reach: a square crate as big across as a tier-1 rock, and as heavy and tough. */
 export const BLOCK_RADIUS = 34;
-/** Where a station's block pad sits, in its own axes: on the dock side, off the dock's own line. */
-const BLOCK_PAD = { x: DOCK_OFFSET * 0.6, y: DOCK_OFFSET * 1.05 };
+/** Where a station's block pad sits, in its own axes: on the dock side, clear of the dock's own line. */
+const BLOCK_PAD = { x: DOCK_OFFSET, y: DOCK_OFFSET };
+/** How near the pad a ship with a job takes its block: the pad's whole working area, dock side and all. */
+const BLOCK_PAD_REACH = DOCK_OFFSET * 1.2;
 /** The most a project's site catch steers a block in at, and how near counts as arrived (as the refinery's). */
 const SITE_LANDING = 40;
 /** Far enough from the station's center to clear both boxes at any rotation. */
@@ -6428,6 +6430,8 @@ export class Sim {
     const held = this.nearestClampable(ship);
     if (!held) {
       if (this.grabPadBlock(ship)) return true;
+      const job = this.blockJobFor(ship);
+      if (job) return this.refuse(ship, `Your block waits at ${this.placeName(job.base.poi)}'s block pad`);
       return this.refuse(ship, "Nothing in reach of the clamp");
     }
     // A rock the station has is already held still: taking it back is no faster than it's going.
@@ -6439,25 +6443,23 @@ export class Sim {
   }
 
   /**
-   * Takes the block a ship's job has waiting at a station's block pad, if the ship is alongside
-   * it. The job becomes a body at the pad, in the clamp.
+   * Takes the block a ship's job has waiting at a station's block pad, if the ship is by the pad:
+   * a short hop off the dock counts, so a player never has to nose onto the cross itself. The job
+   * becomes a body at the pad, in the clamp.
    */
   grabPadBlock(ship: Ship): boolean {
-    const { clampRange } = this.tuning;
-    for (const base of this.bases) {
-      const job = base.blocks.find((each) => each.carrier === ship);
-      if (!job) continue;
-      const pad = this.blockSpot(base);
-      if (Math.hypot(ship.x - pad.x, ship.y - pad.y) - SHIP_RADIUS - BLOCK_RADIUS > clampRange) continue;
-      base.blocks.splice(base.blocks.indexOf(job), 1);
-      const block = this.makeBlock(base, job.site, pad.x, pad.y);
-      block.carrier = ship;
-      block.payer = job.payer;
-      this.blocks.push(block);
-      this.holdRock(ship, block);
-      return true;
-    }
-    return false;
+    const found = this.blockJobFor(ship);
+    if (!found) return false;
+    const { base, job } = found;
+    const pad = this.blockSpot(base);
+    if (Math.hypot(ship.x - pad.x, ship.y - pad.y) > BLOCK_PAD_REACH) return false;
+    base.blocks.splice(base.blocks.indexOf(job), 1);
+    const block = this.makeBlock(base, job.site, pad.x, pad.y);
+    block.carrier = ship;
+    block.payer = job.payer;
+    this.blocks.push(block);
+    this.holdRock(ship, block);
+    return true;
   }
 
   /** Grabs one particular rock or block with the clamp, if it's in reach and slow enough. */

@@ -954,7 +954,7 @@ Fit a clamp to carry one`, enabled: false };
       label: "Carry a block",
       icon: BLOCK_ICON,
       text: `${note}
-${here ? "Your block waits at the block pad: take it with G" : `You have a block waiting at ${sim.baseName(mine.base.id)}`}`,
+${here ? "Your block waits at the block pad, just off the dock: take it with G" : `You have a block waiting at ${sim.baseName(mine.base.id)}`}`,
       enabled: false,
     };
   }
@@ -965,7 +965,7 @@ No block is ready at the pad yet`, enabled: false };
   if (ship.credits < deposit) return { tag: "not enough money", style: "poor", label: "Carry a block", icon: BLOCK_ICON, text: `${note}
 Not enough credits`, enabled: false };
   return { tag: "buy", style: "buy", label: "Carry a block", icon: BLOCK_ICON, text: `${note}
-Click to take one, then press G at the block pad`, enabled: true };
+Click to take one, then press G by the block pad, just off the dock`, enabled: true };
 }
 
 /** Takes a construction block job at the dock, paying its deposit. */

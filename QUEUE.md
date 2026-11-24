@@ -2,22 +2,14 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-21 · Clamp tow, slice 2, step 2: safe towing program · build
-- state: in progress
-- plan: docs/clamp-tow-plan.md
-- added: 2026-11-24
-
-The `towControl` program: the autopilot keeps a towed rock under the safe bump speed, routes
-round with room for it, and delivers it to the refinery pad. Stops for the user to try.
-
 ## Q-22 · Clamp tow, slice 2, steps 3–4: tow traffic and blocks · build
 - state: queued
 - plan: docs/clamp-tow-plan.md
 - added: 2026-11-24
 
 A few traffic floaters turn tow ships (whole rocks home, block jobs first); the deposit and its
-turrets get built from blocks carried to the site, for a deposit and pay. Waits on the user
-trying Q-21.
+turrets get built from blocks carried to the site, for a deposit and pay. Q-21 is played and
+done, so the autopilot it flies with is settled.
 
 ## Q-16 · Designer comforts · build
 - state: queued
@@ -151,6 +143,15 @@ The decided spec is the S-44 text in BACKLOG.md: a bigger bay bought replaces th
 moves over, the old bay to the locker; ore nearest the entry sells first.
 
 ## Done
+
+## Q-21 · Clamp tow, slice 2, step 2: safe towing program · build
+- state: done
+- done: 2026-11-24
+- plan: docs/clamp-tow-plan.md
+- added: 2026-11-24
+
+The `towControl` program: the autopilot keeps a towed rock under the safe bump speed, routes
+round with room for it, and delivers it to the refinery pad. Played and approved.
 
 ## Q-5 · Clamp tow, first slice · build
 - state: done

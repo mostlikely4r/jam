@@ -278,8 +278,9 @@ What the code settled, and what differs from those proposals:
 *Played for:* buy the program, clamp a big rock, click the station and look away. Does it arrive
 whole every time, and is the drift home calm, not slow to the point of dull?
 
-**Stop here for the user to try.** Steps 3 and 4 lean on this autopilot; if it's not right yet,
-fix it before traffic flies it.
+*Played, 2026-11-24:* "works". The hand-over runs itself and the rock goes in whole, so this is
+done (Q-21) and steps 3 and 4 can fly with it. Steps 3 and 4 lean on this autopilot: if tow
+traffic turns out to misuse it, fix it there rather than changing what the player flies by hand.
 
 ### 3. Tow traffic: a few floaters haul whole rocks
 

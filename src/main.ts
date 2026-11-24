@@ -384,6 +384,13 @@ const HELP: [string, HelpLine[]][] = [
     ],
   ],
   [
+    "The clamp",
+    [
+      ["G", "Grab the nearest rock in reach that isn't drifting too fast, or let go of the one held", has("clamp")],
+      ["Let go near a station", "Its catch pulls the rock to the refinery pad beside it, and pays as it works", has("clamp")],
+    ],
+  ],
+  [
     "Chart",
     [
       ["C", "The chart: what you've found so far", has("starmap")],
@@ -477,6 +484,16 @@ function showPage(page: "main" | "help" | "settings"): void {
     if (designer) pauseBox.append(menuButton("System designer (dev, O)", openDesigner));
     if (hullDesigner) pauseBox.append(menuButton("Hull designer (dev, H)", openHulls));
     if (faceGallery) pauseBox.append(menuButton("Face gallery (dev, F)", openFaces));
+    if (dev) {
+      // `G` is the clamp's now, so the bot takes the next free key and says so here.
+      pauseBox.append(
+        menuButton(botPlay ? "Autopilot bot: playing (dev, J) - click for the ship" : "Autopilot bot (dev, J)", () => {
+          // It only flies while the game runs.
+          setPaused(false);
+          void toggleBot();
+        }),
+      );
+    }
     return;
   }
   if (page === "help") {

@@ -91,7 +91,7 @@ within 20 seconds, at a speed under `safeImpactSpeed`, with no hull lost.
 
 ## Needs first
 
-- The in-game bot on `G` (`toggleBot` in `src/main.ts`) and `npm run bot`: both exist.
+- The in-game bot on `J` (`toggleBot` in `src/main.ts`, and the pause menu's dev button) and `npm run bot`: both exist.
 - `Loose.from` on freed ore (`src/sim.ts`): exists.
 - `safeImpactSpeed` in `src/tuning.ts`: exists (90).
 - A move order with an arrival speed: `sim.orderMove(x, y, vx, vy)` takes an end velocity (the

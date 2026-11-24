@@ -11,3 +11,6 @@ All news board lines with a 'place' should have a click link that sets the desti
 
 ## I-2 · Traffic using a tractor beam has the pull but no effects (beams that pull)
 - added: 2026-11-24 07:04
+
+## I-3 · Fuel tanks should be twice as long.
+- added: 2026-11-24 07:08

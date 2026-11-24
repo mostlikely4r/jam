@@ -4,7 +4,7 @@
  * dish), each drawn where its mount sits, turned the way it faces and at its size; what's inside
  * the hull (computer, bay) doesn't show. Damaged parts are handed back so the caller can spark them.
  */
-import { DAMAGED_AT, decalOf, facing, HULL_MOUNTS, type Module, type Mount, type MountId } from "./fitting";
+import { DAMAGED_AT, decalOf, facing, HULL_MOUNTS, PART_ART, type Module, type Mount, type MountId } from "./fitting";
 import { partOf, type PartId, type PartKind, type ShipModel } from "./parts";
 import type { Box } from "./grid";
 
@@ -37,11 +37,22 @@ export type TankFill = number | null;
 
 const METAL: Color = [111, 122, 140];
 const RIM: Color = [190, 200, 216];
+
+/** The colours a part's art starts from, as `#rrggbb`, for the designer's colour pickers. */
+export const METAL_HEX = "#6f7a8c";
+export const RIM_HEX = "#bec8d8";
 const HOT: Color = [255, 138, 58];
 const DEAD: Color = [46, 42, 40];
 
 const rgb = (c: Color) => `rgb(${c[0]},${c[1]},${c[2]})`;
-const mix = (a: Color, b: Color, t: number): Color => [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * t)) as Color;
+
+/** A `#rrggbb` colour as the triple the art works in, or `fallback` for anything else. */
+export function colorOf(css: string, fallback: Color = METAL): Color {
+  const hex = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(css.trim());
+  return hex ? [parseInt(hex[1], 16), parseInt(hex[2], 16), parseInt(hex[3], 16)] : fallback;
+}
+/** One colour part of the way to another, as the art blends its shades. */
+export const mix = (a: Color, b: Color, t: number): Color => [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * t)) as Color;
 const partColor = (wear: number, base: Color): Color => (wear >= 1 ? DEAD : wear >= DAMAGED_AT ? mix(base, HOT, 0.75) : base);
 
 function path(ctx: CanvasRenderingContext2D, points: Point[]): void {
@@ -50,27 +61,33 @@ function path(ctx: CanvasRenderingContext2D, points: Point[]): void {
   ctx.closePath();
 }
 
-/** The fitted modules worth drawing: everything on the outside, turret and its gun left to the caller. */
-function outsideParts(ship: ArtShip): { id: MountId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number }[] {
-  const out: { id: MountId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number }[] = [];
+/** The fitted modules worth drawing: everything on the outside, turret and its gun left to `drawTurret`. */
+function outsideParts(ship: ArtShip): { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number }[] {
+  const out: { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number }[] = [];
   for (const mount of HULL_MOUNTS[ship.model]) {
     const module = ship.fit[mount.id];
     if (!module) continue;
     const kind = partOf(module.part).kind;
     if (kind === "computer" || kind === "section" || kind === "tank" || kind === "turret" || mount.id === "turretGun") continue;
     // Destroyed, a bay carries nothing any more: see `bayBox`.
-    out.push({ id: mount.id, x: mount.x * R, y: mount.y * R, angle: facing(mount), scale: mount.scale, kind, wear: module.wear, alpha: mount.alpha ?? 1, order: mount.order ?? 0 });
+    out.push({ id: mount.id, part: module.part, x: mount.x * R, y: mount.y * R, angle: facing(mount), scale: mount.scale, kind, wear: module.wear, alpha: mount.alpha ?? 1, order: mount.order ?? 0 });
   }
   return out;
 }
 
+/** The colours a part draws in, where its own art changes them from the code's: the metal, and the edge. */
+export interface PartColors {
+  metal?: Color;
+  rim?: Color;
+}
+
 /**
  * One part, drawn at the origin facing +x: a thruster's flame and a gun's shot go that way.
- * `main`: the big engine bell rather than a nozzle nub.
+ * `main`: the big engine bell rather than a nozzle nub. `colours`: the part's own, where its art has some.
  */
-export function drawPart(ctx: CanvasRenderingContext2D, kind: PartKind, wear: number, main = false): void {
-  const c = partColor(wear, METAL);
-  const rim = partColor(wear, RIM);
+export function drawPart(ctx: CanvasRenderingContext2D, kind: PartKind, wear: number, main = false, colours: PartColors = {}): void {
+  const c = partColor(wear, colours.metal ?? METAL);
+  const rim = partColor(wear, colours.rim ?? RIM);
   ctx.lineJoin = "round";
   if (kind === "thruster" && main) {
     const front = -2.5;
@@ -102,7 +119,7 @@ export function drawPart(ctx: CanvasRenderingContext2D, kind: PartKind, wear: nu
     ctx.lineWidth = 0.45;
     ctx.stroke();
   } else if (kind === "gun") {
-    ctx.fillStyle = rgb(partColor(wear, [90, 98, 114]));
+    ctx.fillStyle = rgb(partColor(wear, colours.metal ?? [90, 98, 114]));
     ctx.fillRect(-2, -1.6, 3.4, 3.2);
     ctx.strokeStyle = rgb(c);
     ctx.lineWidth = 1.3;
@@ -119,11 +136,11 @@ export function drawPart(ctx: CanvasRenderingContext2D, kind: PartKind, wear: nu
       ctx.stroke();
     }
   } else if (kind === "tractor") {
-    ctx.fillStyle = rgb(partColor(wear, [70, 120, 112]));
+    ctx.fillStyle = rgb(partColor(wear, colours.metal ?? [70, 120, 112]));
     ctx.beginPath();
     ctx.arc(0, 0, 1.9, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = rgb(partColor(wear, [150, 230, 210]));
+    ctx.strokeStyle = rgb(partColor(wear, colours.rim ?? [150, 230, 210]));
     ctx.lineWidth = 0.6;
     ctx.beginPath();
     ctx.arc(-0.4, 0, 1.9, -1.1, 1.1);
@@ -142,6 +159,23 @@ export function drawPart(ctx: CanvasRenderingContext2D, kind: PartKind, wear: nu
     else if (kind === "tank") ctx.strokeRect(-2.2, -1.4, 4.4, 2.8);
     else ctx.strokeRect(-3, -2.2, 6, 4.4);
   }
+}
+
+/**
+ * A part drawn as its own art has it: stretched, faded and in its own colours, over whatever the
+ * mount or the ship already scales and fades it by. Draws nothing for a part that has no art of its own.
+ */
+export function drawPartArt(ctx: CanvasRenderingContext2D, id: PartId, wear: number, main = false): void {
+  const part = partOf(id);
+  const art = PART_ART[id];
+  ctx.save();
+  if (art?.scaleX !== undefined || art?.scaleY !== undefined) ctx.scale(art.scaleX ?? 1, art.scaleY ?? 1);
+  if (art?.alpha !== undefined) ctx.globalAlpha *= art.alpha;
+  const colours: PartColors = {};
+  if (art?.metal) colours.metal = colorOf(art.metal, METAL);
+  if (art?.rim) colours.rim = colorOf(art.rim, RIM);
+  drawPart(ctx, part.kind, wear, main, colours);
+  ctx.restore();
 }
 
 /** A darker belly panel for depth: a shape of its own for the first two hulls, else the hull's shrunk and shifted down. */
@@ -185,7 +219,7 @@ export function drawDecal(ctx: CanvasRenderingContext2D, id: PartId): void {
     ctx.fillRect(-1.8, -0.6, 2.6, 0.3);
   } else {
     const part = partOf(id);
-    drawPart(ctx, part.kind, 0, part.engine !== undefined);
+    drawPartArt(ctx, id, 0, part.engine !== undefined);
   }
 }
 
@@ -207,6 +241,49 @@ export function drawDecals(ctx: CanvasRenderingContext2D, model: ShipModel, pick
     drawDecal(ctx, id);
     ctx.restore();
   }
+}
+
+/**
+ * A turret mount: a circle on the mount, with the gun fitted on it turning to the aim. Drawn in
+ * the ship's own frame, so the caller has already turned the world to the ship's nose.
+ */
+export interface TurretArt {
+  /** Where the mount sits in the ship's frame, world units. */
+  x: number;
+  y: number;
+  /** Where the gun points, in the ship's frame: the mount's resting way, or its aim. */
+  angle: number;
+  scale: number;
+  /** Its mount's transparency. */
+  alpha?: number;
+  /** The gun fitted on it, if one is, and how worn. */
+  gun: Module | null;
+  /** The turret's own colours, where it's damaged or tinted; the code's metal and rim otherwise. */
+  colours?: PartColors;
+}
+
+/** How far a turret's circle reaches, and how big the gun drawn on it is against its own art. */
+const TURRET_RADIUS = 4.2;
+const TURRET_GUN = 1.8;
+
+export function drawTurret(ctx: CanvasRenderingContext2D, art: TurretArt): void {
+  ctx.save();
+  if (art.alpha !== undefined && art.alpha < 1) ctx.globalAlpha *= art.alpha;
+  ctx.translate(art.x, art.y);
+  // The base first, so the gun reads as turning on it.
+  ctx.fillStyle = rgb(art.colours?.metal ?? METAL);
+  ctx.beginPath();
+  ctx.arc(0, 0, TURRET_RADIUS * art.scale, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = rgb(art.colours?.rim ?? RIM);
+  ctx.lineWidth = 0.6 * art.scale;
+  ctx.stroke();
+  if (art.gun) {
+    ctx.rotate(art.angle);
+    ctx.scale(art.scale * TURRET_GUN, art.scale * TURRET_GUN);
+    drawPartArt(ctx, art.gun.part, art.gun.wear);
+  }
+  ctx.restore();
 }
 
 /** The bare hull: plates and edge. Decals, such as the cockpit, go on top (`drawDecals`). */
@@ -388,13 +465,13 @@ export function drawVectorShip(ctx: CanvasRenderingContext2D, ship: ArtShip, hul
 }
 
 /** One fitted module at its mount, with its transparency, and where it sits if it's broken. */
-function drawFitted(ctx: CanvasRenderingContext2D, part: { id: MountId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number }): Point | null {
+function drawFitted(ctx: CanvasRenderingContext2D, part: { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number }): Point | null {
   ctx.save();
   ctx.translate(part.x, part.y);
   ctx.rotate(part.angle);
   ctx.scale(part.scale, part.scale);
   if (part.alpha < 1) ctx.globalAlpha = part.alpha;
-  drawPart(ctx, part.kind, part.wear, part.id === "thrusterMain");
+  drawPartArt(ctx, part.part, part.wear, part.id === "thrusterMain");
   ctx.restore();
   if (part.wear < DAMAGED_AT) return null;
   const x = part.x;

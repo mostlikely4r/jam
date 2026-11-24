@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { homeSim } from "./home";
-import { decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, refresh, resetPartStats, shipFileNow, thrustOf, useShipFile, type HullInfo } from "./fitting";
+import { decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, PART_ART, refresh, resetPartArt, resetPartStats, shipFileNow, thrustOf, useShipFile, type HullInfo, type PartArt } from "./fitting";
 import { SHIP_MODELS, type PartId, type ThrusterRole } from "./parts";
-import { bayBox, drawVectorShip } from "./shipArt";
+import { bayBox, drawTurret, drawVectorShip } from "./shipArt";
 import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
 import { DOCK_OFFSET, SHIP_RADIUS, Sim } from "./sim";
@@ -894,6 +894,43 @@ describe("the stats of hulls and parts", () => {
     );
   });
 
+  it("a part's art carries in the ship file, and the code's drawing stands until it differs", () => {
+    withFile(
+      () => {
+        PART_ART.bay = { scaleX: 1.5, scaleY: 0.8, alpha: 0.6, metal: "#ff0000", rim: "#00ff00" };
+        // Nothing but what differs is kept: a value the code already draws is dropped.
+        PART_ART.gun1 = { scaleX: 1 } as PartArt;
+      },
+      () => {
+        const file = shipFileNow();
+        expect(file.partArt!.bay).toEqual({ scaleX: 1.5, scaleY: 0.8, alpha: 0.6, metal: "#ff0000", rim: "#00ff00" });
+        expect(file.partArt!.gun1).toBeUndefined();
+        // The file puts it back, the same way round.
+        useShipFile(file);
+        expect(PART_ART.bay).toEqual({ scaleX: 1.5, scaleY: 0.8, alpha: 0.6, metal: "#ff0000", rim: "#00ff00" });
+        // A part the code draws plainly keeps nothing, and resetting one puts it back.
+        expect(PART_ART.smallBay).toBeUndefined();
+        resetPartArt("bay");
+        expect(PART_ART.bay).toBeUndefined();
+        expect(shipFileNow().partArt).toEqual({});
+      },
+    );
+  });
+
+  it("a part's art reads defensively: a size out of range and a colour that isn't one are left out", () => {
+    const keep = shipFileNow();
+    try {
+      useShipFile({
+        ...keep,
+        partArt: { bay: { scaleX: 99, scaleY: 0, alpha: 2, metal: "red", rim: "#12345" }, gun1: { scaleY: 2 } },
+      });
+      expect(PART_ART.bay).toBeUndefined();
+      expect(PART_ART.gun1).toEqual({ scaleY: 2 });
+    } finally {
+      useShipFile(keep);
+    }
+  });
+
   it("a module's shape, price and icon are its item's: the ship file leaves them alone", () => {
     const keep = shipFileNow();
     try {
@@ -906,6 +943,40 @@ describe("the stats of hulls and parts", () => {
     } finally {
       useShipFile(keep);
     }
+  });
+});
+
+describe("a turret draws as a circle with its gun on it", () => {
+  /** A canvas context that records the calls made on it, and the numbers passed. */
+  function recorder(): { ctx: CanvasRenderingContext2D; calls: [string, number[]][] } {
+    const calls: [string, number[]][] = [];
+    const ctx = new Proxy({} as CanvasRenderingContext2D, {
+      get: (_target, name: string) => (...args: number[]) => void calls.push([name, args]),
+      set: () => true,
+    });
+    return { ctx, calls };
+  }
+
+  it("turns the gun to the aim angle, on the turret's own spot and after the circle", () => {
+    const { ctx, calls } = recorder();
+    drawTurret(ctx, { x: 6, y: -12, angle: Math.PI / 2, scale: 1, gun: { part: "gun1", wear: 0 } });
+    expect(calls.find(([name]) => name === "translate")![1]).toEqual([6, -12]);
+    const turns = calls.filter(([name]) => name === "rotate");
+    expect(turns).toHaveLength(1);
+    expect(turns[0][1][0]).toBeCloseTo(Math.PI / 2, 5);
+    // The disk is drawn where it stands, before the gun turns on it.
+    const disk = calls.findIndex(([name, args]) => name === "arc" && args[2] > 1);
+    expect(disk).toBeGreaterThan(-1);
+    expect(disk).toBeLessThan(calls.indexOf(turns[0]));
+  });
+
+  it("draws the circle alone when no gun is fitted, and keeps the mount's scale", () => {
+    const { ctx, calls } = recorder();
+    drawTurret(ctx, { x: 0, y: 0, angle: 0, scale: 2, gun: null });
+    expect(calls.some(([name]) => name === "rotate")).toBe(false);
+    const disk = calls.find(([name]) => name === "arc")!;
+    // Twice the mount's size, twice the circle.
+    expect(disk[1][2]).toBeCloseTo(8.4, 5);
   });
 });
 

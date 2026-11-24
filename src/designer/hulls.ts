@@ -42,6 +42,8 @@ import {
   onEdge,
   PART_MOUNTS,
   resetPartStats,
+  PART_ART,
+  resetPartArt,
   SHIPPED_SHIPS,
   shipFileNow,
   THRUSTER_ROLES,
@@ -52,16 +54,19 @@ import {
   type Module,
   type Mount,
   type MountId,
+  type PartArt,
   type ShipFile,
   itemOwned,
 } from "../fitting";
 import { PART_KINDS, partFits, partOf, PARTS, SHIP_MODELS, type PartIcon, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "../parts";
-import { ITEMS, ITEM_TYPES, itemDef, itemsFileNow, SHIPPED_ITEMS, useItemsFile, type ItemDef, type ItemType } from "../items";
-import { PROGRAMS, PROGRAM_PARTS, programDef, programsFileNow, SHIPPED_PROGRAMS, useProgramsFile, needsMet, type ProgramDef } from "../programs";
+import { ITEMS, ITEM_TYPES, itemDef, itemsFileNow, SHIPPED_ITEMS, useItemsFile, type ItemDef, type ItemsFile, type ItemType } from "../items";
+import { PROGRAMS, PROGRAM_PARTS, programDef, programsFileNow, SHIPPED_PROGRAMS, useProgramsFile, needsMet, type ProgramDef, type ProgramsFile } from "../programs";
 import type { GlyphId } from "../glyphs";
 import { EVERY_GLYPH, glyphIcon, iconEl } from "../icons";
 import { DEFAULTS } from "../tuning";
-import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPart, drawTanks, tankBoxes } from "../shipArt";
+import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPartArt, drawTanks, drawTurret, METAL_HEX, RIM_HEX, tankBoxes } from "../shipArt";
+import { multiSelect, withoutPick, withPick } from "./multiselect";
+import { UndoStack } from "./undo";
 
 const R = 12;
 const DRAFT_KEY = "jam-ships-draft";
@@ -92,6 +97,19 @@ const FITTED = [...PARTS].sort((a, b) => byName(a.label, b.label));
 const PROGRAM_LIST = [...PROGRAM_PARTS].sort((a, b) => byName(a.label, b.label));
 
 type Page = "hulls" | "parts" | "types" | "items" | "programs";
+
+/** What the blueprint can hide: view state, never saved. */
+type Layer = "hull" | "parts" | "mounts" | "decals" | "bay" | "effects";
+
+/** The layer toggles, beside the canvas, in the order they show. */
+const LAYERS: [Layer, string][] = [
+  ["hull", "Hull shape"],
+  ["parts", "Fitted parts"],
+  ["mounts", "Mounts"],
+  ["decals", "Decals"],
+  ["bay", "Cargo bay"],
+  ["effects", "Thrust and gun lines"],
+];
 
 const STYLE = `
 #hulls { position: fixed; inset: 0; z-index: 50; background: #05070d; display: flex; font: 13px system-ui, sans-serif; color: #cfd8e6; }
@@ -139,6 +157,11 @@ const STYLE = `
 #hulls table.loadouts .ok { color: #8fe3a1; }
 #hulls table.loadouts .warn { color: #f0d86a; }
 #hulls table.loadouts .bad { color: #e88a8a; }
+#hulls .viewbar { position: absolute; right: 12px; top: 12px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+#hulls .viewbar[hidden] { display: none; }
+#hulls .viewbar button { margin: 0; padding: 2px 7px; font-size: 11px; background: rgba(11, 15, 24, 0.85); border-color: #33405a; }
+#hulls .viewbar button:not(.on) { color: #6a7486; }
+#hulls .viewbar button.on { border-color: #8fb4ff; }
 `;
 
 const round = (value: number, step: number) => Math.round(value / step) * step;
@@ -188,6 +211,19 @@ export class HullDesigner {
   private zoom = 10;
   private cx = 0;
   private cy = 0;
+  /** How far the user zoomed in, and how far they pushed the ship off the middle. View state, never saved. */
+  private viewZoom = 1;
+  private pan = { x: 0, y: 0 };
+  /** The layers the user hid on the blueprint: view state too, kept across rebuilds. */
+  private readonly hidden = new Set<Layer>();
+  /** Where the cursor last was on the canvas, for a turret's gun to follow. */
+  private at: [number, number] | null = null;
+  /** Ctrl-Z's snapshots, one stack for the three pages. */
+  private readonly undo: UndoStack;
+  /** A drag, a held wheel or a slider counts as one step: no snapshot until it settles. */
+  private gesturing = false;
+  private gestureTimer = 0;
+  private readonly viewbar: HTMLDivElement;
 
   /** `onMountsChanged`: mounts came or went, so ships tidy away what's on ones that are gone. */
   constructor(
@@ -204,7 +240,9 @@ export class HullDesigner {
     this.side.className = "side";
     this.canvas = document.createElement("canvas");
     this.ctx = this.canvas.getContext("2d")!;
-    this.element.append(this.side, this.canvas);
+    this.viewbar = document.createElement("div");
+    this.viewbar.className = "viewbar";
+    this.element.append(this.side, this.canvas, this.viewbar);
     document.body.append(this.element);
     this.listen();
     // Unsaved work from before a reload carries on. A draft no different from the shipped file
@@ -225,6 +263,9 @@ export class HullDesigner {
     } catch {
       /* no draft */
     }
+    // Undo starts from the drafts as they came back, so the first change steps back to the file.
+    this.undo = new UndoStack(100, this.snapshot());
+    this.fillViewbar();
   }
 
   get isOpen(): boolean {
@@ -265,14 +306,143 @@ export class HullDesigner {
       mount.angle = clean(wrapDegrees(mount.angle));
       mount.scale = clean(Math.max(0.2, Math.min(4, mount.scale)));
     }
-    try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(shipFileNow()));
-    } catch {
-      /* storage blocked: the change still holds until reload */
-    }
+    this.writeDrafts();
+    // A change that redraws without rebuilding — a drag, a held wheel, a slider — comes in a burst:
+    // the snapshot waits until it settles, so the whole gesture is one step to undo.
+    if (!rebuild) this.burst();
+    if (!this.gesturing) this.undo.record(this.snapshot());
     this.status = "Not saved";
     if (rebuild) this.rebuild();
     else this.refreshFields();
+  }
+
+  /** The three files as they are now, as one snapshot: what Ctrl-Z steps through. */
+  private snapshot(): string {
+    return JSON.stringify({ ships: shipFileNow(), items: itemsFileNow(), programs: programsFileNow() });
+  }
+
+  /** Keeps the drafts as they are now, and drops any that says nothing the shipped file doesn't. */
+  private writeDrafts(): void {
+    const keep = (key: string, shipped: unknown, now: unknown) => {
+      const text = JSON.stringify(now);
+      if (text === JSON.stringify(shipped)) localStorage.removeItem(key);
+      else localStorage.setItem(key, text);
+    };
+    try {
+      keep(DRAFT_KEY, SHIPPED_SHIPS, shipFileNow());
+      keep(ITEMS_DRAFT_KEY, SHIPPED_ITEMS, itemsFileNow());
+      keep(PROGRAMS_DRAFT_KEY, SHIPPED_PROGRAMS, programsFileNow());
+    } catch {
+      /* storage blocked: the change still holds until reload */
+    }
+  }
+
+  /** Puts a snapshot back into play, all three files at once. */
+  private restore(text: string): void {
+    const { ships, items, programs } = JSON.parse(text) as { ships: ShipFile; items: Partial<ItemsFile>; programs: Partial<ProgramsFile> };
+    useShipFile(ships);
+    useItemsFile(items);
+    useProgramsFile(programs);
+    this.writeDrafts();
+    this.onMountsChanged();
+    this.status = "Not saved";
+    this.rebuild();
+  }
+
+  /** One step back or forward: Ctrl-Z, or Ctrl-Shift-Z and Ctrl-Y. */
+  private step(way: "undo" | "redo"): void {
+    const text = way === "undo" ? this.undo.undo() : this.undo.redo();
+    if (text === null) {
+      this.status = way === "undo" ? "Nothing to undo" : "Nothing to redo";
+      this.refreshFields();
+      return;
+    }
+    this.restore(text);
+  }
+
+  /** A change that comes in a burst, from a held wheel or a slider: it counts as one step. */
+  private burst(): void {
+    this.gesturing = true;
+    if (this.gestureTimer) clearTimeout(this.gestureTimer);
+    this.gestureTimer = window.setTimeout(() => this.settle(), 400);
+  }
+
+  /** Ends a burst: the drag, the held wheel or the slider is one step to undo. */
+  private settle(): void {
+    if (this.gestureTimer) clearTimeout(this.gestureTimer);
+    this.gestureTimer = 0;
+    if (!this.gesturing) return;
+    this.gesturing = false;
+    this.undo.record(this.snapshot());
+  }
+
+  /** Selects nothing: the wheel zooms then, and the mount section goes away. */
+  private deselect(): void {
+    this.gesturing = false;
+    this.selected = null;
+    this.rebuild();
+  }
+
+  /** The zoom that fits the whole ship, at this canvas size. */
+  private fitZoom(width: number, height: number): number {
+    return Math.max(4, Math.min(width, height) / (R * 4.2));
+  }
+
+  /** Back to the whole ship in view: the fit button, or key 0. */
+  private fitView(): void {
+    this.viewZoom = 1;
+    this.pan = { x: 0, y: 0 };
+    this.refreshViewbar();
+  }
+
+  /** Zooms by `factor`, keeping the point at (sx, sy) where it is, so the wheel works toward the pointer. */
+  private zoomAt(factor: number, sx: number, sy: number): void {
+    const next = clean(Math.max(0.5, Math.min(6, this.viewZoom * factor)));
+    if (next === this.viewZoom) return;
+    const [x, y] = this.fromScreen(sx, sy);
+    this.viewZoom = next;
+    const rect = this.canvas.getBoundingClientRect();
+    const unit = R * this.fitZoom(rect.width, rect.height) * this.viewZoom;
+    this.pan = { x: sx - x * unit - rect.width / 2, y: sy - y * unit - rect.height / 2 };
+    this.refreshViewbar();
+  }
+
+  // ---------- view ----------
+
+  /** Whether a layer of the blueprint shows: all of them, until the user hides one. */
+  private shown(layer: Layer): boolean {
+    return !this.hidden.has(layer);
+  }
+
+  private toggleLayer(layer: Layer): void {
+    if (this.hidden.has(layer)) this.hidden.delete(layer);
+    else this.hidden.add(layer);
+    this.refreshViewbar();
+  }
+
+  /** The toggles beside the canvas: one eye per layer, and the fit button. */
+  private fillViewbar(): void {
+    for (const [layer, title] of LAYERS) {
+      const eye = this.button("", () => this.toggleLayer(layer));
+      eye.dataset.layer = layer;
+      eye.title = `Show or hide the ${title.toLowerCase()}`;
+      this.viewbar.append(eye);
+    }
+    const fit = this.button("Fit (0)", () => this.fitView());
+    fit.dataset.fit = "1";
+    fit.title = "Back to the whole ship in view";
+    this.viewbar.append(fit);
+    this.refreshViewbar();
+  }
+
+  private refreshViewbar(): void {
+    for (const button of this.viewbar.querySelectorAll("button")) {
+      if (button.dataset.fit) continue;
+      const layer = button.dataset.layer as Layer;
+      const on = this.shown(layer);
+      button.textContent = `${on ? "\u25c9" : "\u25cb"} ${LAYERS.find(([each]) => each === layer)![1]}`;
+      button.className = on ? "on" : "";
+    }
   }
 
   // ---------- side panel ----------
@@ -328,29 +498,26 @@ export class HullDesigner {
     return label;
   }
 
-  /** Ticks for each of `items` ([id, text]), `has` saying which are on; `toggle` flips one. Mount types by default. */
-  private checks(
-    has: (id: string) => boolean,
-    toggle: (id: string, on: boolean) => void,
-    items: [string, string][] = MOUNT_TYPES.map((type) => [type, type]),
+  /**
+   * A list of ids picked out of a long set: the picked ones as chips, a filter for the rest.
+   * `options` are [id, text] in their own order, `picked` the ids on, in the order they were
+   * picked, and `pick` flips one. Mount types by default.
+   */
+  private multi(
+    key: string,
+    picked: readonly string[],
+    pick: (id: string, on: boolean) => void,
+    options: [string, string][] = MOUNT_TYPES.map((type): [string, string] => [type, type]),
     none = "No mount types yet: add some on the Mount types page.",
   ): HTMLDivElement {
-    const box = document.createElement("div");
-    box.className = "checks";
-    if (items.length === 0) box.textContent = none;
-    for (const [id, text] of items) {
-      const label = document.createElement("label");
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.checked = has(id);
-      input.addEventListener("change", () => {
-        toggle(id, input.checked);
-        this.changed();
-      });
-      label.append(input, text);
-      box.append(label);
-    }
-    return box;
+    return multiSelect({
+      key,
+      options: options.map(([id, label]) => ({ id, label })),
+      picked: () => picked,
+      pick,
+      changed: () => this.changed(),
+      none,
+    });
   }
 
   private rebuild(): void {
@@ -387,16 +554,13 @@ export class HullDesigner {
         useShipFile(SHIPPED_SHIPS);
         useItemsFile(SHIPPED_ITEMS);
         useProgramsFile(SHIPPED_PROGRAMS);
-        try {
-          localStorage.removeItem(ITEMS_DRAFT_KEY);
-          localStorage.removeItem(PROGRAMS_DRAFT_KEY);
-          localStorage.removeItem(DRAFT_KEY);
-        } catch {
-          /* nothing kept */
-        }
+        this.writeDrafts();
         if (!this.mount()) this.selected = this.mounts()[0]?.id ?? null;
         this.onMountsChanged();
         this.status = "Back to src/hulls.json as loaded";
+        // A throw-away is a change like any other: Ctrl-Z brings the work back.
+        this.gesturing = false;
+        this.undo.record(this.snapshot());
         this.rebuild();
       }),
       this.button("Close (Esc)", () => this.close()),
@@ -407,6 +571,8 @@ export class HullDesigner {
     file.append(this.statusLine);
 
     this.side.replaceChildren(title, pages, ...body, file);
+    // The layer toggles are the blueprint's; the items page draws something else.
+    this.viewbar.hidden = this.page === "items";
   }
 
   /** The loops a hull is meant for, each with the programs it needs and the ones that help. */
@@ -437,10 +603,11 @@ export class HullDesigner {
       });
       block.append(this.labelled("Loop", name));
       const list = (label: string, key: "core" | "comfort", hint: string) => {
-        const ticks = this.checks(
-          (id) => loadout[key].includes(id as PartId),
+        const ticks = this.multi(
+          `loadout:${this.model}:${loadout.name}:${key}`,
+          loadout[key],
           (id, on) => {
-            loadout[key] = on ? [...loadout[key], id as PartId] : loadout[key].filter((each) => each !== id);
+            loadout[key] = on ? withPick(loadout[key], id) : withoutPick(loadout[key], id);
           },
           PROGRAM_LIST.map((part): [string, string] => [part.id, part.label]),
           "No programs yet.",
@@ -476,27 +643,30 @@ export class HullDesigner {
         this.model,
         (value) => {
           this.model = value as ShipModel;
-          this.selected = this.mounts()[0]?.id ?? null;
+          // A hull change keeps nothing picked as nothing picked.
+          if (this.selected) this.selected = this.mounts()[0]?.id ?? null;
           this.rebuild();
         },
       ),
     );
     const info = HULL_INFO[this.model];
-    const usedBy = this.checks(
-      (use) => info.usedBy.includes(use as HullUse),
+    const usedBy = this.multi(
+      `used:${this.model}`,
+      info.usedBy,
       (use, on) => {
-        info.usedBy = on ? [...info.usedBy, use as HullUse] : info.usedBy.filter((each) => each !== use);
+        info.usedBy = on ? withPick(info.usedBy, use as HullUse) : withoutPick(info.usedBy, use as HullUse);
       },
-      HULL_USES.map((use) => [use, HULL_USE_NAMES[use]]),
+      HULL_USES.map((use): [string, string] => [use, HULL_USE_NAMES[use]]),
     );
     const usedNote = document.createElement("p");
     usedNote.textContent = "Kept for later: the game doesn't pick hulls by these yet.";
-    const programs = this.checks(
-      (id) => info.programs.includes(id as PartId),
+    const programs = this.multi(
+      `programs:${this.model}`,
+      info.programs,
       (id, on) => {
-        info.programs = on ? [...info.programs, id as PartId] : info.programs.filter((each) => each !== id);
+        info.programs = on ? withPick(info.programs, id) : withoutPick(info.programs, id);
       },
-      PROGRAM_LIST.map((part) => [part.id, part.label]),
+      PROGRAM_LIST.map((part): [string, string] => [part.id, part.label]),
     );
     const programsNote = document.createElement("p");
     programsNote.textContent = "Loaded into its computer as far as it has slots, and the pilot owns them.";
@@ -599,10 +769,11 @@ export class HullDesigner {
     });
     role.append(roleBox);
 
-    const supports = this.checks(
-      (type) => mount.types.includes(type),
+    const supports = this.multi(
+      `types:${this.model}:${mount.id}`,
+      mount.types,
       (type, on) => {
-        mount.types = on ? [...mount.types, type] : mount.types.filter((each) => each !== type);
+        mount.types = on ? withPick(mount.types, type) : withoutPick(mount.types, type);
       },
     );
     const takes = document.createElement("p");
@@ -741,8 +912,10 @@ export class HullDesigner {
       "Drag a mount: move it (Shift snaps to 0.05)",
       "Drag the knob, or wheel: turn it (Shift: 1°, else 15°)",
       "Ctrl + wheel, or + and −: size",
+      "Nothing selected: the wheel zooms toward the pointer, 0 fits it back",
+      "Ctrl-Z: undo    Ctrl-Shift-Z or Ctrl-Y: redo",
       "Arrows: nudge (Shift: finer)    Q / E: turn",
-      "Tab: next mount    Delete: remove it    Esc: back to the game",
+      "Tab: next mount    Delete: remove it    Esc: nothing selected, then close",
       "",
       "Green arrows: which way each thruster pushes the ship.",
     ].join("\n");
@@ -784,6 +957,7 @@ export class HullDesigner {
         },
       ),
     );
+    if (!FITTED.some((each) => each.id === this.part)) this.part = FITTED[0].id;
     const part = partOf(this.part);
     const decal = document.createElement("label");
     const decalBox = document.createElement("input");
@@ -798,11 +972,12 @@ export class HullDesigner {
     });
     decal.style.color = "#cfd8e6";
     decal.append(decalBox, " Decal: looks only. It shows, at random, on decal mounts that fit it, and is never fitted or sold");
-    const fits = this.checks(
-      (type) => (PART_MOUNTS[part.id] ?? []).includes(type),
+    const fits = this.multi(
+      `fits:${part.id}`,
+      PART_MOUNTS[part.id] ?? [],
       (type, on) => {
         const now = PART_MOUNTS[part.id] ?? [];
-        PART_MOUNTS[part.id] = on ? [...now, type] : now.filter((each) => each !== type);
+        PART_MOUNTS[part.id] = on ? withPick(now, type) : withoutPick(now, type);
       },
     );
     const where = document.createElement("p");
@@ -900,6 +1075,8 @@ export class HullDesigner {
       tier,
       this.button("Back to coded stats", () => {
         resetPartStats(part.id);
+        // The plan's own call: the art goes back with the stats.
+        resetPartArt(part.id);
         this.changed();
       }),
       statsNote,
@@ -908,10 +1085,69 @@ export class HullDesigner {
       intro,
       this.section("part", "Part", list, decal),
       stats,
+      this.section(`art:${part.id}`, "Art", ...this.artEditor(part)),
       ...(itemOwned(part.id) ? [] : [this.section(`icon:${part.id}`, "Icon", ...this.iconPicker(part))]),
       this.section(`fits:${part.id}`, `${part.label} fits`, fits, set),
       this.section("goes", "Goes on", where, models),
     ];
+  }
+
+  /**
+   * How the part draws, over the code's own art: stretched wide or tall, faded, and in colours of
+   * its own. Kept in the ship file, only where it differs from the code's.
+   */
+  private artEditor(part: { id: PartId }): HTMLElement[] {
+    const art: PartArt = PART_ART[part.id] ?? {};
+    /** Writes one value of the part's art, dropping it when it says nothing the code doesn't. */
+    const set = (key: keyof PartArt, value: number | string | undefined, rebuild = true) => {
+      const now: PartArt = { ...(PART_ART[part.id] ?? {}) };
+      if (value === undefined) delete now[key];
+      else if (key === "scaleX" || key === "scaleY" || key === "alpha") now[key] = value as number;
+      else now[key] = value as string;
+      if (Object.keys(now).length > 0) PART_ART[part.id] = now;
+      else delete PART_ART[part.id];
+      this.changed(rebuild);
+    };
+    const scale = (key: "scaleX" | "scaleY", label: string) => {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = "0.05";
+      input.min = "0.2";
+      input.max = "4";
+      input.value = String(art[key] ?? 1);
+      input.addEventListener("change", () => {
+        const value = Number(input.value);
+        if (!Number.isFinite(value) || value <= 0) return;
+        const wanted = clean(Math.max(0.2, Math.min(4, value)));
+        set(key, wanted === 1 ? undefined : wanted);
+      });
+      return this.labelled(label, input);
+    };
+    const alpha = document.createElement("input");
+    alpha.type = "range";
+    alpha.min = "0";
+    alpha.max = "1";
+    alpha.step = "0.05";
+    alpha.value = String(art.alpha ?? 1);
+    const readout = document.createElement("span");
+    readout.textContent = `  ${Math.round((art.alpha ?? 1) * 100)}% solid`;
+    alpha.addEventListener("input", () => {
+      const wanted = clean(Math.max(0, Math.min(1, Number(alpha.value))));
+      readout.textContent = `  ${Math.round(wanted * 100)}% solid`;
+      set("alpha", wanted >= 0.999 ? undefined : wanted, false);
+    });
+    const alphaWrap = document.createElement("span");
+    alphaWrap.append(alpha, readout);
+    const colour = (key: "metal" | "rim", label: string, fallback: string) => {
+      const input = document.createElement("input");
+      input.type = "color";
+      input.value = art[key] ?? fallback;
+      input.addEventListener("change", () => set(key, input.value === fallback ? undefined : input.value.toLowerCase()));
+      return this.labelled(label, input);
+    };
+    const note = document.createElement("p");
+    note.textContent = "Drawn this way in the blueprint and in the game, on top of the mount's own size and transparency. Only what differs is kept in src/hulls.json, and Back to coded stats resets it.";
+    return [scale("scaleX", "Width against the code's"), scale("scaleY", "Height against the code's"), this.labelled("Transparency", alphaWrap), colour("metal", "Metal", METAL_HEX), colour("rim", "Edge", RIM_HEX), note];
   }
 
   /**
@@ -1512,10 +1748,11 @@ export class HullDesigner {
     return td;
   }
 
-  /** The programs a program can't do without: a check for each another one. */
+  /** The programs a program can't do without: a pick for each of the others. */
   private needsEditor(id: string): HTMLElement[] {
-    const ticks = this.checks(
-      (each) => (this.liveProgram(id).needs ?? []).includes(each),
+    const ticks = this.multi(
+      `needs:${id}`,
+      this.liveProgram(id).needs ?? [],
       (each, on) => {
         const live = this.liveProgram(id);
         const needs = new Set(live.needs ?? []);
@@ -1896,15 +2133,22 @@ export class HullDesigner {
     this.canvas.addEventListener("mousedown", (event) => {
       const [sx, sy] = point(event);
       const hit = this.pick(sx, sy);
-      if (!hit) return;
+      if (!hit) {
+        // A click on nothing selects nothing: the wheel zooms then, and the mount sections go.
+        if (this.selected) this.deselect();
+        return;
+      }
       if (this.page !== "hulls") this.page = "hulls";
       if (hit.id !== this.selected) this.select(hit.id);
       else this.rebuild();
+      // The whole drag is one step: it settles when the button comes up.
+      this.gesturing = true;
       this.drag = { kind: hit.kind, moved: false };
     });
     window.addEventListener("mousemove", (event) => {
       if (!this.isOpen) return;
       const [sx, sy] = point(event);
+      this.at = [sx, sy];
       if (!this.drag) {
         const hit = this.pick(sx, sy);
         this.hover = hit?.id ?? null;
@@ -1926,15 +2170,23 @@ export class HullDesigner {
       this.changed(false);
     });
     window.addEventListener("mouseup", () => {
-      if (this.drag?.moved) this.rebuild();
+      const dragged = this.drag;
       this.drag = null;
+      if (dragged?.moved) this.rebuild();
+      this.settle();
     });
     this.canvas.addEventListener(
       "wheel",
       (event) => {
         event.preventDefault();
-        const mount = this.mount();
-        if (!mount) return;
+        const [sx, sy] = point(event);
+        // With a mount picked on the hulls page the wheel turns and sizes it; with none, it's the
+        // view's, zooming toward the pointer.
+        if (this.page !== "hulls" || !this.mount()) {
+          if (this.page !== "items") this.zoomAt(event.deltaY > 0 ? 1 / 1.12 : 1.12, sx, sy);
+          return;
+        }
+        const mount = this.mount()!;
         const way = event.deltaY > 0 ? 1 : -1;
         if (event.ctrlKey) mount.scale = round(mount.scale - way * 0.1, 0.1);
         else mount.angle += way * (event.shiftKey ? 1 : 15);
@@ -1944,9 +2196,30 @@ export class HullDesigner {
     );
     window.addEventListener("keydown", (event) => {
       if (!this.isOpen) return;
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+      // What's typed in a field is the field's own, Ctrl-Z included.
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLTextAreaElement) return;
+      if (event.ctrlKey || event.metaKey) {
+        if (event.code === "KeyZ") {
+          event.preventDefault();
+          event.stopPropagation();
+          this.step(event.shiftKey ? "redo" : "undo");
+          return;
+        }
+        if (event.code === "KeyY") {
+          event.preventDefault();
+          event.stopPropagation();
+          this.step("redo");
+          return;
+        }
+      }
       if (event.code === "Escape") {
-        this.close();
+        // Esc selects nothing first, so a mount can be let go of without leaving; then it closes.
+        if (this.selected && this.page === "hulls") this.deselect();
+        else this.close();
+        return;
+      }
+      if (event.code === "Digit0" || event.code === "Numpad0") {
+        this.fitView();
         return;
       }
       const mount = this.mount();
@@ -2018,10 +2291,11 @@ export class HullDesigner {
     }
     const width = rect.width;
     const height = rect.height;
-    this.cx = width / 2;
-    this.cy = height / 2;
-    // The ship fills most of the view, with room round it for parts that stick out.
-    this.zoom = Math.max(4, Math.min(width, height) / (R * 4.2));
+    // The ship fills most of the view, with room round it for parts that stick out; the user's own
+    // zoom and pan sit on top of that fit. View state, never saved.
+    this.zoom = this.fitZoom(width, height) * this.viewZoom;
+    this.cx = width / 2 + this.pan.x;
+    this.cy = height / 2 + this.pan.y;
     const unit = R * this.zoom;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = "#0a1a2e";
@@ -2060,7 +2334,7 @@ export class HullDesigner {
       ctx.translate(this.cx, this.cy);
       ctx.scale(Math.min(width, height) / 40, Math.min(width, height) / 40);
       if (isDecal(part.id) || part.kind === "cockpit") drawDecal(ctx, part.id);
-      else drawPart(ctx, part.kind, 0, part.engine !== undefined);
+      else drawPartArt(ctx, part.id, 0, part.engine !== undefined);
       ctx.restore();
       ctx.fillStyle = "#7f8ba0";
       ctx.font = "12px system-ui, sans-serif";
@@ -2073,18 +2347,21 @@ export class HullDesigner {
     const mounts = model === this.model ? this.mounts() : HULL_MOUNTS[model];
     const decal = (mount: Mount): PartId | null => this.previewOf(model, mount);
     const byOrder = (a: Mount, b: Mount) => (a.order ?? 0) - (b.order ?? 0);
+    // What the user hid, if anything: the blueprint draws the rest.
+    const parts = this.shown("parts");
+    const decals = this.shown("decals");
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.scale(this.zoom, this.zoom);
     // Below the hull first, so only what sticks out past its edge shows, then the hull and the rest,
     // each layer in draw order, the way the game draws them.
-    drawDecals(ctx, model, decal, "below");
-    for (const mount of mounts.filter((each) => (each.order ?? 0) < 0).sort(byOrder)) this.drawPreview(ctx, model, mount);
-    drawHull(ctx, model, [120, 150, 190]);
-    drawDecals(ctx, model, decal, "above");
+    if (decals) drawDecals(ctx, model, decal, "below");
+    if (parts) for (const mount of mounts.filter((each) => (each.order ?? 0) < 0).sort(byOrder)) this.drawPreview(ctx, model, mount);
+    if (this.shown("hull")) drawHull(ctx, model, [120, 150, 190]);
+    if (decals) drawDecals(ctx, model, decal, "above");
     // The bay's box, as in game: the bay the preview shows on its mount, or else the empty well.
     const spot = mounts.find((each) => each.types.includes("cargo bay"));
-    if (spot) {
+    if (spot && this.shown("bay")) {
       const shown = this.previewOf(model, spot);
       const fit: Partial<Record<MountId, Module>> =
         shown && partOf(shown).kind === "section" ? { [spot.id]: { part: shown, wear: 0 } } : {};
@@ -2092,18 +2369,20 @@ export class HullDesigner {
     }
     // The fuel tanks, full: what each preview shows on its mount, in its mount's transparency.
     const tanks: Partial<Record<MountId, Module>> = {};
-    for (const mount of mounts) {
-      if (!mount.types.includes("fuel tank")) continue;
-      const shown = this.previewOf(model, mount);
-      if (shown && mountTakes(mount, shown)) tanks[mount.id] = { part: shown, wear: 0 };
+    if (parts) {
+      for (const mount of mounts) {
+        if (!mount.types.includes("fuel tank")) continue;
+        const shown = this.previewOf(model, mount);
+        if (shown && mountTakes(mount, shown)) tanks[mount.id] = { part: shown, wear: 0 };
+      }
+      drawTanks(ctx, tankBoxes({ model, fit: tanks }, 1));
+      for (const mount of mounts.filter((each) => (each.order ?? 0) >= 0).sort(byOrder)) this.drawPreview(ctx, model, mount);
     }
-    drawTanks(ctx, tankBoxes({ model, fit: tanks }, 1));
-    for (const mount of mounts.filter((each) => (each.order ?? 0) >= 0).sort(byOrder)) this.drawPreview(ctx, model, mount);
     ctx.restore();
 
     // What each does, then the handles on top.
     const onParts = this.page === "parts";
-    for (const mount of mounts) {
+    for (const mount of this.shown("effects") ? mounts : []) {
       const [x, y] = this.toScreen(mount.x, mount.y);
       const on = mount.id === this.selected && !onParts;
       const green = on ? "#8fe3a1" : "rgba(143,227,161,0.55)";
@@ -2134,7 +2413,7 @@ export class HullDesigner {
         ctx.fill();
       }
     }
-    for (const mount of mounts) {
+    for (const mount of this.shown("mounts") ? mounts : []) {
       const [x, y] = this.toScreen(mount.x, mount.y);
       const on = mount.id === this.selected && !onParts;
       const hover = mount.id === this.hover;
@@ -2152,7 +2431,7 @@ export class HullDesigner {
     }
     // The selected mount's turning knob.
     const selected = this.mount();
-    if (selected && !onParts) {
+    if (selected && !onParts && this.shown("mounts")) {
       const [sx, sy] = this.toScreen(selected.x, selected.y);
       const [kx, ky] = this.knob(selected);
       ctx.strokeStyle = "rgba(255,212,121,0.7)";
@@ -2194,12 +2473,27 @@ export class HullDesigner {
     if (!id) return;
     const part = partOf(id);
     if (part.kind === "section" || part.kind === "tank") return;
+    if (part.kind === "turret") {
+      // A turret is a circle with its gun on it: here the gun follows the pointer, so it turns.
+      const [sx, sy] = this.toScreen(mount.x, mount.y);
+      const aim = this.at ? Math.atan2(this.at[1] - sy, this.at[0] - sx) : facing(mount);
+      const gun = FITTED.find((each) => each.kind === "gun" && partFits(each, model));
+      drawTurret(ctx, {
+        x: mount.x * R,
+        y: mount.y * R,
+        angle: aim,
+        scale: mount.scale,
+        alpha: mount.alpha,
+        gun: gun ? { part: gun.id, wear: 0 } : null,
+      });
+      return;
+    }
     ctx.save();
     ctx.translate(mount.x * R, mount.y * R);
     ctx.rotate(facing(mount));
     ctx.scale(mount.scale, mount.scale);
     if ((mount.alpha ?? 1) < 1) ctx.globalAlpha = mount.alpha!;
-    drawPart(ctx, part.kind, 0, part.engine !== undefined);
+    drawPartArt(ctx, id, 0, part.engine !== undefined);
     ctx.restore();
   }
 

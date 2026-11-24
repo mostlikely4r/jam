@@ -2,15 +2,6 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-16 · Designer comforts · build
-- state: queued
-- backlog: S-46
-- plan: docs/designer-comforts-plan.md
-- added: 2026-11-24
-
-Editor only: deselect, wheel zoom, undo, layer toggles, the multi-select, part art, the turret circle.
-Stands alone; the drawing plan leans on its undo and layers.
-
 ## Q-17 · Hulls as data, and the shape editor · build
 - state: queued
 - backlog: S-47
@@ -134,6 +125,16 @@ The decided spec is the S-44 text in BACKLOG.md: a bigger bay bought replaces th
 moves over, the old bay to the locker; ore nearest the entry sells first.
 
 ## Done
+
+## Q-16 · Designer comforts · build
+- state: done
+- done: 2026-11-24
+- backlog: S-46
+- plan: docs/designer-comforts-plan.md
+- added: 2026-11-24
+
+Editor only: deselect, wheel zoom, undo, layer toggles, the multi-select, part art, the turret circle.
+Stands alone; the drawing plan leans on its undo and layers.
 
 ## Q-22 · Clamp tow, slice 2, steps 3–4: tow traffic and blocks · build
 - state: done

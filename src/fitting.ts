@@ -94,6 +94,22 @@ export interface HullInfo {
  */
 export type PartStats = Partial<Pick<Part, "weight" | "tier" | "bay" | "slots" | "set" | "explosive" | "shape" | "icon">>;
 
+/**
+ * How a part draws, over the code's own art in `shipArt.ts`: its drawing stretched, faded, or in
+ * other colours. Kept in the ship file, and only the values that differ from the default.
+ */
+export interface PartArt {
+  /** How wide its drawing is against the code's, 0.2 to 4. */
+  scaleX?: number;
+  /** How tall its drawing is against the code's, 0.2 to 4. */
+  scaleY?: number;
+  /** A transparency multiplier, 0 to 1. */
+  alpha?: number;
+  /** The metal it's made of, and the colour of its edge, as `#rrggbb`. */
+  metal?: string;
+  rim?: string;
+}
+
 /** Whether an item stands behind a part, and owns its shape, price and icon. */
 export function itemOwned(id: PartId): boolean {
   return itemDef(id) !== undefined;
@@ -112,6 +128,8 @@ export interface ShipFile {
   hullInfo?: Record<ShipModel, HullInfo>;
   /** The part stats that differ from the code's own, changed on the parts page. */
   partStats?: Partial<Record<PartId, PartStats>>;
+  /** How each part draws, where that differs from the code's own art on the parts page. */
+  partArt?: Partial<Record<PartId, PartArt>>;
 }
 
 /** One fitted part: what it is and how worn. */
@@ -308,6 +326,52 @@ function partStatsNow(): NonNullable<ShipFile["partStats"]> {
   return out;
 }
 
+/**
+ * The parts' art as it is now, kept in the ship file only where it differs from the code's own
+ * drawing: stretched, faded or in other colours. Changed in place by the hull designer.
+ */
+export const PART_ART: Partial<Record<PartId, PartArt>> = {};
+
+/** Puts a part's art back as the code draws it. */
+export function resetPartArt(id: PartId): void {
+  delete PART_ART[id];
+}
+
+/** The part of an art someone set that says something, with anything invalid or at the default left out. */
+function cleanPartArt(art: PartArt): PartArt {
+  const clean: PartArt = {};
+  const scale = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0.2 && value <= 4 && value !== 1 ? value : undefined;
+  const colour = (value: unknown) => (typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : undefined);
+  const scaleX = scale(art.scaleX);
+  const scaleY = scale(art.scaleY);
+  if (scaleX !== undefined) clean.scaleX = scaleX;
+  if (scaleY !== undefined) clean.scaleY = scaleY;
+  if (typeof art.alpha === "number" && Number.isFinite(art.alpha) && art.alpha >= 0 && art.alpha < 1) clean.alpha = art.alpha;
+  const metal = colour(art.metal);
+  const rim = colour(art.rim);
+  if (metal) clean.metal = metal;
+  if (rim) clean.rim = rim;
+  return clean;
+}
+
+/** Sits a file's art for a part over the code's own drawing, skipping anything invalid. */
+function applyPartArt(id: PartId, art: PartArt): void {
+  if (!PARTS.some((part) => part.id === id && part.kind !== "program")) return;
+  const clean = cleanPartArt(art);
+  if (Object.keys(clean).length > 0) PART_ART[id] = clean;
+}
+
+/** The parts' art that differs from the code's own, to keep in the ship file. */
+function partArtNow(): NonNullable<ShipFile["partArt"]> {
+  const out: NonNullable<ShipFile["partArt"]> = {};
+  for (const [id, art] of Object.entries(PART_ART) as [PartId, PartArt][]) {
+    const clean = cleanPartArt(art);
+    if (Object.keys(clean).length > 0) out[id] = clean;
+  }
+  return out;
+}
+
 /** The mount types there are. Changed in place by the hull designer. */
 export const MOUNT_TYPES: string[] = [];
 /** The mount types each part fits. Changed in place by the hull designer. */
@@ -337,6 +401,9 @@ export function useShipFile(file: ShipFile): void {
   // The parts' stats start as the code has them, then the file's sit on top.
   for (const part of PARTS) resetPartStats(part.id);
   for (const [id, stats] of Object.entries(file.partStats ?? {}) as [PartId, PartStats][]) applyPartStats(id, stats);
+  // The same for how they draw.
+  for (const id of Object.keys(PART_ART) as PartId[]) delete PART_ART[id];
+  for (const [id, art] of Object.entries(file.partArt ?? {}) as [PartId, PartArt][]) applyPartArt(id, art);
   DECAL_PARTS.splice(0, DECAL_PARTS.length, ...strings(file.decalParts).filter((id): id is PartId => PARTS.some((part) => part.id === id && part.kind !== "program")));
   for (const model of SHIP_MODELS) {
     const mounts = (Array.isArray(file.hulls?.[model]) ? file.hulls[model] : []).map(readMount);
@@ -349,7 +416,7 @@ useShipFile(SHIPPED_SHIPS);
 /** The ship file as it is now, to save. */
 export function shipFileNow(): ShipFile {
   return JSON.parse(
-    JSON.stringify({ mountTypes: MOUNT_TYPES, partMounts: PART_MOUNTS, decalParts: DECAL_PARTS, hulls: HULL_MOUNTS, hullInfo: HULL_INFO, partStats: partStatsNow() }),
+    JSON.stringify({ mountTypes: MOUNT_TYPES, partMounts: PART_MOUNTS, decalParts: DECAL_PARTS, hulls: HULL_MOUNTS, hullInfo: HULL_INFO, partStats: partStatsNow(), partArt: partArtNow() }),
   ) as ShipFile;
 }
 

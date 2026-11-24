@@ -31,6 +31,7 @@ import { layoutKey } from "../save";
 import { type Route } from "../route";
 import { FLIGHTS, tripBetween } from "./trips";
 import { type PartId } from "../parts";
+import { multiSelect, withoutPick, withPick } from "./multiselect";
 
 /** The game's zoom limits, for the screen boxes. */
 const DEFAULT_ZOOM = 0.8;
@@ -766,15 +767,13 @@ Layouts: ${layouts.join(", ")}`, "");
         ]),
         ...this.group("Blueprints", [
           this.text("Unlocked: the modules it has from the start, and sells. A module in no station's list is sold nowhere."),
-          this.moduleList(
-            (id) => node.unlocked.includes(id as PartId),
-            (id, on) => (node.unlocked = on ? [...node.unlocked, id as PartId] : node.unlocked.filter((each) => each !== id)),
-          ),
+          this.moduleList(`unlocked:${node.id}`, node.unlocked, (id, on) => {
+            node.unlocked = on ? withPick(node.unlocked, id as PartId) : withoutPick(node.unlocked, id as PartId);
+          }),
           this.text("Wanted: the modules it buys the blueprint for when it can afford them, and what a player may pay toward."),
-          this.moduleList(
-            (id) => node.wanted.includes(id as PartId),
-            (id, on) => (node.wanted = on ? [...node.wanted, id as PartId] : node.wanted.filter((each) => each !== id)),
-          ),
+          this.moduleList(`wanted:${node.id}`, node.wanted, (id, on) => {
+            node.wanted = on ? withPick(node.wanted, id as PartId) : withoutPick(node.wanted, id as PartId);
+          }),
         ]),
         ...this.group("Projects and radio", [
           this.text("A station that builds projects can fund a deposit by its field and turrets for itself and the deposit, from its own money and parts. One on the radio announces new blueprints and finished projects."),
@@ -788,21 +787,20 @@ Layouts: ${layouts.join(", ")}`, "");
       );
     }
     if (!isRoot && !body) {
-      const boxes = SHIP_CHOICES.map((ship) => {
-        const toggle = document.createElement("label");
-        const box = document.createElement("input");
-        box.type = "checkbox";
-        box.checked = node.spawns.includes(ship);
-        box.addEventListener("change", () => {
-          node.spawns = SHIP_CHOICES.filter((each) => (each === ship ? box.checked : node.spawns.includes(each)));
+      const ships = multiSelect({
+        key: `spawns:${node.id}`,
+        options: SHIP_CHOICES.map((ship) => ({ id: ship, label: `the ${ship[0].toUpperCase()}${ship.slice(1)}` })),
+        picked: () => node.spawns,
+        pick: (id, on) => {
+          node.spawns = on ? withPick(node.spawns, id) : withoutPick(node.spawns, id);
+        },
+        changed: () => {
           this.changed();
           this.linkText.textContent = linkSummary(this.world);
-        });
-        toggle.append(box, ` the ${ship[0].toUpperCase()}${ship.slice(1)}`);
-        return toggle;
+        },
       });
       parts.push(
-        ...this.group("New game start", [this.text("A new game with this ship starts here. With several places for one ship, one is picked at random."), ...boxes]),
+        ...this.group("New game start", [this.text("A new game with this ship starts here. With several places for one ship, one is picked at random."), ships]),
       );
     }
     if (!isRoot) {
@@ -909,25 +907,16 @@ Layouts: ${layouts.join(", ")}`, "");
     return rows;
   }
 
-  /** Ticks for every module item, for a station's two lists of them. */
-  private moduleList(has: (id: string) => boolean, toggle: (id: string, on: boolean) => void): HTMLElement {
-    const box = document.createElement("div");
-    box.className = "checks";
-    const modules = moduleItems();
-    if (modules.length === 0) box.textContent = "No module items yet: add some on the hull designer's Items page (H).";
-    for (const item of modules) {
-      const label = document.createElement("label");
-      const check = document.createElement("input");
-      check.type = "checkbox";
-      check.checked = has(item.id);
-      check.addEventListener("change", () => {
-        toggle(item.id, check.checked);
-        this.changed();
-      });
-      label.append(check, ` ${item.name}`);
-      box.append(label);
-    }
-    return box;
+  /** One of a station's two lists of module items, picked out of every module there is. */
+  private moduleList(key: string, picked: readonly string[], pick: (id: string, on: boolean) => void): HTMLElement {
+    return multiSelect({
+      key,
+      options: moduleItems().map((item) => ({ id: item.id, label: item.name })),
+      picked: () => picked,
+      pick,
+      changed: () => this.changed(),
+      none: "No module items yet: add some on the hull designer's Items page (H).",
+    });
   }
 
   private group(title: string, fields: HTMLElement[]): HTMLElement[] {

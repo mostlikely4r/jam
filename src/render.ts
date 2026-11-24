@@ -6,7 +6,7 @@ import { isItem, partOf } from "./parts";
 import { isOreItem } from "./items";
 import { pickOf } from "./programs";
 import { relativeLine, willCollide, type Motion } from "./relative";
-import { bayBox, drawVectorShip } from "./shipArt";
+import { bayBox, colorOf, drawTurret, drawVectorShip, mix } from "./shipArt";
 import { canvasTip } from "./tooltip";
 import {
   BLACK_MARKET_LENGTH,
@@ -1554,21 +1554,17 @@ export class Renderer {
         Math.sin(ship.turretAngle - ship.prevTurretAngle),
         Math.cos(ship.turretAngle - ship.prevTurretAngle),
       );
-      const base = turretMount(ship) ?? { x: 0, y: 0 };
-      ctx.translate(base.x * r, base.y * r);
-      ctx.rotate(ship.prevTurretAngle + turn * alpha);
-      ctx.fillStyle = moduleColor(turret, "#c9d4e6");
-      ctx.beginPath();
-      ctx.arc(0, 0, r * 0.35, 0, Math.PI * 2);
-      ctx.fill();
-      if (gun) {
-        ctx.strokeStyle = moduleColor(gun, "#c9d4e6");
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(gun.wear >= 1 ? r * 0.5 : r * 1.15, 0);
-        ctx.stroke();
-      }
+      const base = turretMount(ship) ?? { x: 0, y: 0, scale: 1 };
+      const metal = colorOf(moduleColor(turret, "#c9d4e6"));
+      drawTurret(ctx, {
+        x: base.x * r,
+        y: base.y * r,
+        // The aim is smoothed between steps, so the gun doesn't jump on its base.
+        angle: ship.prevTurretAngle + turn * alpha,
+        scale: base.scale ?? 1,
+        gun: gun ?? null,
+        colours: { metal, rim: mix(metal, [255, 255, 255], 0.35) },
+      });
     }
     ctx.restore();
     this.drawStanding(ship, x, y);

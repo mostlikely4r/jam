@@ -337,7 +337,7 @@ Four independent fixes, one change each.
   hulls in the designer that the longer tank still sits on the hull.
 
 ## S-46 · Designer comforts: deselect, zoom, undo, layers, multi-select, part art, turret
-- status: specced
+- status: built
 - area: Ships and gear
 - effort: M
 - plan: docs/designer-comforts-plan.md

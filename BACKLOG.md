@@ -408,3 +408,29 @@ A whole rock on a station's refinery pad reads as just a rock shrinking. Wanted 
 cutting into it and the ore streaming from the rock into the station, so the payout is something
 to watch. Today it pays an ore every few seconds with a sound and floating credits
 (`docs/clamp-tow-plan.md`, step 1).
+
+## S-54 · Pilots as people: call-sign plus mood emote, pixel busts for people you know
+- status: parked
+- area: Comms
+- from: a design talk on the faces, 2026-11-24
+
+The glowing robot-screen faces read as AI, not as people flying ships. Tried in throwaway
+prototypes (not in the game):
+
+- Flat vector head-and-shoulders busts: rejected, "too childish, like Peppa Pig".
+- **Call-sign plus emote** ("looks decent"): every pilot has a picture they chose, generated from a
+  seed and biased by job (stitched squadron patch, mascot, slanted name tag, a rare text face), and
+  beside it a neon mood emote in their own colour and eye style. The picture says who, the emote
+  how they feel. Side by side reads best on the radio; a corner badge loses the mood at 28px.
+  Call-signs avoid square frames so they don't look like part icons. Reference: Warframe's KIM
+  chat avatars.
+- **Pixel busts drawn by code**: a 48-pixel grid, automatic outlines and two-tone shading, with tiny
+  eye, brow and mouth stamps. They read as real people at 2x and above with clear moods, but the
+  moods are lost at radio size. They fit a contact card for regulars you know, as the payoff of
+  S-41. Weaker than hand-drawn (pi-emote) mainly in hair and head size.
+- Art sources checked: Avatars In Pixels can't be used (no commercial use, website avatars only).
+  AI images could make a fixed set of portraits for regulars, with moods redrawn by inpainting,
+  but not a kit of parts.
+
+Parked by the user: the current faces will do for now. Aliens would use the same split: an
+unreadable call-sign, and an emote whose features (crest, antennae, glow) you learn to read.

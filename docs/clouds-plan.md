@@ -135,22 +135,88 @@ Items marked *decided* are the user's calls. The rest is my proposal, open to ve
 
 **Stop here for the user to try.**
 
-### Step 2: two effects
+### Step 2: terrain, one penalty and one gift
 
-Picked by the user after trying step 1 (*decided*: two effects in the second test; which two
-is open).
+Written the same day, after talking about what clouds are for. Build it only after the user has
+tried step 1. If step 1 changes their mind, this step changes first.
 
-- A cloud gains `density` (0 to 1) and `effects`, a list of `{ kind, strength }`. The effect
-  at a point is `strength × density × cloudStrength`.
-- Effects from overlapping clouds add up, capped per effect. Each effect also stacks with the
-  others in the same cloud.
-- Moving `cloudStrength` from tests into the tick should cost little: only clouds whose
-  `radius` reaches a ship are checked.
-- **Rule for choosing** (mine): an effect that harms a ship needs AI avoidance and handling in
-  the off-screen sim (trip records). That is the real cost, more than the cloud itself. So
-  prefer two effects that don't hurt traffic, or accept that traffic flies through them
-  unaware, and say which.
-- Its own plan update before building: the two effects, their tweaks, their tests.
+**What clouds are for** (*decided*): terrain.
+- A cloud can lie over a field. The field's rocks hold the rare drops, and the cloud is the
+  price of getting them. Clouds never drop anything themselves.
+- It can be a stretch you pass through, a ring round a body, or a wall.
+- You either fly the long way round, deal with the penalty, or don't go there.
+- The inspiration is the old game's force-field wall round the first area, with a gap that
+  opened and closed, and a super shield that let you through.
+
+**Who goes through** (*decided*):
+- The basic autopilot flies straight through clouds, and so does traffic (mine: the same rule
+  for every ship).
+- Going round is the player's choice, by hand or with a waypoint.
+- So step 2 has **no routing work**, and its two effects must not hurt anyone (mine): a ship
+  that can't route round a cloud mustn't be harmed by it.
+
+**The two effects** (*decided*): **dampening** as the penalty and **nanites** as the gift.
+
+**The arc** (mine, for the wall with a gap)
+
+- `arc`, in degrees from 1 to 360, default 360. The cloud covers only that much of the way
+  round, centred on its own +x axis, and is empty outside it.
+- It turns with the cloud's spin, so a ring with `arc` 330 and a slow `spinPeriod` is a wall
+  whose gap comes round now and then.
+- The arc's ends are hard (mine; a fade there can come later). `cloudStrength` returns 0
+  outside the arc. The renderer clips the ellipse to a wedge, and the designer draws the
+  wedge too.
+
+**The effect machinery** (`src/clouds.ts`, `src/sim.ts`)
+
+- A cloud gains `density` (0 to 1, default 1) and `effects`, a list of `{ kind, strength }`.
+  `kind` is `"dampening"` or `"nanites"`, and `strength` is 0 to 1. A cloud can hold both
+  (*decided*: effects stack).
+- At a point, an effect's amount is `strength × density × cloudStrength`. Overlapping clouds
+  add up, and the total for each kind is capped at 1 (mine).
+- `cloudEffects(clouds, time, x, y)` returns `{ dampening, nanites }`. It's pure and tested.
+  It skips any cloud whose `radius` doesn't reach the point.
+- Each tick, every flown ship gets its amounts: the player's ship, traffic, fighters, drones
+  and haulers. Docked ships are left out.
+- **Trip records** (ships out of view) ignore clouds (mine). They're off screen, and neither
+  effect changes where a ship ends up by much.
+- The world file, the parser, the stringifier and the spec carry `arc`, `density` and
+  `effects`, which are left out of nodes that aren't clouds, as in step 1. A cloud with no
+  effects saves no `effects` key.
+
+**Dampening** (*decided*: it slows a ship above a certain speed and costs extra fuel)
+
+- **Speed** is the ship's own `vx, vy`: the speed it shows, without what its field carries.
+  That's mine, and the builder should check it reads right in a carried field.
+- Above `cloudSpeed`, the excess decays at `cloudDrag × amount` per second. Speed under the
+  cap is untouched. This is a drag on the excess, not a hard limit, so a fast ship coasts down
+  to the cap in a few seconds rather than hitting a wall.
+- While thrusting inside, fuel burns `1 + cloudFuel × amount` times faster. With the fuel
+  switch off, only the drag applies.
+- New tweaks in `src/tuning.ts`, in their own "Clouds" group: `cloudSpeed`, `cloudDrag` and
+  `cloudFuel`. The proposed starting values are half the floater's usual cruising speed, 0.5
+  and 1 (double the burn at full amount). They're one value for every cloud for now (mine);
+  per-cloud values can come later if terrain needs variety.
+
+**Nanites** (the user's idea: a cloud that repairs the ship)
+
+- Inside, a ship mends at `cloudRepair × amount` points per second. A new tweak; the proposal
+  is a quarter of the dock's `repairSpeed`, so docking stays the quick fix.
+- It mends in the dock's order (`nextRepair`): the hull a point at a time, then worn modules.
+- It never replaces a destroyed module (mine: nanites mend, they don't build). It's free, with
+  no credits, upkeep or parts.
+- Build it as its own small function next to `repairHull`. Don't route it through the dock's
+  paying path.
+
+**Showing it**
+
+- On the player's HUD, a line names each effect on the ship and its amount while above 0, for
+  example "Dampening 60%" and "Nanites 30%" (mine).
+- A cloud with effects shows them on its tooltip in the designer.
+- The designer panel adds density, arc and an effects list: add a kind, set its strength,
+  remove it.
+
+**Stop here for the user to try.**
 
 ## How we'll know
 
@@ -169,7 +235,27 @@ is open).
 - `src/designer/link.test.ts`: `cloudsFor` gives one spec per copy, with orbits that follow
   the parent field.
 - `npm test` and `npm run build` pass.
-- **Try it:**
+- **Step 2:**
+  - `src/clouds.test.ts`:
+    - `cloudStrength` is 0 outside the arc and follows the cloud's turn.
+    - `cloudEffects` adds up two overlapping clouds and caps the total at 1.
+    - A cloud with both effects gives both.
+    - A cloud with no effects gives 0.
+  - `src/sim.test.ts`:
+    - A ship above `cloudSpeed` in a dampening cloud loses speed toward the cap. Below the cap
+      it keeps its speed. The same ship outside is untouched.
+    - Thrusting inside with the fuel switch on burns more than the same thrust outside.
+    - A damaged ship in a nanite cloud regains hull first, then module wear. A destroyed
+      module stays destroyed, and no credits move.
+    - Docked ships and trip records are untouched.
+  - **Try it:**
+    1. In the designer (O), turn the front dust cloud into a ring round the field: `ringInner`
+       0.7, `arc` 300, a slow spin, dampening at 1.
+    2. Fly in fast: you sink to the cap and the fuel meter drops faster.
+    3. Wait for the gap and fly through it: no drag.
+    4. Add nanites at 1 to the gas cloud, take a knock from a rock, and drift inside: the hull
+       mends slowly.
+- **Step 1 Try it:**
   1. `npm run dev`, open the game with `?dev`, start a new game and fly to the field with the
      clouds.
   2. The gas cloud glows behind the rocks.
@@ -187,18 +273,29 @@ is open).
 ## Not doing
 
 - **No AI awareness in step 1** (*decided*). Pirates still see you inside a cloud.
+- **Clouds don't drop items** (*decided*). Rare drops come from fields and rare stations.
+- **No harmful effect while ships fly straight through** (mine). Damage clouds wait for
+  routing.
 - **Effects aren't tied to looks** (*decided*). There are no fixed "corrosive nebula" types:
   the designer combines a look with effects.
 
 ## Not in this build
 
+- **The navigation road** (*decided* as a direction, several builds away):
+  - Basic autopilot: straight through (step 2).
+  - A navigation upgrade offers, per obstacle on the route, going round or through, like a car
+    satnav's route choices but per obstacle.
+  - A later upgrade reads your modules and suggests the best route from your counters.
+  - Traffic needs the same choice before any cloud may hurt ships.
+- **Counters** (mine): each harmful effect gets a module that cancels it, like the super
+  shield that passes the wall. A cloud then becomes a gate that opens with gear.
+- **Per-cloud dampening values** (speed cap, drag, fuel), if one global set proves too plain.
 - **Effect ideas, parked:**
   - Dense (visibility for sensors, so you can hide from pirates).
   - Corrosive (damage over time).
-  - Dampening: a speed cap that costs extra fuel above it. It feels different from micro
-    asteroids, though both are a speed limit (*decided*).
   - Micro asteroids: a chance of damage that grows with speed, countered by shields, armour
-    or auto-repair.
+    or auto-repair. A speed limit like dampening, but different enough to matter long term
+    (*decided*).
   - Electrical storm: modules briefly offline (EMP) rather than broken.
   - Rich nebula: fuel collected with a scoop. Needs fuel step 3 and a scoop module.
   - Current: pushes ships along the long axis, so the shape's turn is its direction.

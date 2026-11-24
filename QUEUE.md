@@ -11,6 +11,15 @@
 A new place kind: a turned ellipse with a ring and falloff, two looks (gas, dust) on a back or
 front layer. Visuals only, no effects, no AI. Stops for the user to fly through one.
 
+## Q-12 · Clouds, step 2: dampening, nanites and the arc · build
+- state: queued
+- backlog: S-42
+- plan: docs/clouds-plan.md
+- added: 2026-11-24
+
+The effect machinery, a gap that turns with the cloud, dampening as the penalty and nanites as the
+gift. Ships fly straight through. Waits on the user flying step 1 (Q-11).
+
 ## Q-5 · Clamp tow, first slice · build
 - state: queued
 - plan: docs/clamp-tow-plan.md

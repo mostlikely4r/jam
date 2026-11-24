@@ -101,7 +101,8 @@ describe("drone", () => {
     expect(ship.earned).toBeGreaterThanOrEqual(LOAD * sim.plainOrePrice());
     expect(sim.ship.credits).toBe(0);
     expect(breaks).toBeGreaterThan(0);
-  }, 30000);
+    // 420 s of simulation: about 20 s alone, and past 30 when the whole suite is busy.
+  }, 60000);
 
   it("only fires what it has", () => {
     const sim = homeSim(1, { ...SOLO, retro: true });

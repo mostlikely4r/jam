@@ -6,10 +6,11 @@ station sells a construction block, pays a hauler to place it, and the build gro
 carried (pillar 1, and the candidate target "your work becomes something" in `docs/vision.md`).
 Other uses named: towing a stranded ship home for repair, and much later moving a station.
 
-This plan is only the first slice, *decided* by the user as the cheapest test: **towing a whole
-asteroid to a station, for more ore than mining it would give.** It needs nothing the game
-doesn't already have (rocks, stations, ore, thrusters), and answers whether towing feels good
-before anything is built on it. Nothing here is built yet.
+The first slice, *decided* by the user as the cheapest test: **towing a whole asteroid to a
+station, for more ore than mining it would give.** It needs nothing the game doesn't already
+have (rocks, stations, ore, thrusters), and answers whether towing feels good before anything is
+built on it. Built and approved 2026-11-24 (step 1). The second slice (safe towing, tow traffic,
+and blocks for the base's projects) starts at "Second slice" below, steps 2 to 4, unbuilt.
 
 ## The picture
 
@@ -171,70 +172,243 @@ notes are fixed (pad, going round, taking it back, the payout's sound and credit
 the refinery cutting into the rock with a laser and the ore flowing out, is parked as S-53.
 
 *Played again after those fixes, 2026-11-24:* "looks good". This slice is done (Q-5): hauling a
-rock home is worth the trip, and the hand-over reads. Step 2 below is not built and not queued;
-it waits on a word that towing is worth taking further.
+rock home is worth the trip, and the hand-over reads.
 
-### 2. The autopilot keeps the load safe
+## Second slice: safe towing, tow traffic, and blocks
 
-The *decided* "the right systems take care of it", built once step 1 has been played.
+Written 2026-11-24, from a short talk with the user after the first slice was played and
+approved. Nothing in this section is built yet.
 
-- **A program, `towControl`** (proposal: a program sold in shops, in `src/programs.json`, so safety
-  is something to buy and a computer slot to spend). With it loaded and a rock held, every
-  autopilot move (click move, route, travel) keeps the closing speed toward anything solid in its
-  path under `safeImpactSpeed`, and plans braking with the combined weight (already true through
-  `shipResponse`, check it holds on long routes).
-- **Deliver:** with it loaded, clicking a station while towing flies there, comes to the catch
-  slowly on a clear line, and releases. Without it the player releases by hand as in step 1.
-- Check the corner path round bodies (`cornerToward`) leaves room for the held rock's radius, not
-  only the ship's.
+**Why.** The first slice answered its question (towing a rock home feels weighty and worth it).
+The user asked for the next slice to be *both* halves left open: the autopilot keeping the load
+safe (the old step 2), and then the clamp's main reason, construction (*decided*: "both, step 2
+first"). Construction is what makes the clamp more than a better pickaxe: a base's projects get
+built from blocks somebody really carried out to the site, so you can watch the deposit grow and
+know whose trips built it (pillar 1, and the candidate target "your work becomes something").
+Traffic does that carrying too, so a base grows while you look away (pillar 3).
 
-*Played for:* tow a rock with the program and look away. Does it arrive whole every time?
+### The picture
+
+Items marked *decided* are the user's calls. The rest is my proposal, open to veto.
+
+- **Blocks build today's projects** (*decided*). The field deposit and the deposit's turrets are
+  no longer built out of the base's stock where they stand: the base turns its part A into
+  blocks at the station, and each block has to be carried to the site and placed there. The
+  half-built frame out by the field grows block by block. No new kinds of building.
+- **Carrying a block is a paid job with a deposit** (*decided*, the user's idea from 2026-11-23:
+  bought for X, placed for X + Y). You pay the block's worth to take it, and get it back with
+  pay on top when it's placed. Lose it and the base keeps your deposit.
+- **Traffic does the jobs too, and earns by it** (*decided*: "they need a deposit in credits and
+  a clamp, but this earns money"). A project never waits on the player; the player taking jobs
+  only makes it go faster and earns the pay.
+- **A few traffic floaters turn tow ships** (*decided*: "a few turn builder / asteroid hauler").
+  One buys the clamp in place of its tractor. From then on it carries blocks when a base has
+  them, and otherwise tows whole rocks home to the refinery, as the player does since slice 1.
+  The clamp is both, which is why one ship does both.
+- **Safe towing is a program you buy** (proposal, from the old step 2). With it loaded the
+  autopilot keeps a towed load from bumping hard and does the hand-over itself. Tow traffic buys
+  it before it buys the clamp, so the ships you watch don't smash their loads.
+
+### 2. Safe towing: the `towControl` program
+
+The smallest piece the user can try, flown by the player's own autopilot. It also is what the
+tow traffic in steps 3 and 4 flies with.
+
+- **The program** (proposal): `towControl`, "Tow control", in `src/programs.json` like the
+  others (price proposal 400, tier 1, an icon with the existing program colours; glyph: pick or
+  add one in `src/glyphs.ts`). Takes a computer slot. Bought from a blueprint like any program.
+- **Its rule** (proposal): while the ship holds something in its clamp and the program is
+  loaded (`ship.programs`, not only owned), every autopilot move (click move, click route,
+  travel to a place, the `ClickPilot` in `src/pilot.ts` and `DronePilot` alike) caps its speed
+  so that it could stop, at the braking it really has with the combined weight, before
+  anything solid ahead: rocks, ships, stations, deposits, bodies. Closing speed on a contact
+  then stays under `safeImpactSpeed` (90). Braking already uses the heavier weight through
+  `shipResponse`; check it holds on long routes, where the ship is fastest.
+- **Room for the load** (proposal): `routeAround` and `cornerToward` treat the ship plus its
+  load as one wider body (the held rock's far edge from the ship's centre), so the corners round
+  bodies and rocks leave room for it. Without the program nothing changes from slice 1.
+- **Deliver** (proposal): with the program loaded and a rock held, clicking a station (or a
+  station in the map) means "deliver": fly to the refinery pad's side (`refinerySpot`), come
+  inside `catchRange` on a clear line, stop under `clampSpeed`, and release. If the refinery is
+  still working a rock, wait beside the pad, holding the rock, and release when it's free
+  (pillar 3: you can look away). The short word over the ship says "Waiting for the refinery".
+  A normal click elsewhere cancels the delivery and keeps the rock.
+- **Manual flight is untouched**: the program only governs the autopilot. Flying by hand you can
+  still smash a rock (pillar 2: skill optional, never required).
+
+*Played for:* buy the program, clamp a big rock, click the station and look away. Does it arrive
+whole every time, and is the drift home calm, not slow to the point of dull?
+
+**Stop here for the user to try.** Steps 3 and 4 lean on this autopilot; if it's not right yet,
+fix it before traffic flies it.
+
+### 3. Tow traffic: a few floaters haul whole rocks
+
+- **Who turns** (proposal): traffic floaters (`DronePilot`, `buys === "upgrades"`, model
+  `floater`) only. At a dock, a floater that has already bought everything ahead of it in its
+  list rolls `towShipChance` (tuning, proposal 0.25) once per stay; on a hit, `towControl` and
+  then `clamp` join the end of its wishlist (`TRAFFIC_BUY_ORDER` in `src/parts.ts` stays as it
+  is; the tow pair is per ship). Buying the clamp swaps out the tractor through the normal
+  fitting code (the tractor goes to the base's locker or is sold back, whatever buying a
+  replacement does today). Cap: at most `towShipShare` (proposal 0.2) of a base's traffic is tow
+  ships, so the belt never empties of miners. A tow ship stays one for good.
+- **What a tow ship does** at each dock stay, in order: repair as today; a block job if a base
+  in reach has one and it can afford the deposit plus `trafficBuffer` (step 4); otherwise a rock
+  run. Its task word says which ("towing", "carrying a block").
+- **A rock run** (proposal): it picks a field the way `chooseField` does, flies there, and picks
+  the biggest rock it can clamp that isn't targeted, held, or picked by another tow ship. It
+  comes alongside under `clampSpeed`, grabs (the same `grabRock` path as the player), and
+  delivers with `towControl` as in step 2. The refinery pays it as it pays the player
+  (`releasedBy`). No rock big enough (tier 1 or more, proposal): it mines a load the slow way,
+  with guns and no tractor, and sells it like any traffic.
+- **A busy refinery**: one rock at a time per base, as today. A tow ship whose base's refinery is
+  taken goes to the next nearest base with a free one, if the trip is under the same cutoff that
+  puts traffic off the next station over (`pilot.ts`, the turn-away code); otherwise it waits by
+  the pad as in step 2.
+- **Fleeing**: a tow ship that flees (`watchForPirates`) lets go of its load first. The rock is
+  then an ordinary stray. Pirates don't steal a towed rock (not in this build).
+- **Out of view** (proposal, `src/farside.ts` must say it, or `farside.test.ts` fails): a new
+  `TripRecord` goal `"tow"`. The record travels to the field, takes one rock from it at arrival
+  (from the sleeping field's own list; a field never woken is laid first, as mining one does),
+  and travels to the base on the route planner's path with the trip time of the heavier ship
+  (the planner gets the combined weight). Records never bump (their routes never touch a body),
+  so the rock arrives whole. At arrival it goes straight into the base's `refining` record if the
+  refinery is free, or the record waits at the dock until it is. If the camera comes near, the
+  record wakes as a flown ship holding its rock (`wakeRecord`), placed by its route as today.
+  Update the `towRocks` and `catchRocks` lines in `STEP_PARTS` to match.
+- **Save**: a tow ship is a traffic ship with a clamp fitted; nothing new to save except a held
+  rock on a traffic ship (`ship.tow`, already saved for the player: check it is for any ship)
+  and the new record goal. Bump `SAVE_VERSION` if the record shape changes.
+
+*Played for:* watch the home station for ten minutes. Do tow ships show up, bring rocks in now
+and then, and read as purposeful company rather than clutter?
+
+### 4. Blocks: projects built from carried blocks
+
+**Blocks** (proposal throughout, numbers to tune).
+
+- **What a block is**: a new body, not a bay item: a square crate of `blockParts` (tuning,
+  proposal 10) part A. It has mass like a tier-1 rock, `hp` like one, and takes bumps under the
+  same rules as a towed rock (`towImpact`). Broken, it's gone: debris for show, nothing to mine,
+  and its parts are lost. Drawn as a plain square with the base's colour.
+- **Made at the station**: a base with a project still building turns spare part A (past
+  `stationReserveParts`, as `buildProjects` takes it today) into a block at the station's
+  **block pad**, a spot beside the station like the refinery pad (on the dock side, clear of the
+  dock's approach; put it in a function next to `refinerySpot`). At most `blocksWaiting`
+  (proposal 2) blocks sit at a pad at once. The parts leave the stock when the block is made.
+- **A job**: each waiting block is one job: carry it to the project's site, the deposit spot
+  (`depositSpot`) or the deposit itself for its turrets. The deposit is the block's worth,
+  `blockParts × part A's item price`. The pay is the project's funding shared over its blocks:
+  a project's price (`depositPrice`, `depositGuardPrice`) is no longer spent into nothing when
+  funded; it is held as the project's **purse** and each placed block pays `price / blocks` from
+  it. So the money comes from the base and nothing comes from nowhere.
+
+**Taking a job.**
+
+- **Player**: docked at a base with a waiting block and a clamp fitted, the station screen
+  shows the job ("Field deposit: 12 blocks to go. Deposit 120, pays 250") with a "Take a block"
+  button. Taking it pays the deposit and marks a block at the pad as yours. Undock, come
+  alongside the pad and press `G`: the clamp takes your block as it takes a rock. Someone else's
+  marked block can't be clamped.
+- **Tow traffic**: at its dock stay, a tow ship takes a job when a base it would trade with has
+  one and it can pay the deposit and keep `trafficBuffer` (step 3). It then flies as the player
+  would, with `towControl`.
+
+**Placing it.**
+
+- The site has a catch like the station's: a block let go of within `siteRange` (proposal 300)
+  of the site, slower than `clampSpeed`, is pulled in gently (reuse the catch's steering), set
+  into the frame, and the project's `partsUsed` goes up by `blockParts` (and `partsLeft` down).
+  The carrier gets the deposit back plus the pay, with the floating credits and the sound the
+  refinery's payout uses. The last block finishes the project (`finishDeposit`,
+  `finishBattery`) as today.
+- With `towControl` loaded, clicking the site while holding a block means "place": the step 2
+  delivery, aimed at the site.
+- Let go of too fast or on a bad line, the block bumps the frame and may break under the same
+  rules. Let go of anywhere else, it drifts as a stray; whoever takes it back with a clamp can
+  still place it, and the pay goes to whoever placed it, the deposit back to whoever paid it.
+- `buildProjects` no longer builds the deposit and its turrets from stock. The **station's own
+  turrets** (`stationGuards`) stay as today: they stand on the station, so there is no trip to
+  make.
+- The testing switch (`depositFree`) and projects already part-built in old saves keep working:
+  a part-built project just needs the rest in blocks.
+
+**Out of view** (proposal): a new `TripRecord` goal `"block"`: the record takes the block from
+the pad at departure, travels to the site, and places it at arrival with the same payout. Blocks
+at a pad and on a flown carrier are bodies only while their base is in view; out of view a
+waiting block is a number on the base (`blocksReady`). Add both to `STEP_PARTS`.
+
+**Save**: blocks waiting (per base, and whose they are), blocks in the open or held, the
+projects' purses. Bump `SAVE_VERSION`, with a round-trip test.
+
+*Played for:* fund the deposit (or let the base fund it), take a block or two yourself, then
+leave the area for a while. Do you come back to a deposit further along, built by ships you can
+follow? Does placing a block feel like a payoff, like the refinery does?
 
 ## How we'll know
 
-- **Unit tests** (`src/sim.test.ts` or a new `src/tow.test.ts`, kept in the fast suite where they
-  can be): grab in range and slow, refused when far or fast; held mass lowers `shipResponse`;
-  the held rock never strays, sleeps or gets mined; release keeps the velocity; a bump over the
-  safe speed damages and can break it, a gentle one doesn't; the expected-yield function matches
-  a long run of `breakRock` within a few percent; catch, refinery spot, refining pays the owner
-  ore by ore, pauses on full storage and enters ore in the ledger; save round trip with a held
-  rock and a refining one.
-- **Step 2:** a no-player run where a bot with `towControl` delivers rocks from the home field
-  many times: rocks arriving whole (target: all), minutes per delivery, credits per hour against
-  the same bot mining. Background only, logged, never gates done.
+- **Unit tests** (`src/tow.test.ts`, plus a new `src/blocks.test.ts`; fast suite where they can
+  be):
+  - Step 2: with `towControl`, a towed rock flown at a station or a rock field never closes
+    faster than `safeImpactSpeed`; without it, slice 1 behaviour is unchanged. Deliver releases
+    inside the catch at under `clampSpeed`, and waits while the refinery is busy. The route
+    clears a body by the load's radius.
+  - Step 3: a floater rolled a tow ship buys `towControl` then the clamp, losing its tractor; the
+    share cap holds; a tow ship takes a rock and is paid by the refinery; two tow ships never pick
+    the same rock; a fleeing tow ship lets go; a `"tow"` record takes a rock from a sleeping
+    field and fills the refinery on arrival; a record woken mid-trip holds its rock.
+  - Step 4: a base with a funded deposit makes blocks from spare part A, never past the reserve
+    or `blocksWaiting`; taking a job takes the deposit; placing pays deposit plus share, from the
+    purse; a broken block keeps the deposit with the base and loses its parts; the last block
+    finishes the project; the station's guards still build from stock; a `"block"` record
+    places its block; save round trip with blocks waiting, held and in the open.
+  - `farside.test.ts` passes with the new step parts and record goals.
+- **No-player runs** (background, logged to `docs/parity-log.md`, never gate done): tow traffic
+  over an hour, rocks arriving whole (target: all with `towControl`), minutes per delivery, and
+  credits per hour for a tow ship against a miner; a deposit funded at the start of a run, and
+  how long traffic alone takes to build it (proposal target: under an hour of game time), in
+  view and as records (parity: the two within reason of each other).
 - **Full check:** `npm test`, then `npm run build`.
-- **Try it:** new game, floater. Buy the clamp at the home station (it replaces the tractor). Fly
-  to the field, come up slowly beside a big rock, press `G`. Feel the ship go heavy. Fly it back,
-  slow down near the station and press `G` again. The station pulls it in, it shrinks beside the
-  station, and your credits tick up ore by ore, about twice what mining it would have given. Then
-  try one too fast and watch it crack on the station.
+- **Try it, step 2:** new game, floater, plenty of credits (dev menu). Buy the clamp and Tow
+  control at the home station and load the program. Clamp a big rock in the field, click the
+  station and take your hands off. The ship drifts home slow and careful, stops by the pad and
+  lets go; the rock goes in whole and credits tick up. Click the station again while it's still
+  refining one: the ship waits by the pad.
+- **Try it, steps 3 and 4:** start a game with the deposit not built, fund it at the station (or
+  give the base the credits in the dev menu and wait). Watch the station: blocks appear on the
+  pad, a tow ship clamps one and drifts it out to the field, where the deposit's frame fills in.
+  Take one yourself from the station screen, place it, and see your deposit come back with pay.
 
 ## Needs first
 
-- The tractor mount and part kinds (`src/fitting.ts`, `src/parts.ts`, `src/items.json`): built.
-- `shipWeight` / `shipResponse` dividing all thrust (`src/sim.ts`): built.
-- Base storage and `base.ore` (`storageFree`, ore glut work): built.
-- Programs and computer slots (`src/programs.json`): built, needed only for step 2.
-- Fuel (`docs/fuel-plan.md`): off by default and not needed. If on, towing burns more simply
-  through more thrust time.
-- Rocks don't collide with each other today; the held rock's collisions are new code, not a
-  change to all rocks.
+- Slice 1: clamp, tow, release, catch, refinery, `releasedBy`, `towImpact`: built (Q-5).
+- Programs, computer slots and program blueprints (`src/programs.json`, `src/programs.ts`):
+  built. Check the floater has a free computer slot for a fourth program at the level traffic
+  reaches; if not, `towControl` replaces the least useful one for a tow ship.
+- Projects, their frames and `buildProjects` (`src/sim.ts`, `drawDepositFrame` in
+  `src/render.ts`): built.
+- Trip records, `farside.ts` and its test, `wakeRecord`: built.
+- Traffic buying, `wishlistFor`, the fitting swap when a part replaces another: built.
+- Fuel: off by default, not needed. If on, towing burns more through thrust time, as in slice 1.
 
 ## Not in this build
 
-- Special rocks with something that only survives whole, and a way to see which rocks are special
-  (*decided* for later).
-- Construction blocks, build sites and paid placing jobs: the main direction, next once towing
-  feels right.
-- Towing a stranded ship home (overlaps the rescue AI in `docs/fuel-plan.md`; think of them
-  together).
-- Traffic towing rocks, and towing in the out-of-view trip records.
-- Towing loot, modules or anything but rocks.
-- A laser cutting the refinery's rock and the ore flowing out of it into the station (S-53).
-- The racer's clamp, a stronger clamp, a clamp that isn't on the tractor mount.
+- Special rocks that only survive whole, and a way to see them (*decided* for later).
+- Towing a stranded ship home (think of it with the rescue AI in `docs/fuel-plan.md`).
+- Pirates stealing a towed rock or block, or hunting tow ships.
+- New kinds of buildings from blocks, a station that grows, building where the player picks.
+- The station's own turrets from blocks.
+- A laser cutting the refinery's rock and the ore flowing out (S-53).
+- The racer's clamp, a stronger clamp, a clamp off the tractor mount.
+- Racer traffic as tow ships.
 
 ## Not doing
 
+- **Projects that fall back to building from stock when nobody carries.** Traffic carries; a
+  project with blocks waiting just waits.
+- **Projects that wait only for the player.** Rejected: a base must grow without you.
+- **Traffic keeping a tractor and a clamp and swapping per job, or a second mount for the
+  clamp.** The user chose a few ships that turn tow ships for good.
 - **Making mining worse so towing gets back to today's yield.** Rejected: it would cut idle
   mining income.
 - **Docking with the rock attached and being paid at once.** Rejected: the payoff must be seen.

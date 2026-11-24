@@ -62,6 +62,8 @@ const EDGE_PING_SPREAD = Math.PI / 3;
 const GUARD_RADIUS = 16;
 /** The circle a station's refinery takes a whole rock on: big enough for the biggest rock. */
 const REFINERY_PAD = 72;
+/** A hauler this near the station is parked over the refinery pad, which steps out of its way. */
+const HAULER_PAD_CLEARANCE = HAULER_LENGTH * 4;
 const GUARD_BARREL = 30;
 const HAULER_COLUMNS = 10;
 const HAULER_ROWS = 4;
@@ -957,9 +959,10 @@ export class Renderer {
   }
 
   /**
-   * A station's refinery: the pad beside it to let a whole rock go on, brighter while the clamp
-   * holds one, the reach of its catch then too, and the rock it's working through, shrinking as
-   * the ore comes out.
+   * A station's refinery: the pad beside it to let a whole rock go on, and the rock it's working
+   * through, shrinking as the ore comes out. The pad is a marker for a hand-over, so it shows
+   * only while the clamp holds a rock, and takes itself away while the station's hauler is parked
+   * on it: nothing to read there, just the freighter.
    */
   private drawRefinery(sim: Sim, base: Base, alpha: number): void {
     const { ctx } = this;
@@ -967,42 +970,47 @@ export class Renderer {
     const was = sim.refinerySpot(base, true);
     const x = lerp(was.x, at.x, alpha);
     const y = lerp(was.y, at.y, alpha);
-    const towing = sim.ship.tow !== null;
     const refining = base.refining;
-    const { tuning } = sim;
 
-    // How far the catch reaches, while there's a rock to hand over.
-    if (towing) {
+    if (sim.ship.tow && !this.haulerOnPad(base)) {
+      // How far the catch reaches, while there's a rock to hand over.
       const station = base.poi;
       ctx.strokeStyle = "rgba(111, 224, 200, 0.1)";
       ctx.lineWidth = 2;
       ctx.setLineDash([26, 22]);
       ctx.beginPath();
-      ctx.arc(lerp(station.px, station.x, alpha), lerp(station.py, station.y, alpha), tuning.catchRange, 0, Math.PI * 2);
+      ctx.arc(lerp(station.px, station.x, alpha), lerp(station.py, station.y, alpha), sim.tuning.catchRange, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
-    }
 
-    // The pad: where a rock goes, and the only place it's taken in.
-    ctx.strokeStyle = refining ? "rgba(111, 224, 200, 0.75)" : towing ? "rgba(111, 224, 200, 0.7)" : "rgba(111, 224, 200, 0.22)";
-    ctx.lineWidth = towing && !refining ? 3 : 2;
-    ctx.setLineDash(refining ? [] : [12, 9]);
-    ctx.beginPath();
-    ctx.arc(x, y, REFINERY_PAD, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    // A cross on it, so it reads as a spot to put something rather than a thing itself.
-    ctx.strokeStyle = "rgba(111, 224, 200, 0.35)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(x - REFINERY_PAD * 0.45, y);
-    ctx.lineTo(x + REFINERY_PAD * 0.45, y);
-    ctx.moveTo(x, y - REFINERY_PAD * 0.45);
-    ctx.lineTo(x, y + REFINERY_PAD * 0.45);
-    ctx.stroke();
+      // The pad: where the rock goes, and the only place it's taken in.
+      ctx.strokeStyle = "rgba(111, 224, 200, 0.7)";
+      ctx.lineWidth = 3;
+      ctx.setLineDash([12, 9]);
+      ctx.beginPath();
+      ctx.arc(x, y, REFINERY_PAD, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // A cross on it, so it reads as a spot to put something rather than a thing itself.
+      ctx.strokeStyle = "rgba(111, 224, 200, 0.35)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x - REFINERY_PAD * 0.45, y);
+      ctx.lineTo(x + REFINERY_PAD * 0.45, y);
+      ctx.moveTo(x, y - REFINERY_PAD * 0.45);
+      ctx.lineTo(x, y + REFINERY_PAD * 0.45);
+      ctx.stroke();
+    }
 
     if (!refining) return;
     this.drawRockShape(x, y, refining.angle, refining.radius, refining.shape, refining.tier);
+  }
+
+  /** Whether a station's hauler is close enough to be sitting where the refinery pad is drawn. */
+  private haulerOnPad(base: Base): boolean {
+    const hauler = base.hauler;
+    if (!hauler) return false;
+    return Math.hypot(hauler.x - base.poi.x, hauler.y - base.poi.y) < HAULER_PAD_CLEARANCE;
   }
 
   /** The words in the world that rise and fade: a refinery's credits coming in. */

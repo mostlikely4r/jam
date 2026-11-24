@@ -81,8 +81,10 @@ The smallest version the player can try, flown by hand. Built in `src/sim.ts`, `
 go of in the dock got stuck; the refining read as a rock shrinking, with no clear credits.
 
 - **The refinery pad is drawn**: a dashed ring beside the station, on the side away from the dock,
-  with a cross on it. Faint at rest, bright while the clamp holds a rock, and then the catch's
-  reach is ringed too. It's the spot the rock is worked on, so where to hand one over is seen.
+  with a cross on it, and the catch's reach ringed while there's a rock to hand over. It's the
+  spot the rock is worked on, so where to hand one over is seen. It shows only while the clamp
+  holds a rock, so it's not litter on every station; and it steps out of the way while the
+  station's hauler is parked on it, since the berth is on that side too.
 - **The catch goes round the station**, not through it: a rock let go of on the dock side is
   steered round at its own distance until the pad is in line, instead of being pulled into the
   station's box over and over. That pulling-into-the-box loop was the "stuck" one.

@@ -75,6 +75,30 @@ Step 2 of the plan: meetings, the stranger to regular to friend levels, saved wi
 two tweaks. Regular and friend lines go into the two packs in `src/voices.json`. Bump
 `SAVE_VERSION`.
 
+## Q-13 · Small fixes: fitting by mounts, news links, traffic beams, tank art · build
+- state: queued
+- backlog: S-45
+- added: 2026-11-24
+
+Four independent fixes; the decided spec is the S-45 text in BACKLOG.md. The racer tractor fit
+(I-7) is the one the user hit in play.
+
+## Q-14 · Face target faces any target, main or closest · build
+- state: queued
+- backlog: S-43
+- added: 2026-11-24
+
+The decided spec is the S-43 text in BACKLOG.md: any target, a main/closest tweak (main by
+default), no target no effect.
+
+## Q-15 · Cargo bays: buying swaps the smallest, unloading starts at the top · build
+- state: queued
+- backlog: S-44
+- added: 2026-11-24
+
+The decided spec is the S-44 text in BACKLOG.md: a bigger bay bought replaces the smallest, cargo
+moves over, the old bay to the locker; ore nearest the entry sells first.
+
 ## Done
 
 ## Q-4 · Fuel step 2b: tanks as modules · build

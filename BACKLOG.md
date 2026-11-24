@@ -272,3 +272,66 @@ Gus and Pip are strangers today. Step 2 of `docs/chatter-faces-plan.md`: count m
 - plan: docs/clouds-plan.md
 
 Ellipse clouds (ring, falloff, draw order, opacity, back and front layer) with looks and effects kept apart; one cloud can stack several effects. Step 1 is visuals only; step 2 adds two effects the user picks after flying through one.
+
+## S-43 · Face target faces any target, main or closest
+- status: specced
+- area: Programs
+- effort: S
+- from: I-4
+
+Today the face target program only turns toward the main target when it is a rock (`isRock(main)`
+in `Sim.faceTarget`, `src/sim.ts`). *Decided* (user, 2026-11-24):
+- It faces any target: rock, ship, station, ore, whatever the target list can hold.
+- A new tweak picks what it faces: **face main target** (default, as today) or **face closest
+  target**, where closest means the nearest entry in the ship's own target list, not the nearest
+  object in the world. Closest is re-picked as the ship and targets move.
+- Everything else stays as it is: it still yields to a click order, course, turn key or dock.
+- No target, no effect.
+
+Tests: faces a non-rock main target; the closest setting picks the nearest listed target and
+switches when another gets nearer; an empty list leaves the controls alone.
+
+## S-44 · Cargo bays: buying swaps the smallest, unloading starts at the top
+- status: specced
+- area: Inventory
+- effort: M
+- from: I-5, I-6
+
+**Buying a bay (I-5).** Bought gear never swaps what's fitted today (`planBuy` / `buyPart` in
+`src/sim.ts`). Bays become the exception. *Decided* (user, 2026-11-24):
+- With a free bay mount, nothing changes: it goes there.
+- Otherwise a bought bay replaces the smallest fitted bay, but only if it is bigger. A bay that
+  doesn't add room is never fitted over a larger one; it goes to the hold or locker as today.
+- The cargo moves into the new bay (it is bigger, so it fits; keep auto-place).
+- The old bay goes into the locker at this station; if the locker has no room, into the new bay
+  if it fits there; if neither, the purchase is refused with a clear reason.
+- `whereBuyGoes` and the shop hint show the swap before you buy.
+
+**Unloading order (I-6).** *Decided:* goods leave from the top. The top of the bay is the entry
+point, and the point is to unblock it first, so ore nearest the entry sells first. Today
+`unloadOre` takes the first ore in `ship.hold` order that holds nothing up; keep that rule (ore
+that holds something up stays) but choose by nearness to the entry.
+
+Tests: swap over the smallest bay with cargo moved; no swap when the new bay isn't bigger; old bay
+to locker, then to the new bay, then refusal; unload order follows the entry.
+
+## S-45 · Small fixes: fitting by mounts, news links, traffic beams, tank art
+- status: specced
+- area: Polish
+- effort: S
+- from: I-1, I-2, I-3, I-7
+
+Four independent fixes, one change each.
+- **Fit by mounts (I-7).** The racer has a tractor mount but the shop says the tractor can't fit:
+  `tractor` carries `fits: ["floater"]` in `src/parts.ts`, which overrides the hull's mounts.
+  *Decided:* mounts decide. Drop the hand-written `fits` from `tractor` and `turret` (any other
+  part too), so any hull with a matching mount takes the part. Test: the racer can buy and fit
+  the tractor.
+- **News links (I-1).** Every news board line that names a place gets the click link that sets
+  the destination. The all-round tractor (360) line has none today; check every line kind.
+- **Traffic tractor beams (I-2).** Traffic that uses a tractor pulls ore but draws no beam. Draw
+  the same beam lines the player's tractor draws (render.ts, the per-ore lines; the faint
+  full-range cone stays player-only).
+- **Longer tank art (I-3).** *Decided:* fuel tanks draw twice as long on the ship
+  (`src/shipArt.ts`). Visual only: grid shape, inventory and fuel held stay the same. Check the
+  hulls in the designer that the longer tank still sits on the hull.

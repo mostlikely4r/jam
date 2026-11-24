@@ -8,3 +8,6 @@ then delete it here. Format: see vibeview/FORMAT.md -->
 - added: 2026-11-24 07:03
 
 All news board lines with a 'place' should have a click link that sets the destination. 360 tractor one doesn't currently.
+
+## I-2 · Traffic using a tractor beam has the pull but no effects (beams that pull)
+- added: 2026-11-24 07:04

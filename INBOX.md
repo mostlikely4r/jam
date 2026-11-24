@@ -25,3 +25,8 @@ Program face target only faces asteroids. Needs to face any target and a tweak t
 
 ## I-6 · Cargo bays should empty from the top.
 - added: 2026-11-24 10:01
+
+## I-7 · The racer has a tractor mount point but the shop says 'can't fit on this ship'.…
+- added: 2026-11-24 10:15
+
+The racer has a tractor mount point but the shop says 'can't fit on this ship'. The system should properly look at all the mount points.

@@ -285,6 +285,89 @@ describe("the station's catch and refinery", () => {
     expect(base.refining!.total).toBe(sim.wholeOre(2));
   });
 
+  it("lets the clamp take a caught rock back, rather than having it stuck in the dock", () => {
+    const sim = world();
+    const base = sim.bases[0];
+    const held = beside(sim, 2, 10);
+    expect(sim.toggleClamp()).toBe(true);
+    // Flown to the dock, rock and all, and let go of there: the catch takes it.
+    const dock = sim.dockPoint(false, base.poi);
+    Object.assign(sim.ship, { x: dock.x, y: dock.y, px: dock.x, py: dock.y, vx: 0, vy: 0 });
+    sim.step();
+    expect(sim.toggleClamp()).toBe(false);
+    sim.step();
+    expect(held.held).toBe("catch");
+    // The clamp is the stronger hold: G takes it back, whatever the station was doing with it.
+    expect(sim.toggleClamp()).toBe(true);
+    expect(sim.ship.tow).toBe(held);
+    expect(held.held).toBe("tow");
+    // And the station doesn't take it again while the clamp has it.
+    run(sim, TICK * 4);
+    expect(held.held).toBe("tow");
+    expect(base.refining).toBeNull();
+  });
+
+  it("pays an ore out where the rock is, so the credits can be seen coming in", () => {
+    const sim = world();
+    const base = sim.bases[0];
+    const price = partOf("ore").price;
+    takeIn(sim, 1);
+    // The station goes round its orbit, so the payout is judged against the pad as it was then.
+    let paid: { x: number; y: number; amount: number } | null = null;
+    let pad: { x: number; y: number } | null = null;
+    for (let i = 0; i < Math.round((DEFAULTS.refineSeconds + TICK * 4) / TICK) && !paid; i++) {
+      sim.step();
+      const event = sim.events.find((each) => each.type === "payout") as { x: number; y: number; amount: number } | undefined;
+      sim.events.length = 0;
+      if (!event) continue;
+      paid = event;
+      pad = sim.refinerySpot(base);
+    }
+    expect(paid?.amount).toBe(price);
+    expect(Math.hypot(paid!.x - pad!.x, paid!.y - pad!.y)).toBeLessThan(2);
+  });
+
+  it("says what happened to a rock it lets go of, so the hand-over isn't a guess", () => {
+    const sim = world();
+    const base = sim.bases[0];
+    const held = beside(sim, 1, 10);
+    expect(sim.toggleClamp()).toBe(true);
+    // In the middle of nowhere, nothing takes it.
+    sim.toggleClamp();
+    expect(sim.note?.text).toMatch(/drifts/);
+
+    // Beside the station, the station is taking it in.
+    const dock = sim.dockPoint(false, base.poi);
+    Object.assign(sim.ship, { x: dock.x, y: dock.y, px: dock.x, py: dock.y, vx: 0, vy: 0 });
+    Object.assign(held, { x: held.px = dock.x + SHIP_RADIUS + held.radius + 10, y: held.py = dock.y });
+    expect(sim.toggleClamp()).toBe(true);
+    sim.toggleClamp();
+    expect(sim.note?.text).toMatch(/taking it in/);
+
+    // And while its refinery is busy, another rock drifts on.
+    const busy = world();
+    takeIn(busy, 1);
+    const at = busy.dockPoint(false, busy.bases[0].poi);
+    Object.assign(busy.ship, { x: at.x, y: at.y, px: at.x, py: at.y, vx: 0, vy: 0 });
+    beside(busy, 1, 10);
+    expect(busy.toggleClamp()).toBe(true);
+    busy.toggleClamp();
+    expect(busy.note?.text).toMatch(/still working one/);
+  });
+
+  it("goes round a station, not through it, when the rock is let go of on the dock side", () => {
+    const sim = world();
+    const base = sim.bases[0];
+    const dock = sim.dockPoint(false, base.poi);
+    const let_go = rock(sim, 2, dock.x, dock.y);
+    let_go.releasedBy = sim.ship;
+    run(sim, 60);
+    // It found the pad round the far side without knocking on the station on the way.
+    expect(base.refining).not.toBeNull();
+    expect(base.refining!.total).toBe(sim.wholeOre(2));
+    expect(let_go.hp).toBe(6);
+  });
+
   it("catches only a rock that was let go of, so a broken one's pieces stay loose", () => {
     const sim = world();
     const base = sim.bases[0];
@@ -342,7 +425,7 @@ describe("the station's catch and refinery", () => {
     takeIn(sim, 1);
     const refining = base.refining!;
     const left = refining.left;
-    expect(sim.stationTip(base).text).toMatch(/Refinery: \d+ ore to go/);
+    expect(sim.stationTip(base).text).toMatch(/Refinery: \d+ ore at 10 each/);
     sim.tuning.stationStorage = 1;
     run(sim, DEFAULTS.refineSeconds * 3);
     expect(refining.left).toBe(left);

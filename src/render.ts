@@ -60,6 +60,8 @@ const EDGE_PING_DEPTH = 0.1;
 const EDGE_PING_SPAN = 0.45;
 const EDGE_PING_SPREAD = Math.PI / 3;
 const GUARD_RADIUS = 16;
+/** The circle a station's refinery takes a whole rock on: big enough for the biggest rock. */
+const REFINERY_PAD = 72;
 const GUARD_BARREL = 30;
 const HAULER_COLUMNS = 10;
 const HAULER_ROWS = 4;
@@ -95,6 +97,16 @@ interface Particle {
   maxLife: number;
   color: string;
   size: number;
+}
+
+/** A short word in the world that rises and fades: a refinery's credits coming in. */
+interface Float {
+  x: number;
+  y: number;
+  text: string;
+  life: number;
+  maxLife: number;
+  color: string;
 }
 
 interface Star {
@@ -152,6 +164,7 @@ interface NamedArrow extends Arrow {
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private particles: Particle[] = [];
+  private floats: Float[] = [];
   /** `bend` turns an off-screen ping's direction a little, so it says roughly where, not exactly. */
   private pings: { speaker: Ship | null; x: number; y: number; mayday: boolean; age: number; bend: number }[] = [];
   /** Where the player last saw each pirate, in the axes of what it was near. */
@@ -256,6 +269,13 @@ export class Renderer {
         case "sale":
           this.burst(event.x, event.y, 5, "#8fe3a1", 110, 0.35, 2);
           break;
+        case "payout":
+          this.burst(event.x, event.y, 3, "#ffd479", 70, 0.3, 2);
+          if (event.amount > 0) {
+            const life = 1.2;
+            this.floats.push({ x: event.x, y: event.y, text: `+${event.amount}`, life, maxLife: life, color: "#ffd479" });
+          }
+          break;
         case "impact":
           this.burst(event.x, event.y, 10, "#ff7a5c", 200, 0.4, 2);
           if (event.player) this.flash = Math.min(0.5, this.flash + event.damage / 50);
@@ -352,12 +372,13 @@ export class Renderer {
     // The clamp arms go under the rocks they hold, so only the gap between shows.
     for (const other of sim.ships) this.drawClamp(sim, other, alpha);
     this.drawRocks(sim, alpha, visible);
-    for (const base of sim.bases) this.drawRefining(sim, base, alpha);
+    for (const base of sim.bases) this.drawRefinery(sim, base, alpha);
     this.drawOres(sim, alpha, visible);
     this.drawLoot(sim, alpha, visible);
     this.drawShots(sim, alpha);
     this.drawPings(alpha, frameSeconds);
     this.updateParticles(frameSeconds);
+    this.drawFloats(frameSeconds);
     this.drawTractor(sim, ship, shipX, shipY, alpha, true);
     for (const pilot of sim.traffic) {
       // A trip record is always far out of view: nothing to draw.
@@ -935,12 +956,70 @@ export class Renderer {
     ctx.stroke();
   }
 
-  /** The whole rock a station's refinery is working through, shrinking beside it as the ore comes out. */
-  private drawRefining(sim: Sim, base: Base, alpha: number): void {    const refining = base.refining;
-    if (!refining) return;
+  /**
+   * A station's refinery: the pad beside it to let a whole rock go on, brighter while the clamp
+   * holds one, the reach of its catch then too, and the rock it's working through, shrinking as
+   * the ore comes out.
+   */
+  private drawRefinery(sim: Sim, base: Base, alpha: number): void {
+    const { ctx } = this;
     const at = sim.refinerySpot(base);
     const was = sim.refinerySpot(base, true);
-    this.drawRockShape(lerp(was.x, at.x, alpha), lerp(was.y, at.y, alpha), refining.angle, refining.radius, refining.shape, refining.tier);
+    const x = lerp(was.x, at.x, alpha);
+    const y = lerp(was.y, at.y, alpha);
+    const towing = sim.ship.tow !== null;
+    const refining = base.refining;
+    const { tuning } = sim;
+
+    // How far the catch reaches, while there's a rock to hand over.
+    if (towing) {
+      const station = base.poi;
+      ctx.strokeStyle = "rgba(111, 224, 200, 0.1)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([26, 22]);
+      ctx.beginPath();
+      ctx.arc(lerp(station.px, station.x, alpha), lerp(station.py, station.y, alpha), tuning.catchRange, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // The pad: where a rock goes, and the only place it's taken in.
+    ctx.strokeStyle = refining ? "rgba(111, 224, 200, 0.75)" : towing ? "rgba(111, 224, 200, 0.7)" : "rgba(111, 224, 200, 0.22)";
+    ctx.lineWidth = towing && !refining ? 3 : 2;
+    ctx.setLineDash(refining ? [] : [12, 9]);
+    ctx.beginPath();
+    ctx.arc(x, y, REFINERY_PAD, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // A cross on it, so it reads as a spot to put something rather than a thing itself.
+    ctx.strokeStyle = "rgba(111, 224, 200, 0.35)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x - REFINERY_PAD * 0.45, y);
+    ctx.lineTo(x + REFINERY_PAD * 0.45, y);
+    ctx.moveTo(x, y - REFINERY_PAD * 0.45);
+    ctx.lineTo(x, y + REFINERY_PAD * 0.45);
+    ctx.stroke();
+
+    if (!refining) return;
+    this.drawRockShape(x, y, refining.angle, refining.radius, refining.shape, refining.tier);
+  }
+
+  /** The words in the world that rise and fade: a refinery's credits coming in. */
+  private drawFloats(seconds: number): void {
+    const { ctx } = this;
+    this.floats = this.floats.filter((float) => {
+      float.life -= seconds;
+      if (float.life <= 0) return false;
+      const risen = (1 - float.life / float.maxLife) * 26;
+      ctx.globalAlpha = Math.min(1, float.life * 1.6);
+      ctx.fillStyle = float.color;
+      ctx.font = "14px Consolas, monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(float.text, float.x, float.y - 12 - risen);
+      return true;
+    });
+    ctx.globalAlpha = 1;
   }
 
   /** A short word to the player, over the ship, for something they just did that didn't happen. */

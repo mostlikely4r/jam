@@ -85,6 +85,10 @@ export class Audio {
         case "sale":
           this.tone(980, 1460, 0.08, 0.14, "sine");
           break;
+        case "payout":
+          // A refinery paying an ore out: the dock's sale, a little softer, as it comes again and again.
+          this.tone(880, 1320, 0.09, 0.1, "sine");
+          break;
         case "impact":
           this.burst(240, 0.22, Math.min(0.9, 0.3 + event.damage / 25));
           break;

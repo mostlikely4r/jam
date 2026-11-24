@@ -33,8 +33,14 @@ export const SHIP_RADIUS = 12;
 /** How far a held rock's edge stays from the ship's own: the clamp arm's length. */
 export const TOW_GAP = 6;
 /** The fastest a caught rock is steered in at, and how near the refinery spot counts as arrived. */
-const CATCH_LANDING = 20;
+const CATCH_LANDING = 40;
 const CATCH_ARRIVE = 60;
+/**
+ * A caught rock goes round the station, not through it: how far off the radial it will head when
+ * it has to go round (radians), and how straight a line it will take to the pad when it needn't.
+ */
+const CATCH_TURN = 0.35;
+const CATCH_ALIGN = 0.35;
 /** How long a word to the player stays on the screen. */
 const NOTE_SECONDS = 2.5;
 const ORE_RADIUS = 5;
@@ -936,6 +942,8 @@ export type SimEvent =
   | { type: "break"; x: number; y: number; radius: number }
   | { type: "pickup"; x: number; y: number; kind: number }
   | { type: "sale"; x: number; y: number }
+  /** A refinery paid out an ore of a whole rock: shown as the credits it was worth, where it was paid. */
+  | { type: "payout"; x: number; y: number; amount: number }
   | { type: "impact"; x: number; y: number; damage: number; player: boolean }
   | { type: "wreck"; x: number; y: number; player: boolean }
   | {
@@ -4855,10 +4863,10 @@ export class Sim {
       hold,
       `Room: ${this.storageFree(base)} free of ${this.storageOf(base)}`,
     ];
-    // A whole rock in its refinery, and whether there's room for what's still to come out of it.
+    // A whole rock in its refinery: what's left of it, what each ore pays, and whether there's room.
     if (base.refining) {
-      const left = `${base.refining.left} ore`;
-      lines.push(this.storageFree(base) < volumeOf(PLAIN_ORE) ? `Refinery: ${left} to go, no room` : `Refinery: ${left} to go`);
+      const left = `${base.refining.left} ore at ${partOf(PLAIN_ORE).price} each`;
+      lines.push(this.storageFree(base) < volumeOf(PLAIN_ORE) ? `Refinery: ${left}, no room` : `Refinery: ${left}`);
     }
     return { text: lines.join("\n"), full: !sale.takes };
   }
@@ -5717,11 +5725,31 @@ export class Sim {
    * reach. Answers whether it's holding a rock afterwards.
    */
   toggleClamp(ship: Ship = this.ship): boolean {
-    if (ship.tow) {
+    const rock = ship.tow;
+    if (rock) {
+      const word = ship === this.ship ? this.releaseWord(rock) : "";
       this.letGoTow(ship);
+      // What happens to it now, said at once: a hand-over shouldn't be a guess.
+      if (word) this.note = { text: word, left: NOTE_SECONDS };
       return false;
     }
     return this.grabRock(ship);
+  }
+
+  /** What becomes of a rock let go of where it is: which station's catch takes it, or why none does. */
+  private releaseWord(rock: Rock): string {
+    let near: Base | null = null;
+    let nearest = Infinity;
+    for (const base of this.bases) {
+      const distance = Math.hypot(rock.x - base.poi.x, rock.y - base.poi.y);
+      if (distance > this.tuning.catchRange || distance >= nearest) continue;
+      near = base;
+      nearest = distance;
+    }
+    if (!near) return "Nothing here takes it: it drifts";
+    const station = near;
+    const busy = station.refining !== null || this.rocks.some((each) => each.held === "catch" && each.catcher === station.id);
+    return busy ? `${this.placeName(station.poi)} is still working one: it drifts on` : `${this.placeName(station.poi)} is taking it in`;
   }
 
   /** Where a held rock's centre sits: this far from the ship's, the way the clamp looks. */
@@ -5729,13 +5757,16 @@ export class Sim {
     return SHIP_RADIUS + rock.radius + TOW_GAP;
   }
 
-  /** The nearest rock with its edge within the clamp's reach of the ship's edge, or null. */
+  /**
+   * The nearest rock with its edge within the clamp's reach of the ship's edge, or null. A rock a
+   * station's catch has can be taken back: the clamp's is the stronger hold.
+   */
   private nearestClampable(ship: Ship): Rock | null {
     const { clampRange } = this.tuning;
     let best: Rock | null = null;
     let nearest = Infinity;
     for (const rock of this.rocks) {
-      if (rock.held) continue;
+      if (rock.held === "tow") continue;
       const gap = Math.hypot(rock.x - ship.x, rock.y - ship.y) - rock.radius - SHIP_RADIUS;
       if (gap > clampRange || gap >= nearest) continue;
       best = rock;
@@ -5749,7 +5780,8 @@ export class Sim {
     if (!this.hasClamp(ship)) return false;
     const rock = this.nearestClampable(ship);
     if (!rock) return this.refuse(ship, "Nothing in reach of the clamp");
-    if (Math.hypot(rock.vx - ship.vx, rock.vy - ship.vy) > this.tuning.clampSpeed) {
+    // A rock the station has is already held still: taking it back is no faster than it's going.
+    if (!rock.held && Math.hypot(rock.vx - ship.vx, rock.vy - ship.vy) > this.tuning.clampSpeed) {
       return this.refuse(ship, "That rock is moving too fast to clamp");
     }
     this.holdRock(ship, rock);
@@ -6011,6 +6043,28 @@ export class Sim {
   }
 
   /**
+   * Where a caught rock is steered from here. Straight at the refinery pad when the way there is
+   * clear, and otherwise a step round the station, keeping its distance: a rock let go of on the
+   * dock side has to go round the station, not be pulled into its box over and over.
+   */
+  private catchAim(base: Base, rock: Rock): { x: number; y: number } {
+    const spot = this.refinerySpot(base);
+    const { poi } = base;
+    const dx = rock.x - poi.x;
+    const dy = rock.y - poi.y;
+    const distance = Math.hypot(dx, dy);
+    // Where it lies round the station, and the pad too, in the station's own turning frame.
+    const at = Math.atan2(dy, dx) - poi.rotation;
+    const gap = Math.atan2(Math.sin(Math.PI - at), Math.cos(Math.PI - at));
+    if (Math.abs(gap) < CATCH_ALIGN) return spot;
+    // A step round at its own distance, so the way stays clear of the station's box all the way.
+    const step = Math.sign(gap) * Math.min(Math.abs(gap), CATCH_TURN);
+    const angle = at + step + poi.rotation;
+    const round = Math.max(DOCK_OFFSET, distance);
+    return { x: poi.x + Math.cos(angle) * round, y: poi.y + Math.sin(angle) * round };
+  }
+
+  /**
    * Pulls a caught rock toward its station's refinery spot, at no more than `catchPull`, and
    * hands it to the refinery when it gets there slowly. A rock that hits the station's box takes
    * it as a ship would and may break there: its pieces are nobody's catch.
@@ -6018,8 +6072,9 @@ export class Sim {
   private pullCaught(base: Base, rock: Rock, dt: number): void {
     const { catchPull, clampSpeed } = this.tuning;
     const spot = this.refinerySpot(base);
-    const dx = spot.x - rock.x;
-    const dy = spot.y - rock.y;
+    const aim = this.catchAim(base, rock);
+    const dx = aim.x - rock.x;
+    const dy = aim.y - rock.y;
     const distance = Math.hypot(dx, dy);
     // The speed it wants to carry at the spot: fast far out, slow by the time it's there.
     const want = Math.min(CATCH_LANDING, Math.sqrt(2 * catchPull * distance));
@@ -6171,6 +6226,9 @@ export class Sim {
       this.accountOf(owner).credits += price;
       owner.earned += price;
     }
+    // Where it's paid, and how much: the player sees the credits coming in, not just a rock shrinking.
+    const spot = this.refinerySpot(base);
+    this.events.push({ type: "payout", x: spot.x, y: spot.y, amount: owner ? price : 0 });
     if (refining.left <= 0) base.refining = null;
   }
 

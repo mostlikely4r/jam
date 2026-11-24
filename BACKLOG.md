@@ -398,3 +398,13 @@ creatures), not just seeding the new game. Waits on S-49's one-shot spawn points
 From the 2026-11-24 hull designer talk: a damaged part (S-50's middle level) can be fixed in
 flight. Open: what does the repairing (a repair part, a program, a drone) and what it costs
 (time, parts, power). Broken parts still need a station.
+
+## S-53 · The refinery cuts the rock up with a laser, and the ore flows out
+- status: parked
+- area: World
+- from: the user's play of the clamp tow, 2026-11-24
+
+A whole rock on a station's refinery pad reads as just a rock shrinking. Wanted later: a beam
+cutting into it and the ore streaming from the rock into the station, so the payout is something
+to watch. Today it pays an ore every few seconds with a sound and floating credits
+(`docs/clamp-tow-plan.md`, step 1).

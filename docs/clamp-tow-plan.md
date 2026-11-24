@@ -77,6 +77,24 @@ The smallest version the player can try, flown by hand. Built in `src/sim.ts`, `
   stepped over at speed. It takes the bump's damage; the ground that kills takes it as it takes
   loose ore. A caught rock's bump on the station's box is worked out along its path the same way.
 
+**After the first play** (user's notes, 2026-11-24). The hand-over surprised them, and a rock let
+go of in the dock got stuck; the refining read as a rock shrinking, with no clear credits.
+
+- **The refinery pad is drawn**: a dashed ring beside the station, on the side away from the dock,
+  with a cross on it. Faint at rest, bright while the clamp holds a rock, and then the catch's
+  reach is ringed too. It's the spot the rock is worked on, so where to hand one over is seen.
+- **The catch goes round the station**, not through it: a rock let go of on the dock side is
+  steered round at its own distance until the pad is in line, instead of being pulled into the
+  station's box over and over. That pulling-into-the-box loop was the "stuck" one.
+- **The clamp takes a caught rock back**: `G` works on a rock the catch has, whatever speed it's
+  at, so a hand-over that goes wrong is never a dead end.
+- **Letting go says what happens**: "Station is taking it in", "… is still working one: it drifts
+  on", or "Nothing here takes it: it drifts", as a short word over the ship.
+- **The credits are heard and seen**: each ore the refinery pays out makes a soft dock-sale sound
+  and floats its credits up from the pad, and the station tooltip gives what's left at the price
+  ("Refinery: 9 ore at 10 each"). The shrinking rock, the growing ore pile and these three together
+  are the payoff, until the laser and ore flow below.
+
 **The clamp module** (proposals throughout this step).
 
 - A new part `clamp`, kind `tractor`, so it takes the tractor mount: towing or collecting ore is a
@@ -146,6 +164,10 @@ The smallest version the player can try, flown by hand. Built in `src/sim.ts`, `
 *Played for:* tow a big rock from the home field to the station by hand. Is it weighty and
 calm, or slow and dull? Does watching it shrink while the credits come in feel like a payoff?
 
+*Played, 2026-11-24:* weighty enough to try twice. The loop above came out of it, and three of the
+notes are fixed (pad, going round, taking it back, the payout's sound and credits). The fourth,
+the refinery cutting into the rock with a laser and the ore flowing out, is parked as S-53.
+
 **Stop here for the user to try.** Not built: the notes below are for the next step.
 
 **Stop here for the user to try.**
@@ -206,6 +228,7 @@ The *decided* "the right systems take care of it", built once step 1 has been pl
   together).
 - Traffic towing rocks, and towing in the out-of-view trip records.
 - Towing loot, modules or anything but rocks.
+- A laser cutting the refinery's rock and the ore flowing out of it into the station (S-53).
 - The racer's clamp, a stronger clamp, a clamp that isn't on the tractor mount.
 
 ## Not doing

@@ -15,7 +15,8 @@ import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartIcon, type PartId } from "./parts";
 import { ITEMS, itemDef } from "./items";
 import { PROGRAM_PARTS } from "./programs";
-import { computerSize, hullMax, mountsHolding, owns, tankMounts } from "./fitting";
+import { computerSize, hullMax, hullName, mountsHolding, newGameHulls, owns, tankMounts, } from "./fitting";
+import type { ShipModel } from "./parts";
 import { blueprintIcon, iconEl } from "./icons";
 import { partCategory, shopCellState, SHOP_CATEGORIES, type ShopBadge } from "./shop";
 import { setTip } from "./tooltip";
@@ -175,10 +176,16 @@ const startBox = document.querySelector("#start .box") as HTMLDivElement;
 /** The live demos behind the start menu's ship cards, while it's open. */
 let demos: ShipDemo[] = [];
 
-const SHIPS: { model: "racer" | "floater"; name: string; pitch: string }[] = [
-  { model: "racer", name: "Racer", pitch: "Quick and twitchy. Hands on the keys, shoot rocks on the move." },
-  { model: "floater", name: "Floater", pitch: "Slow and steady, flown with the mouse. Click where to go and let it drift there." },
-];
+/** What the start menu says about each of the game's own hulls. One it has no line for gets a plain one. */
+const SHIP_PITCHES: Record<string, string> = {
+  racer: "Quick and twitchy. Hands on the keys, shoot rocks on the move.",
+  floater: "Slow and steady, flown with the mouse. Click where to go and let it drift there.",
+};
+
+/** The ships the start menu offers, read when it opens: the hulls the ship file marks `newGame`. */
+function ships(): { model: ShipModel; name: string; pitch: string }[] {
+  return newGameHulls().map((model) => ({ model, name: hullName(model), pitch: SHIP_PITCHES[model] ?? "A hull of your own drawing, with whatever it comes with." }));
+}
 
 /** Whether a game is going, rather than waiting on the start menu. Only then is it saved. */
 let inGame = false;
@@ -254,7 +261,7 @@ function showStart(): void {
   const cards = document.createElement("div");
   cards.className = "cards";
   demos = [];
-  for (const ship of SHIPS) {
+  for (const ship of ships()) {
     const card = document.createElement("div");
     card.className = "card";
     const view = document.createElement("canvas");
@@ -280,8 +287,10 @@ function showStart(): void {
   startBox.replaceChildren(title, sub, ...(touchOnly ? [notice] : []), ...saveButtons(), cards, hint);
 }
 
-function chooseShip(model: "racer" | "floater"): void {
+function chooseShip(model: ShipModel): void {
   tuning.floaterStart = model === "floater";
+  // Any hull the file gives the new game can be flown, the floater's or not.
+  tuning.startHull = model;
   saveTuning();
   restart();
   demos = [];

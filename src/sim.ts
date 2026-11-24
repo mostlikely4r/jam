@@ -2,7 +2,7 @@ import { Chatter, type FaceKey } from "./chatter";
 import { type BayGrid, type BlueprintId, partFits, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, TOW_BUY_ORDER, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
 import { hubRecipes, isOreItem, itemDef, oreItems, saleRecipes } from "./items";
 import { copyPicks, pickOf, PROGRAMS, setPick as setTweakPick } from "./programs";
-import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Mount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works, fullTanks, shareTanks, tankCapacity, tankMounts } from "./fitting";
+import { computerSize, DAMAGED_AT, facing, fitPart, hullInfo, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Mount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works, fullTanks, shareTanks, tankCapacity, tankMounts } from "./fitting";
 import { ClickPilot, DronePilot, FacePilot, FighterPilot, LOW_HULL, type TurnAway } from "./pilot";
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
@@ -1502,7 +1502,7 @@ export class Sim {
   startPlayer(): void {
     this.stats = { bestOre: this.stats.bestOre, topSpeed: 0 };
     this.resetPlayerControls();
-    const model = this.tuning.floaterStart ? "floater" : "racer";
+    const model = this.tuning.startHull || (this.tuning.floaterStart ? "floater" : "racer");
     this.ship = this.makeShip(this.startX(), this.field.y, this.controls, model);
     const spawns = this.spawns.filter((spawn) => spawn.ship === model);
     if (spawns.length > 0) {
@@ -2816,7 +2816,7 @@ export class Sim {
 
   /** Every part adds weight, which divides all of the ship's thrust. A towed rock adds all of its own. */
   shipWeight(ship: Ship): number {
-    let weight = HULL_INFO[ship.model].weight ?? this.tuning.weight;
+    let weight = hullInfo(ship.model).weight ?? this.tuning.weight;
     for (const module of Object.values(ship.fit)) {
       if (!module) continue;
       const part = partOf(module.part);
@@ -2851,7 +2851,7 @@ export class Sim {
 
   /** What a bare hull of this model costs: the hull's own price, or the tuning's rebuild cost. */
   hullPrice(model: ShipModel): number {
-    return HULL_INFO[model].price ?? this.tuning.rebuildCost;
+    return hullInfo(model).price ?? this.tuning.rebuildCost;
   }
 
   private blueprintTier(id: BlueprintId): number {
@@ -3813,7 +3813,7 @@ export class Sim {
    */
   wishlistFor(ship: Ship): PartId[] {
     const tows = ship.parts.has("towControl") || ship.parts.has("clamp");
-    return [...TRAFFIC_BUY_ORDER[ship.model], ...(tows ? TOW_BUY_ORDER : [])].filter((id) => this.wouldUse(ship, id));
+    return [...(TRAFFIC_BUY_ORDER[ship.model] ?? []), ...(tows ? TOW_BUY_ORDER : [])].filter((id) => this.wouldUse(ship, id));
   }
 
   /**

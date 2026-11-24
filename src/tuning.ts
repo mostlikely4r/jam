@@ -62,6 +62,8 @@ export const DEFAULTS = {
   partWeightScale: 1,
 
   floaterStart: true,
+  /** The hull the start menu puts the player in. Empty: the floater, or the racer, by `floaterStart`. */
+  startHull: "",
   floaterEngine: 0.2,
   clickSpeed: 80,
   /** A course's top speed. The burn out and the brake in keep the trip time right; this only

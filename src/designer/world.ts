@@ -8,7 +8,8 @@
 
 import { clampEccentricity, orbitSpeeds, orbitState, type OrbitShape } from "../kepler";
 import { itemDef } from "../items";
-import type { PartId } from "../parts";
+import { newGameHulls } from "../fitting";
+import type { PartId, ShipModel } from "../parts";
 import { DEFAULTS } from "../tuning";
 
 export const WORLD_VERSION = 1;
@@ -19,9 +20,12 @@ export const PLACE_KINDS = ["anchor", "field", "station", "pirate base"] as cons
 export type NodeKind = (typeof BODY_KINDS)[number] | (typeof PLACE_KINDS)[number];
 
 export const SURFACES = ["none", "damage", "death"] as const;
-/** The ships a new game starts with. */
-export const SHIP_CHOICES = ["racer", "floater"] as const;
-export type ShipChoice = (typeof SHIP_CHOICES)[number];
+/** The hulls a new game offers, by name: those `src/hulls.json` marks `newGame`. */
+export function shipChoices(): ShipModel[] {
+  return newGameHulls();
+}
+/** A hull name, as the game reads it. */
+export type ShipChoice = ShipModel;
 export type Surface = (typeof SURFACES)[number];
 
 export interface WorldNode {
@@ -435,7 +439,7 @@ export function parseWorld(text: string): World | null {
         rockInflow: num("rockInflow", places.rockInflow),
         carryFull: num("carryFull"),
         carryNone: num("carryNone"),
-        spawns: Array.isArray(raw.spawns) ? SHIP_CHOICES.filter((ship) => (raw.spawns as unknown[]).includes(ship)) : [],
+        spawns: Array.isArray(raw.spawns) ? shipChoices().filter((ship) => (raw.spawns as unknown[]).includes(ship)) : [],
         shipyard: typeof raw.shipyard === "boolean" ? raw.shipyard : places.shipyard,
         storage: num("storage", places.storage),
         unlocked: isModuleList(raw.unlocked),

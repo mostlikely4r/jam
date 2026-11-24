@@ -15,7 +15,7 @@ import {
   limitCarrying,
   spinAngle,
   stringifyWorld,
-  SHIP_CHOICES,
+  shipChoices,
   SURFACES,
   walk,
   type NodeKind,
@@ -23,6 +23,7 @@ import {
   type World,
   type WorldNode,
 } from "./world";
+import { hullName } from "../fitting";
 import { clampEccentricity, orbitEllipse, phaseToward } from "../kepler";
 import { ITEMS, moduleItems } from "../items";
 import { linkSummary, linkedNodes, useLayout, type GameLink, type ShipMarkKind } from "./link";
@@ -789,7 +790,7 @@ Layouts: ${layouts.join(", ")}`, "");
     if (!isRoot && !body) {
       const ships = multiSelect({
         key: `spawns:${node.id}`,
-        options: SHIP_CHOICES.map((ship) => ({ id: ship, label: `the ${ship[0].toUpperCase()}${ship.slice(1)}` })),
+        options: shipChoices().map((ship) => ({ id: ship, label: `the ${hullName(ship)}` })),
         picked: () => node.spawns,
         pick: (id, on) => {
           node.spawns = on ? withPick(node.spawns, id) : withoutPick(node.spawns, id);

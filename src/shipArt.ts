@@ -4,7 +4,7 @@
  * dish), each drawn where its mount sits, turned the way it faces and at its size; what's inside
  * the hull (computer, bay) doesn't show. Damaged parts are handed back so the caller can spark them.
  */
-import { DAMAGED_AT, decalOf, facing, HULL_MOUNTS, PART_ART, type Module, type Mount, type MountId } from "./fitting";
+import { DAMAGED_AT, decalOf, facing, hullEdge, hullMounts, hullShapes, PART_ART, type ArtShape, type HullPoint, type Module, type Mount, type MountId } from "./fitting";
 import { partOf, type PartId, type PartKind, type ShipModel } from "./parts";
 import type { Box } from "./grid";
 
@@ -13,16 +13,99 @@ const R = 12;
 type Point = [number, number];
 type Color = [number, number, number];
 
-export const HULL: Record<ShipModel, Point[]> = {
-  racer: [[R * 1.25, 0], [-R, -R * 0.8], [-R * 0.55, 0], [-R, R * 0.8]],
-  floater: [[R, -R * 0.7], [-R, -R], [-R, R], [R, R * 0.7]],
-  // A broad shield of a hull.
-  defender: [[R * 1.15, 0], [R * 0.35, -R * 0.95], [-R, -R * 0.8], [-R * 0.85, 0], [-R, R * 0.8], [R * 0.35, R * 0.95]],
-  // A small boxy work pod.
-  drone: [[R, 0], [R * 0.4, -R * 0.7], [-R * 0.9, -R * 0.7], [-R * 0.9, R * 0.7], [R * 0.4, R * 0.7]],
-  // Jagged, with a spike on each side.
-  pirate: [[R * 1.3, 0], [R * 0.1, -R * 0.4], [-R * 0.2, -R], [-R * 0.5, -R * 0.3], [-R, -R * 0.6], [-R * 0.8, 0], [-R, R * 0.6], [-R * 0.5, R * 0.3], [-R * 0.2, R], [R * 0.1, R * 0.4]],
-};
+/** The colours a hull or a part draws its shapes in, worked out once from the colour it starts from. */
+export interface ShapePalette {
+  body: Color;
+  shade: Color;
+  rim: Color;
+  glass: Color;
+}
+
+/** The lit edge's own weight, and how transparent it is.	*/
+const EDGE_WIDTH = 0.7;
+const EDGE_ALPHA = 0.85;
+
+/**
+ * The colours a hull draws in: its own body colour, and the shades the art works out from it. A
+ * shape says which role it takes, so one drawing serves every hull colour.
+ */
+export function hullPalette(hull: Color): ShapePalette {
+  return { body: hull, shade: mix(hull, [40, 50, 70], 0.22), rim: [240, 246, 255], glass: mix(hull, [110, 200, 255], 0.6) };
+}
+
+/** The colours a part draws its own shapes in: its metal, its edge colour, and shades of those. */
+export function partPalette(colours: PartColors = {}): ShapePalette {
+  const metal = colours.metal ?? METAL;
+  const rim = colours.rim ?? RIM;
+  return { body: metal, shade: mix(metal, [20, 24, 32], 0.4), rim, glass: mix(metal, [170, 255, 230], 0.5) };
+}
+
+/** Draw order, lower first, as a mount's. */
+const byOrder = (a: ArtShape, b: ArtShape) => (a.order ?? 0) - (b.order ?? 0);
+
+/**
+ * One shape, in its role's colour: filled, or stroked along its points for the rim. `edge` is
+ * what it clips against, if it asks to be clipped and there is one.
+ */
+export function drawShape(ctx: CanvasRenderingContext2D, shape: ArtShape, palette: ShapePalette, edge?: HullPoint[]): void {
+  const colour = palette[shape.role];
+  ctx.save();
+  if (shape.alpha !== undefined) ctx.globalAlpha *= shape.alpha;
+  if (shape.clip && edge && edge.length >= 3) {
+    path(ctx, edge.map(([x, y]): Point => [x * R, y * R]));
+    ctx.clip();
+  }
+  if (shape.role === "rim") {
+    ctx.strokeStyle = rgb(colour);
+    ctx.lineWidth = shape.width ?? EDGE_WIDTH;
+    if (shape.kind === "polygon" && shape.points) {
+      const points = shape.points.map(([x, y]): Point => [x * R, y * R]);
+      if (points.length === 2) {
+        ctx.beginPath();
+        ctx.moveTo(points[0][0], points[0][1]);
+        ctx.lineTo(points[1][0], points[1][1]);
+      } else path(ctx, points);
+      ctx.stroke();
+    } else if (shape.kind === "circle" && shape.r !== undefined) {
+      ctx.beginPath();
+      ctx.arc((shape.x ?? 0) * R, (shape.y ?? 0) * R, shape.r * R, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (shape.kind === "rect") {
+      ctx.save();
+      ctx.translate((shape.x ?? 0) * R, (shape.y ?? 0) * R);
+      ctx.rotate(((shape.angle ?? 0) * Math.PI) / 180);
+      ctx.strokeRect((-(shape.w ?? 0) * R) / 2, (-(shape.h ?? 0) * R) / 2, (shape.w ?? 0) * R, (shape.h ?? 0) * R);
+      ctx.restore();
+    }
+    ctx.restore();
+    return;
+  }
+  ctx.fillStyle = rgb(colour);
+  if (shape.kind === "polygon" && shape.points && shape.points.length >= 3) {
+    path(ctx, shape.points.map(([x, y]): Point => [x * R, y * R]));
+    ctx.fill();
+  } else if (shape.kind === "circle" && shape.r !== undefined) {
+    ctx.beginPath();
+    ctx.arc((shape.x ?? 0) * R, (shape.y ?? 0) * R, shape.r * R, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (shape.kind === "rect") {
+    ctx.save();
+    ctx.translate((shape.x ?? 0) * R, (shape.y ?? 0) * R);
+    ctx.rotate(((shape.angle ?? 0) * Math.PI) / 180);
+    ctx.fillRect((-(shape.w ?? 0) * R) / 2, (-(shape.h ?? 0) * R) / 2, (shape.w ?? 0) * R, (shape.h ?? 0) * R);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+/**
+ * Shapes drawn as a hull draws them: the ones that aren't lit edges first, in order, then the
+ * rim ones, which are lit edges and go over everything. `edge` is there so clipped shapes can clip.
+ */
+export function drawShapes(ctx: CanvasRenderingContext2D, shapes: ArtShape[], palette: ShapePalette, edge?: HullPoint[]): void {
+  for (const shape of shapes.filter((each) => each.role !== "rim").sort(byOrder)) drawShape(ctx, shape, palette, edge);
+  for (const shape of shapes.filter((each) => each.role === "rim").sort(byOrder)) drawShape(ctx, shape, palette, edge);
+}
 
 /** What the art needs to know about a ship. */
 export interface ArtShip {
@@ -64,7 +147,7 @@ function path(ctx: CanvasRenderingContext2D, points: Point[]): void {
 /** The fitted modules worth drawing: everything on the outside, turret and its gun left to `drawTurret`. */
 function outsideParts(ship: ArtShip): { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number }[] {
   const out: { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number }[] = [];
-  for (const mount of HULL_MOUNTS[ship.model]) {
+  for (const mount of hullMounts(ship.model)) {
     const module = ship.fit[mount.id];
     if (!module) continue;
     const kind = partOf(module.part).kind;
@@ -174,15 +257,14 @@ export function drawPartArt(ctx: CanvasRenderingContext2D, id: PartId, wear: num
   const colours: PartColors = {};
   if (art?.metal) colours.metal = colorOf(art.metal, METAL);
   if (art?.rim) colours.rim = colorOf(art.rim, RIM);
-  drawPart(ctx, part.kind, wear, main, colours);
+  // A part with shapes of its own drawn in the file uses those, worn and scorched as the code's art is.
+  if (art?.shapes && art.shapes.length > 0) {
+    const palette = partPalette(colours);
+    const worn: ShapePalette = { body: partColor(wear, palette.body), shade: partColor(wear, palette.shade), rim: partColor(wear, palette.rim), glass: partColor(wear, palette.glass) };
+    drawShapes(ctx, art.shapes, worn);
+  } else drawPart(ctx, part.kind, wear, main, colours);
   ctx.restore();
 }
-
-/** A darker belly panel for depth: a shape of its own for the first two hulls, else the hull's shrunk and shifted down. */
-const BELLY: Partial<Record<ShipModel, Point[]>> = {
-  racer: [[2, 1.2], [-12, 9.6], [-6.6, 0.2]],
-  floater: [[12, 2], [-12, 4], [-12, 12], [12, 8.4]],
-};
 
 /** A decal part drawn at the origin facing +x. Cockpit glass has art of its own; any other part shows as it would fitted. */
 export function drawDecal(ctx: CanvasRenderingContext2D, id: PartId): void {
@@ -228,7 +310,7 @@ export function drawDecal(ctx: CanvasRenderingContext2D, id: PartId): void {
  * `layer` picks by the mount's draw order: "below" the hull's own shape, or "above" it.
  */
 export function drawDecals(ctx: CanvasRenderingContext2D, model: ShipModel, pick: (mount: Mount) => PartId | null, layer: "below" | "above" = "above"): void {
-  for (const mount of HULL_MOUNTS[model]) {
+  for (const mount of hullMounts(model)) {
     if (!mount.decal) continue;
     if (((mount.order ?? 0) < 0) !== (layer === "below")) continue;
     const id = pick(mount);
@@ -288,30 +370,23 @@ export function drawTurret(ctx: CanvasRenderingContext2D, art: TurretArt): void 
 
 /** The bare hull: plates and edge. Decals, such as the cockpit, go on top (`drawDecals`). */
 export function drawHull(ctx: CanvasRenderingContext2D, model: ShipModel, hull: Color): void {
-  ctx.fillStyle = rgb(hull);
-  path(ctx, HULL[model]);
+  // The outline is the body: what the hull is filled with, and what everything else clips to.
+  const edge = hullEdge(model);
+  if (edge.length < 3) return;
+  const palette = hullPalette(hull);
+  ctx.fillStyle = rgb(palette.body);
+  path(ctx, edge.map(([x, y]): Point => [x * R, y * R]));
   ctx.fill();
-  ctx.save();
-  path(ctx, HULL[model]);
-  ctx.clip();
-  ctx.fillStyle = rgb(mix(hull, [40, 50, 70], 0.22));
-  path(ctx, BELLY[model] ?? HULL[model].map(([x, y]): Point => [x * 0.6 - 2, y * 0.6 + 2.5]));
-  ctx.fill();
-  ctx.restore();
-  // The lit edge.
-  ctx.strokeStyle = "rgba(240,246,255,0.85)";
-  ctx.lineWidth = 0.7;
-  path(ctx, HULL[model]);
+  // Shading, panels and decals over it, in their own order, then the shapes that are lit edges
+  // over the lit edge itself, which is the outline.
+  const shapes = hullShapes(model);
+  drawShapes(ctx, shapes.filter((each) => each.role !== "rim"), palette, edge);
+  ctx.strokeStyle = `rgba(${palette.rim[0]},${palette.rim[1]},${palette.rim[2]},${EDGE_ALPHA})`;
+  ctx.lineWidth = EDGE_WIDTH;
+  path(ctx, edge.map(([x, y]): Point => [x * R, y * R]));
   ctx.stroke();
-  if (model === "floater") {
-    // The pale front edge that shows which way it faces.
-    ctx.strokeStyle = "#f4f8ff";
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.moveTo(R, -R * 0.7);
-    ctx.lineTo(R, R * 0.7);
-    ctx.stroke();
-  }
+  // Anything drawn over the lit edge, such as the floater's pale front edge.
+  drawShapes(ctx, shapes.filter((each) => each.role === "rim"), palette, edge);
 }
 
 /**
@@ -320,7 +395,7 @@ export function drawHull(ctx: CanvasRenderingContext2D, model: ShipModel, hull: 
  * A ship without a bay carries nothing at all.
  */
 export function bayBox(ship: ArtShip): Box & { part: PartId | null; alpha: number } {
-  const mounts = HULL_MOUNTS[ship.model];
+  const mounts = hullMounts(ship.model);
   let spot = mounts.find((mount) => mount.types.includes("cargo bay"));
   let part: PartId | null = null;
   for (const mount of mounts) {
@@ -387,7 +462,7 @@ export interface TankBox extends Box {
  */
 export function tankBoxes(ship: ArtShip, fill: number): TankBox[] {
   const boxes: TankBox[] = [];
-  for (const mount of HULL_MOUNTS[ship.model]) {
+  for (const mount of hullMounts(ship.model)) {
     const module = ship.fit[mount.id];
     if (!module || module.wear >= 1) continue;
     const capacity = partOf(module.part).tank ?? 0;

@@ -347,7 +347,7 @@ undo, show/hide layers, a multi-select drop-down for long id lists, per-part x/y
 base colours, and the turret drawn as a circle with its gun turning.
 
 ## S-47 · Hulls as data, and a shape editor for hulls and parts
-- status: specced
+- status: built
 - area: Ships and gear
 - effort: L
 - plan: docs/hull-drawing-plan.md

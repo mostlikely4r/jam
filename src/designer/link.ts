@@ -5,7 +5,7 @@
  * the one place a place is described (docs/home-pair-plan.md).
  */
 import { TICK, type AnchorSpec, type FieldSpec, type Orbit, type OrbitRing, type PirateBaseSpec, type Sim, type SolidBody, type Spawn, type StationSpec } from "../sim";
-import { SHIP_CHOICES, copiesOf, isBody, parentOf, pathTo, walk, type Copy, type NodeKind, type World, type WorldNode } from "./world";
+import { shipChoices, copiesOf, isBody, parentOf, pathTo, walk, type Copy, type NodeKind, type World, type WorldNode } from "./world";
 
 /** A whole layout as the game takes it. */
 export interface Layout {
@@ -302,7 +302,7 @@ export function linkSummary(world: World): string {
   const places = nodes.filter((node) => !real.includes(node));
   const lines: string[] = [];
   if (places.length > 0) lines.push(`Map only: ${places.map((node) => node.name).join(", ")}`);
-  const starts = SHIP_CHOICES.map((ship) => {
+  const starts = shipChoices().map((ship) => {
     const places = nodes.filter((node) => node.spawns.includes(ship)).map((node) => node.name);
     return `${ship}: ${places.length > 0 ? places.join(" or ") : "by the field"}`;
   });

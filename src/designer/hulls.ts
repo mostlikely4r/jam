@@ -27,19 +27,33 @@
  * Changes are in the game at once; Save writes them all to src/hulls.json, which the game ships with.
  */
 import {
+  copyHull,
   decalChoices,
   DECAL_PARTS,
   facing,
+  HULL_EDGE,
   HULL_INFO,
   HULL_MOUNTS,
+  HULL_SHAPES,
   HULL_USE_NAMES,
   HULL_USES,
   hullDefaults,
+  addPoint,
+  dragPoint,
+  hullInfo,
+  hullName,
   isDecal,
+  removePoint,
+  SHAPE_ROLES,
+  SHAPE_ROLE_NAMES,
+  type ArtShape,
+  type HullPoint,
+  type ShapeRole,
   MOUNT_TYPES,
   mountTakes,
   mountThrust,
   onEdge,
+  onGrid,
   PART_MOUNTS,
   resetPartStats,
   PART_ART,
@@ -72,10 +86,22 @@ const R = 12;
 const DRAFT_KEY = "jam-ships-draft";
 const ITEMS_DRAFT_KEY = "jam-items-draft";
 const PROGRAMS_DRAFT_KEY = "jam-programs-draft";
-const MODEL_NAMES: Record<ShipModel, string> = { racer: "Racer", floater: "Floater", defender: "Defender", drone: "Drone", pirate: "Pirate" };
 const byName = (a: string, b: string) => a.localeCompare(b);
-/** Every hull, alphabetically by name: the order of the drop down lists. */
-const MODELS: ShipModel[] = [...SHIP_MODELS].sort((a, b) => byName(MODEL_NAMES[a], MODEL_NAMES[b]));
+/** Every hull the file has now, alphabetically by name: the order of the drop down lists. */
+const hullList = (): ShipModel[] => [...SHIP_MODELS].sort((a, b) => byName(hullName(a), hullName(b)));
+/** Whether a spot is inside a polygon, by counting the edges a ray to the right crosses. */
+function insidePolygon(points: HullPoint[], x: number, y: number): boolean {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [xi, yi] = points[i];
+    const [xj, yj] = points[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** What each kind of shape is called in the panel. */
+const SHAPE_KIND_NAMES: Record<ArtShape["kind"], string> = { polygon: "Polygon", circle: "Circle", rect: "Rect" };
 const ROLE_NAMES: Record<ThrusterRole, string> = {
   thrusterMain: "Main (W)",
   thrusterReverse: "Reverse (S)",
@@ -205,7 +231,7 @@ export class HullDesigner {
   private showOn: ShipModel | null = null;
   /** The sections the user has opened: every section starts collapsed. */
   private opened = new Set<string>();
-  private drag: { kind: "move" | "turn"; moved: boolean } | null = null;
+  private drag: { kind: "move" | "turn"; moved: boolean } | { kind: "point" | "centre"; index: number; moved: boolean } | null = null;
   private status = "";
   /** Screen pixels per world unit, and where the ship's middle is on screen. */
   private zoom = 10;
@@ -220,6 +246,17 @@ export class HullDesigner {
   private at: [number, number] | null = null;
   /** Ctrl-Z's snapshots, one stack for the three pages. */
   private readonly undo: UndoStack;
+  /**
+   * What the canvas has picked to draw as shapes: the hull's outline and shapes on the hulls page,
+   * or the picked part's own drawn art on the parts page. `null` is a mount.
+   */
+  private shape: number | "edge" | null = null;
+  /** The point of the picked shape being dragged, while one is. */
+  private point: number | null = null;
+  /** The point under the cursor, so it can light up before it is grabbed. */
+  private hoverPoint: number | null = null;
+  /** Mirror drawing: a point's twin across the middle line moves with it. On until turned off. */
+  private mirrored = true;
   /** A drag, a held wheel or a slider counts as one step: no snapshot until it settles. */
   private gesturing = false;
   private gestureTimer = 0;
@@ -294,7 +331,7 @@ export class HullDesigner {
   }
 
   private shippedMount(id: MountId): Mount | undefined {
-    return SHIPPED_SHIPS.hulls[this.model]?.find((mount) => mount.id === id);
+    return SHIPPED_SHIPS.hulls[this.model]?.mounts.find((mount) => mount.id === id);
   }
 
   /** After any change: kept as a draft, and the panel shows it. */
@@ -345,6 +382,9 @@ export class HullDesigner {
     useProgramsFile(programs);
     this.writeDrafts();
     this.onMountsChanged();
+    // A shape picked by its place in the list may be a different one after a step back.
+    this.shape = null;
+    this.point = null;
     this.status = "Not saved";
     this.rebuild();
   }
@@ -380,12 +420,16 @@ export class HullDesigner {
   private deselect(): void {
     this.gesturing = false;
     this.selected = null;
+    this.shape = null;
+    this.point = null;
     this.rebuild();
   }
 
-  /** The zoom that fits the whole ship, at this canvas size. */
+  /** The zoom that fits what's drawn, at this canvas size: the whole ship, or a part on its own. */
   private fitZoom(width: number, height: number): number {
-    return Math.max(4, Math.min(width, height) / (R * 4.2));
+    // A part on its own is a twelfth of a hull's size, so its view fits about half a radius.
+    const across = this.alone() ? 0.6 : 4.2;
+    return Math.max(4, Math.min(width, height) / (R * across));
   }
 
   /** Back to the whole ship in view: the fit button, or key 0. */
@@ -520,7 +564,16 @@ export class HullDesigner {
     });
   }
 
+  /** A hull the file still has, after the list changed under the designer: the racer, or the first. */
+  private keepModel(): void {
+    if (HULL_MOUNTS[this.model]) return;
+    this.model = HULL_MOUNTS.racer ? "racer" : SHIP_MODELS[0] ?? "";
+    this.selected = null;
+    this.shape = null;
+  }
+
   private rebuild(): void {
+    this.keepModel();
     const title = document.createElement("h1");
     title.textContent = "HULL DESIGNER";
     const pages = document.createElement("div");
@@ -639,17 +692,18 @@ export class HullDesigner {
     const models = this.labelled(
       "Hull",
       this.dropdown(
-        MODELS.map((model) => [model, MODEL_NAMES[model]]),
+        hullList().map((model) => [model, hullName(model)]),
         this.model,
         (value) => {
           this.model = value as ShipModel;
           // A hull change keeps nothing picked as nothing picked.
+          this.shape = null;
           if (this.selected) this.selected = this.mounts()[0]?.id ?? null;
           this.rebuild();
         },
       ),
     );
-    const info = HULL_INFO[this.model];
+    const info = hullInfo(this.model);
     const usedBy = this.multi(
       `used:${this.model}`,
       info.usedBy,
@@ -709,6 +763,7 @@ export class HullDesigner {
     const out: HTMLElement[] = [
       intro,
       this.section("hull", "Hull", models),
+      this.section("hullshape", "Shape", ...this.shapesEditor(), this.button("Copy this hull", () => this.copyHull(), "on")),
       this.section("used", "Used by", usedBy, usedNote),
       this.section("programs", "Default programs", programs, programsNote),
       this.section("loadouts", "Loadouts", ...this.loadoutsEditor(info)),
@@ -903,7 +958,7 @@ export class HullDesigner {
         }),
       );
     }
-    tools.append(this.button("Mirrored copy", () => this.mirror(mount)));
+    tools.append(this.button("Mirrored copy", () => this.mirrorMount(mount)));
     tools.append(this.button("Remove mount", () => this.removeMount(mount), "danger"));
 
     const keys = document.createElement("div");
@@ -953,6 +1008,7 @@ export class HullDesigner {
         this.part,
         (value) => {
           this.part = value as PartId;
+          this.shape = null;
           this.rebuild();
         },
       ),
@@ -981,10 +1037,10 @@ export class HullDesigner {
       },
     );
     const where = document.createElement("p");
-    const lines = MODELS.map((model) => {
-      if (!partFits(part, model)) return `${MODEL_NAMES[model]}: not for this ship`;
+    const lines = hullList().map((model) => {
+      if (!partFits(part, model)) return `${hullName(model)}: not for this ship`;
       const mounts = HULL_MOUNTS[model].filter((mount) => mountTakes(mount, part.id)).map((mount) => mount.name);
-      return `${MODEL_NAMES[model]}: ${mounts.length ? mounts.join(", ") : "nowhere"}`;
+      return `${hullName(model)}: ${mounts.length ? mounts.join(", ") : "nowhere"}`;
     });
     where.textContent = lines.join("\n");
     where.style.whiteSpace = "pre-line";
@@ -993,7 +1049,7 @@ export class HullDesigner {
     const models = this.labelled(
       "Show on hull",
       this.dropdown(
-        [["", "none: just the part"], ...MODELS.map((model): [string, string] => [model, MODEL_NAMES[model]])],
+        [["", "none: just the part"], ...hullList().map((model): [string, string] => [model, hullName(model)])],
         this.showOn ?? "",
         (value) => {
           this.showOn = value ? (value as ShipModel) : null;
@@ -1086,6 +1142,7 @@ export class HullDesigner {
       this.section("part", "Part", list, decal),
       stats,
       this.section(`art:${part.id}`, "Art", ...this.artEditor(part)),
+      this.section("partshape", "Shapes drawn on it", ...this.shapesEditor()),
       ...(itemOwned(part.id) ? [] : [this.section(`icon:${part.id}`, "Icon", ...this.iconPicker(part))]),
       this.section(`fits:${part.id}`, `${part.label} fits`, fits, set),
       this.section("goes", "Goes on", where, models),
@@ -1099,7 +1156,7 @@ export class HullDesigner {
   private artEditor(part: { id: PartId }): HTMLElement[] {
     const art: PartArt = PART_ART[part.id] ?? {};
     /** Writes one value of the part's art, dropping it when it says nothing the code doesn't. */
-    const set = (key: keyof PartArt, value: number | string | undefined, rebuild = true) => {
+    const set = (key: Exclude<keyof PartArt, "shapes">, value: number | string | undefined, rebuild = true) => {
       const now: PartArt = { ...(PART_ART[part.id] ?? {}) };
       if (value === undefined) delete now[key];
       else if (key === "scaleX" || key === "scaleY" || key === "alpha") now[key] = value as number;
@@ -1681,7 +1738,7 @@ export class HullDesigner {
     const intro = document.createElement("p");
     intro.textContent = "Do the programs a hull would run fit its computer? A red cell is creep: the loop can't fit even its core. 'Core only' means the loop works but the comfort programs are over the slots. A loadout naming a program without the one it needs doesn't work either.";
     const names: string[] = [];
-    for (const model of MODELS) for (const loadout of HULL_INFO[model].loadouts) if (!names.includes(loadout.name)) names.push(loadout.name);
+    for (const model of hullList()) for (const loadout of HULL_INFO[model].loadouts) if (!names.includes(loadout.name)) names.push(loadout.name);
     if (names.length === 0) {
       const none = document.createElement("p");
       none.textContent = "No hull has a loadout yet: add one under Default programs on the Hulls page.";
@@ -1698,9 +1755,9 @@ export class HullDesigner {
     head.append(heading("Hull"));
     for (const name of names) head.append(heading(name));
     table.append(head);
-    for (const model of MODELS) {
+    for (const model of hullList()) {
       const row = document.createElement("tr");
-      row.append(heading(MODEL_NAMES[model]));
+      row.append(heading(hullName(model)));
       for (const name of names) {
         const loadout = HULL_INFO[model].loadouts.find((each) => each.name === name);
         if (!loadout) {
@@ -1922,7 +1979,7 @@ export class HullDesigner {
         this.renameType(type, name);
         this.changed();
       });
-      const used = MODELS.reduce((sum, model) => sum + HULL_MOUNTS[model].filter((mount) => mount.types.includes(type)).length, 0);
+      const used = hullList().reduce((sum, model) => sum + HULL_MOUNTS[model].filter((mount) => mount.types.includes(type)).length, 0);
       const parts = FITTED.filter((part) => (PART_MOUNTS[part.id] ?? []).includes(type)).length;
       const count = document.createElement("span");
       count.className = "dim";
@@ -1951,18 +2008,18 @@ export class HullDesigner {
 
   private renameType(from: string, to: string): void {
     MOUNT_TYPES[MOUNT_TYPES.indexOf(from)] = to;
-    for (const model of MODELS) for (const mount of HULL_MOUNTS[model]) mount.types = mount.types.map((type) => (type === from ? to : type));
+    for (const model of hullList()) for (const mount of HULL_MOUNTS[model]) mount.types = mount.types.map((type) => (type === from ? to : type));
     for (const part of FITTED) PART_MOUNTS[part.id] = (PART_MOUNTS[part.id] ?? []).map((type) => (type === from ? to : type));
   }
 
   private removeType(type: string): void {
     MOUNT_TYPES.splice(MOUNT_TYPES.indexOf(type), 1);
-    for (const model of MODELS) for (const mount of HULL_MOUNTS[model]) mount.types = mount.types.filter((each) => each !== type);
+    for (const model of hullList()) for (const mount of HULL_MOUNTS[model]) mount.types = mount.types.filter((each) => each !== type);
     for (const part of FITTED) PART_MOUNTS[part.id] = (PART_MOUNTS[part.id] ?? []).filter((each) => each !== type);
   }
 
   private newId(): MountId {
-    const taken = new Set(MODELS.flatMap((model) => HULL_MOUNTS[model].map((mount) => mount.id)));
+    const taken = new Set(hullList().flatMap((model) => HULL_MOUNTS[model].map((mount) => mount.id)));
     let n = 1;
     while (taken.has(`mount${n}`)) n++;
     return `mount${n}`;
@@ -1977,7 +2034,7 @@ export class HullDesigner {
   }
 
   /** A copy on the other side of the middle line, its control swapped left for right. */
-  private mirror(mount: Mount): void {
+  private mirrorMount(mount: Mount): void {
     const id = this.newId();
     const copy: Mount = { ...JSON.parse(JSON.stringify(mount)), id, name: `${mount.name} (mirrored)`, y: -mount.y, angle: -mount.angle };
     if (mount.role) copy.role = MIRROR_ROLE[mount.role] ?? mount.role;
@@ -2012,6 +2069,7 @@ export class HullDesigner {
 
   private select(id: MountId): void {
     this.selected = id;
+    this.shape = null;
     this.rebuild();
   }
 
@@ -2089,6 +2147,204 @@ export class HullDesigner {
     this.rebuild();
   }
 
+  // ---------- the shapes a hull or a part is drawn with ----------
+
+  /** Whether the parts page is drawing just the part: no hull under it, so no outline either. */
+  private alone(): boolean {
+    return this.page === "parts" && this.showOn === null;
+  }
+
+  /** The shapes the canvas draws and the panel lists: a hull's, or the picked part's own drawn art. */
+  private shapes(): ArtShape[] {
+    if (this.page === "parts") return PART_ART[this.part]?.shapes ?? [];
+    return HULL_SHAPES[this.model] ?? [];
+  }
+
+  /** Where a shape edit goes: a hull's list, or the picked part's art, made if it isn't there yet. */
+  private shapeList(): ArtShape[] {
+    if (this.page !== "parts") return (HULL_SHAPES[this.model] ??= []);
+    const art = (PART_ART[this.part] ??= {});
+    return (art.shapes ??= []);
+  }
+
+  /** A hull's outline: the body it's filled with, and the line its shapes clip against. */
+  private outline(): HullPoint[] {
+    return this.page === "parts" ? [] : HULL_EDGE[this.model] ?? [];
+  }
+
+  /** The shape picked, with its own settings; the outline has none, so this is null for it. */
+  private pickedShape(): ArtShape | null {
+    return this.shape === null || this.shape === "edge" ? null : this.shapes()[this.shape] ?? null;
+  }
+
+  /** The points being edited: the outline's, or the picked shape's. */
+  private pickedPoints(): HullPoint[] | null {
+    if (this.shape === "edge") return this.outline();
+    if (this.shape === null) return null;
+    return this.shapes()[this.shape]?.points ?? null;
+  }
+
+  /** Writes edited points back where they came from. */
+  private setPoints(points: HullPoint[]): void {
+    if (this.shape === "edge") {
+      const edge = (HULL_EDGE[this.model] ??= []);
+      edge.splice(0, edge.length, ...points);
+      return;
+    }
+    if (this.shape === null) return;
+    const shape = this.shapes()[this.shape];
+    if (shape) shape.points = points;
+  }
+
+  /** Picks a shape, or the outline: a mount is let go of, so the wheel and the panel are the shape's. */
+  private selectShape(which: number | "edge" | null, rebuild = true): void {
+    this.shape = which;
+    this.point = null;
+    if (which !== null) this.selected = null;
+    if (rebuild) this.rebuild();
+  }
+
+  /** Adds a shape to the picked hull or part, at the middle of the view, and picks it. */
+  private addShape(kind: "polygon" | "circle" | "rect"): void {
+    const [fx, fy] = this.fromScreen(this.cx, this.cy);
+    const x = clean(fx);
+    const y = clean(fy);
+    const shape: ArtShape =
+      kind === "polygon"
+        ? { kind, role: "shade", points: [[x + 0.3, y], [x, y - 0.3], [x - 0.3, y], [x, y + 0.3]] }
+        : kind === "circle"
+          ? { kind, role: "glass", x, y, r: 0.25 }
+          : { kind, role: "shade", x, y, w: 0.6, h: 0.4 };
+    const list = this.shapeList();
+    list.push(shape);
+    this.selectShape(list.length - 1, false);
+    this.changed();
+  }
+
+  /** Takes the picked shape off the hull or the part. The outline is never removed. */
+  private removeShape(): void {
+    if (this.shape === null || this.shape === "edge") return;
+    this.shapes().splice(this.shape, 1);
+    this.selectShape(null, false);
+    this.changed();
+  }
+
+  /**
+   * A new hull from the picked one: its outline, shapes, mounts and stats, under a name of its
+   * own. What it's used for starts empty, so a copy doesn't quietly join the new game's ships.
+   */
+  private copyHull(): void {
+    const from = this.model;
+    let id = `${from}Copy`;
+    let n = 2;
+    while (SHIP_MODELS.includes(id)) id = `${from}Copy${n++}`;
+    copyHull(from, id);
+    this.model = id;
+    this.selectShape(null, false);
+    this.selected = HULL_MOUNTS[id][0]?.id ?? null;
+    this.onMountsChanged();
+    this.changed();
+  }
+
+  /** The shape controls: the list, the add buttons, mirroring, and the picked shape's own settings. */
+  private shapesEditor(): HTMLElement[] {
+    const note = document.createElement("p");
+    const onParts = this.page === "parts";
+    note.textContent = onParts
+      ? "The shapes this part is drawn with, in its own frame, facing the nose. A part with shapes is drawn from them instead of the code's art; one without keeps the code's."
+      : "The outline is the hull's body: what it's filled with, and the line everything else clips against. The shapes over it are shading, panels and decals, drawn in draw order. Drag a point to move it, click a segment to add one, right-click a point or Delete to remove one.";
+    const list = document.createElement("div");
+    list.className = "list";
+    const outline = this.outline();
+    if (outline.length > 0) list.append(this.button(`Outline (${outline.length} points)`, () => this.selectShape("edge"), this.shape === "edge" ? "on" : ""));
+    for (const [index, shape] of this.shapes().entries()) {
+      const label = `${index + 1}. ${SHAPE_KIND_NAMES[shape.kind]}, ${shape.role}`;
+      list.append(this.button(label, () => this.selectShape(index), this.shape === index ? "on" : ""));
+    }
+    if (list.childElementCount === 0) {
+      const none = document.createElement("p");
+      none.textContent = "Nothing drawn yet.";
+      list.append(none);
+    }
+
+    const mirror = document.createElement("label");
+    const mirrorBox = document.createElement("input");
+    mirrorBox.type = "checkbox";
+    mirrorBox.checked = this.mirrored;
+    mirrorBox.addEventListener("change", () => {
+      this.mirrored = mirrorBox.checked;
+      this.changed(false);
+    });
+    mirror.style.color = "#cfd8e6";
+    mirror.append(mirrorBox, " Mirror: a point and its twin across the middle line move together");
+
+    const out: HTMLElement[] = [
+      note,
+      list,
+      this.button("Add a polygon", () => this.addShape("polygon")),
+      this.button("Add a circle", () => this.addShape("circle")),
+      this.button("Add a rect", () => this.addShape("rect")),
+      mirror,
+    ];
+
+    const shape = this.pickedShape();
+    if (shape) {
+      out.push(
+        this.labelled(
+          "Colour",
+          this.dropdown(
+            SHAPE_ROLES.map((role): [string, string] => [role, SHAPE_ROLE_NAMES[role]]),
+            shape.role,
+            (value) => {
+              shape.role = value as ShapeRole;
+              this.changed();
+            },
+          ),
+        ),
+      );
+      const order = document.createElement("input");
+      order.type = "number";
+      order.step = "1";
+      order.value = String(shape.order ?? 0);
+      order.addEventListener("change", () => {
+        const value = Number(order.value);
+        if (!Number.isFinite(value) || value === 0) delete shape.order;
+        else shape.order = Math.round(value);
+        this.changed();
+      });
+      out.push(this.labelled("Draw order", order));
+      const alpha = document.createElement("input");
+      alpha.type = "range";
+      alpha.min = "0";
+      alpha.max = "1";
+      alpha.step = "0.05";
+      alpha.value = String(shape.alpha ?? 1);
+      alpha.addEventListener("input", () => {
+        const value = Number(alpha.value);
+        if (value >= 0.999) delete shape.alpha;
+        else shape.alpha = clean(value);
+        this.changed(false);
+      });
+      out.push(this.labelled("Transparency", alpha));
+      if (!onParts) {
+        const clip = document.createElement("label");
+        const clipBox = document.createElement("input");
+        clipBox.type = "checkbox";
+        clipBox.checked = shape.clip === true;
+        clipBox.addEventListener("change", () => {
+          if (clipBox.checked) shape.clip = true;
+          else delete shape.clip;
+          this.changed();
+        });
+        clip.style.color = "#cfd8e6";
+        clip.append(clipBox, " Clipped to the outline");
+        out.push(clip);
+      }
+      out.push(this.button("Remove this shape", () => this.removeShape(), "danger"));
+    }
+    return out;
+  }
+
   // ---------- canvas ----------
 
   private toScreen(x: number, y: number): [number, number] {
@@ -2125,6 +2381,115 @@ export class HullDesigner {
     return best;
   }
 
+  /**
+   * What a click on the canvas lands on among the shapes: a point to drag, the middle of a segment
+   * to add one to, or a shape itself. Points of any shape are picked first, whatever is selected,
+   * then the segment middles of the picked one, then the shapes under the pointer, top one first.
+   * The outline counts as the body underneath the rest, so clicking the bare hull picks it.
+   */
+  private pickShape(sx: number, sy: number): { shape: number | "edge"; point?: number; add?: number } | null {
+    const reach = 9;
+    let best: { shape: number | "edge"; point: number; distance: number } | null = null;
+    const consider = (shape: number | "edge", points: HullPoint[]) => {
+      points.forEach(([x, y], index) => {
+        const [px, py] = this.toScreen(x, y);
+        const distance = Math.hypot(px - sx, py - sy);
+        if (distance <= reach && (best === null || distance < best.distance)) best = { shape, point: index, distance };
+      });
+    };
+    const outline = this.outline();
+    if (outline.length > 0) consider("edge", outline);
+    this.shapes().forEach((shape, index) => {
+      if (shape.points) consider(index, shape.points);
+    });
+    if (best !== null) {
+      const hit: { shape: number | "edge"; point: number } = best;
+      return hit;
+    }
+    // A click on the middle of a segment of the picked shape puts a point there.
+    const picked = this.pickedPoints();
+    if (picked && picked.length >= 3 && this.shape !== null) {
+      for (let i = 0; i < picked.length; i++) {
+        const [ax, ay] = picked[i];
+        const [bx, by] = picked[(i + 1) % picked.length];
+        const [px, py] = this.toScreen((ax + bx) / 2, (ay + by) / 2);
+        if (Math.hypot(px - sx, py - sy) <= reach) return { shape: this.shape, add: i };
+      }
+    }
+    const [x, y] = this.fromScreen(sx, sy);
+    const shapes = this.shapes();
+    for (let index = shapes.length - 1; index >= 0; index--) {
+      const shape = shapes[index];
+      const hit = shape.kind === "polygon" ? !!shape.points && insidePolygon(shape.points, x, y) : this.insideShape(shape, x, y);
+      if (hit) return { shape: index };
+    }
+    if (outline.length >= 3 && insidePolygon(outline, x, y)) return { shape: "edge" };
+    return null;
+  }
+
+  /** Whether a spot, in hull units, is inside a circle or a rect: a polygon is `insidePolygon`'s. */
+  private insideShape(shape: ArtShape, x: number, y: number): boolean {
+    if (shape.kind === "circle") return Math.hypot(x - (shape.x ?? 0), y - (shape.y ?? 0)) <= (shape.r ?? 0);
+    if (shape.kind !== "rect") return false;
+    // Turned the other way into the rect's own frame, then a box test.
+    const a = (-(shape.angle ?? 0) * Math.PI) / 180;
+    const dx = x - (shape.x ?? 0);
+    const dy = y - (shape.y ?? 0);
+    return Math.abs(dx * Math.cos(a) - dy * Math.sin(a)) <= (shape.w ?? 0) / 2 && Math.abs(dx * Math.sin(a) + dy * Math.cos(a)) <= (shape.h ?? 0) / 2;
+  }
+
+  /** The picked shape's points and segment middles, over everything, so they can be dragged. */
+  private drawShapeHandles(): void {
+    const { ctx } = this;
+    const shape = this.pickedShape();
+    if (shape && shape.kind !== "polygon") {
+      // A circle or a rect has no points: a cross marks its middle, which drags it.
+      const [sx, sy] = this.toScreen(shape.x ?? 0, shape.y ?? 0);
+      ctx.strokeStyle = "rgba(255,212,121,0.9)";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(sx - 7, sy);
+      ctx.lineTo(sx + 7, sy);
+      ctx.moveTo(sx, sy - 7);
+      ctx.lineTo(sx, sy + 7);
+      ctx.stroke();
+    }
+    const points = this.pickedPoints();
+    if (!points) return;
+    if (this.shape === "edge" || points.length >= 3) {
+      for (let i = 0; i < points.length; i++) {
+        const [ax, ay] = points[i];
+        const [bx, by] = points[(i + 1) % points.length];
+        const [sx, sy] = this.toScreen((ax + bx) / 2, (ay + by) / 2);
+        ctx.strokeStyle = "rgba(143,227,161,0.6)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    points.forEach(([x, y], index) => {
+      const [sx, sy] = this.toScreen(x, y);
+      const hot = index === this.point || index === this.hoverPoint;
+      ctx.fillStyle = hot ? "#ffd479" : "#ffffff";
+      ctx.fillRect(sx - 3.5, sy - 3.5, 7, 7);
+      ctx.strokeStyle = "#0a1a2e";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sx - 3.5, sy - 3.5, 7, 7);
+    });
+  }
+
+  /** Takes a point off the picked shape, or the outline, with its twin. A polygon keeps three. */
+  private removeShapePoint(shape: number | "edge", index: number): void {
+    const points = shape === "edge" ? this.outline() : shape === null ? null : this.shapes()[shape]?.points;
+    if (!points) return;
+    const next = removePoint(points, index, this.mirrored);
+    if (next === points) return;
+    this.selectShape(shape, false);
+    this.setPoints(next);
+    this.changed();
+  }
+
   private listen(): void {
     const point = (event: MouseEvent): [number, number] => {
       const rect = this.canvas.getBoundingClientRect();
@@ -2132,27 +2497,81 @@ export class HullDesigner {
     };
     this.canvas.addEventListener("mousedown", (event) => {
       const [sx, sy] = point(event);
-      const hit = this.pick(sx, sy);
-      if (!hit) {
-        // A click on nothing selects nothing: the wheel zooms then, and the mount sections go.
-        if (this.selected) this.deselect();
+      const grip = this.pickShape(sx, sy);
+      // The right button takes a point off the shape being drawn.
+      if (event.button === 2) {
+        if (grip?.point !== undefined) this.removeShapePoint(grip.shape, grip.point);
         return;
       }
-      if (this.page !== "hulls") this.page = "hulls";
-      if (hit.id !== this.selected) this.select(hit.id);
-      else this.rebuild();
-      // The whole drag is one step: it settles when the button comes up.
-      this.gesturing = true;
-      this.drag = { kind: hit.kind, moved: false };
+      // A point of a shape first: grabbing one is always what the click meant. Then a mount, then
+      // the middle of a segment (which adds one), then the shape itself.
+      if (grip?.point !== undefined) {
+        this.selectShape(grip.shape, false);
+        this.point = grip.point;
+        this.gesturing = true;
+        this.drag = { kind: "point", index: grip.point, moved: false };
+        this.rebuild();
+        return;
+      }
+      const hit = this.pick(sx, sy);
+      if (hit) {
+        if (this.page !== "hulls") this.page = "hulls";
+        if (hit.id !== this.selected) this.select(hit.id);
+        else this.rebuild();
+        // The whole drag is one step: it settles when the button comes up.
+        this.gesturing = true;
+        this.drag = { kind: hit.kind, moved: false };
+        return;
+      }
+      if (grip?.add !== undefined && this.shape !== null) {
+        const points = this.pickedPoints();
+        if (points) {
+          const [x, y] = this.fromScreen(sx, sy);
+          this.setPoints(addPoint(points, grip.add, [clean(x), clean(y)], this.mirrored));
+          this.changed();
+          return;
+        }
+      }
+      if (grip) {
+        // A click on a circle or a rect drags it; on a polygon, it only picks it.
+        this.selectShape(grip.shape, false);
+        const shape = this.pickedShape();
+        this.gesturing = shape !== null && shape.kind !== "polygon";
+        this.drag = this.gesturing ? { kind: "centre", index: 0, moved: false } : null;
+        this.rebuild();
+        return;
+      }
+      // A click on nothing selects nothing: the wheel zooms then, and the sections go.
+      if (this.selected || this.shape !== null) this.deselect();
     });
+    this.canvas.addEventListener("contextmenu", (event) => event.preventDefault());
     window.addEventListener("mousemove", (event) => {
       if (!this.isOpen) return;
       const [sx, sy] = point(event);
       this.at = [sx, sy];
       if (!this.drag) {
         const hit = this.pick(sx, sy);
+        const grip = this.pickShape(sx, sy);
         this.hover = hit?.id ?? null;
-        this.canvas.style.cursor = hit ? (hit.kind === "turn" ? "crosshair" : "move") : "default";
+        this.hoverPoint = grip?.point ?? null;
+        this.canvas.style.cursor = grip?.point !== undefined ? "grab" : hit ? (hit.kind === "turn" ? "crosshair" : "move") : "default";
+        return;
+      }
+      // A point of a shape, and the twin mirroring gives it, then a circle or a rect's middle.
+      if (this.drag.kind === "point" || this.drag.kind === "centre") {
+        const shape = this.pickedShape();
+        const [x, y] = this.fromScreen(sx, sy);
+        const step = event.shiftKey ? 0.05 : 0;
+        if (this.drag.kind === "point") {
+          const points = this.pickedPoints();
+          if (!points) return;
+          this.setPoints(dragPoint(points, this.drag.index, [clean(x), clean(y)], this.mirrored, step));
+        } else if (shape && shape.kind !== "polygon") {
+          shape.x = step > 0 ? onGrid(x, step) : clean(x);
+          shape.y = step > 0 ? onGrid(y, step) : clean(y);
+        }
+        this.drag.moved = true;
+        this.changed(false);
         return;
       }
       const mount = this.mount();
@@ -2172,6 +2591,7 @@ export class HullDesigner {
     window.addEventListener("mouseup", () => {
       const dragged = this.drag;
       this.drag = null;
+      this.point = null;
       if (dragged?.moved) this.rebuild();
       this.settle();
     });
@@ -2180,6 +2600,25 @@ export class HullDesigner {
       (event) => {
         event.preventDefault();
         const [sx, sy] = point(event);
+        // A picked circle or rect sizes and turns on the wheel; a polygon has no size of its own,
+        // so there the wheel is the view's, as it is with nothing picked.
+        const shape = this.pickedShape();
+        if (shape) {
+          const way = event.deltaY > 0 ? 1 : -1;
+          if (shape.kind === "circle") {
+            shape.r = clean(Math.max(0.02, (shape.r ?? 0.2) + way * (event.shiftKey ? 0.01 : 0.05)));
+            this.changed(false);
+            return;
+          }
+          if (shape.kind === "rect") {
+            if (event.ctrlKey) {
+              shape.w = clean(Math.max(0.02, (shape.w ?? 0.2) + way * 0.05));
+              shape.h = clean(Math.max(0.02, (shape.h ?? 0.2) + way * 0.05));
+            } else shape.angle = clean(wrapDegrees((shape.angle ?? 0) + way * (event.shiftKey ? 1 : 15)));
+            this.changed(false);
+            return;
+          }
+        }
         // With a mount picked on the hulls page the wheel turns and sizes it; with none, it's the
         // view's, zooming toward the pointer.
         if (this.page !== "hulls" || !this.mount()) {
@@ -2214,12 +2653,18 @@ export class HullDesigner {
       }
       if (event.code === "Escape") {
         // Esc selects nothing first, so a mount can be let go of without leaving; then it closes.
-        if (this.selected && this.page === "hulls") this.deselect();
+        if ((this.selected && this.page === "hulls") || this.shape !== null) this.deselect();
         else this.close();
         return;
       }
       if (event.code === "Digit0" || event.code === "Numpad0") {
         this.fitView();
+        return;
+      }
+      // Delete takes the picked shape off, unless the outline is picked: a hull has to have one.
+      if (event.code === "Delete" && this.shape !== null && this.shape !== "edge") {
+        event.preventDefault();
+        this.removeShape();
         return;
       }
       const mount = this.mount();
@@ -2301,12 +2746,14 @@ export class HullDesigner {
     ctx.fillStyle = "#0a1a2e";
     ctx.fillRect(0, 0, width, height);
 
-    // Blueprint grid: a line every quarter radius, stronger every radius.
+    // Blueprint grid: a line every quarter radius, stronger every radius. A part drawn on its own
+    // gets a finer one, a twentieth of a radius, since it is drawn that much larger.
+    const grid = this.alone() ? 1 / 20 : 1 / 4;
     for (let i = -8; i <= 8; i++) {
       ctx.strokeStyle = i % 4 === 0 ? "rgba(120,170,230,0.28)" : "rgba(120,170,230,0.1)";
       ctx.lineWidth = 1;
-      const [x] = this.toScreen(i / 4, 0);
-      const [, y] = this.toScreen(0, i / 4);
+      const [x] = this.toScreen(i * grid, 0);
+      const [, y] = this.toScreen(0, i * grid);
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, height);
@@ -2328,14 +2775,15 @@ export class HullDesigner {
     }
 
     // The parts page with no hull to show: just the selected part, drawn as in game.
-    if (this.page === "parts" && this.showOn === null) {
+    if (this.alone()) {
       const part = partOf(this.part);
       ctx.save();
       ctx.translate(this.cx, this.cy);
-      ctx.scale(Math.min(width, height) / 40, Math.min(width, height) / 40);
+      ctx.scale(this.zoom, this.zoom);
       if (isDecal(part.id) || part.kind === "cockpit") drawDecal(ctx, part.id);
       else drawPartArt(ctx, part.id, 0, part.engine !== undefined);
       ctx.restore();
+      this.drawShapeHandles();
       ctx.fillStyle = "#7f8ba0";
       ctx.font = "12px system-ui, sans-serif";
       ctx.fillText(`${part.label}${isDecal(part.id) ? ", a decal" : ""}: drawn as in game, facing the nose`, 14, height - 14);
@@ -2446,9 +2894,13 @@ export class HullDesigner {
       ctx.fill();
     }
 
+    // The shape being drawn: its points, and the middles of its segments, on top of everything.
+    this.drawShapeHandles();
+
     ctx.fillStyle = "#7f8ba0";
     ctx.font = "12px system-ui, sans-serif";
-    ctx.fillText(`${MODEL_NAMES[model]}: nose to the right, one square a quarter of the ship's radius`, 14, height - 14);
+    const square = this.alone() ? "a twentieth" : "a quarter";
+    ctx.fillText(`${hullName(model)}: nose to the right, one square ${square} of the ship's radius`, 14, height - 14);
   }
 
   /**

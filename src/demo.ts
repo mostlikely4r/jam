@@ -3,6 +3,7 @@ import { homeSim } from "./home";
 import { Renderer } from "./render";
 import { type Rock, type Sim, TICK } from "./sim";
 import { DEFAULTS, type Tuning } from "./tuning";
+import type { ShipModel } from "./parts";
 
 /** A demo starts over after this long, so it keeps showing the ship at work in the field. */
 const DEMO_SECONDS = 60;
@@ -70,7 +71,7 @@ export class ShipDemo {
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
-    readonly model: "racer" | "floater",
+    readonly model: ShipModel,
   ) {
     this.renderer = new Renderer(canvas);
     this.reset();

@@ -2,15 +2,6 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-17 · Hulls as data, and the shape editor · build
-- state: queued
-- backlog: S-47
-- plan: docs/hull-drawing-plan.md
-- added: 2026-11-24
-
-Shapes into src/hulls.json, a model becomes a name, then the editor. Today's hulls must look the
-same. Waits on Q-16.
-
 ## Q-18 · Hull buying · build
 - state: queued
 - backlog: S-48
@@ -125,6 +116,16 @@ The decided spec is the S-44 text in BACKLOG.md: a bigger bay bought replaces th
 moves over, the old bay to the locker; ore nearest the entry sells first.
 
 ## Done
+
+## Q-17 · Hulls as data, and the shape editor · build
+- state: done
+- done: 2026-11-24
+- backlog: S-47
+- plan: docs/hull-drawing-plan.md
+- added: 2026-11-24
+
+Shapes into src/hulls.json, a model becomes a name, then the editor. Today's hulls must look the
+same. Waits on Q-16.
 
 ## Q-16 · Designer comforts · build
 - state: done

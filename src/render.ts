@@ -1,6 +1,6 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
-import { DAMAGED_AT, facing, HULL_MOUNTS, tankCapacity, turretMount, works, type Module } from "./fitting";
+import { DAMAGED_AT, facing, hullMounts, tankCapacity, turretMount, works, type Module } from "./fitting";
 import { footprint, gridRect, type Rect } from "./grid";
 import { isItem, partOf } from "./parts";
 import { isOreItem } from "./items";
@@ -1526,7 +1526,7 @@ export class Renderer {
     const r = SHIP_RADIUS;
     // A flame's size shows its throttle. Even the faintest trim stays visible. Each comes out of
     // its thruster, the way it faces.
-    for (const mount of HULL_MOUNTS[ship.model]) {
+    for (const mount of hullMounts(ship.model)) {
       if (!mount.role || !works(ship.fit[mount.id])) continue;
       const level = ship.firing.get(mount.role as ThrusterId);
       if (level === undefined) continue;

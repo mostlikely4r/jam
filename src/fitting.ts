@@ -96,7 +96,8 @@ export type PartStats = Partial<Pick<Part, "weight" | "tier" | "bay" | "slots" |
 
 /**
  * How a part draws, over the code's own art in `shipArt.ts`: its drawing stretched, faded, or in
- * other colours. Kept in the ship file, and only the values that differ from the default.
+ * other colours. Kept in the ship file, and only the values that differ from the default. A part
+ * with drawn shapes of its own uses those instead of the code's drawing.
  */
 export interface PartArt {
   /** How wide its drawing is against the code's, 0.2 to 4. */
@@ -108,6 +109,8 @@ export interface PartArt {
   /** The metal it's made of, and the colour of its edge, as `#rrggbb`. */
   metal?: string;
   rim?: string;
+  /** Shapes of its own, drawn at its own origin facing the nose, instead of the code's drawing. */
+  shapes?: ArtShape[];
 }
 
 /** Whether an item stands behind a part, and owns its shape, price and icon. */
@@ -117,19 +120,73 @@ export function itemOwned(id: PartId): boolean {
 
 /**
  * What src/hulls.json holds: the mount types, which each part fits, which parts are decals,
- * each hull's mounts and what else each hull has.
+ * each hull's outline, shapes and mounts, and what else each hull has.
  */
 export interface ShipFile {
   mountTypes: string[];
   partMounts: Partial<Record<PartId, string[]>>;
   /** The parts flagged as decals: looks only, and only for decal mounts. */
   decalParts?: PartId[];
-  hulls: Record<ShipModel, Mount[]>;
-  hullInfo?: Record<ShipModel, HullInfo>;
+  /** Each hull, by name: a hull is just a name, and this is the list of them. */
+  hulls: Record<string, Hull>;
+  hullInfo?: Record<string, HullInfo>;
   /** The part stats that differ from the code's own, changed on the parts page. */
   partStats?: Partial<Record<PartId, PartStats>>;
   /** How each part draws, where that differs from the code's own art on the parts page. */
   partArt?: Partial<Record<PartId, PartArt>>;
+}
+
+/** A point in hull units: x toward the nose, y to the right, a hull radius being one. */
+export type HullPoint = [number, number];
+
+/** What a shape's colour comes from: the ship's own colour, worked out once per role. */
+export const SHAPE_ROLES = ["body", "shade", "rim", "glass"] as const;
+export type ShapeRole = (typeof SHAPE_ROLES)[number];
+export const SHAPE_ROLE_NAMES: Record<ShapeRole, string> = {
+  body: "Body",
+  shade: "Shade (a darker panel)",
+  rim: "Rim (the lit edge)",
+  glass: "Glass and glow",
+};
+
+/**
+ * A shape drawn on a hull or a part: shading, a panel, a decal or a lit edge. A hull's are in hull
+ * radii, the units mounts use; a part's are in the same units, a twelfth of one.
+ */
+export interface ArtShape {
+  kind: "polygon" | "circle" | "rect";
+  /** Which of the ship's colours it takes. */
+  role: ShapeRole;
+  /** Draw order: lower draws first, and 0 is the hull level. */
+  order?: number;
+  /** A transparency multiplier, 0 to 1. */
+  alpha?: number;
+  /** Clipped to the hull's edge. Shading is. Parts have no edge, so nothing of theirs clips. */
+  clip?: boolean;
+  /** A polygon's points. A rim shape is stroked through them, open with two points, else closed. */
+  points?: HullPoint[];
+  /** A circle's or a rect's middle. */
+  x?: number;
+  y?: number;
+  /** A circle's reach. */
+  r?: number;
+  /** A rect's size. */
+  w?: number;
+  h?: number;
+  /** A rect's turn, degrees clockwise. */
+  angle?: number;
+  /** A rim shape's line width. Without one, the hull edge's own. */
+  width?: number;
+}
+
+/** One hull as the ship file keeps it. */
+export interface Hull {
+  /** The outline: the clip line every hull shape clips against, and what collisions will use. */
+  edge: HullPoint[];
+  /** Shading, panels and decals drawn over the body, and any lit edges of their own. */
+  shapes: ArtShape[];
+  /** Where things go on it. */
+  mounts: Mount[];
 }
 
 /** One fitted part: what it is and how worn. */
@@ -352,6 +409,8 @@ function cleanPartArt(art: PartArt): PartArt {
   const rim = colour(art.rim);
   if (metal) clean.metal = metal;
   if (rim) clean.rim = rim;
+  const shapes = readShapes(art.shapes);
+  if (shapes.length > 0) clean.shapes = shapes;
   return clean;
 }
 
@@ -378,20 +437,152 @@ export const MOUNT_TYPES: string[] = [];
 export const PART_MOUNTS: Partial<Record<PartId, string[]>> = {};
 /** The parts flagged as decals: looks only, and only for decal mounts. Changed in place by the hull designer. */
 export const DECAL_PARTS: PartId[] = [];
-/** Each hull's mounts. The arrays are changed in place, so everything holding them sees it. */
-export const HULL_MOUNTS = Object.fromEntries(SHIP_MODELS.map((model) => [model, [] as Mount[]])) as Record<ShipModel, Mount[]>;
+/** Each hull's mounts, by hull name. The arrays are changed in place, so everything holding them sees it. */
+export const HULL_MOUNTS: Record<string, Mount[]> = {};
+/** Each hull's outline, by hull name: what it's filled with, clipped against and edged with. */
+export const HULL_EDGE: Record<string, HullPoint[]> = {};
+/** The shapes drawn on each hull, by hull name: shading, panels and decals over the outline. */
+export const HULL_SHAPES: Record<string, ArtShape[]> = {};
 /** What else each hull has: its default programs and what it's used for. Changed in place by the hull designer. */
-export const HULL_INFO = Object.fromEntries(SHIP_MODELS.map((model) => [model, { programs: [], loadouts: [], usedBy: [] } as HullInfo])) as Record<ShipModel, HullInfo>;
+export const HULL_INFO: Record<string, HullInfo> = {};
+
+/** Hull names already warned about, so a ship drawn every frame doesn't flood the console. */
+const NO_SUCH_HULL = new Set<string>();
+
+/**
+ * A hull the game can fly, by name: the racer when a save or a world names one the file hasn't
+ * got, so an old or edited file falls back rather than crashing.
+ */
+export function hullNamed(model: ShipModel): ShipModel {
+  if (HULL_MOUNTS[model]) return model;
+  const fallback = HULL_MOUNTS.racer ? "racer" : Object.keys(HULL_MOUNTS)[0] ?? "";
+  if (!NO_SUCH_HULL.has(model)) {
+    NO_SUCH_HULL.add(model);
+    console.warn(`jam: no hull called "${model}" in src/hulls.json; the ${fallback || "nothing"} stands in for it`);
+  }
+  return fallback;
+}
+
+/** A hull's mounts, falling back as `hullNamed` does. */
+export function hullMounts(model: ShipModel): Mount[] {
+  return HULL_MOUNTS[hullNamed(model)] ?? [];
+}
+
+/** A hull's outline, falling back as `hullNamed` does. */
+export function hullEdge(model: ShipModel): HullPoint[] {
+  return HULL_EDGE[hullNamed(model)] ?? [];
+}
+
+/** The shapes drawn on a hull, falling back as `hullNamed` does. */
+export function hullShapes(model: ShipModel): ArtShape[] {
+  return HULL_SHAPES[hullNamed(model)] ?? [];
+}
 
 /** The hull points every hull has unless its own say otherwise. */
 export const MAX_HULL = 100;
 
-/** The hull points a ship of this model has: its own, or `MAX_HULL`. */
-export function hullMax(model: ShipModel): number {
-  return HULL_INFO[model].hull ?? MAX_HULL;
+/** A hull's own record: its default programs, loadouts and uses. */
+export function hullInfo(model: ShipModel): HullInfo {
+  return HULL_INFO[hullNamed(model)] ?? { programs: [], loadouts: [], usedBy: [] };
 }
 
-/** Puts a ship file into play: mount types, which parts fit them, every hull's mounts and stats. */
+/** The hulls a new game offers: those the file marks `newGame`, in the file's order. */
+export function newGameHulls(): ShipModel[] {
+  return SHIP_MODELS.filter((model) => hullInfo(model).usedBy.includes("newGame"));
+}
+
+/** A hull's name as people read it: its id in words, `racerCopy` being "Racer Copy". */
+export function hullName(model: string): string {
+  const words = model
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter((word) => word !== "");
+  if (words.length === 0) return model;
+  return words.map((word) => word[0].toUpperCase() + word.slice(1).toLowerCase()).join(" ");
+}
+
+/** The hull points a ship of this model has: its own, or `MAX_HULL`. */
+export function hullMax(model: ShipModel): number {
+  return HULL_INFO[hullNamed(model)]?.hull ?? MAX_HULL;
+}
+
+/** The point pairs of an outline or a polygon, with anything that isn't a finite pair left out. */
+function readPoints(raw: unknown): HullPoint[] {
+  if (!Array.isArray(raw)) return [];
+  const points: HullPoint[] = [];
+  for (const each of raw as unknown[]) {
+    if (!Array.isArray(each) || each.length !== 2) continue;
+    const [x, y] = each as unknown[];
+    if (typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y)) points.push([x, y]);
+  }
+  return points;
+}
+
+/**
+ * One shape read from a file, with anything invalid or missing dropped: a polygon needs three
+ * points (two for a rim line), a circle a reach, a rect a size.
+ */
+function readShape(raw: Partial<ArtShape>): ArtShape | null {
+  if (!raw || typeof raw !== "object") return null;
+  const kind = raw.kind;
+  if (kind !== "polygon" && kind !== "circle" && kind !== "rect") return null;
+  const role = (SHAPE_ROLES as readonly string[]).includes(raw.role as string) ? (raw.role as ShapeRole) : "body";
+  const shape: ArtShape = { kind, role };
+  // A reach, a size or a line's width: a number, and more than nothing.
+  const size = (value: unknown, min: number): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) && value >= min ? value : undefined;
+  if (typeof raw.order === "number" && Number.isFinite(raw.order) && raw.order !== 0) shape.order = raw.order;
+  if (typeof raw.alpha === "number" && Number.isFinite(raw.alpha) && raw.alpha >= 0 && raw.alpha < 1) shape.alpha = raw.alpha;
+  if (raw.clip === true) shape.clip = true;
+  if (kind === "polygon") {
+    const points = readPoints(raw.points);
+    const fewest = role === "rim" ? 2 : 3;
+    if (points.length < fewest) return null;
+    shape.points = points;
+    const width = size(raw.width, 0.05);
+    if (role === "rim" && width !== undefined) shape.width = width;
+    return shape;
+  }
+  const x = typeof raw.x === "number" && Number.isFinite(raw.x) ? raw.x : undefined;
+  const y = typeof raw.y === "number" && Number.isFinite(raw.y) ? raw.y : undefined;
+  if (x === undefined || y === undefined) return null;
+  shape.x = x;
+  shape.y = y;
+  if (kind === "circle") {
+    const r = size(raw.r, 0.01);
+    if (r === undefined) return null;
+    shape.r = r;
+    return shape;
+  }
+  const w = size(raw.w, 0.01);
+  const h = size(raw.h, 0.01);
+  if (w === undefined || h === undefined) return null;
+  shape.w = w;
+  shape.h = h;
+  if (typeof raw.angle === "number" && Number.isFinite(raw.angle) && raw.angle !== 0) shape.angle = raw.angle;
+  return shape;
+}
+
+/** The shapes a hull or a part is drawn with, read from a file. */
+function readShapes(raw: unknown): ArtShape[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as Partial<ArtShape>[]).map(readShape).filter((shape): shape is ArtShape => shape !== null);
+}
+
+/**
+ * A hull's outline read from a file. An outline is the one thing a hull can't do without, so a
+ * file that has none for a hull the shipped file knows falls back to the shipped one.
+ */
+function readEdge(raw: unknown, model: string): HullPoint[] {
+  const edge = readPoints(raw);
+  if (edge.length >= 3) return edge;
+  return readPoints(SHIPPED_SHIPS.hulls?.[model]?.edge);
+}
+
+/**
+ * Puts a ship file into play: mount types, which parts fit them, every hull's outline, shapes,
+ * mounts and stats. A hull is just a name: the file's list is `SHIP_MODELS`.
+ */
 export function useShipFile(file: ShipFile): void {
   MOUNT_TYPES.splice(0, MOUNT_TYPES.length, ...strings(file.mountTypes));
   for (const part of PARTS) {
@@ -405,18 +596,37 @@ export function useShipFile(file: ShipFile): void {
   for (const id of Object.keys(PART_ART) as PartId[]) delete PART_ART[id];
   for (const [id, art] of Object.entries(file.partArt ?? {}) as [PartId, PartArt][]) applyPartArt(id, art);
   DECAL_PARTS.splice(0, DECAL_PARTS.length, ...strings(file.decalParts).filter((id): id is PartId => PARTS.some((part) => part.id === id && part.kind !== "program")));
-  for (const model of SHIP_MODELS) {
-    const mounts = (Array.isArray(file.hulls?.[model]) ? file.hulls[model] : []).map(readMount);
-    HULL_MOUNTS[model].splice(0, HULL_MOUNTS[model].length, ...mounts);
-    Object.assign(HULL_INFO[model], readHullInfo(file.hullInfo?.[model]));
+  // The hulls: the file's names, in its order, and each one's outline, shapes and mounts.
+  const hulls = (file.hulls ?? {}) as Record<string, Partial<Hull>>;
+  const models = Object.keys(hulls).filter((model) => model !== "");
+  SHIP_MODELS.splice(0, SHIP_MODELS.length, ...models);
+  for (const model of Object.keys(HULL_MOUNTS)) {
+    if (models.includes(model)) continue;
+    delete HULL_MOUNTS[model];
+    delete HULL_EDGE[model];
+    delete HULL_SHAPES[model];
+    delete HULL_INFO[model];
+  }
+  for (const model of models) {
+    const hull = hulls[model] ?? {};
+    // A draft kept before hulls nested their mounts has the mounts array itself.
+    const raw = Array.isArray(hull) ? (hull as unknown as Mount[]) : hull.mounts;
+    const mounts = (Array.isArray(raw) ? raw : []).map(readMount);
+    // The arrays are kept and filled, so everything holding one sees the change.
+    (HULL_MOUNTS[model] ??= []).splice(0, HULL_MOUNTS[model].length, ...mounts);
+    (HULL_EDGE[model] ??= []).splice(0, HULL_EDGE[model].length, ...readEdge(hull.edge, model));
+    (HULL_SHAPES[model] ??= []).splice(0, HULL_SHAPES[model].length, ...readShapes(hull.shapes));
+    Object.assign((HULL_INFO[model] ??= { programs: [], loadouts: [], usedBy: [] }), readHullInfo(file.hullInfo?.[model]));
   }
 }
 useShipFile(SHIPPED_SHIPS);
 
 /** The ship file as it is now, to save. */
 export function shipFileNow(): ShipFile {
+  const hulls: Record<string, Hull> = {};
+  for (const model of SHIP_MODELS) hulls[model] = { edge: HULL_EDGE[model] ?? [], shapes: HULL_SHAPES[model] ?? [], mounts: HULL_MOUNTS[model] ?? [] };
   return JSON.parse(
-    JSON.stringify({ mountTypes: MOUNT_TYPES, partMounts: PART_MOUNTS, decalParts: DECAL_PARTS, hulls: HULL_MOUNTS, hullInfo: HULL_INFO, partStats: partStatsNow(), partArt: partArtNow() }),
+    JSON.stringify({ mountTypes: MOUNT_TYPES, partMounts: PART_MOUNTS, decalParts: DECAL_PARTS, hulls, hullInfo: HULL_INFO, partStats: partStatsNow(), partArt: partArtNow() }),
   ) as ShipFile;
 }
 
@@ -424,7 +634,6 @@ export function shipFileNow(): ShipFile {
 export function tankless(ship: Fitting & { model: ShipModel }): boolean {
   return tankMounts(ship).length === 0;
 }
-
 /** A fuel tank on a mount: how much it holds, and how worn it is (from a leak to gone). */
 export interface TankMount {
   mount: Mount;
@@ -440,7 +649,7 @@ export interface TankMount {
  */
 export function tankMounts(ship: Fitting & { model: ShipModel }): TankMount[] {
   const tanks: TankMount[] = [];
-  for (const mount of HULL_MOUNTS[ship.model]) {
+  for (const mount of hullMounts(ship.model)) {
     const module = ship.fit[mount.id];
     if (!module || module.wear >= 1) continue;
     const capacity = partOf(module.part).tank ?? 0;
@@ -489,7 +698,7 @@ export function isDecal(id: PartId): boolean {
 export function mountsMoved(): void {}
 
 export function mountOf(model: ShipModel, id: MountId): Mount | undefined {
-  return HULL_MOUNTS[model].find((mount) => mount.id === id);
+  return hullMounts(model).find((mount) => mount.id === id);
 }
 
 /** The mount types a part fits. */
@@ -560,7 +769,7 @@ export function mountThrust(mount: Mount): { push: { x: number; y: number }; tur
 
 export function thrustOf(ship: Fitting & { model: ShipModel }): Thrust {
   const thrust: Thrust = { push: {}, turn: { thrusterRotateLeft: 0, thrusterRotateRight: 0 }, has: new Set() };
-  for (const mount of HULL_MOUNTS[ship.model]) {
+  for (const mount of hullMounts(ship.model)) {
     const role = mount.role;
     if (!role) continue;
     const module = ship.fit[mount.id];
@@ -582,7 +791,7 @@ export function thrustOf(ship: Fitting & { model: ShipModel }): Thrust {
  */
 export function hullDefaults(model: ShipModel): Partial<Record<MountId, PartId>> {
   const defaults: Partial<Record<MountId, PartId>> = {};
-  for (const mount of HULL_MOUNTS[model]) {
+  for (const mount of hullMounts(model)) {
     if (mount.default && mountTakes(mount, mount.default) && partFits(partOf(mount.default), model)) defaults[mount.id] = mount.default;
   }
   return defaults;
@@ -596,11 +805,11 @@ export function newFitting(model: ShipModel, random: () => number = Math.random)
   const fitting: Fitting = { fit: {}, software: new Set(), programs: [], parts: new Set(), hold: [], oreBlocks: [], decals: {}, tweaks: {} };
   for (const [mount, part] of Object.entries(hullDefaults(model)) as [MountId, PartId][]) fitting.fit[mount] = { part, wear: 0 };
   refresh(fitting);
-  for (const id of HULL_INFO[model].programs) {
+  for (const id of hullInfo(model).programs) {
     fitting.software.add(id);
     install(fitting, id);
   }
-  for (const mount of HULL_MOUNTS[model]) {
+  for (const mount of hullMounts(model)) {
     const choices = decalChoices(model, mount);
     if (choices.length > 0) fitting.decals![mount.id] = choices[Math.min(choices.length - 1, Math.floor(random() * choices.length))];
   }
@@ -609,7 +818,7 @@ export function newFitting(model: ShipModel, random: () => number = Math.random)
 
 /** The mount holding a turret, if one is on. */
 export function turretMount(ship: Fitting & { model: ShipModel }): Mount | null {
-  for (const mount of HULL_MOUNTS[ship.model]) {
+  for (const mount of hullMounts(ship.model)) {
     const module = ship.fit[mount.id];
     if (module && partOf(module.part).kind === "turret") return mount;
   }
@@ -618,7 +827,7 @@ export function turretMount(ship: Fitting & { model: ShipModel }): Mount | null 
 
 /** The mounts a ship has now: its hull's, plus a turret's gun mount while one is on. */
 export function mountsOf(ship: Fitting & { model: ShipModel }): Mount[] {
-  const mounts = HULL_MOUNTS[ship.model];
+  const mounts = hullMounts(ship.model);
   const base = turretMount(ship);
   if (!base) return mounts;
   return [...mounts, { id: "turretGun", name: "Turret gun", types: ["gun"], x: base.x, y: base.y, angle: base.angle, scale: base.scale }];
@@ -680,7 +889,7 @@ export function mountsFor(ship: Fitting & { model: ShipModel }, id: PartId): Mou
   if (part.kind === "program" || part.kind === "cockpit" || isDecal(id) || !partFits(part, ship.model)) return [];
   // A gun goes on the turret when there is one.
   if (part.kind === "gun" && turretMount(ship)) return ["turretGun"];
-  const mounts = HULL_MOUNTS[ship.model].filter((mount) => mountTakes(mount, id));
+  const mounts = hullMounts(ship.model).filter((mount) => mountTakes(mount, id));
   const ids = [...mounts.filter((mount) => !ship.fit[mount.id]), ...mounts.filter((mount) => ship.fit[mount.id])].map((mount) => mount.id);
   // A set keeps the hull's order, so a pair goes on left then right.
   const set = part.set ?? 1;
@@ -780,4 +989,100 @@ export function nearestMount(ship: Fitting & { model: ShipModel; angle: number }
     }
   }
   return best;
+}
+
+// ---------- drawing a hull or a part's shapes ----------
+
+/** A number rounded to a grid, for the drag that snaps with Shift. */
+export function onGrid(value: number, step: number): number {
+  const rounded = Math.round(value / step) * step;
+  // Clean, so 0.30000000000000004 never reaches the file.
+  return Math.round(rounded * 1e6) / 1e6;
+}
+
+/** Two points the same place, either side of the middle line, give or take rounding. */
+const samePlace = (a: HullPoint, b: HullPoint): boolean => Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
+
+/**
+ * A point's twin across the hull's middle line (hulls face +x, so the line is y = 0): the other
+ * point of the shape at the same x and the opposite y. -1 when the shape has no twin for it,
+ * which is what a point on the line, or an odd shape, has.
+ */
+export function twinOf(points: HullPoint[], index: number): number {
+  const at = points[index];
+  if (!at) return -1;
+  const twin: HullPoint = [at[0], -at[1]];
+  if (samePlace(at, twin)) return -1;
+  return points.findIndex((point, i) => i !== index && samePlace(point, twin));
+}
+
+/**
+ * The points after one is dragged to `at`: with mirroring on, its twin across the middle line
+ * moves with it, and a point dragged onto the line stays single there.
+ */
+export function dragPoint(points: HullPoint[], index: number, at: HullPoint, mirror: boolean, step = 0): HullPoint[] {
+  if (!points[index]) return points;
+  const next = points.map((point): HullPoint => [...point] as HullPoint);
+  const twin = mirror ? twinOf(points, index) : -1;
+  const snapped: HullPoint = step > 0 ? [onGrid(at[0], step), onGrid(at[1], step)] : [at[0], at[1]];
+  next[index] = snapped;
+  if (twin >= 0) next[twin] = [snapped[0], -snapped[1]];
+  return next;
+}
+
+/**
+ * The points after a new one is added on the segment from `after` to the one past it: with
+ * mirroring on, its twin goes on the segment that mirrors that one too, so the shape stays even.
+ * A point added on the middle line, or a shape without a mirroring segment, gets no twin.
+ */
+export function addPoint(points: HullPoint[], after: number, at: HullPoint, mirror: boolean, step = 0): HullPoint[] {
+  const count = points.length;
+  if (count === 0 || after < 0 || after >= count) return points;
+  const snapped: HullPoint = step > 0 ? [onGrid(at[0], step), onGrid(at[1], step)] : [at[0], at[1]];
+  const next = points.map((point): HullPoint => [...point] as HullPoint);
+  next.splice(after + 1, 0, snapped);
+  if (!mirror || snapped[1] === 0) return next;
+  // The segment the twin belongs on joins the twins of this segment's two ends.
+  const ends = [points[after], points[(after + 1) % count]];
+  const twins = ends.map((end) => points.findIndex((point) => samePlace(point, [end[0], -end[1]])));
+  if (!ends.every((end) => Math.abs(end[1]) > 1e-9) || twins.some((index) => index < 0)) return next;
+  const [a, b] = twins;
+  const where = b === (a + 1) % count ? a + 1 : a === (b + 1) % count ? a : -1;
+  if (where < 0) return next;
+  // The first insert may have moved the segment the twin goes after, so count from the twin end.
+  const shift = after + 1 < where ? 1 : 0;
+  next.splice(where + shift, 0, [snapped[0], -snapped[1]]);
+  return next;
+}
+
+/**
+ * The points after one is removed: its twin goes with it, and a polygon keeps at least three.
+ * Returns the points it was given when nothing can be removed.
+ */
+export function removePoint(points: HullPoint[], index: number, mirror: boolean): HullPoint[] {
+  if (!points[index] || points.length <= 3) return points;
+  const twin = mirror ? twinOf(points, index) : -1;
+  if (twin >= 0 && points.length <= 4) return points;
+  const drop = new Set([index, ...(twin >= 0 ? [twin] : [])]);
+  return points.filter((_, i) => !drop.has(i)).map((point): HullPoint => [...point] as HullPoint);
+}
+
+/** A shape's points after `flip` puts it on the other side of the middle line: x stays, y turns. */
+export function flipPoints(points: HullPoint[]): HullPoint[] {
+  return points.map(([x, y]): HullPoint => [x, -y]);
+}
+
+/**
+ * A hull copied from another: its outline, shapes, mounts and stats, under a name of its own.
+ * What it's used for starts empty, so a copy doesn't quietly join the new game's ships. The copy
+ * is a copy: changing it leaves the hull it came from alone.
+ */
+export function copyHull(from: ShipModel, to: ShipModel): void {
+  const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+  if (HULL_MOUNTS[to]) return;
+  SHIP_MODELS.push(to);
+  HULL_MOUNTS[to] = copy(HULL_MOUNTS[from] ?? []);
+  HULL_EDGE[to] = copy(HULL_EDGE[from] ?? []);
+  HULL_SHAPES[to] = copy(HULL_SHAPES[from] ?? []);
+  HULL_INFO[to] = { ...copy(HULL_INFO[from] ?? { programs: [], loadouts: [], usedBy: [] }), usedBy: [] };
 }

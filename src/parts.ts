@@ -70,11 +70,14 @@ export const PART_KINDS = ["thruster", "gun", "turret", "tractor", "computer", "
 export type PartKind = (typeof PART_KINDS)[number];
 
 /**
- * The hulls there are. The racer is the quick ship with an arrow shape. The floater is slow and
- * square. The defender, drone and pirate hulls are drawn and fitted in the hull designer.
+ * The hulls there are, read from the ship file: a model is just a name. The file's own list, in
+ * its own order, and empty until `useShipFile` has read it. Filled in place, so everything
+ * holding the array sees a hull added or removed. The racer is the quick ship with an arrow
+ * shape; the floater is slow and square. The rest are drawn in the hull designer.
  */
-export const SHIP_MODELS = ["racer", "floater", "defender", "drone", "pirate"] as const;
-export type ShipModel = (typeof SHIP_MODELS)[number];
+export const SHIP_MODELS: string[] = [];
+/** A hull, by the name the ship file gives it. */
+export type ShipModel = string;
 
 /** How many cells something takes on a grid, unturned: `w` across, `h` down. */
 export interface Shape {
@@ -109,7 +112,7 @@ export interface Part {
   /** A fuel tank: how much fuel it holds (docs/fuel-plan.md). A ship's tank is the sum of its own. */
   tank?: number;
   description: string;
-  /** The ships it can be fitted to. Without this, any ship. */
+  /** The ships it can be fitted to, by hull name. Without this, any ship. */
   fits?: ShipModel[];
   /** 0 = sold from the start, 1 and 2 = once haulers have bought enough of the station's ore. */
   tier: 0 | 1 | 2;
@@ -529,9 +532,10 @@ export const DRONE_BUY_ORDER: PartId[] = ["spinStabilizer", "reverse", "strafe",
 
 /**
  * What traffic and the player's drones buy, in order: only what their autopilot makes good
- * use of. Click parts and retro add little to it, so they're left out.
+ * use of. Click parts and retro add little to it, so they're left out. A hull that isn't here
+ * buys nothing.
  */
-export const TRAFFIC_BUY_ORDER: Record<ShipModel, PartId[]> = {
+export const TRAFFIC_BUY_ORDER: Record<string, PartId[]> = {
   racer: ["reverse", "strafe", "spinStabilizer", "bay"],
   floater: ["tractor", "turret", "reverse", "strafe", "spinStabilizer", "bay"],
   defender: [],

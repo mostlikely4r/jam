@@ -760,11 +760,11 @@ describe("mounts as they draw in game", () => {
       },
       () => {
         const file = shipFileNow();
-        expect(file.hulls.racer.find((mount) => mount.id === "gun")).toMatchObject({ alpha: 0.5, order: -1 });
+        expect(file.hulls.racer.mounts.find((mount) => mount.id === "gun")).toMatchObject({ alpha: 0.5, order: -1 });
         useShipFile(file);
         expect(mountOf("racer", "gun")).toMatchObject({ alpha: 0.5, order: -1 });
-        expect(file.hulls.racer.find((mount) => mount.id === "computer")).not.toHaveProperty("alpha");
-        expect(file.hulls.racer.find((mount) => mount.id === "computer")).not.toHaveProperty("order");
+        expect(file.hulls.racer.mounts.find((mount) => mount.id === "computer")).not.toHaveProperty("alpha");
+        expect(file.hulls.racer.mounts.find((mount) => mount.id === "computer")).not.toHaveProperty("order");
       },
     );
   });

@@ -10,7 +10,7 @@ import { layoutKey, loadGame, loadStart, saveGame, saveInfo, type SaveSlot, type
 import { stringifyWorld } from "./designer/world";
 import { Audio } from "./audio";
 import { Radio } from "./radio";
-import { type Base, type Deposit, SHIP_RADIUS, type Ship, Sim, STATION_HALF, TICK, targetSpot, type Targetable } from "./sim";
+import { type Base, type Battery, type Deposit, DEPOSIT_REACH, SHIP_RADIUS, type Ship, Sim, STATION_HALF, TICK, targetSpot, type Targetable } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartIcon, type PartId } from "./parts";
 import { ITEMS, itemDef } from "./items";
@@ -826,7 +826,7 @@ function updateShop(): void {
   }
   if (!docked) shopOpen = false;
   const locker = base ? sim.lockerAt(base) : null;
-  const state = `${shopOpen} ${sim.buyRefused} ${sim.oreIn(ship)} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.home} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${sim.hub.size} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()}`;
+  const state = `${shopOpen} ${sim.buyRefused} ${sim.oreIn(ship)} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.home} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.shopBase().blocks.map((job) => job.carrier?.home ?? "free").join()} ${buildingProject(sim.shopBase())?.partsLeft ?? 0} ${sim.hasClamp(ship)} ${sim.blockJobFor(ship)?.base.id ?? ""} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${sim.hub.size} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked || !shopOpen;
@@ -910,12 +910,68 @@ function stationCells(): HTMLButtonElement[] {
   else if (!sim.unlocked("deposit")) depositGuardLine = { tag: "needs a deposit", label: "Deposit turrets", icon: blueprintIcon("depositGuards"), text: "Needs a field deposit first", enabled: false };
   else depositGuardLine = lockedLine("depositGuards", "Deposit turrets", blueprintIcon("depositGuards"), `${tuning.depositGuardParts} station parts to build`);
 
+  const job = blockJobLine();
   return [
     shopCell(droneLine, tradeDrone),
     shopCell(depositLine, () => sim.fundBlueprint(ship, "deposit")),
     shopCell(stationGuardLine, () => sim.fundBlueprint(ship, "stationGuards")),
     shopCell(depositGuardLine, () => sim.fundBlueprint(ship, "depositGuards")),
+    ...(job ? [shopCell(job, takeBlock)] : []),
   ];
+}
+
+/** The crate a block is drawn as, in the shop. */
+const BLOCK_ICON: PartIcon = { glyph: "crate", primary: "#4a4f5d", secondary: "#aab1bd", border: "#c4a4f0" };
+
+/** The project of a base that its blocks are for: the one its pad is supplying. */
+function buildingProject(base: Base): Deposit | Battery | null {
+  return (
+    sim.deposits.find((each) => each.base === base.id && each.partsLeft > 0) ??
+    sim.batteries.find((each) => each.base === base.id && each.id === "depositGuards" && each.partsLeft > 0) ??
+    null
+  );
+}
+
+/** The line for carrying a construction block out to a base's project, or null with none building. */
+function blockJobLine(): ShopLine | null {
+  const base = sim.shopBase();
+  const project = buildingProject(base);
+  if (!project) return null;
+  const name = "guns" in project ? "Deposit turrets" : "Field deposit";
+  const blocks = Math.ceil(project.partsLeft / tuning.blockParts);
+  const deposit = sim.blockDeposit();
+  const pay = Math.round((project.purse ?? 0) / Math.max(1, project.blocks ?? 1));
+  const { ship } = sim;
+  const note = `${name}: ${blocks} block${blocks === 1 ? "" : "s"} to go
+Deposit ${deposit}, pays ${pay} a block`;
+  if (!sim.hasClamp(ship)) return { tag: "needs a clamp", label: "Carry a block", icon: BLOCK_ICON, text: `${note}
+Fit a clamp to carry one`, enabled: false };
+  const mine = sim.blockJobFor(ship);
+  if (mine) {
+    const here = mine.base === base;
+    return {
+      tag: "yours",
+      label: "Carry a block",
+      icon: BLOCK_ICON,
+      text: `${note}
+${here ? "Your block waits at the block pad: take it with G" : `You have a block waiting at ${sim.baseName(mine.base.id)}`}`,
+      enabled: false,
+    };
+  }
+  if (!base.blocks.some((each) => each.carrier === null)) {
+    return { tag: "waiting for a block", label: "Carry a block", icon: BLOCK_ICON, text: `${note}
+No block is ready at the pad yet`, enabled: false };
+  }
+  if (ship.credits < deposit) return { tag: "not enough money", style: "poor", label: "Carry a block", icon: BLOCK_ICON, text: `${note}
+Not enough credits`, enabled: false };
+  return { tag: "buy", style: "buy", label: "Carry a block", icon: BLOCK_ICON, text: `${note}
+Click to take one, then press G at the block pad`, enabled: true };
+}
+
+/** Takes a construction block job at the dock, paying its deposit. */
+function takeBlock(): void {
+  sim.takeBlockJob(sim.ship);
+  if (!panel.hidden) buildPanel();
 }
 
 /** One line of the dock's board: what it says, and the field an ore line names for the click. */
@@ -1375,6 +1431,19 @@ function dragStart(clientX: number, clientY: number): DragStart {
   return "space";
 }
 
+/** The nearest deposit a screen point lands on, if any: a right click there can mean a block placed. */
+function depositAt(clientX: number, clientY: number): Deposit | null {
+  let best: Deposit | null = null;
+  let closest = Infinity;
+  for (const deposit of sim.deposits) {
+    const distance = screenDistance(clientX, clientY, deposit.x, deposit.y);
+    if (distance >= reachScreen(DEPOSIT_REACH) || distance >= closest) continue;
+    best = deposit;
+    closest = distance;
+  }
+  return best;
+}
+
 /** The nearest station a screen point lands on, if any: a right click there can mean a hand-over. */
 function stationAt(clientX: number, clientY: number): Base | null {
   let best: Base | null = null;
@@ -1469,6 +1538,8 @@ window.addEventListener("mouseup", (event) => {
   if (!dragged) {
     const station = stationAt(fromX, fromY);
     if (station && sim.orderDeliver(station)) return;
+    const deposit = depositAt(fromX, fromY);
+    if (deposit && sim.orderPlace(deposit)) return;
   }
   if (dragged) sim.orderMove(spot.x, spot.y, dx / tuning.dragSeconds, dy / tuning.dragSeconds);
   else sim.orderTranslate(spot.x, spot.y);

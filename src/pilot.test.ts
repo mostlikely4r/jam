@@ -1387,27 +1387,41 @@ describe("pirate and defender", () => {
         expect(sim.deposits).toHaveLength(0);
       });
 
-      it("once funded it's built from the station's parts, and only opens when finished", () => {
-        const sim = projectWorld();
-        sim.ship.credits = 1000;
+      /** Carries one block from the station's pad to the deposit's site, as a player with a clamp would. */
+      function carryBlock(sim: Sim, at: { x: number; y: number }): void {
+        const base = sim.bases[0];
+        sim.devSet(sim.ship, "clamp", true);
+        expect(sim.takeBlockJob(sim.ship)).not.toBeNull();
+        const pad = sim.blockSpot(base);
+        Object.assign(sim.ship, { x: pad.x, y: pad.y, px: pad.x, py: pad.y, vx: 0, vy: 0 });
+        expect(sim.grabPadBlock(sim.ship)).toBe(true);
+        Object.assign(sim.ship, { x: at.x, y: at.y, px: at.x, py: at.y, vx: 0, vy: 0 });
+        // A tick for the clamp to carry it where the ship now is, then it's let go of there.
+        sim.step();
+        sim.releaseTow(sim.ship);
+        for (let t = 0; t < 3; t += TICK) sim.step();
+      }
+
+      it("once funded it's carried out in blocks, and only opens when the last one is placed", () => {
+        const sim = projectWorld({ floaterStart: true });
+        sim.ship.credits = 2000;
         sim.fundBlueprint(sim.ship, "deposit");
-        expect(sim.ship.credits).toBe(0);
+        expect(sim.ship.credits).toBe(1000);
         expect(sim.deposits).toHaveLength(1);
         expect(sim.unlocked("deposit")).toBe(false);
         expect(sim.bases[0].blueprintsOrdered.has("deposit")).toBe(true);
         expect(sim.blueprintQueue(sim.bases[0])).not.toContain("deposit");
         const deposit = sim.deposits[0];
-        sim.ship.x = deposit.x;
-        sim.ship.y = deposit.y;
-        sim.ship.px = deposit.x;
-        sim.ship.py = deposit.y;
-        expect(sim.depositAt()).toBeNull();
         const partsBefore = sim.partA(sim.bases[0]);
-        run(sim, 3);
+        run(sim, 1);
+        // A block waits at the pad, made from the station's parts: the deposit isn't built yet.
+        expect(sim.bases[0].blocks).toHaveLength(1);
+        expect(sim.partA(sim.bases[0])).toBeCloseTo(partsBefore - sim.tuning.blockParts, 6);
+        expect(sim.unlocked("deposit")).toBe(false);
+        carryBlock(sim, deposit);
         expect(sim.unlocked("deposit")).toBe(true);
         expect(sim.bases[0].blueprintsOrdered.has("deposit")).toBe(false);
         expect(deposit.partsUsed).toBeCloseTo(10, 6);
-        expect(sim.partA(sim.bases[0])).toBeCloseTo(partsBefore - 10, 6);
       });
 
       it("doesn't carry anything until it opens", () => {
@@ -1423,16 +1437,19 @@ describe("pirate and defender", () => {
         expect(sim.ship.frame).not.toBe(deposit);
       });
 
-      it("stops at the station's reserve and waits for more parts", () => {
+      it("stops at the station's reserve, and starts again when more parts come", () => {
         const sim = projectWorld({ stationStartParts: 25, depositParts: 50 });
         sim.ship.credits = 1000;
         sim.fundBlueprint(sim.ship, "deposit");
         run(sim, 20);
-        expect(sim.partA(sim.bases[0])).toBeCloseTo(20, 6);
-        expect(sim.deposits[0].partsLeft).toBeCloseTo(45, 6);
+        // Five spare past the reserve is no block: nothing has left the station's stock.
+        expect(sim.partA(sim.bases[0])).toBeCloseTo(25, 6);
+        expect(sim.bases[0].blocks).toHaveLength(0);
+        expect(sim.deposits[0].partsLeft).toBeCloseTo(50, 6);
         sim.bases[0].stock.set("partA", 100);
-        run(sim, 20);
-        expect(sim.unlocked("deposit")).toBe(true);
+        run(sim, 1);
+        expect(sim.bases[0].blocks.length).toBeGreaterThan(0);
+        expect(sim.unlocked("deposit")).toBe(false);
       });
 
       it("the station pays for it itself out of what it can spare", () => {

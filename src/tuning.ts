@@ -98,6 +98,16 @@ export const DEFAULTS = {
   catchPull: 15,
   /** Seconds the refinery takes over each ore of a whole rock. */
   refineSeconds: 4,
+  /** How near a project's site its catch picks up a block let go of, and how hard it pulls it in. */
+  siteRange: 300,
+  /** Parts A in one construction block: what a project is carried in. */
+  blockParts: 10,
+  /** Blocks that may wait at a station's block pad at once. */
+  blocksWaiting: 2,
+  /** The chance a floater that has bought everything else turns tow ship, once a stay. */
+  towShipChance: 0.25,
+  /** The most of a base's traffic that may be tow ships, as a share. */
+  towShipShare: 0.2,
 
   /** How far from the ship a target stays picked. Past it, it drops and doesn't come back on its own. */
   targetRange: 1500,
@@ -613,6 +623,16 @@ export const GROUPS: Group[] = [
       { key: "deliverShare", label: "Delivers when this full", min: 0.1, max: 1, step: 0.05 },
       { key: "droneCruiseSpeed", label: "Cruise speed", min: 100, max: 1000, step: 10 },
       { key: "droneFieldSpeed", label: "Speed in the field", min: 30, max: 300, step: 5 },
+    ],
+  },
+  {
+    title: "Towing and blocks",
+    sliders: [
+      { key: "siteRange", label: "Site catch range", min: 100, max: 1500, step: 25 },
+      { key: "blockParts", label: "Parts A in a construction block", min: 1, max: 50, step: 1 },
+      { key: "blocksWaiting", label: "Blocks that may wait at a pad", min: 1, max: 6, step: 1 },
+      { key: "towShipChance", label: "Chance a floater turns tow ship, a stay", min: 0, max: 1, step: 0.05 },
+      { key: "towShipShare", label: "Most of a base's traffic that tows, as a share", min: 0, max: 1, step: 0.05 },
     ],
   },
   {

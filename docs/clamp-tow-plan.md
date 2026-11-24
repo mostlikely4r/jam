@@ -10,7 +10,8 @@ The first slice, *decided* by the user as the cheapest test: **towing a whole as
 station, for more ore than mining it would give.** It needs nothing the game doesn't already
 have (rocks, stations, ore, thrusters), and answers whether towing feels good before anything is
 built on it. Built and approved 2026-11-24 (step 1). The second slice (safe towing, tow traffic,
-and blocks for the base's projects) starts at "Second slice" below, steps 2 to 4, unbuilt.
+and blocks for the base's projects) starts at "Second slice" below: steps 2 to 4 are built,
+the last two on 2026-11-24 (Q-22).
 
 ## The picture
 
@@ -177,7 +178,7 @@ rock home is worth the trip, and the hand-over reads.
 ## Second slice: safe towing, tow traffic, and blocks
 
 Written 2026-11-24, from a short talk with the user after the first slice was played and
-approved. Step 2 (safe towing) is built, 2026-11-24; steps 3 and 4 are not built yet.
+approved. All three steps are built, 2026-11-24.
 
 **Why.** The first slice answered its question (towing a rock home feels weighty and worth it).
 The user asked for the next slice to be *both* halves left open: the autopilot keeping the load
@@ -320,6 +321,28 @@ traffic turns out to misuse it, fix it there rather than changing what the playe
   rock on a traffic ship (`ship.tow`, already saved for the player: check it is for any ship)
   and the new record goal. Bump `SAVE_VERSION` if the record shape changes.
 
+**Built 2026-11-24** (Q-22). What the code settled, and what differs from the proposals:
+
+- **The tow pair is the ship's state, not ids on a list.** `wishlistFor` adds the pair once a
+  clamp or Tow control is fitted, and a tow ship's own shopping (`buyTow`) loads Tow control
+  before it buys the clamp, making room in a full computer by unloading Click to turn. From then
+  on it shops for nothing else: buying its normal list again would fit a tractor over the clamp.
+- **The turn is one roll a stay** (`considerTow`), and `towShareFull` keeps at least one tow ship
+  in a small fleet and no more than the share in a large one.
+- **A tow ship picks its field the flown way** (`pickField`, taken out of `chooseField`), takes
+  the biggest rock it can clamp that no other tow ship is after (`towRock`), and with none it
+  mines the old way.
+- **The hand-over is shared**: `Sim.handOverTo` says where to fly, whether the pad is busy, and
+  lets the rock go when the pair is there, slow and on a clear line. `ClickPilot` and the drone
+  both fly to it.
+- **A record's trip carries a real clamp**: the body it takes from the field (or the pad) is
+  `ship.tow` for the whole leg, so the planner weighs it and `wakeRecord` only has to put it
+  where the clamp hangs. `startRecord` leaves its mining stay out for a tow ship.
+- **A record stays at the dock between jobs** (`dockStay`), so repairs, shopping and the block
+  job at each stay run the same code a flown ship's do.
+- **Shots pass a held rock by** (`moveShots`): a caught rock was being shot out from under the
+  station by traffic fire on its way back out. A rock in a clamp or a catch is nobody's to hit.
+
 *Played for:* watch the home station for ten minutes. Do tow ships show up, bring rocks in now
 and then, and read as purposeful company rather than clutter?
 
@@ -381,6 +404,25 @@ waiting block is a number on the base (`blocksReady`). Add both to `STEP_PARTS`.
 **Save**: blocks waiting (per base, and whose they are), blocks in the open or held, the
 projects' purses. Bump `SAVE_VERSION`, with a round-trip test.
 
+**Built 2026-11-24** (Q-22). What the code settled, and what differs from the proposals:
+
+- **A waiting block is a job on the base** (`Base.blocks`): it is a body (`Sim.blocks`) only once
+  clamped or let go, so a pad is a number of crates and nothing is simulated at a pad out of
+  view. Claiming a job records the carrier and the payer on it.
+- **`buildProjects` makes a block only when the project still needs one** and the pad has room,
+  which keeps a small project from filling the pad with blocks it can't use. The station's own
+  turrets keep the stock build.
+- **The funding and block plan live on the project** (`purse`, `blocks`, `paid`), set from the
+  price when it is ordered. A project from an older save is filled in on its first tick
+  (`normalizeProject`) with the rest of its price over the blocks that remain.
+- **The site's catch is the refinery's cousin** (`catchBlocks`, called from `catchRocks`): it
+  pulls a block let go of near the site in gently and sets it into the frame; one let go of too
+  fast knocks on the frame and may break.
+- **The job is on the dock's Station row** (`main.ts`), with the blocks to go, the deposit and
+  the pay. A right click on the deposit while holding its block is a place, through Tow control.
+- **A record takes the job and the block at the pad** and places it at the site, then docks for
+  its next stay (`towArrived`).
+
 *Played for:* fund the deposit (or let the base fund it), take a block or two yourself, then
 leave the area for a while. Do you come back to a deposit further along, built by ships you can
 follow? Does placing a block feel like a payoff, like the refinery does?
@@ -423,8 +465,8 @@ follow? Does placing a block feel like a payoff, like the refinery does?
 
 - Slice 1: clamp, tow, release, catch, refinery, `releasedBy`, `towImpact`: built (Q-5).
 - Programs, computer slots and program blueprints (`src/programs.json`, `src/programs.ts`):
-  built. Check the floater has a free computer slot for a fourth program at the level traffic
-  reaches; if not, `towControl` replaces the least useful one for a tow ship.
+  built. The floater's flight computer runs four, so Tow control had room; a full one still gives
+  way by unloading Click to turn (`DronePilot.makeRoom`).
 - Projects, their frames and `buildProjects` (`src/sim.ts`, `drawDepositFrame` in
   `src/render.ts`): built.
 - Trip records, `farside.ts` and its test, `wakeRecord`: built.
@@ -433,8 +475,6 @@ follow? Does placing a block feel like a payoff, like the refinery does?
 
 ## Not in this build
 
-- Steps 3 and 4: tow traffic, blocks, and projects built from carried blocks (Q-22). They wait on
-  the user trying step 2.
 - Special rocks that only survive whole, and a way to see them (*decided* for later).
 - Towing a stranded ship home (think of it with the rescue AI in `docs/fuel-plan.md`).
 - Pirates stealing a towed rock or block, or hunting tow ships.

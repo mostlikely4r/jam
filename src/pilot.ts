@@ -1,11 +1,14 @@
+import { computerSize } from "./fitting";
 import { DRONE_BUY_ORDER, type PartId } from "./parts";
 import { planRoute, type Route, type Vec } from "./route";
 import {
   type Base,
+  type Battery,
+  type Block,
   type Body,
   type Deposit,
   DOCK_OFFSET,
-
+  isBlock,
   type MiningField,
   type Ore,
   type Poi,
@@ -752,6 +755,15 @@ export class DronePilot extends ShipPilot {
   /** What it will buy with its earnings, in order. */
   wishlist: PartId[] = DRONE_BUY_ORDER;
   /**
+   * It turned tow ship: it buys Tow control and a clamp, then tows whole rocks home or carries
+   * blocks out to a base's projects (`docs/clamp-tow-plan.md`, steps 3 and 4).
+   */
+  towShip = false;
+  /** The rock it's after in a field, so two tow ships never pick the same one. */
+  towRock: Rock | null = null;
+  /** The base it's taking a whole rock to, while it has one in the clamp. */
+  towBase: Base | null = null;
+  /**
    * What it spends on: a test drone buys its list and then more drones, traffic and the
    * player's drones buy the upgrades they can use and keep a buffer, or nothing at all.
    */
@@ -775,6 +787,12 @@ export class DronePilot extends ShipPilot {
   habit: string | null = null;
   /** Whether it has picked a field on this stay at the dock. */
   private decidedField = false;
+  /** Whether it has rolled for a block job or a tow on this stay at the dock. */
+  private towDecided = false;
+  /** Whether it has rolled the tow-ship dice on this stay: once, and no more. */
+  private towRolled = false;
+  /** No rock worth towing here this trip: it mines the old way until it docks again. */
+  private towMining = false;
   private rock: Rock | null = null;
   private ore: Ore | null = null;
   private retarget = 0;
@@ -811,6 +829,9 @@ export class DronePilot extends ShipPilot {
     this.decidedField = false;
     this.decidedTrade = false;
     this.leftStop = false;
+    // A record's stay decides its tow work afresh, as a flown one does on undocking.
+    this.towDecided = false;
+    this.towRolled = false;
   }
 
   /** Turned away at this stop and leaving for elsewhere with its ore: a record's stay is over. */
@@ -838,6 +859,10 @@ export class DronePilot extends ShipPilot {
 
     this.watchForPirates(sim);
     if (this.fleeing) {
+      // A load in the clamp is worth more than the chase: it's let go of, and runs.
+      if (ship.tow) sim.letGoTow(ship);
+      this.towRock = null;
+      this.towBase = null;
       this.flee(sim);
       return;
     }
@@ -853,6 +878,8 @@ export class DronePilot extends ShipPilot {
       this.turnedFor = 0;
       this.waitsHere = false;
       this.leftStop = false;
+      this.towDecided = false;
+      this.towRolled = false;
     }
     if (sim.oreIn(ship) >= sim.deliveryLoad(ship) && !this.hauling) {
       this.backToRocks = false;
@@ -872,6 +899,8 @@ export class DronePilot extends ShipPilot {
       return;
     }
     if (sim.oreIn(ship) === 0 && sim.atShop(ship)) this.shop(sim);
+    // A tow ship's own work comes before mining: a block job, or a whole rock home.
+    if (sim.oreIn(ship) === 0 && this.towReady(sim) && this.tow(sim)) return;
 
     if (!this.hauling && sim.oreIn(ship) === 0) {
       this.chooseField(sim);
@@ -918,22 +947,26 @@ export class DronePilot extends ShipPilot {
       this.working = fields[0].id;
       return;
     }
+    this.working = this.pickField(sim).id;
+  }
+
+  /** The field a ship would pick from the dock it is at: the cheapest round trip, by its own rules. */
+  pickField(sim: Sim): MiningField {
+    const { ship } = this;
+    const fields = sim.miningFields();
+    if (fields.length === 1) return fields[0];
     const { tuning } = sim;
     const open = fields.filter((field) => !sim.fieldEmpty(field));
     const current = this.workingField(sim).id;
     const elsewhere = open.filter((field) => field.id !== current);
     if (elsewhere.length > 0 && sim.roll() < tuning.fieldWanderChance) {
-      this.working = elsewhere[Math.floor(sim.roll() * elsewhere.length)].id;
-      return;
+      return elsewhere[Math.floor(sim.roll() * elsewhere.length)];
     }
     // Selling away from its own base, it goes back to the field by its own.
     const own = sim.homeBaseOf(ship);
     if (sim.dockedAt(ship) !== own.poi) {
       const home = sim.miningFieldAt(own.poi.x, own.poi.y);
-      if (open.includes(home)) {
-        this.working = home.id;
-        return;
-      }
+      if (open.includes(home)) return home;
     }
     const lately = ship.pirateKilledAt !== null && sim.now - ship.pirateKilledAt < tuning.fieldFearSeconds;
     const feared = lately && sim.roll() < tuning.fieldFearChance ? ship.pirateKilledIn : null;
@@ -951,7 +984,7 @@ export class DronePilot extends ShipPilot {
         best = field;
       }
     }
-    this.working = best.id;
+    return best;
   }
 
   /** Seconds from one place to another, by the route planner, round any body in the way. */
@@ -1065,6 +1098,12 @@ export class DronePilot extends ShipPilot {
     const { ship } = this;
     if (this.buys === "nothing") return;
     if (this.buys === "upgrades") {
+      if (this.considerTow(sim)) return;
+      // A tow ship stays one: it buys the tow pair and nothing that would swap the clamp out.
+      if (this.towShip) {
+        this.buyTow(sim);
+        return;
+      }
       const next = sim.wishlistFor(ship)[0];
       if (!next) return;
       // The player's drones spend the player's money, so they leave it a bigger cushion.
@@ -1077,6 +1116,208 @@ export class DronePilot extends ShipPilot {
     const next = allowed.find((part) => sim.wouldUse(ship, part));
     if (next) sim.buyPart(ship, next);
     else sim.buyDrone(ship);
+  }
+
+  /**
+   * At a dock, once a stay, a floater that has bought everything ahead of it in its list may
+   * turn tow ship: Tow control then a clamp join the list. Most of a base's traffic stays
+   * mining, so the belt never empties.
+   */
+  considerTow(sim: Sim): boolean {
+    const { ship } = this;
+    if (this.towShip || ship.owner || this.buys !== "upgrades" || ship.model !== "floater") return false;
+    if (!sim.isDocked(ship) || sim.wishlistFor(ship).length > 0 || this.towRolled) return false;
+    this.towRolled = true;
+    // Only from a shop that sells the pair, and on a hull whose mount takes the clamp.
+    if (!sim.unlocked("towControl") || !sim.canBuy(ship, "towControl") || !sim.canBuy(ship, "clamp")) return false;
+    if (sim.towShareFull(ship) || sim.roll() >= sim.tuning.towShipChance) return false;
+    this.towShip = true;
+    return true;
+  }
+
+  /** A tow ship's shopping: Tow control loaded first, then the clamp. Answers whether it did anything. */
+  private buyTow(sim: Sim): boolean {
+    const { ship } = this;
+    const credits = sim.accountOf(ship).credits;
+    const buffer = ship.owner ? sim.tuning.droneBuffer : sim.tuning.trafficBuffer;
+    const affords = (id: PartId) => credits - sim.partPrice(id) >= buffer;
+    if (!ship.software.has("towControl")) {
+      if (!sim.canBuy(ship, "towControl") || !sim.unlocked("towControl")) return false;
+      if (!affords("towControl")) return true;
+      this.makeRoom(sim);
+      sim.buyPart(ship, "towControl");
+      return true;
+    }
+    if (!ship.programs.includes("towControl")) {
+      this.makeRoom(sim);
+      sim.setProgram(ship, "towControl", true);
+      return true;
+    }
+    if (!sim.hasClamp(ship)) {
+      if (!sim.canBuy(ship, "clamp") || !sim.unlocked("clamp")) return false;
+      if (!affords("clamp")) return true;
+      sim.buyPart(ship, "clamp");
+      return true;
+    }
+    return false;
+  }
+
+  /** Unloads the least useful program to make room for Tow control: the turn program goes first. */
+  private makeRoom(sim: Sim): void {
+    const { ship } = this;
+    if (ship.programs.length < computerSize(ship)) return;
+    const drop = ship.programs.includes("clickTurn") ? "clickTurn" : ship.programs[ship.programs.length - 1];
+    sim.setProgram(ship, drop, false);
+  }
+
+  /** Whether it has what a tow run needs: a clamp that works, and Tow control loaded. */
+  private towReady(sim: Sim): boolean {
+    return this.towShip && sim.hasClamp(this.ship) && this.ship.parts.has("towControl");
+  }
+
+  /**
+   * A tow ship's work: a block to its site, a whole rock home, or off to find one. Answers
+   * whether it took the tick over; without a rock worth towing it mines as traffic always did.
+   */
+  private tow(sim: Sim): boolean {
+    const { ship } = this;
+    if (ship.tow) {
+      this.towDeliver(sim, ship.tow);
+      return true;
+    }
+    if (sim.isDocked(ship)) {
+      if (!this.towDecided) {
+        this.towDecided = true;
+        this.towMining = false;
+        this.working = this.pickField(sim).id;
+        // A block job first, if its base has one it can pay for and still keep its buffer.
+        if (!sim.blockJobFor(ship)) sim.takeBlockJob(ship, sim.tuning.trafficBuffer);
+      }
+      const job = sim.blockJobFor(ship);
+      if (job) {
+        this.towPad(sim, job.base);
+        return true;
+      }
+      this.towField(sim);
+      return true;
+    }
+    const job = sim.blockJobFor(ship);
+    if (job) {
+      this.towPad(sim, job.base);
+      return true;
+    }
+    if (this.towMining) return false;
+    this.towField(sim);
+    return true;
+  }
+
+  /** Flies to its field, finds the biggest rock worth towing, and comes alongside to clamp it. */
+  private towField(sim: Sim): void {
+    const { ship } = this;
+    const field = this.workingField(sim);
+    const away =
+      sim.extraFields.length > 0 &&
+      (sim.miningFieldAt(ship.x, ship.y).id !== field.id ||
+        sim.sleeping.has(field.id) ||
+        sim.cornerToward(ship.x, ship.y, field.poi.x, field.poi.y) !== null);
+    if (away) {
+      this.task = field.id === sim.ownField(ship).id ? "to field" : "to far field";
+      this.travel(sim, field.poi, field.radius * FIELD_ARRIVAL_SHARE, 0, null);
+      return;
+    }
+    const rock = this.towPick(sim, field);
+    if (!rock) {
+      // Nothing worth the trip here: it mines a load the old way, with guns and no tractor.
+      this.towMining = true;
+      this.mine(sim);
+      return;
+    }
+    this.towRock = rock;
+    this.task = "to rock";
+    if (sim.inClampReach(ship, rock) && Math.hypot(rock.vx - ship.vx, rock.vy - ship.vy) <= sim.tuning.clampSpeed) {
+      if (sim.grabTow(ship, rock)) {
+        this.towRock = null;
+        this.towBase = this.refineryFor(sim);
+      }
+      return;
+    }
+    this.flyTo(sim, rock, rock.radius, 0, rock);
+  }
+
+  /** The biggest rock worth towing in a field that no other tow ship has picked. */
+  private towPick(sim: Sim, field: MiningField): Rock | null {
+    let best: Rock | null = null;
+    for (const rock of sim.rocks) {
+      if (rock.held || rock.tier < 1 || !sim.rockIn(field, rock)) continue;
+      if (this.towClaimed(sim, rock)) continue;
+      if (!best || rock.tier > best.tier || (rock.tier === best.tier && rock.radius > best.radius)) best = rock;
+    }
+    return best;
+  }
+
+  /** Whether another tow ship is already after this rock. */
+  private towClaimed(sim: Sim, rock: Rock): boolean {
+    return [...sim.traffic, ...sim.drones].some((pilot) => pilot !== this && pilot.towRock === rock);
+  }
+
+  /** Flies to its base's block pad and takes the block its job has waiting there. */
+  private towPad(sim: Sim, base: Base): void {
+    const { ship } = this;
+    this.task = "carrying a block";
+    if (sim.grabPadBlock(ship)) return;
+    const pad = sim.blockSpot(base);
+    this.travel(sim, { x: pad.x, y: pad.y, px: pad.x, py: pad.y }, 0, 0, null);
+  }
+
+  /** Takes what it carries where it belongs: a block to its site, a whole rock to a refinery. */
+  private towDeliver(sim: Sim, held: Rock | Block): void {
+    const { ship } = this;
+    if (isBlock(held)) {
+      const project = held.site;
+      if (!sim.siteOpen(project)) {
+        sim.letGoTow(ship);
+        return;
+      }
+      this.task = "carrying a block";
+      const at = sim.siteSpot(project);
+      const slow = Math.hypot(held.vx, held.vy) <= sim.tuning.clampSpeed;
+      if (slow && Math.hypot(ship.x - at.x, ship.y - at.y) <= DOCK_OFFSET) {
+        sim.releaseTow(ship);
+        this.towDecided = false;
+        return;
+      }
+      this.travel(sim, { x: at.x, y: at.y, px: at.x, py: at.y }, 0, 0, null);
+      return;
+    }
+    if (!this.towBase) this.towBase = this.refineryFor(sim);
+    const spot = sim.handOverTo(ship, this.towBase);
+    if (spot.done) {
+      this.towBase = null;
+      this.towDecided = false;
+      return;
+    }
+    this.task = spot.busy ? "waiting for the refinery" : "towing";
+    this.travel(sim, { x: spot.x, y: spot.y, px: spot.px, py: spot.py }, 0, 0, null);
+  }
+
+  /**
+   * The base a towed rock goes to: its own if the refinery is free, else the nearest free one
+   * within the same cutoff that puts traffic off the next station over, else its own to wait.
+   */
+  refineryFor(sim: Sim): Base {
+    const own = sim.homeBaseOf(this.ship);
+    if (!sim.catchBusy(own)) return own;
+    const { ship } = this;
+    let best: Base | null = null;
+    let nearest = Infinity;
+    for (const base of sim.bases) {
+      if (base === own || sim.catchBusy(base)) continue;
+      const seconds = Math.hypot(base.poi.x - ship.x, base.poi.y - ship.y) / Math.max(1, this.cruiseSpeed(sim));
+      if (seconds > LONG_TRIP || seconds >= nearest) continue;
+      best = base;
+      nearest = seconds;
+    }
+    return best ?? own;
   }
 
   /** The load is sold or lost: what it chose for that load is over too. */
@@ -1381,6 +1622,8 @@ interface ClickOrder {
   straight?: boolean;
   /** Tow control's hand-over: the station the rock in the clamp is to be given to. */
   deliver?: Poi;
+  /** Tow control's block: the project the block in the clamp is to be set into. */
+  place?: Deposit | Battery;
 }
 
 /** A click move's speed ceiling, as a share of the peak it would reach burning full to the halfway point. */
@@ -1400,11 +1643,6 @@ export class ClickPilot extends ShipPilot {
   /** How near the refinery pad a delivery lets go of its rock: close enough to be a hand-over. */
   private get handOverReach(): number {
     return DOCK_OFFSET;
-  }
-
-  /** How much further out than the pad a delivery holds off while the refinery is busy. */
-  private get waitOffset(): number {
-    return DOCK_OFFSET * 1.4;
   }
 
   get active(): boolean {
@@ -1427,6 +1665,7 @@ export class ClickPilot extends ShipPilot {
     if (!order) return "";
     if (this.handsOff > 0) return "waiting for the keys";
     if (order.deliver) return this.towWait ? "waiting for the refinery" : "delivering";
+    if (order.place) return "placing";
     if (order.follow) return order.stage === "flying" ? "on course" : "coming in";
     return order.stage;
   }
@@ -1526,6 +1765,27 @@ export class ClickPilot extends ShipPilot {
   }
 
   /**
+   * Tow control's block: flies the pair to a project's site and lets the block in the clamp go
+   * there. The order ends when the block is let go of, or the player orders something else.
+   */
+  placeTo(sim: Sim, project: Deposit | Battery): void {
+    const { ship } = this;
+    const at = sim.siteSpot(project);
+    this.order = {
+      spot: { x: at.x, y: at.y, px: at.x, py: at.y, vx: 0, vy: 0 },
+      place: project,
+      drifts: false,
+      move: true,
+      face: this.order?.face ?? null,
+      stage: "flying",
+      closest: Infinity,
+      stuck: 0,
+      trip: Math.hypot(at.x - ship.x, at.y - ship.y),
+    };
+    this.handsOff = 0;
+  }
+
+  /**
    * The delivery, tick by tick: closes on the pad and lets the rock go once it's there, slow and
    * on a clear line. While the refinery works another rock it holds off clear of the pad and
    * says so, and hands over as soon as the pad is free.
@@ -1533,29 +1793,46 @@ export class ClickPilot extends ShipPilot {
   private handOver(sim: Sim, order: ClickOrder): void {
     const { ship } = this;
     const base = sim.baseOf(order.deliver!);
-    const rock = ship.tow;
     // Nothing to hand over, or nowhere to hand it: the order is done. The rock stays held.
-    if (!base || !rock || !ship.parts.has("towControl")) {
+    if (!base || !ship.tow || isBlock(ship.tow) || !ship.parts.has("towControl")) {
       this.cancel();
       return;
     }
-    const busy = sim.catchBusy(base);
-    this.towWait = busy;
-    if (!busy) {
-      const pad = sim.refinerySpot(base);
-      const slow = Math.hypot(rock.vx, rock.vy) <= sim.tuning.clampSpeed;
-      const near = Math.hypot(ship.x - pad.x, ship.y - pad.y) <= this.handOverReach;
-      if (slow && near && sim.clearOfStations(rock.x, rock.y, pad.x, pad.y)) {
-        sim.releaseTow(ship);
-        this.cancel();
-        return;
-      }
-    } else sim.say("Waiting for the refinery");
+    const spot = sim.handOverTo(ship, base);
+    this.towWait = spot.busy;
+    if (spot.done) {
+      this.cancel();
+      return;
+    }
+    if (spot.busy) sim.say("Waiting for the refinery");
     // The pad, or clear of it while another rock is being pulled in there.
-    const spot = poiSpot(order.deliver!, busy ? REFINERY_OFFSET - this.waitOffset : REFINERY_OFFSET, 0);
-    // The destination the ring and the sim follow: the pad as the station carries it.
     order.spot = { x: spot.x, y: spot.y, px: spot.px, py: spot.py, vx: 0, vy: 0 };
-    this.travel(sim, spot, 0, 0, null);
+    this.travel(sim, order.spot, 0, 0, null);
+  }
+
+  /**
+   * A block placed at its project's site, tick by tick: closes on the site and lets the block go
+   * there once it's close and slow. The order is done when the block is let go of, or the project
+   * finishes before it arrives.
+   */
+  private placeBlock(sim: Sim, order: ClickOrder): void {
+    const { ship } = this;
+    const project = order.place!;
+    const held = ship.tow;
+    if (!held || !isBlock(held) || !ship.parts.has("towControl") || !sim.siteOpen(project)) {
+      this.cancel();
+      return;
+    }
+    const at = sim.siteSpot(project);
+    const slow = Math.hypot(held.vx, held.vy) <= sim.tuning.clampSpeed;
+    const near = Math.hypot(ship.x - at.x, ship.y - at.y) <= this.handOverReach;
+    if (slow && near) {
+      sim.releaseTow(ship);
+      this.cancel();
+      return;
+    }
+    order.spot = { x: at.x, y: at.y, px: at.x, py: at.y, vx: 0, vy: 0 };
+    this.travel(sim, { x: at.x, y: at.y, px: at.x, py: at.y }, 0, 0, null);
   }
 
   /**
@@ -1674,6 +1951,10 @@ export class ClickPilot extends ShipPilot {
     // Tow control's hand-over runs the pair in to the pad itself, and ends the order when done.
     if (order.deliver) {
       this.handOver(sim, order);
+      return;
+    }
+    if (order.place) {
+      this.placeBlock(sim, order);
       return;
     }
     const target = order.follow ? this.courseSpot(order.follow) : order.spot;

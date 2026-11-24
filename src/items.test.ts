@@ -840,7 +840,7 @@ describe("part A", () => {
   });
 
   it("is what a project is built from", () => {
-    const { sim, outpost } = world({ depositPrice: 1000, depositParts: 5, depositBuildRate: 100, stationStartParts: 40 }, { items: [], projects: true });
+    const { sim, outpost } = world({ depositPrice: 1000, depositParts: 15, stationReserveParts: 0, stationStartParts: 40 }, { items: [], projects: true });
     const { ship } = sim;
     const base = sim.bases[1];
     ship.credits = 100000;
@@ -848,8 +848,10 @@ describe("part A", () => {
     run(sim, 0.1);
     expect(sim.fundBlueprint(ship, "deposit")).toBe(true);
     run(sim, 1);
-    expect(sim.unlocked("deposit", base)).toBe(true);
-    expect(sim.partA(base)).toBe(35);
+    // The parts leave the station's stock to make blocks at its pad, for carrying out to the site.
+    expect(sim.unlocked("deposit", base)).toBe(false);
+    expect(base.blocks).toHaveLength(2);
+    expect(sim.partA(base)).toBe(20);
   });
 
   it("buys a module with none in store by spending its recipe", () => {

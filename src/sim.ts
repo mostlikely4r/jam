@@ -1,5 +1,5 @@
 import { Chatter, type FaceKey } from "./chatter";
-import { type BayGrid, type BlueprintId, partFits, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
+import { type BayGrid, type BlueprintId, partFits, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, TOW_BUY_ORDER, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
 import { hubRecipes, isOreItem, itemDef, oreItems, saleRecipes } from "./items";
 import { copyPicks, pickOf, PROGRAMS, setPick as setTweakPick } from "./programs";
 import { computerSize, DAMAGED_AT, facing, fitPart, HULL_INFO, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Mount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works, fullTanks, shareTanks, tankCapacity, tankMounts } from "./fitting";
@@ -62,6 +62,12 @@ const WRECK_ORE_SPEED = 15;
 export const DOCK_OFFSET = STATION_HALF * 2;
 /** Where a station's refinery pad sits, on its own axis away from the dock. */
 export const REFINERY_OFFSET = -DOCK_OFFSET;
+/** A construction block's reach: a square crate as big across as a tier-1 rock, and as heavy and tough. */
+export const BLOCK_RADIUS = 34;
+/** Where a station's block pad sits, in its own axes: on the dock side, off the dock's own line. */
+const BLOCK_PAD = { x: DOCK_OFFSET * 0.6, y: DOCK_OFFSET * 1.05 };
+/** The most a project's site catch steers a block in at, and how near counts as arrived (as the refinery's). */
+const SITE_LANDING = 40;
 /** Far enough from the station's center to clear both boxes at any rotation. */
 export const STATION_REACH = 450;
 /** A deposit's size, for pointing at it and picking it: its ring around the middle. */
@@ -222,8 +228,8 @@ export interface Ship extends Body, Fitting {
   destination: Target | null;
   /** The field the ore aboard was mined in, for the news a sale puts up. Null: not mined. */
   oreField: string | null;
-  /** The rock its clamp is holding and flying with it, or null (`docs/clamp-tow-plan.md`). */
-  tow: Rock | null;
+  /** The rock or block its clamp is holding and flying with it, or null (`docs/clamp-tow-plan.md`). */
+  tow: Rock | Block | null;
   /** Seconds left before it explodes, once its hull has given out: out of control meanwhile. 0 while it's whole. */
   critical: number;
   /** Fuel its thrusters have burned since it was last in a dock. */
@@ -274,6 +280,50 @@ export interface Rock extends Body {
   catcher?: string;
   /** The ship that last let it go, if one did: whoever the refinery pays for a whole rock. */
   releasedBy?: Ship;
+}
+
+/**
+ * A construction block: a square crate of part A a base makes for a project still being built,
+ * and pays a carrier to take out to the site (`docs/clamp-tow-plan.md`, step 4). Not an item:
+ * it never goes in a bay. Carried in a clamp, it's a body like a rock; broken, it's gone.
+ */
+export interface Block extends Body {
+  /** Tells a block from a rock wherever the clamp can hold either. */
+  block: true;
+  radius: number;
+  hp: number;
+  angle: number;
+  prevAngle: number;
+  spin: number;
+  /** The base that made it. */
+  base: string;
+  /** The project it's for, and whose catch will take it. */
+  site: Deposit | Battery;
+  /** The ship whose job it is, while it's at the pad or being carried: only that ship may clamp it. Claimed, it's set; let go of in the open, it's cleared. */
+  carrier: Ship | null;
+  /** Who paid the deposit: gets it back when the block is placed, whoever carries it. */
+  payer: Ship | null;
+  /** Set while the clamp or a project's catch holds it. */
+  held?: "tow" | "catch";
+  /** The project whose catch has it, while `held` is "catch". */
+  catcher?: Deposit | Battery;
+  /** The ship that last let it go, if one did: whoever places it is paid. */
+  releasedBy?: Ship;
+}
+
+/** Whether a body the clamp can hold is a construction block rather than a rock. */
+export function isBlock(body: Rock | Block): body is Block {
+  return "block" in body;
+}
+
+/** A block waiting at a base's pad: one job, to be taken and carried out to its project. */
+export interface BlockJob {
+  /** The project it's for: the deposit being built, or the turrets for one. */
+  site: Deposit | Battery;
+  /** The ship that took the job, if one has: only it may clamp the block. */
+  carrier: Ship | null;
+  /** Who paid the deposit: gets it back when the block is placed. */
+  payer: Ship | null;
 }
 
 /**
@@ -408,6 +458,10 @@ export interface Deposit {
   /** Parts still to come before it opens, and the parts already built into it. */
   partsLeft: number;
   partsUsed: number;
+  /** The funding held to pay the blocks that build it, and what's left of it; paid over `blocks`, of which `paid` credits have gone out. Older saves have none. */
+  purse?: number;
+  blocks?: number;
+  paid?: number;
 }
 
 /** One gun of a battery. */
@@ -433,6 +487,10 @@ export interface Battery {
   fromSwitch: boolean;
   partsLeft: number;
   partsUsed: number;
+  /** The funding held to pay the blocks that build it, as on a deposit. */
+  purse?: number;
+  blocks?: number;
+  paid?: number;
 }
 
 /** A place from the layout: where it is comes from its chain of orbits and the clock, never added up. */
@@ -608,6 +666,8 @@ export interface Base {
   board: Report[];
   /** A whole rock its refinery is working through, or null. One at a time (`docs/clamp-tow-plan.md`). */
   refining: Refining | null;
+  /** Blocks waiting at its pad, each one job to carry out to a project. */
+  blocks: BlockJob[];
 }
 
 /**
@@ -647,6 +707,7 @@ type BaseState = Pick<
   | "blueprintsOrdered"
   | "board"
   | "refining"
+  | "blocks"
 >;
 
 /**
@@ -672,8 +733,8 @@ export interface SleepingField {
  * there. At each stop its pilot decides what's next, exactly as a flown one would.
  */
 export interface TripRecord {
-  /** Working a field, selling at a dock, buying a load, or (a pirate or defender) going home. */
-  goal: "field" | "dock" | "trade" | "home";
+  /** Working a field, selling at a dock, buying a load, (a pirate or defender) going home, towing a whole rock, or carrying a block. */
+  goal: "field" | "dock" | "trade" | "home" | "tow" | "block";
   /** The field's id, the base's id, "pirate base", or a deposit's index. */
   target: string;
   /** On the way, or (for a field) mining it, or keeping watch over it, until `arrive`. */
@@ -684,6 +745,10 @@ export interface TripRecord {
   path: { x: number; y: number }[];
   /** Where the target was due to be on arrival, when it set out. */
   aim: { x: number; y: number };
+  /** A tow or block record is carrying this; without it, it's on its way to fetch one. The body itself is in the ship's clamp (`ship.tow`). */
+  hauling?: "rock" | "block";
+  /** The project a block record is carrying one to, so its site is found after a load. */
+  site?: Deposit | Battery;
 }
 
 interface ExtraField {
@@ -1143,6 +1208,8 @@ export class Sim {
   /** Flies the player's ship to a clicked spot, if it has the part. */
   clickPilot!: ClickPilot;
   rocks: Rock[] = [];
+  /** Construction blocks in the open or in a clamp. Blocks waiting at a pad are jobs on the base, not bodies. */
+  blocks: Block[] = [];
   /** Fields nobody is near, by id. Their rocks aren't in `rocks` and nothing moves them. */
   sleeping = new Map<string, SleepingField>();
   /** Each POI's carry this tick, set at the start of `carryBodies`. */
@@ -1227,6 +1294,7 @@ export class Sim {
       working: each.working,
       habit: each.habit,
       record: each.record,
+      towShip: each.towShip,
     });
     return {
       // Only what differs from the defaults, so a default changed since reaches an old save.
@@ -1240,8 +1308,8 @@ export class Sim {
       fighterRecords: this.fighters.map((each) => each.record),
 
       bases: this.bases.map(
-        ({ id, account, ore, partCarry, stock, hauler, haulerTimer, lostTraffic, blueprints, wanted, blueprintPaid, blueprintsOrdered, board, refining }): BaseState => ({
-          id, account, ore, partCarry, stock, hauler, haulerTimer, lostTraffic, blueprints, wanted, blueprintPaid, blueprintsOrdered, board, refining,
+        ({ id, account, ore, partCarry, stock, hauler, haulerTimer, lostTraffic, blueprints, wanted, blueprintPaid, blueprintsOrdered, board, refining, blocks }): BaseState => ({
+          id, account, ore, partCarry, stock, hauler, haulerTimer, lostTraffic, blueprints, wanted, blueprintPaid, blueprintsOrdered, board, refining, blocks,
         }),
       ),
       deposits: this.deposits,
@@ -1254,6 +1322,7 @@ export class Sim {
       distress: this.distress,
       clock: this.clock,
       rocks: this.rocks,
+      blocks: this.blocks,
       shots: this.shots,
       ores: this.ores,
       loot: this.loot,
@@ -1292,7 +1361,7 @@ export class Sim {
     };
     this.controls = data.controls;
     this.ship = fill(data.ship);
-    const pilot = (each: { ship: Ship; buys: DronePilot["buys"]; flees: boolean; wishlist: PartId[]; working?: string; habit?: string | null; record?: TripRecord | null }) => {
+    const pilot = (each: { ship: Ship; buys: DronePilot["buys"]; flees: boolean; wishlist: PartId[]; working?: string; habit?: string | null; record?: TripRecord | null; towShip?: boolean }) => {
       const made = new DronePilot(fill(each.ship));
       made.buys = each.buys;
       made.flees = each.flees;
@@ -1300,6 +1369,7 @@ export class Sim {
       made.working = each.working ?? "";
       made.habit = each.habit ?? null;
       made.record = each.record ?? null;
+      made.towShip = each.towShip ?? false;
       return made;
     };
     this.drones = data.drones.map(pilot);
@@ -1314,6 +1384,7 @@ export class Sim {
       "shots", "ores", "loot", "down", "stats", "randomState", "lookState", "seed",
     ] as const;
     for (const key of plain) if (key in data) Object.assign(this, { [key]: data[key] });
+    this.blocks = data.blocks ?? [];
     const bases: BaseState[] = data.bases;
     this.savedBases = new Map(bases.map((state) => [state.id, state]));
     for (const base of this.bases) this.takeSaved(base);
@@ -1337,6 +1408,7 @@ export class Sim {
     // A new game starts on the tutorial pair.
     this.pointersManual = false;
     this.rocks = [];
+    this.blocks = [];
     this.sleeping = new Map();
     this.shots = [];
     this.ores = [];
@@ -1543,6 +1615,7 @@ export class Sim {
       blueprintsOrdered: new Set(),
       board: [],
       refining: null,
+      blocks: [],
     };
   }
 
@@ -1565,8 +1638,19 @@ export class Sim {
       blueprintsOrdered: saved.blueprintsOrdered ?? base.blueprintsOrdered,
       board: saved.board ?? [],
       refining: saved.refining ?? null,
+      blocks: saved.blocks ?? [],
     });
     return true;
+  }
+
+  /** Whether a base already fields its share of tow ships, so no more of its traffic may turn. */
+  towShareFull(ship: Ship): boolean {
+    const base = this.homeBaseOf(ship);
+    const fleet = this.traffic.filter((pilot) => this.homeBaseOf(pilot.ship) === base);
+    const towing = fleet.filter((pilot) => pilot.towShip).length;
+    // At least one, so a small fleet still gets its tow ship; never more than the share.
+    const most = Math.max(1, Math.floor(this.tuning.towShipShare * Math.max(1, fleet.length)));
+    return towing >= most;
   }
 
   /**
@@ -1977,6 +2061,16 @@ export class Sim {
   /** Every ship in the world, the player's included. */
   get ships(): Ship[] {
     return [this.ship, ...this.pilots.map((pilot) => pilot.ship)];
+  }
+
+  /** Whether a ship is still in the world: flown, or a record waiting to be woken. */
+  inWorld(ship: Ship): boolean {
+    return (
+      ship === this.ship ||
+      this.drones.some((pilot) => pilot.ship === ship) ||
+      this.traffic.some((pilot) => pilot.ship === ship) ||
+      this.fighters.some((pilot) => pilot.ship === ship)
+    );
   }
 
   /** Whether no rock stands between two points. */
@@ -2581,8 +2675,23 @@ export class Sim {
    */
   orderDeliver(base: Base): boolean {
     const { ship } = this;
-    if (!ship.tow || !ship.parts.has("towControl") || !ship.parts.has("clickMove")) return false;
+    if (!ship.tow || isBlock(ship.tow) || !ship.parts.has("towControl") || !ship.parts.has("clickMove")) return false;
     this.clickPilot.deliverTo(base.poi);
+    return true;
+  }
+
+  /**
+   * Sets the block in the clamp into the deposit's project: Tow control flies the pair to the
+   * site and lets it go. A click on a deposit means this only with a block held that's for it.
+   */
+  orderPlace(deposit: Deposit): boolean {
+    const { ship } = this;
+    const held = ship.tow;
+    if (!held || !isBlock(held) || !ship.parts.has("towControl") || !ship.parts.has("clickMove")) return false;
+    const site = held.site;
+    const host = "guns" in site ? site.host : site;
+    if (host !== deposit || !this.siteOpen(site)) return false;
+    this.clickPilot.placeTo(this, site);
     return true;
   }
 
@@ -2838,9 +2947,9 @@ export class Sim {
   private orderBlueprint(id: BlueprintId, base: Base): void {
     base.blueprintPaid.delete(id);
     base.blueprintsOrdered.add(id);
-    if (id === "deposit") this.addDeposit(base, false, this.tuning.depositParts);
-    if (id === "stationGuards") this.addBattery(base, id, false, this.tuning.stationGuardParts);
-    if (id === "depositGuards") this.addBattery(base, id, false, this.tuning.depositGuardParts);
+    if (id === "deposit") this.addDeposit(base, false, this.tuning.depositParts, this.tuning.depositPrice);
+    if (id === "stationGuards") this.addBattery(base, id, false, this.tuning.stationGuardParts, this.tuning.stationGuardPrice);
+    if (id === "depositGuards") this.addBattery(base, id, false, this.tuning.depositGuardParts, this.tuning.depositGuardPrice);
   }
 
   /** Everything a base has on order arrives at once, and its shop can stock it from then on. */
@@ -2872,6 +2981,247 @@ export class Sim {
     }
   }
 
+  // Blocks: a base's projects are carried out to the site as crates of part A (step 4 of the
+  // clamp-tow plan).
+
+  /** Where a station's block pad is, in the world: on its dock side, off the dock's own line. */
+  blockSpot(base: Base, previous = false): { x: number; y: number } {
+    const { poi } = base;
+    const rotation = previous ? poi.prevRotation : poi.rotation;
+    const x = previous ? poi.px : poi.x;
+    const y = previous ? poi.py : poi.y;
+    return {
+      x: x + Math.cos(rotation) * BLOCK_PAD.x - Math.sin(rotation) * BLOCK_PAD.y,
+      y: y + Math.sin(rotation) * BLOCK_PAD.x + Math.cos(rotation) * BLOCK_PAD.y,
+    };
+  }
+
+  /** What a block is worth: the part A in it, at part A's price. A job's deposit. */
+  blockDeposit(): number {
+    return Math.round(this.partPrice(PART_A) * this.tuning.blockParts);
+  }
+
+  /** A block at a pad, ready to be carried: as big and as tough as a tier-1 rock, and as heavy. */
+  makeBlock(base: Base, site: Deposit | Battery, x: number, y: number): Block {
+    return {
+      block: true,
+      x,
+      y,
+      px: x,
+      py: y,
+      vx: 0,
+      vy: 0,
+      radius: BLOCK_RADIUS,
+      hp: Math.max(1, Math.ceil((this.tuning.rockToughness * BLOCK_RADIUS) / 60)),
+      angle: 0,
+      prevAngle: 0,
+      spin: 0,
+      base: base.id,
+      site,
+      carrier: null,
+      payer: null,
+    };
+  }
+
+  /**
+   * Where a project's site is now: the deposit being built, or the deposit a battery of turrets
+   * stands on. A station's own turrets never take blocks, but their host answers too.
+   */
+  siteSpot(project: Deposit | Battery): { x: number; y: number } {
+    if (!("guns" in project)) return { x: project.x, y: project.y };
+    const { host } = project;
+    return { x: host.x, y: host.y };
+  }
+
+  /** Where a project's site will be at a time on the clock, for a trip planned ahead. */
+  private siteSpotAt(project: Deposit | Battery, time: number): { x: number; y: number } {
+    if (!("guns" in project)) return this.depositSpotAt(project.at, project.toward, time);
+    const { host } = project;
+    if ("ore" in host) return this.depositSpotAt(host.at, host.toward, time);
+    return this.poiAt(host, time);
+  }
+
+  /** Where a deposit sits by its field at a time on the clock. */
+  private depositSpotAt(at: Poi, toward: Poi, time: number): { x: number; y: number } {
+    const from = this.poiAt(at, time);
+    const to = this.poiAt(toward, time);
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const distance = Math.hypot(dx, dy) || 1;
+    const out = at.reach + this.tuning.depositGap;
+    return { x: from.x + (dx / distance) * out, y: from.y + (dy / distance) * out };
+  }
+
+  /** What a project's funding was: its price, held to pay the blocks that build it. */
+  private projectPrice(project: Deposit | Battery): number {
+    if (!("guns" in project)) return this.tuning.depositPrice;
+    return project.id === "stationGuards" ? this.tuning.stationGuardPrice : this.tuning.depositGuardPrice;
+  }
+
+  /** Fills in the funding and block plan of a project made before projects were carried in blocks. */
+  private normalizeProject(project: Deposit | Battery): void {
+    if (project.purse === undefined) {
+      const total = project.partsLeft + project.partsUsed;
+      project.purse = total > 0 ? Math.round(this.projectPrice(project) * (project.partsLeft / total)) : 0;
+    }
+    if (project.blocks === undefined) project.blocks = Math.max(1, Math.ceil(project.partsLeft / this.tuning.blockParts));
+    if (project.paid === undefined) project.paid = 0;
+  }
+
+  /** The project of a base that blocks are made for: its deposit first, then the turrets for one. */
+  private buildingProject(base: Base): Deposit | Battery | null {
+    return (
+      this.deposits.find((each) => each.base === base.id && each.partsLeft > 0) ??
+      this.batteries.find((each) => each.base === base.id && each.id === "depositGuards" && each.partsLeft > 0) ??
+      null
+    );
+  }
+
+  /** The job a ship has taken and not yet collected, and the base whose pad it waits at. */
+  blockJobFor(ship: Ship): { base: Base; job: BlockJob } | null {
+    for (const base of this.bases) {
+      const job = base.blocks.find((each) => each.carrier === ship && this.siteOpen(each.site));
+      if (job) return { base, job };
+    }
+    return null;
+  }
+
+  /**
+   * Takes a block job at the base the ship is docked at: a waiting block, its deposit paid. With
+   * `buffer`, the ship keeps that many credits back. Answers the job, or null.
+   */
+  takeBlockJob(ship: Ship = this.ship, buffer = 0): BlockJob | null {
+    if (!this.atShop(ship) || !this.hasClamp(ship)) return null;
+    const base = this.baseAt(ship);
+    if (!base) return null;
+    // A job it already has is the one it takes: taking two would be two deposits.
+    const already = this.blockJobFor(ship);
+    if (already) return already.job;
+    return this.claimBlockJob(ship, base, buffer);
+  }
+
+  /**
+   * Gives a ship a waiting block job at a base, its deposit paid. A record's stop takes one this
+   * way, without docking. Answers the job, or null.
+   */
+  claimBlockJob(ship: Ship, base: Base, buffer = 0): BlockJob | null {
+    const job = base.blocks.find((each) => each.carrier === null && this.siteOpen(each.site));
+    if (!job) return null;
+    const deposit = this.blockDeposit();
+    const account = this.accountOf(ship);
+    if (account.credits - deposit < buffer) return null;
+    account.credits -= deposit;
+    base.account.credits += deposit;
+    job.carrier = ship;
+    job.payer = ship;
+    return job;
+  }
+
+  /**
+   * Sets a block into its project: its parts are used, the carrier is paid the deposit back plus
+   * the project's share of its funding, and the last block finishes it.
+   */
+  private placeBlock(block: Block): void {
+    const project = block.site;
+    const base = this.bases.find((each) => each.id === block.base) ?? null;
+    const at = this.blocks.indexOf(block);
+    if (at >= 0) this.blocks.splice(at, 1);
+    if (!this.siteOpen(project)) {
+      // It closed under the block, such as an older save's extra: the base gives the deposit back.
+      if (block.payer) {
+        if (base) base.account.credits -= this.blockDeposit();
+        this.accountOf(block.payer).credits += this.blockDeposit();
+      }
+      return;
+    }
+    this.normalizeProject(project);
+    // The pay is the project's funding shared over its blocks, the last block taking the rest.
+    const share = Math.round(project.purse! / Math.max(1, project.blocks!));
+    const pay = Math.min(share, project.purse! - project.paid!);
+    project.paid! += pay;
+    project.partsUsed += Math.min(this.tuning.blockParts, project.partsLeft);
+    project.partsLeft = Math.max(0, project.partsLeft - this.tuning.blockParts);
+    // The deposit comes back from the base that held it; the pay was held as the project's own.
+    const deposit = this.blockDeposit();
+    if (base) base.account.credits -= deposit;
+    if (block.payer) {
+      const payer = this.accountOf(block.payer);
+      payer.credits += deposit;
+    }
+    const placer = block.carrier ?? block.releasedBy ?? null;
+    if (placer && pay > 0) {
+      this.accountOf(placer).credits += pay;
+      placer.earned += pay;
+    }
+    const spot = this.siteSpot(project);
+    this.events.push({ type: "payout", x: spot.x, y: spot.y, amount: deposit + (placer ? pay : 0) });
+    if (project.partsLeft > 0) return;
+    if ("guns" in project) this.finishBattery(project);
+    else this.finishDeposit(project);
+  }
+
+  /**
+   * Projects catch a block let go of near them, gently, and set it into the frame. A block let go
+   * of too fast knocks on the frame and may break, as a rock let go of hits a station.
+   */
+  private catchBlocks(dt: number): void {
+    const { siteRange, catchPull, clampSpeed } = this.tuning;
+    const projects = [...this.deposits, ...this.batteries] as (Deposit | Battery)[];
+    for (const block of this.blocks) {
+      if (block.held || block.releasedBy === undefined) continue;
+      let best: Deposit | Battery | null = null;
+      let nearest = siteRange;
+      for (const project of projects) {
+        if (!this.siteOpen(project)) continue;
+        const at = this.siteSpot(project);
+        const distance = Math.hypot(block.x - at.x, block.y - at.y);
+        if (distance > nearest) continue;
+        best = project;
+        nearest = distance;
+      }
+      if (!best) continue;
+      block.held = "catch";
+      block.catcher = best;
+    }
+    for (const block of [...this.blocks]) {
+      if (block.held !== "catch") continue;
+      const project = block.catcher;
+      if (!project || !this.siteOpen(project)) {
+        delete block.held;
+        delete block.catcher;
+        continue;
+      }
+      const at = this.siteSpot(project);
+      const dx = at.x - block.x;
+      const dy = at.y - block.y;
+      const distance = Math.hypot(dx, dy);
+      const want = Math.min(SITE_LANDING, Math.sqrt(2 * catchPull * distance));
+      const changeX = (distance > 0 ? (dx / distance) * want : 0) - block.vx;
+      const changeY = (distance > 0 ? (dy / distance) * want : 0) - block.vy;
+      const change = Math.hypot(changeX, changeY);
+      const most = catchPull * dt;
+      const share = change > most ? most / change : 1;
+      block.vx += changeX * share;
+      block.vy += changeY * share;
+      block.px = block.x;
+      block.py = block.y;
+      block.x += block.vx * dt;
+      block.y += block.vy * dt;
+      if (distance > CATCH_ARRIVE) continue;
+      const speed = Math.hypot(block.vx, block.vy);
+      if (speed > clampSpeed) {
+        // Too fast to set down: it knocks on the frame and may break.
+        const damage = Math.max(0, speed - this.tuning.safeImpactSpeed) * this.tuning.damagePerSpeed * this.tuning.towDamageScale;
+        block.hp -= damage;
+        block.vx *= -this.tuning.bounce;
+        block.vy *= -this.tuning.bounce;
+        if (block.hp <= 0) this.breakBlock(block);
+        continue;
+      }
+      this.placeBlock(block);
+    }
+  }
+
   private depositSpot(at: Poi, toward: Poi): { x: number; y: number } {
     const dx = toward.x - at.x;
     const dy = toward.y - at.y;
@@ -2881,12 +3231,13 @@ export class Sim {
   }
 
   /** A base's deposit: out by the field it sits by, on that base's side. */
-  private addDeposit(base: Base, fromSwitch: boolean, partsLeft: number): Deposit {
+  private addDeposit(base: Base, fromSwitch: boolean, partsLeft: number, purse = 0): Deposit {
     const at = this.baseField(base).poi;
     const toward = base.poi;
     const { x, y } = this.depositSpot(at, toward);
     const name = "field deposit";
-    const deposit: Deposit = { name, base: base.id, at, toward, x, y, px: x, py: y, ore: new Map(), fromSwitch, partsLeft, partsUsed: 0 };
+    const blocks = Math.max(1, Math.ceil(partsLeft / this.tuning.blockParts));
+    const deposit: Deposit = { name, base: base.id, at, toward, x, y, px: x, py: y, ore: new Map(), fromSwitch, partsLeft, partsUsed: 0, purse, blocks, paid: 0 };
     this.deposits.push(deposit);
     return deposit;
   }
@@ -2914,6 +3265,7 @@ export class Sim {
         deposit.at = this.baseField(base).poi;
         deposit.toward = base.poi;
       }
+      if (!deposit.fromSwitch) this.normalizeProject(deposit);
       deposit.px = deposit.x;
       deposit.py = deposit.y;
       Object.assign(deposit, this.depositSpot(deposit.at, deposit.toward));
@@ -2924,7 +3276,33 @@ export class Sim {
     deposit.partsLeft = 0;
     const base = this.projectBase(deposit);
     base?.blueprintsOrdered.delete("deposit");
+    this.settleProject(deposit);
     if (this.tuning.chatter && base?.spec.radio) this.chatter.depositBuilt(this, base.poi);
+  }
+
+  /**
+   * A project is finished or gone: whatever block of its is still waiting, carried or adrift can
+   * never be placed, so its deposit goes back to whoever paid it rather than stay with the base.
+   */
+  private settleProject(project: Deposit | Battery): void {
+    const deposit = this.blockDeposit();
+    const refund = (payer: Ship | null, base: Base | null) => {
+      if (!payer) return;
+      if (base) base.account.credits -= deposit;
+      this.accountOf(payer).credits += deposit;
+    };
+    for (const base of this.bases) {
+      const jobs = base.blocks.filter((job) => job.site === project);
+      if (jobs.length === 0) continue;
+      for (const job of jobs) refund(job.payer, base);
+      base.blocks = base.blocks.filter((job) => job.site !== project);
+    }
+    for (const block of [...this.blocks]) {
+      if (block.site !== project) continue;
+      const base = this.bases.find((each) => each.id === block.base) ?? null;
+      refund(block.payer, base);
+      this.breakBlock(block);
+    }
   }
 
   /** A station's own turrets, as its spec or else the tuning says. */
@@ -2933,7 +3311,7 @@ export class Sim {
     return base.spec.guards ?? { count: stationGuardCount, arc: stationGuardArc, distance: stationGuardDistance };
   }
 
-  private addBattery(base: Base, id: Battery["id"], fromSwitch: boolean, partsLeft: number): void {
+  private addBattery(base: Base, id: Battery["id"], fromSwitch: boolean, partsLeft: number, purse = 0): void {
     const host = id === "stationGuards" ? base.poi : this.deposits.find((deposit) => deposit.base === base.id && deposit.partsLeft <= 0);
     if (!host) return;
     const count = id === "stationGuards" ? this.guardsOf(base).count : this.tuning.depositGuardCount;
@@ -2944,7 +3322,8 @@ export class Sim {
       gun.faction = "defender";
       guns.push({ x: host.x, y: host.y, px: host.x, py: host.y, angle: 0, prevAngle: 0, cooldown: 0, gun });
     }
-    const battery: Battery = { id, base: base.id, host, guns, fromSwitch, partsLeft, partsUsed: 0 };
+    const blocks = Math.max(1, Math.ceil(partsLeft / this.tuning.blockParts));
+    const battery: Battery = { id, base: base.id, host, guns, fromSwitch, partsLeft, partsUsed: 0, purse, blocks, paid: 0 };
     this.batteries.push(battery);
     this.placeGuards(battery);
     for (const guard of guns) {
@@ -3003,6 +3382,7 @@ export class Sim {
       return false;
     });
     for (const battery of this.batteries) {
+      if (!battery.fromSwitch) this.normalizeProject(battery);
       // A station's turrets stand on its station as the layout has it now, a loaded game's too.
       const base = this.projectBase(battery);
       if (battery.id === "stationGuards" && base) battery.host = base.poi;
@@ -3014,6 +3394,7 @@ export class Sim {
     battery.partsLeft = 0;
     const base = this.projectBase(battery);
     base?.blueprintsOrdered.delete(battery.id);
+    this.settleProject(battery);
     if (this.tuning.chatter && base?.spec.radio) this.chatter.guardsBuilt(this, base.poi, battery.id === "stationGuards");
   }
 
@@ -3082,22 +3463,43 @@ export class Sim {
     this.events.push({ type: "shot", x, y });
   }
 
-  /** Funded projects are built from whatever parts their base can spare past its reserve. */
+  /**
+   * Funded projects are built from whatever parts their base can spare past its reserve. The
+   * station's own turrets go straight onto it, since they stand on the station; every other
+   * project is a block at the station's pad, for someone to carry out to the site.
+   */
   private buildProjects(dt: number): void {
-    const { depositBuildRate, stationReserveParts } = this.tuning;
-    for (const project of [...this.deposits, ...this.batteries]) {
-      if (project.partsLeft <= 0) continue;
-      const base = this.projectBase(project);
+    const { depositBuildRate, stationReserveParts, blockParts, blocksWaiting } = this.tuning;
+    for (const base of this.bases) {
+      // A job whose project finished, or whose carrier is gone, stops waiting.
+      base.blocks = base.blocks.filter((job) => this.siteOpen(job.site) && (job.carrier === null || this.inWorld(job.carrier)));
+      if (base.blocks.length >= blocksWaiting) continue;
+      const project = this.buildingProject(base);
+      if (!project) continue;
+      // Only as many as the project still needs: blocks waiting, carried or adrift cover the rest.
+      const wanted = Math.ceil(project.partsLeft / blockParts);
+      const outstanding =
+        base.blocks.filter((job) => job.site === project).length + this.blocks.filter((block) => block.site === project).length;
+      if (outstanding >= wanted) continue;
+      const spare = this.partA(base) + base.partCarry - stationReserveParts;
+      if (spare < blockParts) continue;
+      this.spendPartA(base, blockParts);
+      this.normalizeProject(project);
+      base.blocks.push({ site: project, carrier: null, payer: null });
+    }
+    // The station's own turrets: the one project with no trip to make.
+    for (const battery of this.batteries) {
+      if (battery.id !== "stationGuards" || battery.partsLeft <= 0) continue;
+      const base = this.projectBase(battery);
       if (!base) continue;
       const spare = this.partA(base) + base.partCarry - stationReserveParts;
-      const used = Math.min(depositBuildRate * dt, spare, project.partsLeft);
+      const used = Math.min(depositBuildRate * dt, spare, battery.partsLeft);
       if (used <= 0) continue;
       this.spendPartA(base, used);
-      project.partsLeft -= used;
-      project.partsUsed += used;
-      if (project.partsLeft > 1e-9) continue;
-      if ("guns" in project) this.finishBattery(project);
-      else this.finishDeposit(project);
+      battery.partsLeft -= used;
+      battery.partsUsed += used;
+      if (battery.partsLeft > 1e-9) continue;
+      this.finishBattery(battery);
     }
   }
 
@@ -3403,9 +3805,13 @@ export class Sim {
     return [...ore.keys()].sort((a, b) => (a === PLAIN_ORE ? -1 : b === PLAIN_ORE ? 1 : 0));
   }
 
-  /** The parts this ship would buy next, in order, if it could afford them and the shop had them. */
+  /**
+   * The parts this ship would buy next, in order, if it could afford them and the shop had them.
+   * A tow ship has the tow pair at the end of its list, where it turned.
+   */
   wishlistFor(ship: Ship): PartId[] {
-    return TRAFFIC_BUY_ORDER[ship.model].filter((id) => this.wouldUse(ship, id));
+    const tows = ship.parts.has("towControl") || ship.parts.has("clamp");
+    return [...TRAFFIC_BUY_ORDER[ship.model], ...(tows ? TOW_BUY_ORDER : [])].filter((id) => this.wouldUse(ship, id));
   }
 
   /**
@@ -4625,6 +5031,12 @@ export class Sim {
       rock.angle += turn;
     }
     for (const ore of this.ores) this.carry(ore);
+    for (const block of this.blocks) {
+      if (block.held) continue;
+      const { turn } = this.carry(block);
+      block.prevAngle = block.angle;
+      block.angle += turn;
+    }
     for (const loot of this.loot) this.carry(loot);
     for (const shot of this.shots) this.carry(shot);
     // An order's destination moves like any loose body at its spot.
@@ -5267,7 +5679,9 @@ export class Sim {
       return;
     }
     const field = this.miningFieldAt(ship.x, ship.y);
+    // A tow ship's trip is its next tow or block leg, not a mining stay.
     const mining =
+      !pilot.towShip &&
       !pilot.trading &&
       !pilot.isHauling &&
       this.oreIn(ship) < this.deliveryLoad(ship) &&
@@ -5279,6 +5693,18 @@ export class Sim {
 
   /** Where a record's target is at a time on the clock. */
   private recordTargetAt(record: TripRecord, time: number): { x: number; y: number } {
+    if (record.goal === "tow") {
+      if (!record.hauling) {
+        const fields = this.miningFields();
+        const field = fields.find((each) => each.id === record.target) ?? fields[0];
+        return this.poiAt(field.poi, time);
+      }
+      return this.poiAt(this.recordBase(record).poi, time);
+    }
+    if (record.goal === "block") {
+      if (record.hauling === "block" && record.site) return this.siteSpotAt(record.site, time);
+      return this.poiAt(this.recordBase(record).poi, time);
+    }
     if (record.goal === "field") {
       const fields = this.miningFields();
       const field = fields.find((each) => each.id === record.target) ?? fields[0];
@@ -5299,6 +5725,7 @@ export class Sim {
   /** Sets off for the next stop, the way its pilot would: a buying run, home to sell, or to its field. */
   private nextLeg(pilot: DronePilot): void {
     const { ship } = pilot;
+    if (pilot.towShip && this.nextTowLeg(pilot)) return;
     let goal: TripRecord["goal"];
     let target: string;
     const fields = this.miningFields();
@@ -5352,6 +5779,10 @@ export class Sim {
     const { ship } = pilot;
     const due = record.arrive;
     const at = this.recordTargetAt(record, due);
+    if (record.goal === "tow" || record.goal === "block") {
+      this.towArrived(pilot, record, due, at);
+      return;
+    }
     if (record.goal === "field" && record.stage === "travel") {
       const fields = this.miningFields();
       const field = fields.find((each) => each.id === record.target) ?? fields[0];
@@ -5394,6 +5825,161 @@ export class Sim {
   }
 
   /** The next leg, setting out at a time already past (a stop that fell due between ticks). */
+  /**
+   * A tow ship's next leg out of view: a block to its site, a whole rock to a refinery, or off to
+   * fetch one. Answers whether it set a leg; false leaves it to fly as ordinary traffic.
+   */
+  private nextTowLeg(pilot: DronePilot): boolean {
+    const { ship } = pilot;
+    const held = ship.tow;
+    if (held) {
+      if (isBlock(held)) {
+        if (!this.siteOpen(held.site)) return false;
+        const base = this.projectBase(held.site);
+        this.startTowLeg(pilot, "block", base?.id ?? this.nearestBase(held.x, held.y).id, "block");
+        return true;
+      }
+      pilot.towBase = pilot.refineryFor(this);
+      this.startTowLeg(pilot, "tow", pilot.towBase.id, "rock");
+      return true;
+    }
+    const job = this.blockJobFor(ship);
+    if (job) {
+      this.startTowLeg(pilot, "block", job.base.id);
+      return true;
+    }
+    // Off to a field: the one it works, or one picked the way a flown ship picks it.
+    if (!this.miningFields().some((field) => field.id === pilot.working)) pilot.working = pilot.pickField(this).id;
+    this.startTowLeg(pilot, "tow", pilot.working);
+    return true;
+  }
+
+  /** Sets a tow or block record off on a leg, the route planned round every body as any record's is. */
+  private startTowLeg(pilot: DronePilot, goal: "tow" | "block", target: string, hauling?: "rock" | "block"): void {
+    const { ship } = pilot;
+    const from = { x: ship.x, y: ship.y };
+    const site = hauling === "block" && ship.tow && isBlock(ship.tow) ? ship.tow.site : undefined;
+    const record: TripRecord = { goal, target, stage: "travel", depart: this.clock, arrive: this.clock, path: [from], aim: from, hauling, site };
+    const { route, world } = pilot.plan(this, () => from, (t) => this.recordTargetAt(record, t));
+    record.arrive = route.arrive;
+    record.path = world.path;
+    record.aim = world.aim;
+    pilot.record = record;
+    pilot.task = goal === "block" ? "carrying a block" : "towing";
+  }
+
+  /** A tow or block record's stop: take a rock or block, or put the one it carries where it belongs. */
+  private towArrived(pilot: DronePilot, record: TripRecord, due: number, at: { x: number; y: number }): void {
+    const { ship } = pilot;
+    if (!record.hauling) {
+      ship.x = ship.px = at.x;
+      ship.y = ship.py = at.y;
+      if (record.goal === "tow") {
+        const rock = this.takeWholeRock(record.target, 1);
+        if (!rock) {
+          // Nothing big enough: it mines a load the old way, with guns and no tractor.
+          const field = this.miningFields().find((each) => each.id === record.target) ?? this.ownField(ship);
+          this.startMining(pilot, field);
+          return;
+        }
+        rock.x = rock.px = ship.x;
+        rock.y = rock.py = ship.y;
+        rock.held = "tow";
+        rock.releasedBy = ship;
+        ship.tow = rock;
+        pilot.towBase = pilot.refineryFor(this);
+        this.startTowLeg(pilot, "tow", pilot.towBase.id, "rock");
+        return;
+      }
+      // A block job at the base: the block waiting at its pad, in the clamp. One it has already
+      // taken is the one it takes; otherwise it buys one.
+      const base = this.recordBase(record);
+      const job = this.blockJobFor(ship)?.job ?? this.claimBlockJob(ship, base, this.tuning.trafficBuffer);
+      if (!job) {
+        this.nextLegAt(pilot, due);
+        return;
+      }
+      const pad = this.blockSpot(base);
+      ship.x = ship.px = pad.x;
+      ship.y = ship.py = pad.y;
+      const block = this.makeBlock(base, job.site, pad.x, pad.y);
+      block.carrier = ship;
+      block.payer = job.payer;
+      block.held = "tow";
+      this.blocks.push(block);
+      ship.tow = block;
+      this.startTowLeg(pilot, "block", base.id, "block");
+      return;
+    }
+    if (record.goal === "block") {
+      const block = ship.tow;
+      if (block && isBlock(block)) {
+        ship.tow = null;
+        this.placeBlock(block);
+      }
+      // Back to the dock for its stay: repair, shop, and the next job.
+      this.dockStay(pilot, this.recordBase(record));
+      return;
+    }
+    // A whole rock at the refinery: it goes in if the pad is free, else the record waits by it.
+    const base = this.recordBase(record);
+    if (this.catchBusy(base)) {
+      pilot.task = "waiting for the refinery";
+      record.depart = record.arrive = this.clock;
+      record.path = [{ x: ship.x, y: ship.y }];
+      record.aim = { x: ship.x, y: ship.y };
+      record.arrive = this.clock + 5;
+      return;
+    }
+    const rock = ship.tow;
+    if (rock && !isBlock(rock)) {
+      ship.tow = null;
+      rock.releasedBy = ship;
+      this.takeIn(base, rock);
+    }
+    this.dockStay(pilot, base);
+  }
+
+  /** A record's stay at a base's dock, decided next: repair, shop, and whether it has a job to carry. */
+  private dockStay(pilot: DronePilot, base: Base): void {
+    const at = { x: pilot.ship.x, y: pilot.ship.y };
+    pilot.record = { goal: "dock", target: base.id, stage: "travel", depart: this.clock, arrive: this.clock, path: [at], aim: at };
+  }
+
+  /**
+   * Takes the biggest rock worth towing out of a field, lapped first if it has never been woken,
+   * as mining one does. It leaves the field's own list, and comes into the world held.
+   */
+  private takeWholeRock(fieldId: string, minTier: number): Rock | null {
+    const sleeping = this.sleeping.get(fieldId);
+    if (sleeping) this.freshen(sleeping);
+    const rocks = sleeping
+      ? sleeping.rocks
+      : this.rocks.filter((rock) => this.miningFieldAt(rock.x, rock.y).id === fieldId);
+    let best: Rock | null = null;
+    for (const rock of rocks) {
+      if (rock.held || rock.arriving || rock.tier < minTier) continue;
+      if (!best || rock.tier > best.tier) best = rock;
+    }
+    if (!best) return null;
+    if (!sleeping) return best;
+    sleeping.rocks.splice(sleeping.rocks.indexOf(best), 1);
+    // Out of the field's turning frame, into the world where the field is now.
+    const field = this.miningFields().find((each) => each.id === fieldId);
+    if (!field) return best;
+    const { poi } = field;
+    const cos = Math.cos(poi.rotation);
+    const sin = Math.sin(poi.rotation);
+    const { x, y, vx, vy } = best;
+    best.x = best.px = poi.x + x * cos - y * sin;
+    best.y = best.py = poi.y + x * sin + y * cos;
+    best.vx = vx * cos - vy * sin;
+    best.vy = vx * sin + vy * cos;
+    best.angle = best.prevAngle = best.angle + poi.rotation;
+    this.rocks.push(best);
+    return best;
+  }
+
   private nextLegAt(pilot: DronePilot, depart: number): void {
     this.nextLeg(pilot);
     const record = pilot.record!;
@@ -5473,6 +6059,8 @@ export class Sim {
   private placeRecord(record: TripRecord, ship: Ship): void {
     const from = { x: ship.x, y: ship.y };
     this.putRecord(record, ship);
+    // What it carries hangs where the clamp would hold it.
+    if (ship.tow) this.placeTow(ship, ship.tow);
     // A damaged tank leaks out there too: a record's fitting changes only when it's woken.
     this.leakFuel(ship, TICK);
     if (record.stage !== "travel") return;
@@ -5537,6 +6125,8 @@ export class Sim {
     ship.px = ship.x;
     ship.py = ship.y;
     ship.vx = ship.vy = 0;
+    // A load it carried through the record is already in its clamp: put it where it hangs, flown.
+    if (ship.tow) this.placeTow(ship, ship.tow);
   }
 
   /**
@@ -5694,6 +6284,13 @@ export class Sim {
    * A rock a clamp or a catch holds is in no field: nothing moves it but its holder.
    */
   private moveRocks(dt: number): void {
+    // Blocks in the open drift on: no field holds them.
+    for (const block of this.blocks) {
+      if (block.held) continue;
+      block.x += block.vx * dt;
+      block.y += block.vy * dt;
+      block.angle += block.spin * dt;
+    }
     const { rockStraySpeed, rockStraySeconds } = this.tuning;
     const fields = this.awakeRockFields();
     let gone = false;
@@ -5739,8 +6336,8 @@ export class Sim {
   }
 
   /**
-   * The clamp's key: with a rock held it lets go, and without one it grabs the nearest it can
-   * reach. Answers whether it's holding a rock afterwards.
+   * The clamp's key: with a rock or block held it lets go, and without one it grabs the nearest
+   * it can reach. Answers whether it's holding one afterwards.
    */
   toggleClamp(ship: Ship = this.ship): boolean {
     if (ship.tow) {
@@ -5750,12 +6347,12 @@ export class Sim {
     return this.grabRock(ship);
   }
 
-  /** Lets go of the rock the clamp holds, saying what becomes of it. Answers whether it let go. */
+  /** Lets go of what the clamp holds, saying what becomes of it. Answers whether it let go. */
   releaseTow(ship: Ship = this.ship): boolean {
-    const rock = ship.tow;
-    if (!rock) return false;
+    const held = ship.tow;
+    if (!held) return false;
     // What happens to it now, said at once: a hand-over shouldn't be a guess.
-    const word = ship === this.ship ? this.releaseWord(rock) : "";
+    const word = ship === this.ship ? this.releaseWord(held) : "";
     this.letGoTow(ship);
     if (word) this.say(word);
     return true;
@@ -5766,12 +6363,18 @@ export class Sim {
     this.note = { text, left: NOTE_SECONDS };
   }
 
-  /** What becomes of a rock let go of where it is: which station's catch takes it, or why none does. */
-  private releaseWord(rock: Rock): string {
+  /** What becomes of a rock or block let go of where it is: what takes it, or why nothing does. */
+  private releaseWord(held: Rock | Block): string {
+    if (isBlock(held)) {
+      if (!this.siteOpen(held.site)) return "Nothing is being built here: the block drifts";
+      const site = this.siteSpot(held.site);
+      if (Math.hypot(held.x - site.x, held.y - site.y) > this.tuning.siteRange) return "Not at the site: the block drifts";
+      return "The site is taking the block in";
+    }
     let near: Base | null = null;
     let nearest = Infinity;
     for (const base of this.bases) {
-      const distance = Math.hypot(rock.x - base.poi.x, rock.y - base.poi.y);
+      const distance = Math.hypot(held.x - base.poi.x, held.y - base.poi.y);
       if (distance > this.tuning.catchRange || distance >= nearest) continue;
       near = base;
       nearest = distance;
@@ -5788,39 +6391,81 @@ export class Sim {
     return base.refining !== null || this.rocks.some((rock) => rock.held === "catch" && rock.catcher === base.id);
   }
 
-  /** Where a held rock's centre sits: this far from the ship's, the way the clamp looks. */
-  holdDistance(rock: { radius: number }): number {
-    return SHIP_RADIUS + rock.radius + TOW_GAP;
+  /** Whether a project is still being built and in the world: a site its catch can still take blocks to. */
+  siteOpen(project: Deposit | Battery): boolean {
+    if (project.partsLeft <= 0) return false;
+    return "guns" in project ? this.batteries.includes(project) : this.deposits.includes(project);
+  }
+
+  /** Where a held rock or block's centre sits: this far from the ship's, the way the clamp looks. */
+  holdDistance(held: { radius: number }): number {
+    return SHIP_RADIUS + held.radius + TOW_GAP;
   }
 
   /**
-   * The nearest rock with its edge within the clamp's reach of the ship's edge, or null. A rock a
-   * station's catch has can be taken back: the clamp's is the stronger hold.
+   * The nearest rock or block with its edge within the clamp's reach of the ship's edge, or null.
+   * A rock a station's catch has can be taken back (the clamp's is the stronger hold), and so can
+   * a block at its site. A block another ship has taken a job for is nobody else's.
    */
-  private nearestClampable(ship: Ship): Rock | null {
+  private nearestClampable(ship: Ship): Rock | Block | null {
     const { clampRange } = this.tuning;
-    let best: Rock | null = null;
+    let best: Rock | Block | null = null;
     let nearest = Infinity;
-    for (const rock of this.rocks) {
-      if (rock.held === "tow") continue;
-      const gap = Math.hypot(rock.x - ship.x, rock.y - ship.y) - rock.radius - SHIP_RADIUS;
+    for (const held of [...this.rocks, ...this.blocks] as (Rock | Block)[]) {
+      if (held.held === "tow") continue;
+      if (isBlock(held) && held.carrier !== null && held.carrier !== ship) continue;
+      const gap = Math.hypot(held.x - ship.x, held.y - ship.y) - held.radius - SHIP_RADIUS;
       if (gap > clampRange || gap >= nearest) continue;
-      best = rock;
+      best = held;
       nearest = gap;
     }
     return best;
   }
 
-  /** Grabs the nearest rock the clamp can reach, if it's slow enough; says why not when it can't. */
+  /** Grabs the nearest thing the clamp can reach, if it's slow enough; says why not when it can't. */
   private grabRock(ship: Ship): boolean {
     if (!this.hasClamp(ship)) return false;
-    const rock = this.nearestClampable(ship);
-    if (!rock) return this.refuse(ship, "Nothing in reach of the clamp");
-    // A rock the station has is already held still: taking it back is no faster than it's going.
-    if (!rock.held && Math.hypot(rock.vx - ship.vx, rock.vy - ship.vy) > this.tuning.clampSpeed) {
-      return this.refuse(ship, "That rock is moving too fast to clamp");
+    const held = this.nearestClampable(ship);
+    if (!held) {
+      if (this.grabPadBlock(ship)) return true;
+      return this.refuse(ship, "Nothing in reach of the clamp");
     }
-    this.holdRock(ship, rock);
+    // A rock the station has is already held still: taking it back is no faster than it's going.
+    if (!held.held && Math.hypot(held.vx - ship.vx, held.vy - ship.vy) > this.tuning.clampSpeed) {
+      return this.refuse(ship, isBlock(held) ? "That block is moving too fast to clamp" : "That rock is moving too fast to clamp");
+    }
+    this.holdRock(ship, held);
+    return true;
+  }
+
+  /**
+   * Takes the block a ship's job has waiting at a station's block pad, if the ship is alongside
+   * it. The job becomes a body at the pad, in the clamp.
+   */
+  grabPadBlock(ship: Ship): boolean {
+    const { clampRange } = this.tuning;
+    for (const base of this.bases) {
+      const job = base.blocks.find((each) => each.carrier === ship);
+      if (!job) continue;
+      const pad = this.blockSpot(base);
+      if (Math.hypot(ship.x - pad.x, ship.y - pad.y) - SHIP_RADIUS - BLOCK_RADIUS > clampRange) continue;
+      base.blocks.splice(base.blocks.indexOf(job), 1);
+      const block = this.makeBlock(base, job.site, pad.x, pad.y);
+      block.carrier = ship;
+      block.payer = job.payer;
+      this.blocks.push(block);
+      this.holdRock(ship, block);
+      return true;
+    }
+    return false;
+  }
+
+  /** Grabs one particular rock or block with the clamp, if it's in reach and slow enough. */
+  grabTow(ship: Ship, held: Rock | Block): boolean {
+    if (!this.hasClamp(ship) || !this.inClampReach(ship, held)) return false;
+    if (isBlock(held) && held.carrier !== null && held.carrier !== ship) return false;
+    if (!held.held && Math.hypot(held.vx - ship.vx, held.vy - ship.vy) > this.tuning.clampSpeed) return false;
+    this.holdRock(ship, held);
     return true;
   }
 
@@ -5832,60 +6477,63 @@ export class Sim {
     return false;
   }
 
-  /** Takes a rock up in the clamp: from now on it flies where the clamp puts it. */
-  private holdRock(ship: Ship, rock: Rock): void {
-    ship.tow = rock;
-    rock.held = "tow";
-    delete rock.catcher;
-    this.placeTow(ship, rock);
+  /** Takes a rock or block up in the clamp: from now on it flies where the clamp puts it. */
+  private holdRock(ship: Ship, held: Rock | Block): void {
+    ship.tow = held;
+    held.held = "tow";
+    delete held.catcher;
+    this.placeTow(ship, held);
     // Picked up on the spot: it doesn't fly in from where it was.
-    rock.px = rock.x;
-    rock.py = rock.y;
+    held.px = held.x;
+    held.py = held.y;
   }
 
-  /** Puts a held rock where its clamp holds it, from where the ship is now. */
-  private placeTow(ship: Ship, rock: Rock): void {
+  /** Puts a held rock or block where its clamp holds it, from where the ship is now. */
+  private placeTow(ship: Ship, held: Rock | Block): void {
     const mount = this.clampMount(ship);
     const angle = ship.angle + (mount ? facing(mount) : 0);
-    const out = this.holdDistance(rock);
-    rock.px = rock.x;
-    rock.py = rock.y;
-    rock.x = ship.x + Math.cos(angle) * out;
-    rock.y = ship.y + Math.sin(angle) * out;
-    rock.prevAngle = rock.angle;
-    rock.angle = ship.angle;
-    rock.vx = ship.vx;
-    rock.vy = ship.vy;
+    const out = this.holdDistance(held);
+    held.px = held.x;
+    held.py = held.y;
+    held.x = ship.x + Math.cos(angle) * out;
+    held.y = ship.y + Math.sin(angle) * out;
+    held.prevAngle = held.angle;
+    held.angle = ship.angle;
+    held.vx = ship.vx;
+    held.vy = ship.vy;
   }
 
   /**
-   * Lets go of the rock the clamp holds. It keeps the ship's motion at its spot, and remembers
-   * who let go of it: that's who the refinery pays.
+   * Lets go of what the clamp holds. It keeps the ship's motion at its spot, and remembers who
+   * let go of it: that's who the refinery or a project's site pays. A block let go of is anyone's
+   * to clamp again: the site's catch, or another ship.
    */
   letGoTow(ship: Ship): void {
-    const rock = ship.tow;
+    const held = ship.tow;
     ship.tow = null;
-    if (!rock) return;
-    if (rock.held === "tow") delete rock.held;
-    // The ship's velocity where the rock sits, so a turning ship carries the rock round with it.
-    const rx = rock.x - ship.x;
-    const ry = rock.y - ship.y;
-    rock.vx = ship.vx - ship.spin * ry;
-    rock.vy = ship.vy + ship.spin * rx;
-    rock.releasedBy = ship;
+    if (!held) return;
+    if (held.held === "tow") delete held.held;
+    // The ship's velocity where it sits, so a turning ship carries it round with it.
+    const rx = held.x - ship.x;
+    const ry = held.y - ship.y;
+    held.vx = ship.vx - ship.spin * ry;
+    held.vy = ship.vy + ship.spin * rx;
+    held.releasedBy = ship;
+    if (isBlock(held)) held.carrier = null;
   }
 
   /**
-   * Flies every held rock: the clamp puts it where it hangs, and it hits what it runs into.
-   * Losing the clamp, or a rock no longer in the world, lets it go.
+   * Flies every held rock or block: the clamp puts it where it hangs, and it hits what it runs
+   * into. Losing the clamp, or a body no longer in the world, lets it go.
    */
   private towRocks(): void {
     for (const ship of this.ships) {
-      const rock = ship.tow;
-      if (!rock) continue;
-      if (rock.held !== "tow" || !this.rocks.includes(rock)) {
+      const held = ship.tow;
+      if (!held) continue;
+      const here = isBlock(held) ? this.blocks.includes(held) : this.rocks.includes(held);
+      if (held.held !== "tow" || !here) {
         ship.tow = null;
-        if (rock.held === "tow") delete rock.held;
+        if (held.held === "tow") delete held.held;
         continue;
       }
       // A clamp shot off, or a ship that isn't flying, holds nothing.
@@ -5893,33 +6541,34 @@ export class Sim {
         this.letGoTow(ship);
         continue;
       }
-      this.placeTow(ship, rock);
-      this.towBumps(ship, rock);
+      this.placeTow(ship, held);
+      this.towBumps(ship, held);
     }
   }
 
   /**
-   * Everything a held rock runs into this tick: other rocks, ships, stations, and solid ground.
-   * Its path this tick is swept, as a fast ship's is, so nothing is stepped over at speed.
+   * Everything a held rock or block runs into this tick: other rocks and blocks, ships, stations,
+   * and solid ground. Its path this tick is swept, as a fast ship's is, so nothing is stepped
+   * over at speed.
    */
-  private towBumps(ship: Ship, rock: Rock): void {
-    // Where the clamp carried the rock this tick: from where it hung to where it hangs now.
-    const wasX = rock.px;
-    const wasY = rock.py;
-    const moveX = rock.x - wasX;
-    const moveY = rock.y - wasY;
-    /** Stops the pair at the point the rock touched, backing it off along this tick's move. */
+  private towBumps(ship: Ship, held: Rock | Block): void {
+    // Where the clamp carried it this tick: from where it hung to where it hangs now.
+    const wasX = held.px;
+    const wasY = held.py;
+    const moveX = held.x - wasX;
+    const moveY = held.y - wasY;
+    /** Stops the pair at the point it touched, backing it off along this tick's move. */
     const touch = (t: number) => {
       ship.x -= moveX * (1 - t);
       ship.y -= moveY * (1 - t);
-      if (ship.tow === rock) this.placeTow(ship, rock);
+      if (ship.tow === held) this.placeTow(ship, held);
     };
     /** Pushes the pair out of whatever it's inside, so it isn't hit again next tick. */
     const clear = (nx: number, ny: number, depth: number) => {
       if (depth <= 0) return;
       ship.x += nx * depth;
       ship.y += ny * depth;
-      if (ship.tow === rock) this.placeTow(ship, rock);
+      if (ship.tow === held) this.placeTow(ship, held);
     };
     /** Bumps the pair against something round, if this tick's path meets it. Answers whether to go on. */
     const against = (from: Body & { px: number; py: number }, reach: number, mass: number | null): boolean => {
@@ -5932,77 +6581,78 @@ export class Sim {
       );
       if (t === null) return true;
       touch(t);
-      const dx = rock.x - from.x;
-      const dy = rock.y - from.y;
+      const dx = held.x - from.x;
+      const dy = held.y - from.y;
       const distance = Math.hypot(dx, dy);
       const nx = distance > 0 ? dx / distance : 1;
       const ny = distance > 0 ? dy / distance : 0;
       clear(nx, ny, reach - distance);
-      const held = this.towImpact(ship, rock, nx, ny, from, mass);
-      return held && ship.tow === rock;
+      const kept = this.towImpact(ship, held, nx, ny, from, mass);
+      return kept && ship.tow === held;
     };
 
-    for (const other of this.rocks) {
-      if (other === rock || other.held) continue;
-      if (!against(other, rock.radius + other.radius, this.rockMass(other))) return;
+    for (const other of [...this.rocks, ...this.blocks] as (Rock | Block)[]) {
+      if (other === held || other.held) continue;
+      if (!against(other, held.radius + other.radius, this.rockMass(other))) return;
     }
 
     for (const other of this.ships) {
       if (other === ship) continue;
-      if (!against(other, rock.radius + SHIP_RADIUS, this.shipWeight(other))) return;
+      if (!against(other, held.radius + SHIP_RADIUS, this.shipWeight(other))) return;
     }
 
     for (const dock of this.docks) {
-      const hit = this.stationHit(rock, wasX, wasY, moveX, moveY, dock);
+      const hit = this.stationHit(held, wasX, wasY, moveX, moveY, dock);
       if (!hit) continue;
       touch(hit.t);
       clear(hit.nx, hit.ny, hit.out);
-      if (!this.towImpact(ship, rock, hit.nx, hit.ny, STILL, null)) return;
-      if (ship.tow !== rock) return;
+      if (!this.towImpact(ship, held, hit.nx, hit.ny, STILL, null)) return;
+      if (ship.tow !== held) return;
     }
 
     for (const { body, x, y, vx, vy } of this.bodySpots) {
       if (body.surface === "none") continue;
       // Where the body was when the tick began, and what it did since.
       const was = { x: x - vx * TICK, y: y - vy * TICK };
-      const reach = body.radius + rock.radius;
+      const reach = body.radius + held.radius;
       const t = sweepCircle(wasX - was.x, wasY - was.y, moveX - (x - was.x), moveY - (y - was.y), reach);
       if (t === null) continue;
-      // Deadly ground takes a rock as it takes loose ore.
+      // Deadly ground takes it as it takes loose ore.
       if (body.surface === "death") {
         this.letGoTow(ship);
-        this.rocks.splice(this.rocks.indexOf(rock), 1);
+        if (isBlock(held)) this.breakBlock(held);
+        else this.rocks.splice(this.rocks.indexOf(held), 1);
         return;
       }
       touch(t);
-      const dx = rock.x - x;
-      const dy = rock.y - y;
+      const dx = held.x - x;
+      const dy = held.y - y;
       const distance = Math.hypot(dx, dy);
       const nx = distance > 0 ? dx / distance : 1;
       const ny = distance > 0 ? dy / distance : 0;
       clear(nx, ny, reach - distance);
-      if (!this.towImpact(ship, rock, nx, ny, { vx, vy }, null)) return;
-      if (ship.tow !== rock) return;
+      if (!this.towImpact(ship, held, nx, ny, { vx, vy }, null)) return;
+      if (ship.tow !== held) return;
     }
   }
 
   /**
-   * A held rock hits something: both are knocked apart by the closing speed and how heavy each
-   * is, and over the safe speed the rock takes the damage, at `towDamageScale`. At no hp it comes
-   * apart. Answers whether it held together.
+   * A held rock or block hits something: both are knocked apart by the closing speed and how
+   * heavy each is, and over the safe speed it takes the damage, at `towDamageScale`. At no hp a
+   * rock comes apart, and a block is lost. Answers whether it held together.
    */
   private towImpact(
     ship: Ship,
-    rock: Rock,
+    held: Rock | Block,
     nx: number,
     ny: number,
     other: { vx: number; vy: number },
     otherMass: number | null,
   ): boolean {
     const { tuning } = this;
-    const closing = (rock.vx - other.vx) * nx + (rock.vy - other.vy) * ny;
+    const closing = (held.vx - other.vx) * nx + (held.vy - other.vy) * ny;
     if (closing >= 0) return true;
-    // The ship and the rock it flies are one body: whatever it hits moves both.
+    // The ship and what it flies are one body: whatever it hits moves both.
     const pairInverse = 1 / Math.max(0.01, this.shipWeight(ship));
     const otherInverse = otherMass === null ? 0 : 1 / Math.max(0.01, otherMass);
     const impulse = (-(1 + tuning.bounce) * closing) / (pairInverse + otherInverse);
@@ -6010,31 +6660,42 @@ export class Sim {
     ship.vy += impulse * pairInverse * ny;
     other.vx -= impulse * otherInverse * nx;
     other.vy -= impulse * otherInverse * ny;
-    // Nothing takes the damage but the rock: it's what touched.
+    // Nothing takes the damage but what's held: it's what touched.
     const damage = Math.max(0, -closing - tuning.safeImpactSpeed) * tuning.damagePerSpeed * tuning.towDamageScale;
     if (damage <= 0) return true;
-    rock.hp -= damage;
-    if (rock.hp > 0) return true;
-    this.breakTow(ship, rock);
+    held.hp -= damage;
+    if (held.hp > 0) return true;
+    this.breakTow(ship, held);
     return false;
   }
 
   /**
-   * A held rock comes apart. Its pieces are ordinary rocks, and the clamp keeps the biggest one
-   * it can still reach, or holds nothing.
+   * A held rock or block comes apart. A rock's pieces are ordinary rocks, and the clamp keeps the
+   * biggest one it can still reach, or holds nothing; a block is gone.
    */
-  private breakTow(ship: Ship, rock: Rock): void {
+  private breakTow(ship: Ship, held: Rock | Block): void {
     this.letGoTow(ship);
+    if (isBlock(held)) {
+      this.breakBlock(held);
+      return;
+    }
     const before = new Set(this.rocks);
-    this.breakRock(rock, ship);
+    this.breakRock(held, ship);
     const pieces = this.rocks.filter((each) => !before.has(each)).sort((a, b) => b.radius - a.radius);
     const piece = pieces.find((each) => this.inClampReach(ship, each));
     if (piece) this.holdRock(ship, piece);
   }
 
-  /** Whether a rock's edge is close enough to the ship's for the clamp to take it. */
-  inClampReach(ship: Ship, rock: { x: number; y: number; radius: number }): boolean {
-    return Math.hypot(rock.x - ship.x, rock.y - ship.y) - rock.radius - SHIP_RADIUS <= this.tuning.clampRange;
+  /** A block comes apart: debris for show, nothing to mine, and its parts are lost. */
+  breakBlock(block: Block): void {
+    const at = this.blocks.indexOf(block);
+    if (at >= 0) this.blocks.splice(at, 1);
+    this.events.push({ type: "break", x: block.x, y: block.y, radius: block.radius });
+  }
+
+  /** Whether a rock or block's edge is close enough to the ship's for the clamp to take it. */
+  inClampReach(ship: Ship, held: { x: number; y: number; radius: number }): boolean {
+    return Math.hypot(held.x - ship.x, held.y - ship.y) - held.radius - SHIP_RADIUS <= this.tuning.clampRange;
   }
 
   /**
@@ -6060,6 +6721,7 @@ export class Sim {
       }
       this.pullCaught(base, rock, dt);
     }
+    this.catchBlocks(dt);
   }
 
   /** The nearest rock let go of near a station, within its catch's reach, or null. */
@@ -6233,6 +6895,37 @@ export class Sim {
     const x = previous ? poi.px : poi.x;
     const y = previous ? poi.py : poi.y;
     return { x: x + Math.cos(rotation) * REFINERY_OFFSET, y: y + Math.sin(rotation) * REFINERY_OFFSET };
+  }
+
+  /** Where a delivery holds off while the refinery is busy: further out along the pad's own line. */
+  refineryHoldSpot(base: Base, previous = false): { x: number; y: number } {
+    const { poi } = base;
+    const rotation = previous ? poi.prevRotation : poi.rotation;
+    const x = previous ? poi.px : poi.x;
+    const y = previous ? poi.py : poi.y;
+    const out = REFINERY_OFFSET - DOCK_OFFSET * 1.4;
+    return { x: x + Math.cos(rotation) * out, y: y + Math.sin(rotation) * out };
+  }
+
+  /**
+   * A hand-over of a whole rock to a station's refinery, tick by tick: where to fly, whether the
+   * refinery is busy, and whether the rock has been let go of. The autopilots fly to the spot;
+   * this only decides, and hands it over once it's there, slow, on a clear line.
+   */
+  handOverTo(ship: Ship, base: Base): { x: number; y: number; px: number; py: number; busy: boolean; done: boolean } {
+    const busy = this.catchBusy(base);
+    const at = busy ? this.refineryHoldSpot(base) : this.refinerySpot(base);
+    const was = busy ? this.refineryHoldSpot(base, true) : this.refinerySpot(base, true);
+    const held = ship.tow;
+    if (!held) return { x: at.x, y: at.y, px: was.x, py: was.y, busy, done: true };
+    const slow = Math.hypot(held.vx, held.vy) <= this.tuning.clampSpeed;
+    const near = Math.hypot(ship.x - at.x, ship.y - at.y) <= DOCK_OFFSET;
+    const clear = this.clearOfStations(held.x, held.y, at.x, at.y);
+    if (!busy && slow && near && clear) {
+      this.releaseTow(ship);
+      return { x: at.x, y: at.y, px: was.x, py: was.y, busy, done: true };
+    }
+    return { x: at.x, y: at.y, px: was.x, py: was.y, busy, done: false };
   }
 
   /** The ore a whole rock holds: what mining it would give, times the whole-rock bonus. */
@@ -7454,6 +8147,8 @@ export class Sim {
       let hit: Rock | null = null;
       let hitT = Infinity;
       for (const rock of this.rocks) {
+        // A rock in a clamp or a catch is nobody's to shoot at: shots pass it by.
+        if (rock.held) continue;
         const t = sweepCircle(
           shot.x - rock.x,
           shot.y - rock.y,

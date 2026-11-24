@@ -539,6 +539,9 @@ export const TRAFFIC_BUY_ORDER: Record<ShipModel, PartId[]> = {
   pirate: [],
 };
 
+/** What a floater that turns tow ship buys, in order, after everything else on its list. */
+export const TOW_BUY_ORDER: PartId[] = ["towControl", "clamp"];
+
 /** What the station builds on site from its own parts, rather than having a hauler bring it. */
 export const PROJECTS = ["deposit", "stationGuards", "depositGuards"] as const;
 export type ProjectId = (typeof PROJECTS)[number];

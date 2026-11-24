@@ -158,11 +158,11 @@ describe("saves", () => {
   });
 
   it("turn away a save from before the field and station were the layout's own", () => {
-    expect(SAVE_VERSION).toBe(9);
+    expect(SAVE_VERSION).toBe(10);
     const sim = play(seedWorld());
     const layout = layoutKey("any");
     const start = makeStart(sim, layout);
-    expect(loadStart(new Sim(2, { ...DEFAULTS }), { ...start, version: 8 }, layout)).toBe(false);
+    expect(loadStart(new Sim(2, { ...DEFAULTS }), { ...start, version: 9 }, layout)).toBe(false);
     expect(loadStart(new Sim(2, { ...DEFAULTS }), start, layout)).toBe(true);
   });
 });

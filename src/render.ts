@@ -11,6 +11,7 @@ import { canvasTip } from "./tooltip";
 import {
   BLACK_MARKET_LENGTH,
   BLACK_MARKET_WIDTH,
+  BLOCK_RADIUS,
   bodyAt,
   DEPOSIT_HALF,
   DOCK_OFFSET,
@@ -22,6 +23,7 @@ import {
   STATION_HALF,
   TICK,
   targetSpot,
+  isBlock,
   type Base,
   type Poi,
   type PoiReading,
@@ -365,6 +367,9 @@ export class Renderer {
     this.stationSpots = [];
     for (const base of sim.bases) this.drawStation(sim, base, alpha);
     this.drawDeposits(sim, alpha);
+    this.drawBlockPads(sim, alpha);
+    this.drawBlocks(sim, alpha, visible);
+    this.drawBlockSite(sim);
     this.drawGuards(sim, alpha);
     for (const base of sim.bases) this.drawHauler(sim, base, alpha);
     this.drawBlackMarket(sim, alpha);
@@ -917,6 +922,92 @@ export class Renderer {
       if (!visible(x, y, rock.radius * 1.2)) continue;
       this.drawRockShape(x, y, lerp(rock.prevAngle, rock.angle, alpha), rock.radius, rock.shape, rock.tier);
     }
+  }
+
+  /** Construction blocks: square crates, at a pad, drifting, or in the clamp. */
+  private drawBlocks(sim: Sim, alpha: number, visible: (x: number, y: number, r: number) => boolean): void {
+    for (const block of sim.blocks) {
+      const x = lerp(block.px, block.x, alpha);
+      const y = lerp(block.py, block.y, alpha);
+      if (!visible(x, y, block.radius * 1.2)) continue;
+      this.drawBlockShape(x, y, lerp(block.prevAngle, block.angle, alpha), block.held !== undefined);
+    }
+  }
+
+  /** A block's crate: a plain square, brighter at the edge while the clamp or a site has it. */
+  private drawBlockShape(x: number, y: number, angle: number, held: boolean): void {
+    const { ctx } = this;
+    const half = BLOCK_RADIUS * 0.72;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.fillStyle = "#6b7280";
+    ctx.fillRect(-half, -half, half * 2, half * 2);
+    ctx.strokeStyle = held ? "#8fe3a1" : "#aab1bd";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-half, -half, half * 2, half * 2);
+    // A band across it, so it reads as a crate and not a wall.
+    ctx.strokeStyle = "rgba(170, 177, 189, 0.45)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-half, 0);
+    ctx.lineTo(half, 0);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * Each station's block pad: where the blocks it makes wait, and where a carrier comes alongside
+   * to take one. Drawn only while blocks are waiting there, so it's not clutter on every station.
+   */
+  private drawBlockPads(sim: Sim, alpha: number): void {
+    const { ctx } = this;
+    for (const base of sim.bases) {
+      if (base.blocks.length === 0) continue;
+      const at = sim.blockSpot(base);
+      const was = sim.blockSpot(base, true);
+      const x = lerp(was.x, at.x, alpha);
+      const y = lerp(was.y, at.y, alpha);
+      // The pad: where a block waits, and the only place one is taken.
+      ctx.strokeStyle = "rgba(196, 164, 240, 0.7)";
+      ctx.lineWidth = 3;
+      ctx.setLineDash([12, 9]);
+      ctx.beginPath();
+      ctx.arc(x, y, REFINERY_PAD, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = "rgba(196, 164, 240, 0.35)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x - REFINERY_PAD * 0.45, y);
+      ctx.lineTo(x + REFINERY_PAD * 0.45, y);
+      ctx.moveTo(x, y - REFINERY_PAD * 0.45);
+      ctx.lineTo(x, y + REFINERY_PAD * 0.45);
+      ctx.stroke();
+      // The blocks themselves, laid beside the cross.
+      base.blocks.forEach((_, i) => {
+        const side = i === 0 ? -1 : 1;
+        this.drawBlockShape(x + side * BLOCK_RADIUS * 1.5, y, 0, false);
+      });
+    }
+  }
+
+  /**
+   * The site of the block in the player's clamp: how near it is set into the frame, drawn while
+   * there's a block to place, as the refinery's catch ring is while there's a rock to hand over.
+   */
+  private drawBlockSite(sim: Sim): void {
+    const held = sim.ship.tow;
+    if (!held || !isBlock(held) || !sim.siteOpen(held.site)) return;
+    const { ctx } = this;
+    const at = sim.siteSpot(held.site);
+    ctx.strokeStyle = "rgba(143, 227, 161, 0.14)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([26, 22]);
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, sim.tuning.siteRange, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   /** One rock's outline, as its dice shaped it, filled by its tier. */

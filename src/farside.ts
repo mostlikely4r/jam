@@ -39,10 +39,13 @@ export const STEP_PARTS: Record<string, FarSide> = {
   },
   carryBodies: {
     out: "in view only",
-    far: "Sleeping fields keep their rocks in the field's own frame, so they turn with it on waking. A sleeping field carries nothing else: loose ore left in one stays where it was in space.",
+    far: "Sleeping fields keep their rocks in the field's own frame, so they turn with it on waking. A sleeping field carries nothing else: loose ore or a block left in one stays where it was in space.",
   },
   driftInRocks: { out: "in view only", far: "A sleeping field gets the rocks that would have drifted in all at once on waking (`wakeField`)." },
-  moveRocks: { out: "in view only", far: "Sleeping rocks don't move; a shot gap stays where it was." },
+  moveRocks: {
+    out: "in view only",
+    far: "Sleeping rocks don't move; a shot gap stays where it was. Blocks in the open out of view just lie there, as loose ore does.",
+  },
   swapNews: { out: "in view only", far: "A record swaps news at the start of its dock visit (`dockVisit`)." },
   letGoOfOre: { out: "in view only", far: "Records hold no ore in a beam; loose ore out of view is caught by no one." },
   pullOre: { out: "in view only", far: "Records mine by the clock: `recordOre*` rates, measured from flown ships." },
@@ -51,11 +54,11 @@ export const STEP_PARTS: Record<string, FarSide> = {
   moveShip: { out: "in view only", far: "Records are placed along their route by the clock (`placeRecord`). A damaged tank leaks out there too: `placeRecord` leaks it each tick, as `moveShip` does flown." },
   towRocks: {
     out: "in view only",
-    far: "Only a flown ship's clamp holds anything: a clamp is the player's, and nobody tows out of view yet. A held rock keeps its place beside its ship, so nothing is lost either way.",
+    far: "Traffic tows out of view too, as a `tow` or `block` trip record: it keeps what it carries in its clamp, and the record places the ship, and the load with it, along the route. The player's own clamp is always flown.",
   },
   catchRocks: {
     out: "in view only",
-    far: "A rock let go of drifts on at the same speed out of view, so a catch there would take a rock nobody let go of nearby. Its refinery runs everywhere on what it already holds.",
+    far: "A record hands its whole rock to the refinery at the end of its trip, or sets its block straight into the site (`Sim.towArrived`), so no catch runs out there. The refinery runs everywhere on what it already holds.",
   },
   touchBodies: { out: "in view only", far: "Record routes never touch a body." },
   burnDown: {
@@ -73,7 +76,10 @@ export const STEP_PARTS: Record<string, FarSide> = {
   fireGuards: { out: "in view only", far: "Turrets only fire at flown pirates; a pirate record keeps its watch out of turret range only by luck." },
   spendStationParts: { out: "everywhere", note: "Base economy." },
   buyBlueprints: { out: "everywhere", note: "Base economy." },
-  buildProjects: { out: "everywhere", note: "Base economy." },
+  buildProjects: {
+    out: "everywhere",
+    note: "Base economy: it turns parts into blocks at a pad everywhere. Carrying them is flown, or a `block` record's trip.",
+  },
   spendPirateCredits: { out: "everywhere", note: "Pirate base economy." },
   moveHauler: { out: "everywhere", note: "One hauler per base, flown always: few enough not to matter yet." },
   refineBase: { out: "everywhere", note: "Base economy: a whole rock keeps refining while nobody is near." },

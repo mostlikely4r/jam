@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { homeSim } from "./home";
-import { partOf } from "./parts";
+import { partOf, TRAFFIC_BUY_ORDER } from "./parts";
 import { roundTrip } from "./save";
 import { DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, expectedOre, type Rock, SHIP_RADIUS, Sim, STATION_HALF, TICK, TOW_GAP } from "./sim";
@@ -617,4 +617,206 @@ describe("tow control", () => {
     const wide = sim.cornerToward(from.x, from.y, to.x, to.y, reach)!;
     expect(Math.hypot(wide.x - circle.x, wide.y - circle.y) - plainFar).toBeCloseTo(reach, -1);
   });
+});
+
+describe("tow traffic", () => {
+  /** A small, still system: its field and its station close enough for a trip to be quick. */
+  function towWorld(settings: Partial<typeof WORLD> = {}): Sim {
+    return homeSim(1, {
+      ...WORLD,
+      fieldRadius: 500,
+      stationDistance: 1000,
+      rockCount: 4,
+      rockInflow: 0,
+      ...settings,
+    });
+  }
+
+  /** Puts a traffic ship at the home station's dock with money to spend. */
+  function atDock(sim: Sim, pilot: Sim["traffic"][number]): void {
+    const at = sim.dockPoint(false, sim.bases[0].poi);
+    Object.assign(pilot.ship, { x: at.x, y: at.y, px: at.x, py: at.y, vx: 0, vy: 0 });
+    sim.accountOf(pilot.ship).credits = 10000;
+  }
+
+  /** Every upgrade a floater's list asks for, so it has nothing left to buy but the tow pair. */
+  function boughtEverything(sim: Sim, pilot: Sim["traffic"][number]): void {
+    for (const id of TRAFFIC_BUY_ORDER.floater) sim.buyPart(pilot.ship, id);
+  }
+
+  /** A tow ship with its clamp and program, ready to work. */
+  function readyTow(sim: Sim, pilot: Sim["traffic"][number]): void {
+    pilot.towShip = true;
+    sim.devSet(pilot.ship, "towControl", true);
+    sim.devSet(pilot.ship, "clamp", true);
+    sim.accountOf(pilot.ship).credits = 10000;
+  }
+
+  it("turns a floater that has bought everything else, buying Tow control then the clamp", () => {
+    const sim = towWorld({ trafficFloaters: 1, towShipChance: 1, trafficBuffer: 0 });
+    const pilot = sim.traffic[0];
+    atDock(sim, pilot);
+    boughtEverything(sim, pilot);
+    expect(sim.wishlistFor(pilot.ship)).toHaveLength(0);
+    expect(pilot.considerTow(sim)).toBe(true);
+    expect(pilot.towShip).toBe(true);
+    // Tow control comes first, and a slot is made for it by unloading the turn program.
+    for (let i = 0; i < 3; i++) sim.step();
+    expect(pilot.ship.software.has("towControl")).toBe(true);
+    expect(pilot.ship.programs).toContain("towControl");
+    for (let i = 0; i < 3; i++) sim.step();
+    expect(sim.hasClamp(pilot.ship)).toBe(true);
+    // The clamp takes the tractor's mount, and the tractor with it.
+    expect(pilot.ship.parts.has("tractor")).toBe(false);
+  });
+
+  it("keeps most of a base's traffic mining", () => {
+    const sim = towWorld({ trafficFloaters: 3, towShipChance: 1, trafficBuffer: 0 });
+    sim.traffic[0].towShip = true;
+    expect(sim.towShareFull(sim.traffic[1].ship)).toBe(true);
+    const second = sim.traffic[1];
+    atDock(sim, second);
+    boughtEverything(sim, second);
+    expect(second.considerTow(sim)).toBe(false);
+    expect(second.towShip).toBe(false);
+  });
+
+  it("takes a whole rock to the refinery, which pays it for the ore that comes out", () => {
+    const sim = towWorld({ trafficFloaters: 1, clickSpeed: 200 });
+    const pilot = sim.traffic[0];
+    readyTow(sim, pilot);
+    const field = sim.ownField(pilot.ship);
+    pilot.working = field.id;
+    Object.assign(pilot.ship, { x: field.poi.x + 100, y: field.poi.y, px: field.poi.x + 100, py: field.poi.y, vx: 0, vy: 0 });
+    // One big rock, worth a trip, and the field's own small ones.
+    const big = sim.makeRock(2, field.poi.x + 300, field.poi.y, 0, 0);
+    sim.rocks.push(big);
+    const base = sim.bases[0];
+    for (let i = 0; i < Math.round(400 / TICK) && !base.refining; i++) {
+      sim.step();
+      sim.events.length = 0;
+    }
+    expect(base.refining).not.toBeNull();
+    expect(base.refining!.owner).toBe(pilot.ship);
+    // The refinery pays as the ore comes out, as it pays the player.
+    for (let i = 0; i < Math.round((DEFAULTS.refineSeconds + 1) / TICK); i++) {
+      sim.step();
+      sim.events.length = 0;
+    }
+    expect(pilot.ship.earned).toBeGreaterThan(0);
+  }, 30000);
+
+  it("never lets two tow ships pick the same rock", () => {
+    const sim = towWorld({ trafficFloaters: 2 });
+    const [a, b] = sim.traffic;
+    for (const pilot of [a, b]) {
+      readyTow(sim, pilot);
+      const field = sim.ownField(pilot.ship);
+      Object.assign(pilot.ship, { x: field.poi.x, y: field.poi.y, px: field.poi.x, py: field.poi.y, vx: 0, vy: 0 });
+      pilot.working = field.id;
+    }
+    const big = sim.makeRock(2, sim.field.x + 100, sim.field.y, 0, 0);
+    sim.rocks.push(big);
+    sim.step();
+    // One of them has it; the other found something else to do.
+    expect([a.ship.tow, b.ship.tow].filter((held) => held === big)).toHaveLength(1);
+  });
+
+  it("lets go of its load when it flees", () => {
+    const sim = towWorld({ trafficFloaters: 1, pirates: 1 });
+    const pilot = sim.traffic[0];
+    readyTow(sim, pilot);
+    // Clear of the field's rocks, so nothing blocks the sight between the two ships.
+    Object.assign(pilot.ship, { x: 5000, y: 5000, px: 5000, py: 5000, vx: 0, vy: 0 });
+    const rock = sim.makeRock(2, pilot.ship.x + 100, pilot.ship.y, 0, 0);
+    sim.rocks.push(rock);
+    expect(sim.grabTow(pilot.ship, rock)).toBe(true);
+    // Marked, a pirate comes for it: the rock is let go of first.
+    pilot.ship.marked = true;
+    const pirate = sim.fighters.find((each) => each.ship.faction === "pirate")!.ship;
+    Object.assign(pirate, { x: pilot.ship.x, y: pilot.ship.y + 200, px: pilot.ship.x, py: pilot.ship.y + 200 });
+    sim.step();
+    expect(pilot.ship.tow).toBeNull();
+    expect(rock.held).toBeUndefined();
+  });
+
+  /** Keeps the camera, and so the player's ship, far from everything: traffic runs as records. */
+  function parkAway(sim: Sim): void {
+    sim.ship.x = sim.ship.px = 40000;
+    sim.ship.y = sim.ship.py = 40000;
+    sim.ship.vx = sim.ship.vy = 0;
+  }
+
+  it("a tow record takes a rock from a sleeping field and fills the refinery on arrival", () => {
+    const sim = towWorld({ trafficFloaters: 1, clickSpeed: 200 });
+    const pilot = sim.traffic[0];
+    readyTow(sim, pilot);
+    const field = sim.ownField(pilot.ship);
+    const big = sim.makeRock(2, field.poi.x + 100, field.poi.y, 0, 0);
+    sim.rocks.push(big);
+    parkAway(sim);
+    const base = sim.bases[0];
+    let carried = false;
+    for (let i = 0; i < Math.round(600 / TICK) && !base.refining; i++) {
+      sim.step();
+      sim.events.length = 0;
+      parkAway(sim);
+      if (pilot.ship.tow) carried = true;
+    }
+    expect(sim.sleeping.size).toBeGreaterThan(0);
+    expect(carried).toBe(true);
+    expect(base.refining).not.toBeNull();
+    expect(base.refining!.owner).toBe(pilot.ship);
+  }, 30000);
+
+  it("a tow record woken mid-trip is a flown ship holding its rock", () => {
+    const sim = towWorld({ trafficFloaters: 1, clickSpeed: 200 });
+    const pilot = sim.traffic[0];
+    readyTow(sim, pilot);
+    const field = sim.ownField(pilot.ship);
+    sim.rocks.push(sim.makeRock(2, field.poi.x + 100, field.poi.y, 0, 0));
+    parkAway(sim);
+    for (let i = 0; i < Math.round(300 / TICK) && !pilot.ship.tow; i++) {
+      sim.step();
+      sim.events.length = 0;
+      parkAway(sim);
+    }
+    expect(pilot.record?.hauling).toBe("rock");
+    // The camera comes to it: the record wakes with what it carried.
+    sim.ship.x = sim.ship.px = pilot.ship.x + 1000;
+    sim.ship.y = sim.ship.py = pilot.ship.y;
+    sim.step();
+    expect(pilot.record).toBeNull();
+    expect(pilot.ship.tow).not.toBeNull();
+    expect(pilot.ship.tow!.held).toBe("tow");
+  }, 30000);
+
+  it("a block record takes a block from the pad and places it at the site", () => {
+    const sim = towWorld({
+      trafficFloaters: 1,
+      clickSpeed: 200,
+      depositParts: 20,
+      depositPrice: 1000,
+      depositBuildRate: 100,
+      stationStartParts: 1000,
+      stationReserveParts: 0,
+    });
+    const base = sim.bases[0];
+    // The player funds the deposit from the dock, then leaves the area.
+    const at = sim.dockPoint(false, base.poi);
+    Object.assign(sim.ship, { x: at.x, y: at.y, px: at.x, py: at.y, vx: 0, vy: 0 });
+    sim.ship.credits = 100000;
+    expect(sim.fundBlueprint(sim.ship, "deposit")).toBe(true);
+    const deposit = sim.deposits[0];
+    const pilot = sim.traffic[0];
+    readyTow(sim, pilot);
+    parkAway(sim);
+    for (let i = 0; i < Math.round(900 / TICK) && !sim.unlocked("deposit"); i++) {
+      sim.step();
+      sim.events.length = 0;
+      parkAway(sim);
+    }
+    expect(deposit.partsUsed).toBe(20);
+    expect(sim.unlocked("deposit")).toBe(true);
+  }, 45000);
 });

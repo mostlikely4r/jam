@@ -1,6 +1,7 @@
 // SAFETY: the file is hand-authored data checked by faces.test.ts, which walks every voice and
 // mood and reads every part; the type below is the shape it is written to.
 import file from "./voices.json";
+import { DEFAULT_NOD, type Nod } from "./sway";
 
 /**
  * Faces: the glowing picture a radio line puts before its name.
@@ -108,12 +109,20 @@ export interface VoiceFace {
 }
 
 export interface FaceFile {
-  [voice: string]: { face: VoiceFace };
+  [voice: string]: { face: VoiceFace; sway?: Nod };
 }
 
 const DATA = file as unknown as FaceFile;
 
 const SCREEN: Screen = { color: "#0A1520", middle: "#16293C", edge: "#070D16", rim: "#2A4A66", radius: 10 };
+
+/**
+ * The nod a voice sways with: its own, else the generic voice's, else the built-in one. Something
+ * to sway with is always found, so a new voice moves before anyone writes a nod for it.
+ */
+export function swayFor(voice: Voice): Nod {
+  return DATA[voice]?.sway ?? DATA.generic?.sway ?? DEFAULT_NOD;
+}
 
 function faceOf(voice: Voice): VoiceFace | undefined {
   return DATA[voice]?.face;
@@ -323,6 +332,9 @@ export function renderFace(face: Face, render: FaceRender = {}): string {
     `<rect x="0.75" y="0.75" width="${round(FACE_BOX.w - 1.5)}" height="${round(FACE_BOX.h - 1.5)}" rx="${round(screen.radius - 0.75)}" fill="none" stroke="${screen.rim}" stroke-width="1.2" opacity="0.55"/>`;
   const body = [
     glass,
+    // Everything but the glass, in one group: the sway moves this, so the face turns inside its
+    // screen and the screen itself stays where it is.
+    `<g class="features">`,
     layer(face.under, face, grade),
     open,
     layer(face.eyes, face, grade),
@@ -331,6 +343,7 @@ export function renderFace(face: Face, render: FaceRender = {}): string {
     layer(face.over, face, grade),
     layer(face.marks, face, grade),
     close,
+    `</g>`,
   ].join("");
   const defs =
     `<defs><radialGradient id="${id}" cx="50%" cy="45%" r="70%">` +

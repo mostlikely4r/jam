@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { LICENCES, MUSIC_TIMING, type MusicInput, MusicScheduler, musicSettingsFrom, type Track, usableTracks } from "./music";
 import musicList from "./music.json";
+import { MAX_BPM, MIN_BPM } from "./sway";
 
 const track = (id: string, mood: Track["mood"] = "funk"): Track => ({
   id,
@@ -11,6 +12,7 @@ const track = (id: string, mood: Track["mood"] = "funk"): Track => ({
   licence: "CC BY 4.0",
   source: "https://example.org",
   mood,
+  bpm: 120,
 });
 
 const work: MusicInput = { atWork: true, docked: false, paused: false, mode: "always", seconds: 1 };
@@ -188,6 +190,20 @@ describe("track list", () => {
       expect(credits, each.id).toContain(each.title);
       expect(credits, each.id).toContain(each.artist);
     }
+  });
+
+  it("has a tempo the faces can sway to", () => {
+    for (const each of tracks) {
+      expect(each.bpm, each.id).toBeGreaterThanOrEqual(MIN_BPM);
+      expect(each.bpm, each.id).toBeLessThanOrEqual(MAX_BPM);
+    }
+  });
+
+  it("gives a track a usable tempo, so a hand-edited bpm can't stop the sway", () => {
+    expect(usableTracks([{ ...track("a"), bpm: 115 }])[0].bpm).toBe(115);
+    expect(usableTracks([{ ...track("a"), bpm: 900 }])[0].bpm).toBe(100);
+    const { bpm: _bpm, ...noTempo } = track("a");
+    expect(usableTracks([noTempo])[0].bpm).toBe(100);
   });
 
   it("drops a track with a licence off the list", () => {

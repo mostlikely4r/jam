@@ -7,10 +7,12 @@ import {
   VOICES,
   faceFor,
   renderFaceSvg,
+  swayFor,
   type FaceFile,
   type Mood,
   type MoodFace,
   type Part,
+  type Voice,
 } from "./faces";
 
 const DATA = file as unknown as FaceFile;
@@ -79,8 +81,7 @@ describe("faces", () => {
     expect(faceFor("station", "tired").eyes).toEqual(DATA.station.face.moods.neutral!.eyes);
   });
 
-  it("draws the same markup twice, at the size it was asked for", () => {
-    const once = renderFaceSvg("gus", "neutral", { size: 60 });
+  it("draws the same markup twice, at the size it was asked for", () => {    const once = renderFaceSvg("gus", "neutral", { size: 60 });
     expect(renderFaceSvg("gus", "neutral", { size: 60 })).toBe(once);
     expect(once).toContain('height="60"');
     expect(once).toContain('viewBox="0 0 100 66"');
@@ -151,5 +152,40 @@ describe("faces", () => {
         expect(heaviest, `${voice} ${mood} has a mass`).toBeGreaterThanOrEqual(3);
       }
     }
+  });
+});
+
+describe("the nod a face sways with", () => {
+  it("has one for every voice, in numbers the box can hold", () => {
+    for (const voice of VOICES) {
+      const nod = swayFor(voice);
+      expect(nod.every, `${voice} every`).toBeGreaterThanOrEqual(1);
+      expect(nod.every, `${voice} every`).toBeLessThanOrEqual(8);
+      expect(["still", "tilt", "yaw", "pitch"], `${voice} kind`).toContain(nod.kind);
+      expect(Math.abs(nod.amount), `${voice} amount`).toBeLessThanOrEqual(FACE_BOX.h / 4);
+      expect(nod.turn ?? 0, `${voice} turn`).toBeGreaterThanOrEqual(0);
+      expect(nod.turn ?? 0, `${voice} turn`).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  it("turns the regulars different ways, and leaves the station still", () => {
+    // The character is what the nod says: Gus up and down, Pip left and right.
+    expect(swayFor("gus").kind).toBe("pitch");
+    expect(swayFor("pip").kind).toBe("yaw");
+    expect(swayFor("station").kind).toBe("still");
+    expect(swayFor("station").amount).toBe(0);
+  });
+
+  it("is the voice's own when the file wrote one", () => {
+    expect(swayFor("gus")).toEqual(DATA.gus.sway);
+    expect(swayFor("pip")).toEqual(DATA.pip.sway);
+    // A regular and plain traffic don't nod alike: the character is what the nod says.
+    expect(swayFor("gus")).not.toEqual(swayFor("generic"));
+  });
+
+  it("falls back to the generic nod for a voice the file doesn't have", () => {
+    // SAFETY: a voice the file doesn't have is exactly the fallback under test.
+    expect(swayFor("nosuchvoice" as Voice)).toEqual(DATA.generic.sway);
+    expect(swayFor("nosuchvoice" as Voice)).toEqual(swayFor("generic"));
   });
 });

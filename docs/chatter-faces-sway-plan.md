@@ -37,14 +37,17 @@ Calls marked *decided* are the user's, in this talk. The rest is my proposal.
 - **The nod belongs to the character, not the mood** (*decided*: a different nod per character,
   and scared faces sway too — "even when scared"). So the motion is a `sway` block next to each
   voice's `face` in `src/voices.json`: how many beats per nod, how far it tips, how far it dips.
-  The face already says how someone feels; the nod says who they are. Gus is a heavy, slow drop;
-  Pip is quick and light off the beat; plain traffic is a small, even dip; the station is bolted
-  down and barely tips (*mine* — veto it after watching step 1).
+  The face already says how someone feels; the nod says who they are. Which way each voice turns
+  was settled after the first look: see *The shape of the nod* below.
 - **Volume and mute govern it** (*decided*: "let volume/mute govern"): there is no new switch.
   A track that isn't playing has no beat, and mute counts as not playing, so `M` stops the sway
   and turning the music volume down to nothing leaves the faces still.
-- **Reduced motion is respected** (*mine*): with `prefers-reduced-motion: reduce` the faces hold
-  still. The game has no other animation of this kind today, so this is the first one to ask.
+- **Reduced motion is not consulted** (*decided* 2026-11-25). The first build held the faces still
+  under `prefers-reduced-motion: reduce`, and the user's own machine reports exactly that: "sway
+  on, gus near, music on, no sway". They wanted the motion, and nothing else in the game — ships
+  flying, ore drifting, the now-playing line — asks the OS first, so this one doesn't either. A
+  smaller motion under that setting is the obvious thing to add if someone ever needs it, and is
+  left in **Not in this build**.
 - **A gallery preview** (*decided*: "gallery preview in"). `src/designer/faces.ts` gets a sway
   toggle and a tempo slider and drives the faces it already shows, including the fake radio line
   at 26px, which is the size the motion really has to read at.
@@ -53,30 +56,38 @@ Calls marked *decided* are the user's, in this talk. The rest is my proposal.
   lagging dip on a 26px face reads as loose, not musical. A hand-set tempo with the phase pinned
   to the audio position is exact, testable, and costs one number per track. Under "Not doing".
 
-### The shape of the nod (*mine*, tune in the gallery)
+### The shape of the nod (*decided* 2026-11-25, after the first look)
 
-Small, mostly on the accent. Reading at 26px is what decides it: a wide, gentle swing dies at
-that size, so the motion is one clear dip per cycle with a soft return, and a slow tilt.
+Revised from the first build. The user's words: "would it be possible to sway all but the boxes?",
+and "it's all plain rotation... could it be more 3d in a sense, like turning head left right (for
+some), up down (others), tilt (like now, others still)". So the motion moves the **face, not its
+glass** — the little screen stays put and the features turn inside it — and each voice turns a
+different way.
 
-- One cycle is `every` beats (a "nod"): Gus 2, Pip 1, generic 1, station 4.
-- `bpm` gives the cycle length, `cycle = every * 60 / bpm` seconds, and the phase is
-  `p = ((position - beat) / cycle) mod 1`.
-- The accent is a skewed sine, quick in and slow out, which is what a nod is:
-  `k = sin(2πp) * 0.65 + sin(4πp) * 0.35`.
-- `lift = -bounce * max(0, k)` — the face drops into the beat and comes back up (SVG y is down).
-- `tilt = tiltAmount * k` — it tips with the same accent, so the drop and the lean are one motion,
-  never two.
-- Starting numbers for the gallery: Gus `{ every: 2, tilt: 2.4, bounce: 1.1 }`, Pip
-  `{ every: 1, tilt: 3.2, bounce: 1.6 }`, generic `{ every: 1, tilt: 1.4, bounce: 0.7 }`,
-  station `{ every: 4, tilt: 0.8, bounce: 0 }`.
+- **The glass never moves.** `renderFace` wraps every layer but the screen in one
+  `<g class="features">`, and a pose sets that group's SVG `transform`. The screen, its rim and its
+  gradient stay where they are, which is also what makes a "turn" read on a flat drawing.
+- **One cycle is `every` beats**: Gus 2, Pip 1, generic 1, station 4.
+- **The accent** is one lobe of a skewed sine and then its mirror: `k(p) = ±sin(π u^0.7)`, with
+  `u = 2p` in the first half and `u = 2p - 1` in the second. Quick off the beat, slow back, zero
+  twice a cycle. The mirror gives a yaw a turn to each side and a tilt a lean each way.
+- **Three ways to turn, and one still**:
+  - `yaw` (Pip): the features slide across by `amount` box units and squash `turn` across, so the
+    head turns to one side and back.
+  - `pitch` (Gus): they rise and drop by `amount` and squash `turn` downwards, so the head bobs.
+  - `tilt` (generic): they roll by `amount` degrees, about the middle of the box.
+  - `still` (station): nothing. The station is a screen on a wall.
+- Starting numbers: Gus `{ every: 2, kind: "pitch", amount: 4.5, turn: 0.1 }`, Pip
+  `{ every: 1, kind: "yaw", amount: 5, turn: 0.12 }`, generic `{ every: 1, kind: "tilt", amount: 2.2 }`,
+  station `{ every: 4, kind: "still", amount: 0 }`. The first build's amounts were too small to
+  read at 26px; these are a box unit or two more.
 - A missing `sway` falls back to the generic voice's, like every other layer, so a new alien voice
   sways before anyone draws anything for it.
-- Values are in the face's own 100 × 66 box (`FACE_BOX`), so `tilt` is degrees and `bounce` is box
-  units, and the same numbers hold at 26px and at 110px.
+- Everything is in the face's own 100 × 66 box, so the same numbers hold at 26px and at 110px.
 
 ## What to build
 
-### 1. The tempo, the nod, and the gallery preview
+### 1. The tempo, the nod, and the gallery preview (*built* 2026-11-25, revised same day)
 
 Nothing in the corner changes in this step.
 
@@ -98,7 +109,27 @@ Nothing in the corner changes in this step.
 **Stop here for the user to try.** Judging motion needs no song: open the gallery (see below),
 turn the tempo up and down, and read the faces at 26px in the fake radio line.
 
-### 2. The log moves with the track
+Built as below, with these differences:
+- `poseTransform` (the pose as CSS) lives in `src/sway.ts` too, as pure code with no DOM. It takes
+  a `scale` (`size / FACE_BOX.h`) instead of importing `FACE_BOX`, so `sway.ts` imports nothing
+  and the same pose means the same shape at 26px and at 110px. It rounds to a twentieth of a
+  pixel, so a still face writes nothing.
+- The **bpm numbers are measured, not heard**: a throwaway onset-envelope script read the four
+  files (`aerosol-of-my-love` 100, `disco-con-tutti` 115, `funkorama` 102, `your-call` 119). They
+  are close but nobody has checked them by ear, and no `beat` offset is set. Step 1 is where they
+  get confirmed or corrected.
+- The gallery preview gives every face **its own voice's nod**, not one nod for the page, so Gus
+  and Pip can be compared side by side. A beat square sits between the sliders, and each heading
+  says how that voice moves ("Gus — nods up and down").
+- The options boxes **don't** sway: they are still figures to compare shapes against.
+- The bpm numbers are no longer measurements: **incompetech publishes them** in its catalogue
+  (`pieces.json`, fetched 2026-11-25), so all seven tracks carry the source's own tempo. The `beat`
+  offsets are still unset, nobody having lined a downbeat up by ear.
+- Three more tracks arrived from the user while this was being built, all Kevin MacLeod, all
+  CC BY 4.0 per the catalogue: "Funky Chunk" (115), "ZigZag" (80) and "Who Likes to Party" (117),
+  in `src/music.json` and `CREDITS.md`.
+
+### 2. The log moves with the track (*built* 2026-11-25)
 
 - `MusicPlayer` (`src/music.ts`) gets `get position(): number | null` — the element's
   `currentTime` while a track is playing, else null.
@@ -108,13 +139,26 @@ turn the tempo up and down, and read the faces at 26px in the fake radio line.
   is eased in and out over about a third of a second, so a track starting or a fade to silence
   settles the faces instead of snapping them. A pose is written only when it changed by more than
   a tenth of a unit, so a still corner does no work.
-- `index.html`: `#chatter svg.face { transform-box: fill-box; transform-origin: 50% 62%;
-  will-change: transform; }` — the pivot sits low so the face tips from its chin, the way a head
-  does.
-- `prefers-reduced-motion: reduce` turns the sway off (`window.matchMedia`, read per frame so it
-  follows the OS setting).
+- No CSS is needed for the motion: the pose is an SVG `transform` on the features group, so it
+  turns about the middle of the face box by construction and no `transform-box` or pixel scale has
+  to be got right.
+- ~~`prefers-reduced-motion: reduce` turns the sway off~~: dropped 2026-11-25 after the user's
+  machine reported it and silenced a motion they wanted. Under **Not in this build**.
 
 **Stop here for the user to try.**
+
+Built as below, with these differences:
+- The pose is rounded (0.02 box units, 0.02 degrees, 0.005 of a squash), not written per frame
+  once it changes at all: a still corner writes nothing. Since the pose is in the box's own units,
+  there is no pixel scale to convert any more.
+- The dev HUD (`?dev`) shows a `Sway` line: the tempo and position the faces are following, or the
+  one reason they are still (no track, no audio position, muted, volume at zero). It answers "why
+  isn't it moving" without guessing — which is how the reduced-motion gate was found.
+- `music.level` at zero stills the faces along with mute, since the plan's picture says a music
+  volume at nothing leaves them still.
+- `Beat` (`{ bpm, position }`: the track's tempo and its own seconds) is defined in `src/radio.ts`,
+  where it is used, and the beat is read before `updateMusic` runs, so a new track shows on the
+  faces a frame later.
 
 ## How we'll know
 
@@ -153,4 +197,10 @@ turn the tempo up and down, and read the faces at 26px in the fake radio line.
 - Faces anywhere but the radio log (world pings, the shop, the news board).
 - Motion that reacts to the mood as well as the character (a scared shiver, a happy bounce).
 - The world moving with the beat (engine hum, station lights, the now-playing line).
-- Station radio and per-place tracks (`docs/music-plan.md`, step 3 onward).
+- Station radio and per-place tracks (`docs/music-plan.md`, step 3 onward).
+- More ways to sway, for new faces (S-70): this build has `yaw`, `pitch`, `tilt` and `still`, and
+  the user's call is that new faces should pick from more than three.
+- A gentler sway under `prefers-reduced-motion: reduce` instead of none, if someone asks for it.
+- Downbeat offsets (`beat`) per track: the tempos come from incompetech's catalogue, but nobody has
+  lined the first beat up by ear, so the dip may sit a fraction off on a track that starts on an
+  anacrusis.

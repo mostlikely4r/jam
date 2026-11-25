@@ -11,7 +11,7 @@ import { stringifyWorld } from "./designer/world";
 import { Audio } from "./audio";
 import { MUSIC_TIMING, type MusicMode, MusicPlayer, MusicScheduler, musicSettingsFrom, nowPlayingText, usableTracks } from "./music";
 import musicList from "./music.json";
-import { Radio } from "./radio";
+import { Radio, type Beat } from "./radio";
 import { type Base, type Battery, type Deposit, DEPOSIT_REACH, type HullPlan, SHIP_RADIUS, type Ship, Sim, STATION_HALF, TICK, targetSpot, type Targetable } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partOf, type Part, type PartIcon, type PartId } from "./parts";
@@ -1874,6 +1874,28 @@ function updateMusic(paused: boolean, seconds: number): void {
   music.update({ atWork: idleSeconds < MUSIC_TIMING.workMemory, docked: sim.baseAt(ship) !== null, paused, seconds });
 }
 
+/** In the dev HUD beside the sway line: why the faces are still, in the order `beatNow` gives up. */
+function swayOffReason(): string {
+  if (!music.playing) return "no track playing";
+  if (music.position === null) return "no audio position";
+  if (audio.muted) return "muted";
+  if (music.level <= 0) return "music volume at zero";
+  return "no beat";
+}
+
+/**
+ * What the radio faces sway to (docs/chatter-faces-sway-plan.md): the playing track's tempo and
+ * its own position, so the dip lands on the beat. Nothing playing, muted or the music volume at
+ * zero leaves the faces still. The OS's reduced-motion setting is deliberately not consulted: the
+ * user turned it on and still wanted the faces moving, and the rest of the game moves regardless.
+ */
+function beatNow(): Beat | null {
+  const track = music.playing;
+  const position = music.position;
+  if (!track || position === null || audio.muted || music.level <= 0) return null;
+  return { bpm: track.bpm, position: position - (track.beat ?? 0) };
+}
+
 function frame(now: number): void {
   const paused = pausedNow();
   const seconds = Math.min(MAX_FRAME_SECONDS, (now - lastTime) / 1000);
@@ -1910,7 +1932,7 @@ function frame(now: number): void {
     renderer.addPing(event);
     audio.beep(event.mayday);
   }
-  radio.update();
+  radio.update(beatNow());
   renderer.addEvents(sim.events);
   audio.play(
     sim.events.filter(
@@ -1947,6 +1969,8 @@ function frame(now: number): void {
     const fuelLine = tuning.fuel
       ? [`Fuel  [${"#".repeat(fuelBars)}${".".repeat(10 - fuelBars)}] ${sim.ship.fuel.toFixed(1)}/${sim.fuelMax(sim.ship)}${sim.ship.fuel <= 0 ? "  NO FUEL: drifting" : ""}`]
       : [];
+    // Why the radio faces do or don't nod: the tempo they're swaying to, or what's stopping them.
+    const beat = beatNow();
     hud.textContent = [
       `Speed ${Math.round(speed)}  (top ${Math.round(sim.stats.topSpeed)})`,
       `Spin  ${Math.round((sim.ship.spin * 180) / Math.PI)} deg/s  Retro ${sim.ship.parts.has("retro") ? (tuning.retro ? "ON" : "off") : "none"}`,
@@ -1955,6 +1979,7 @@ function frame(now: number): void {
       `Ore   ${sim.oreIn(sim.ship)}/${cargoText(sim.ship)}  (best ${sim.stats.bestOre})  Credits ${sim.ship.credits}  Upkeep ${sim.ship.upkeep}`,
       `Parts ${partList(sim.ship)}  Weight ${sim.shipWeight(sim.ship).toFixed(2)}`,
       `${frameText()}${sim.isDocked() ? "  DOCKED" : ""}${botPlay ? `  BOT: ${botPlay.where}` : ""}${sim.ship.marked ? "  MARKED by pirates" : ""}${sim.ship.wanted ? "  WANTED by the station" : ""}${sim.clickPilot.active ? `  ${sim.clickPilot.isCourse ? "Course" : "Click order"}: ${sim.clickPilot.task}` : ""}${sim.isDocked() && sim.ship.hull < hullMax(sim.ship.model) && !sim.hasPartsFor(tuning.repairCost) ? "  No repairs: the station is out of parts" : ""}`,
+      `Sway  ${beat ? `${beat.bpm} bpm @ ${beat.position.toFixed(1)}s` : swayOffReason()}`,
       `Rocks ${sim.rocks.length}  Wrecks ${sim.ship.wrecks}`,
       ...sim.drones.flatMap((drone, index) => {
         const { ship } = drone;

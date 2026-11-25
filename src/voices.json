@@ -13,6 +13,7 @@
       "slim": ["Barren out here.", "Nothing but dust.", "Picked this corner clean."],
       "news": ["Word for you: {item} at {base}, {price}.", "Heard {base} has {item}. {price}."]
     },
+    "sway": { "every": 2, "kind": "pitch", "amount": 4.5, "turn": 0.1 },
     "face": {
       "color": "#F2A623",
       "identity": {
@@ -96,6 +97,7 @@
       "slim": ["Aww, nothing left here.", "This corner's picked clean.", "Where'd all the rock go?"],
       "news": ["Psst! {item} at {base}, {price}!", "Guess what: {base} has {item} for {price}!"]
     },
+    "sway": { "every": 1, "kind": "yaw", "amount": 5, "turn": 0.12 },
     "face": {
       "color": "#F0709C",
       "identity": {
@@ -157,6 +159,7 @@
     }
   },
   "generic": {
+    "sway": { "every": 1, "kind": "tilt", "amount": 2.2 },
     "face": {
       "color": "#4FE3F0",
       "moods": {
@@ -204,6 +207,7 @@
     }
   },
   "station": {
+    "sway": { "every": 4, "kind": "still", "amount": 0 },
     "face": {
       "color": "#7FE3D4",
       "screen": { "radius": 2, "rim": "#3C6E74" },

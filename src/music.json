@@ -1,6 +1,7 @@
 [
   {
     "id": "aerosol-of-my-love",
+    "bpm": 100,
     "file": "aerosol-of-my-love.mp3",
     "title": "Aerosol of my Love",
     "artist": "Kevin MacLeod",
@@ -11,6 +12,7 @@
   },
   {
     "id": "disco-con-tutti",
+    "bpm": 115,
     "file": "disco-con-tutti.mp3",
     "title": "Disco con Tutti",
     "artist": "Kevin MacLeod",
@@ -21,6 +23,7 @@
   },
   {
     "id": "funkorama",
+    "bpm": 101,
     "file": "funkorama.mp3",
     "title": "Funkorama",
     "artist": "Kevin MacLeod",
@@ -31,6 +34,7 @@
   },
   {
     "id": "your-call",
+    "bpm": 120,
     "file": "your-call.mp3",
     "title": "Your Call",
     "artist": "Kevin MacLeod",
@@ -38,5 +42,38 @@
     "source": "https://incompetech.com",
     "mood": "funk",
     "attribution": "\"Your Call\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+  },
+  {
+    "id": "funky-chunk",
+    "bpm": 115,
+    "file": "Funky Chunk.mp3",
+    "title": "Funky Chunk",
+    "artist": "Kevin MacLeod",
+    "licence": "CC BY 4.0",
+    "source": "https://incompetech.com",
+    "mood": "funk",
+    "attribution": "\"Funky Chunk\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+  },
+  {
+    "id": "zigzag",
+    "bpm": 80,
+    "file": "ZigZag.mp3",
+    "title": "ZigZag",
+    "artist": "Kevin MacLeod",
+    "licence": "CC BY 4.0",
+    "source": "https://incompetech.com",
+    "mood": "funk",
+    "attribution": "\"ZigZag\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+  },
+  {
+    "id": "who-likes-to-party",
+    "bpm": 117,
+    "file": "Who Likes to Party.mp3",
+    "title": "Who Likes to Party",
+    "artist": "Kevin MacLeod",
+    "licence": "CC BY 4.0",
+    "source": "https://incompetech.com",
+    "mood": "funk",
+    "attribution": "\"Who Likes to Party\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
   }
 ]

@@ -571,7 +571,7 @@ place; music from stations that fades with distance, and pirates with their own 
 before they're seen. Details in `docs/music-plan.md`, Not in this build.
 
 ## S-68 · Chatter faces swing to the music
-- status: specced
+- status: built
 - area: Sound
 - effort: S
 - priority: P1
@@ -580,7 +580,9 @@ before they're seen. Details in `docs/music-plan.md`, Not in this build.
 While a track plays, the little faces in front of the radio log sway or bob along with it. The
 user, 2026-11-25, after first playing with music: "one thing we definitely need soonish".
 Builds on S-66 (music) and the faces of `docs/chatter-faces-plan.md`. Specced 2026-11-25: hand-set
-`bpm` per track, a nod per voice, the beat read off the audio position.
+`bpm` per track, a nod per voice, the beat read off the audio position. Built 2026-11-25: the faces
+turn inside their screens to six tracks' tempos, a different nod per voice, and the gallery previews
+any of them; more kinds of nod to come (S-70).
 
 ## S-69 · Station personalities, heard in their music
 - status: idea
@@ -592,3 +594,20 @@ talks and in the music that starts once you linger docked and shop. Docked, the 
 fades (S-66); after a while the station's own music comes in. The user, 2026-11-25. Touches the
 station's voice in `src/voices.json` (`docs/chatter-faces-plan.md`) and the place tracks of S-67.
 
+## S-70 · More ways to sway
+- status: idea
+- area: Sound
+- effort: S
+
+The faces of S-68 have three ways to nod: `yaw` (a head turning left and right), `pitch` (up and
+down) and `tilt` (a roll), plus `still`. Every **new** face should be able to pick from more than
+those three. The user's call, 2026-11-25, on seeing the first build: "new faces should get more
+variations of sway".
+
+Ideas to try, in the same pure shape: a lag or follow-through, the mood marks arriving a beat late
+so a nod has weight; a lean (a shift with a one-sided squash, like a shrug); a double-take, or a
+turn that holds for a bar; a rate that isn't a whole number of beats (a half-beat sway drifting
+across the bar); and moods colouring the motion, once S-68's "the nod is the character" is tested
+by play. `Nod` in `src/sway.ts` is the place: `kind` grows a value and `swayAt` gives it a pose,
+and both the gallery preview and the `sway` block in `src/voices.json` pick it up with no other
+change.

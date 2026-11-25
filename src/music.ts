@@ -5,6 +5,7 @@
  * tests without a browser. `MusicPlayer` plays what the scheduler asks for through the game's
  * own audio graph, so the main volume and Mute cover music too.
  */
+import { clampBpm } from "./sway";
 
 /** The only licences a track may have: the repo is public, so every file in it is shared. */
 export const LICENCES = ["CC0", "CC BY 3.0", "CC BY 4.0"] as const;
@@ -23,6 +24,10 @@ export interface Track {
   /** Where the track came from: a URL. */
   source: string;
   mood: Mood;
+  /** The tempo the radio faces sway to, hand-set by ear. */
+  bpm: number;
+  /** Seconds before the first downbeat, when it isn't at 0:00; the sway's phase is offset by it. */
+  beat?: number;
   /** The exact credit text, when the source asks for a particular one. */
   attribution?: string;
 }
@@ -161,13 +166,18 @@ export class MusicScheduler {
   }
 }
 
-/** The track list, checked: entries with a licence off the list are dropped, with a warning. */
+/**
+ * The track list, checked: entries with a licence off the list are dropped, with a warning, and
+ * every tempo is made usable, so a hand-edited `bpm` can never stop the faces swaying.
+ */
 export function usableTracks(list: unknown[]): Track[] {
-  return (list as Track[]).filter((track) => {
-    const ok = (LICENCES as readonly string[]).includes(track.licence);
-    if (!ok) console.warn(`music: ${track.id} left out, licence "${track.licence}" isn't allowed`);
-    return ok;
-  });
+  return (list as Track[])
+    .filter((track) => {
+      const ok = (LICENCES as readonly string[]).includes(track.licence);
+      if (!ok) console.warn(`music: ${track.id} left out, licence "${track.licence}" isn't allowed`);
+      return ok;
+    })
+    .map((track) => ({ ...track, bpm: clampBpm(track.bpm) }));
 }
 
 /** The music settings from a saved settings object; an older save without them gets the defaults. */
@@ -239,6 +249,15 @@ export class MusicPlayer {
   /** The track playing now, paused with the menu or not; null between tracks and while held in the dock. */
   get playing(): Track | null {
     return this.scheduler.playing;
+  }
+
+  /**
+   * Where the playing track is, in its own seconds; null when nothing is playing. The radio faces
+   * sway to this, so the dip lands on the real beat and freezes with a pause, like the audio.
+   */
+  get position(): number | null {
+    if (!this.current || !this.element) return null;
+    return this.element.currentTime;
   }
 
   update(input: Omit<MusicInput, "mode">): void {

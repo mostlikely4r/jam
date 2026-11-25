@@ -8,12 +8,14 @@ import {
   faceFor,
   renderFace,
   renderFaceSvg,
+  swayFor,
   type Face,
   type FaceFile,
   type Mood,
   type Part,
   type Voice,
 } from "../faces";
+import { DEFAULT_NOD, accentAt, phaseAt, poseTransform, swayAt, type Nod, type NodKind } from "../sway";
 
 const DATA = file as unknown as FaceFile;
 
@@ -29,6 +31,14 @@ const DATA = file as unknown as FaceFile;
  */
 
 const NAMES: Record<Voice, string> = { gus: "Gus", pip: "Pip", generic: "Generic", station: "Station" };
+
+/** What each nod does, said in words, since the point of the preview is judging it. */
+const NODS: Record<NodKind, string> = {
+  still: "still",
+  tilt: "tips",
+  yaw: "turns left and right",
+  pitch: "nods up and down",
+};
 
 /** What each voice says, for the line test: the length and the name are what the face sits beside. */
 const LINES: Record<Voice, string> = {
@@ -51,6 +61,9 @@ const STYLE = `
   #faces header p { margin: 0; color: #7f8ba0; flex: 1; }
   #faces header label { color: #aab6c8; white-space: nowrap; }
   #faces input[type="range"] { width: 110px; vertical-align: middle; accent-color: #8fb4ff; }
+  #faces .beat { display: inline-block; width: 9px; height: 9px; background: #1e2a3d; border: 1px solid #33405a;
+                 align-self: center; }
+  #faces .beat.on { background: #8fe3a1; border-color: #5fae66; }
   #faces header button { background: #1a2233; color: #cfd8e6; border: 1px solid #33405a; padding: 4px 9px;
                          font: inherit; cursor: pointer; }
   #faces header button:hover { background: #26324a; }
@@ -89,6 +102,14 @@ export class FaceGallery {
   private readonly body: HTMLDivElement;
   private size = 110;
   private compare = true;
+  /** The sway preview: faces posed with the nod of their voice, off until asked for. */
+  private sway = false;
+  private bpm = 100;
+  private frame = 0;
+  private started = 0;
+  /** Each face's features group and the nod of the voice it belongs to. */
+  private readonly posed = new Map<SVGElement, Nod>();
+  private readonly beatSquare: HTMLSpanElement;
 
   constructor(private readonly onClose: () => void) {
     const style = document.createElement("style");
@@ -126,10 +147,30 @@ export class FaceGallery {
       this.rebuild();
     });
     compareLabel.append(compare, " grades 1 and 2");
+    const swayLabel = document.createElement("label");
+    const swayBox = document.createElement("input");
+    swayBox.type = "checkbox";
+    swayBox.addEventListener("change", () => this.setSway(swayBox.checked));
+    swayLabel.append(swayBox, " sway");
+    const bpmLabel = document.createElement("label");
+    bpmLabel.textContent = "bpm ";
+    const bpmInput = document.createElement("input");
+    bpmInput.type = "range";
+    bpmInput.min = "60";
+    bpmInput.max = "160";
+    bpmInput.step = "1";
+    bpmInput.value = String(this.bpm);
+    bpmInput.addEventListener("input", () => {
+      this.bpm = Number(bpmInput.value);
+    });
+    bpmLabel.append(bpmInput);
+    this.beatSquare = document.createElement("span");
+    this.beatSquare.className = "beat";
+    this.beatSquare.title = "the beat";
     const close = document.createElement("button");
     close.textContent = "Close (Esc)";
     close.addEventListener("click", () => this.close());
-    header.append(title, hint, sizeLabel, compareLabel, close);
+    header.append(title, hint, sizeLabel, compareLabel, swayLabel, bpmLabel, this.beatSquare, close);
 
     this.body = document.createElement("div");
     this.body.className = "body";
@@ -177,7 +218,7 @@ export class FaceGallery {
         const figure = document.createElement("figure");
         const cap = document.createElement("figcaption");
         cap.textContent = caption;
-        figure.append(svg(renderFace(face, { size: 96, seed: `opt-${name}-${caption}` })), cap);
+        figure.append(svg(renderFace(face, { size: 96, seed: `opt-${name}-${caption}` }), face.voice), cap);
         shown.append(figure);
       }
       const named = document.createElement("div");
@@ -281,7 +322,55 @@ export class FaceGallery {
 
   close(): void {
     this.element.hidden = true;
+    cancelAnimationFrame(this.frame);
+    this.rest();
     this.onClose();
+  }
+
+  /** Turns the preview on or off: on poses the faces on this page, off leaves them as they were. */
+  private setSway(on: boolean): void {
+    this.sway = on;
+    cancelAnimationFrame(this.frame);
+    if (!on) {
+      this.rest();
+      return;
+    }
+    this.started = performance.now();
+    this.frame = requestAnimationFrame(this.tick);
+  }
+
+  /** One frame of the preview: every face at its own voice's nod, and the beat square between. */
+  private readonly tick = (): void => {
+    if (!this.sway || !this.isOpen) return;
+    const seconds = (performance.now() - this.started) / 1000;
+    for (const [features, nod] of this.posed) {
+      const transform = poseTransform(swayAt(nod, this.bpm, seconds), 1);
+      if (transform === (features.dataset.pose ?? "")) continue;
+      features.dataset.pose = transform;
+      if (transform) features.setAttribute("transform", transform);
+      else features.removeAttribute("transform");
+    }
+    this.beatSquare.classList.toggle("on", accentAt(phaseAt(DEFAULT_NOD, this.bpm, seconds)) > 0.5);
+    this.frame = requestAnimationFrame(this.tick);
+  };
+
+  /** Puts every face back where it started, so the page reads as it did before the preview. */
+  private rest(): void {
+    for (const features of this.posed.keys()) {
+      features.dataset.pose = "";
+      features.removeAttribute("transform");
+    }
+    this.beatSquare.classList.remove("on");
+  }
+
+  /** Every face on the page, with the nod of its voice; the options boxes stay still. */
+  private collect(): void {
+    this.posed.clear();
+    for (const element of this.body.querySelectorAll<SVGSVGElement>("svg[data-voice]")) {
+      if (element.closest(".option")) continue;
+      const features = element.querySelector<SVGElement>(".features");
+      if (features) this.posed.set(features, swayFor(element.dataset.voice as Voice));
+    }
   }
 
   /** The line test: what each face looks like in the radio log, beside the name and the words. */
@@ -297,7 +386,7 @@ export class FaceGallery {
         who.textContent = `${NAMES[voice]}: `;
         const text = document.createElement("span");
         text.textContent = LINES[voice];
-        line.append(svg(renderFaceSvg(voice, mood, { size: LINE_SIZE })), who, text);
+        line.append(svg(renderFaceSvg(voice, mood, { size: LINE_SIZE }), voice), who, text);
         row.append(line);
       }
       box.append(row);
@@ -320,7 +409,7 @@ export class FaceGallery {
     }
     const big = document.createElement("div");
     big.className = "big";
-    big.append(svg(renderFaceSvg(voice, mood, { grade: 3, size: this.size })));
+    big.append(svg(renderFaceSvg(voice, mood, { grade: 3, size: this.size }), voice));
     cell.append(tag, big);
     if (this.compare) {
       const grades = document.createElement("div");
@@ -329,7 +418,7 @@ export class FaceGallery {
         const figure = document.createElement("figure");
         const caption = document.createElement("figcaption");
         caption.textContent = grade === 1 ? "1 line" : "2 filled";
-        figure.append(svg(renderFaceSvg(voice, mood, { grade, size: 52 })), caption);
+        figure.append(svg(renderFaceSvg(voice, mood, { grade, size: 52 }), voice), caption);
         grades.append(figure);
       }
       cell.append(grades);
@@ -342,21 +431,26 @@ export class FaceGallery {
     for (const voice of VOICES) {
       const head = document.createElement("h2");
       head.textContent = NAMES[voice];
-      if (voice !== "gus" && voice !== "pip") {
-        const where = document.createElement("span");
-        where.textContent = voice;
-        head.append(where);
-      }
+      const where = document.createElement("span");
+      where.textContent = `${NODS[swayFor(voice).kind]} · ${voice}`;
+      head.append(where);
       const row = document.createElement("div");
       row.className = "row";
       for (const mood of MOODS) row.append(this.cell(voice, mood));
       this.body.append(head, row);
     }
+    this.collect();
+    if (this.sway && this.isOpen) this.setSway(true);
   }
 }
 
-/** The markup `renderFaceSvg` returns, as an element to put on the page. */
-function svg(markup: string): Element {
+/**
+ * The markup `renderFaceSvg` returns, as an element to put on the page, tagged with the voice it
+ * belongs to so the sway preview knows which nod to give it.
+ */
+function svg(markup: string, voice: Voice): Element {
   const parsed = new DOMParser().parseFromString(markup, "image/svg+xml").documentElement;
-  return document.importNode(parsed, true);
+  const element = document.importNode(parsed, true);
+  element.setAttribute("data-voice", voice);
+  return element;
 }

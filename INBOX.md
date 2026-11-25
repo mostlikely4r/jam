@@ -21,3 +21,8 @@ With multiple thrusters the ship can thrust while turning too.
 
 ## I-4 · Fuel tanks should empty front to back (now they left to right).
 - added: 2026-11-25 10:11
+
+## I-5 · Art with and height do not seem to effect anything (like for the large fuel tan…
+- added: 2026-11-25 10:12
+
+Art with and height do not seem to effect anything (like for the large fuel tank).

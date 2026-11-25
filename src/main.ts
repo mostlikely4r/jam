@@ -21,7 +21,7 @@ import { computerSize, hullMax, hullName, mountsHolding, newFitting, newGameHull
 import { drawVectorShip } from "./shipArt";
 import type { ShipModel } from "./parts";
 import { blueprintIcon, iconEl } from "./icons";
-import { partCategory, shopCellState, SHOP_CATEGORIES, type ShopBadge } from "./shop";
+import { canSupplyLine, partCategory, shopCellState, SHOP_CATEGORIES, type ShopBadge } from "./shop";
 import { setTip } from "./tooltip";
 import { Inventory } from "./inventory";
 import { dragging, makeDraggable, rotateDrag } from "./drag";
@@ -718,10 +718,15 @@ function lockedLine(id: BlueprintId, label: string, icon?: PartIcon, note?: stri
   return { tag: "unlock", style: "unlock", label, icon, text: `${head}\nClick to fund it`, enabled: true };
 }
 
-/** An item the station can sell, as far as it has the parts and the buyer has the credits. */
+/** An item the station can sell, as far as it has what it takes to supply it and the buyer has the credits. */
 function saleLine(price: number, label: string, text: string, part: PartId | null = null, icon?: PartIcon): ShopLine {
   const drawn = icon ?? (part ? partOf(part).icon : undefined);
-  const supplied = part && !isProgram(part) ? sim.canSupply(sim.shopBase(), part) : sim.hasPartsFor(price);
+  // What the station spends to supply it: a part comes out of its store, a program is software
+  // (nothing of the station goes into it), and a service like a new drone is made from its parts.
+  const supplied = canSupplyLine(part === null ? "service" : isProgram(part) ? "program" : "store", {
+    stocked: part !== null && sim.canSupply(sim.shopBase(), part),
+    hasParts: sim.hasPartsFor(price),
+  });
   // The recipe for a part takes items in: without them in store it is locked, and the tooltip says which.
   if (part && !isProgram(part) && !sim.hasInputsFor(sim.shopBase(), part)) {
     return { tag: "lacks", label, icon: drawn, text: `${text}

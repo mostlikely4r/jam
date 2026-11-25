@@ -1,7 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { PARTS } from "./parts";
 import { PROGRAM_PARTS } from "./programs";
-import { partCategory, SHOP_CATEGORIES, shopCellState } from "./shop";
+import { canSupplyLine, partCategory, SHOP_CATEGORIES, shopCellState } from "./shop";
+
+describe("what the station supplies", () => {
+  it("always has a program to sell, whatever its parts: nothing of the station goes into one", () => {
+    const empty = { stocked: false, hasParts: false };
+    expect(canSupplyLine("program", empty)).toBe(true);
+    // A part for sale comes out of the store, a service like a drone out of the station's parts.
+    expect(canSupplyLine("store", empty)).toBe(false);
+    expect(canSupplyLine("service", empty)).toBe(false);
+    expect(canSupplyLine("store", { stocked: true, hasParts: false })).toBe(true);
+    expect(canSupplyLine("service", { stocked: false, hasParts: true })).toBe(true);
+    expect(canSupplyLine("store", { stocked: false, hasParts: true })).toBe(false);
+    expect(canSupplyLine("service", { stocked: true, hasParts: false })).toBe(false);
+  });
+});
 
 describe("the shop grid", () => {
   it("maps a line's state to its dimming and badge, for each state there is", () => {

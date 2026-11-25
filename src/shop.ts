@@ -46,6 +46,19 @@ export function partCategory(part: Part): ShopCategory {
   }
 }
 
+/** What a shop line sells, which is what decides what the station spends to supply it. */
+export type ShopSupply = "store" | "program" | "service";
+
+/**
+ * Whether the station can supply a line of its shop. A part for sale comes out of the store the
+ * station builds it into; a program is only software, so the station's parts are not spent on
+ * it and it is always there to sell; a service, a new drone, is made from the station's parts.
+ */
+export function canSupplyLine(what: ShopSupply, station: { stocked: boolean; hasParts: boolean }): boolean {
+  if (what === "program") return true;
+  return what === "store" ? station.stocked : station.hasParts;
+}
+
 /** What a cell's corner badge draws. `none` draws nothing. */
 export type ShopBadge = "none" | "sell" | "load" | "run" | "lock" | "halfLock" | "clock" | "tick";
 

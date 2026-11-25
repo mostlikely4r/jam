@@ -1227,6 +1227,21 @@ describe("buying, WoW style", () => {
     expect(sim.buyRefused).toBeNull();
   });
 
+  it("sells a program at a station with no parts A at all, where a drone is out of reach", () => {
+    const sim = docked("racer");
+    const { ship } = sim;
+    const base = sim.baseAt()!;
+    // Nothing for a service to spend: a program costs the station none of this.
+    base.stock.set("partA" as PartId, 0);
+    base.partCarry = 0;
+    expect(sim.hasPartsFor(sim.tuning.dronePrice)).toBe(false);
+    expect(sim.buyPart(ship, "spinStabilizer")).toBe(true);
+    expect(ship.software.has("spinStabilizer")).toBe(true);
+    expect(sim.partA(base)).toBe(0);
+    expect(ship.credits).toBe(10000 - sim.partPrice("spinStabilizer"));
+    expect(sim.buyDrone(ship)).toBeNull();
+  });
+
   it("a pair goes in the bay or the locker together", () => {
     const sim = docked("racer");
     const { ship } = sim;

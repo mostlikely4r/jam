@@ -64,3 +64,6 @@ Programs and hulls should have blueprints which station can 'want' or 'have unlo
 - added: 2026-11-25 10:35
 
 Auto targeting program. Tweak: max range.
+
+## I-14 · Click move tweak: top speed.
+- added: 2026-11-25 10:38

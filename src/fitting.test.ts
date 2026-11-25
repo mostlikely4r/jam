@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { homeSim } from "./home";
 import { copyHull, decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, PART_ART, refresh, removeHull, resetPartArt, resetPartStats, shipFileNow, thrustOf, useShipFile, type HullInfo, type PartArt } from "./fitting";
 import { SHIP_MODELS, type PartId, type ThrusterRole } from "./parts";
-import { bayBox, drawTanks, drawTurret, drawVectorShip, tankBoxes } from "./shipArt";
+import { bayBox, drawTanks, drawTurret, drawVectorShip, hullTint, tankBoxes } from "./shipArt";
 import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
 import { DOCK_OFFSET, SHIP_RADIUS, Sim } from "./sim";
@@ -1096,6 +1096,27 @@ describe("a turret draws as a circle with its gun on it", () => {
     expect(stretch).toBeGreaterThan(-1);
     expect(stretch).toBeLessThan(disk);
     expect(disk).toBeLessThan(turn);
+  });
+});
+
+describe("a hull reddens by its share of its own hull", () => {
+  const grey: [number, number, number] = [200, 215, 235];
+
+  it("a whole hull is its own colour, whatever its maximum", () => {
+    expect(hullTint(grey, 100, 100)).toEqual(grey);
+    expect(hullTint(grey, 300, 300)).toEqual(grey);
+  });
+
+  it("the same share of a bigger hull reads the same", () => {
+    expect(hullTint(grey, 150, 300)).toEqual(hullTint(grey, 50, 100));
+    expect(hullTint(grey, 150, 300)).toEqual([228, 155, 160]);
+  });
+
+  it("a wreck is as red as it goes, and never past", () => {
+    expect(hullTint(grey, 0, 300)).toEqual([255, 95, 85]);
+    // Nothing going spare, and nothing over the top of a colour.
+    expect(hullTint(grey, 320, 300)).toEqual(grey);
+    expect(hullTint(grey, -50, 300)).toEqual([255, 95, 85]);
   });
 });
 

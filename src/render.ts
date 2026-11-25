@@ -1,12 +1,12 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
-import { DAMAGED_AT, facing, hullMounts, tankCapacity, turretMount, works, type Module } from "./fitting";
+import { DAMAGED_AT, facing, hullMax, hullMounts, tankCapacity, turretMount, works, type Module } from "./fitting";
 import { footprint, gridRect, type Rect } from "./grid";
 import { isItem, partOf } from "./parts";
 import { isOreItem } from "./items";
 import { pickOf } from "./programs";
 import { relativeLine, willCollide, type Motion } from "./relative";
-import { bayBox, colorOf, drawTurret, drawVectorShip, mix } from "./shipArt";
+import { bayBox, colorOf, drawTurret, drawVectorShip, hullTint, mix } from "./shipArt";
 import { canvasTip } from "./tooltip";
 import {
   BLACK_MARKET_LENGTH,
@@ -1540,8 +1540,8 @@ export class Renderer {
       this.drawFlame(x, y, direction, length * size * (0.2 + 0.8 * level), width * size * (0.5 + 0.5 * level));
     }
 
-    const damage = 1 - Math.max(0, ship.hull) / 100;
-    const tint = [red + damage * 55, green - damage * 120, blue - damage * 150].map((v) => Math.round(Math.max(0, Math.min(255, v)))) as [number, number, number];
+    // Worn by share of its own hull, so a 300-point hull starts at its own colour, not past blue.
+    const tint = hullTint([red, green, blue], ship.hull, hullMax(ship.model));
     const broken = drawVectorShip(ctx, ship, tint, this.tankFill(ship));
     for (const [bx, by] of broken) this.drawSparks(bx, by);
     this.drawCargo(ship);

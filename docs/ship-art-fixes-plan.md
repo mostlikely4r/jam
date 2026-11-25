@@ -47,6 +47,8 @@ the same for `bayBox`. In the designer, set the large tank's width to 2 and see 
 
 ## 3. Hull colour by share of the hull (I-6)
 
+*Built.*
+
 *Decided* (the note): "Hull color (more red when damaged) should be based on the % of the hull
 not the flat. A 300 hull now starts blue instead of gray."
 

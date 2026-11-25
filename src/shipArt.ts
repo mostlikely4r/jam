@@ -11,7 +11,21 @@ import type { Box } from "./grid";
 const R = 12;
 
 type Point = [number, number];
-type Color = [number, number, number];
+/** A colour, red, green and blue, 0 to 255 each. */
+export type Color = [number, number, number];
+
+/** The most a hull can redden by, its own colour taken toward hot. */
+const TINT = [55, -120, -150] as const;
+
+/**
+ * A hull's colour as it takes damage: its own colour while whole, further toward red the more of its
+ * points it has lost. `max` is the ship's whole hull, so a 300-point hull reads the same as a
+ * 100-point one at the same share, and starts at its own colour rather than somewhere past blue.
+ */
+export function hullTint(base: Color, hull: number, max: number): Color {
+  const damage = max > 0 ? Math.max(0, Math.min(1, 1 - Math.max(0, hull) / max)) : 0;
+  return [0, 1, 2].map((i) => Math.round(Math.max(0, Math.min(255, base[i] + damage * TINT[i])))) as Color;
+}
 
 /** The colours a hull or a part draws its shapes in, worked out once from the colour it starts from. */
 export interface ShapePalette {

@@ -2,6 +2,15 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-23 · Pricing: one price function, then the new rules · build
+- state: queued
+- backlog: S-55
+- plan: docs/pricing-plan.md
+- added: 2026-11-25
+
+Step 1 moves every price into `price()` with no change in play and stops for a check; step 2
+brings the 60% buy share, frame-plus-parts hulls and the contracts, then stops for the user to try.
+
 ## Q-18 · Hull buying · build
 - state: in progress
 - backlog: S-48

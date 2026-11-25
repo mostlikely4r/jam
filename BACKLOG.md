@@ -434,3 +434,14 @@ prototypes (not in the game):
 
 Parked by the user: the current faces will do for now. Aliens would use the same split: an
 unreadable call-sign, and an emote whose features (crest, antennae, glow) you learn to read.
+
+## S-55 · One price for everything: worth, a station's buy share, and contracts
+- status: specced
+- area: Ships and gear
+- effort: L
+- plan: docs/pricing-plan.md
+- from: the user's questions on the hull shop's prices, 2026-11-25
+
+A single `price(seller, buyer, item, amount)` over an item's worth. Stations buy back at 60%; a
+hull is worth its frame plus its parts; ore keeps full price by a standing contract; the hauler,
+deposit and black market deals become contracts. Closes the hull-swap money loop.

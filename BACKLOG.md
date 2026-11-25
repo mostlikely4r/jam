@@ -576,3 +576,13 @@ While a track plays, the little faces in front of the radio log sway or bob alon
 user, 2026-11-25, after first playing with music: "one thing we definitely need soonish".
 Builds on S-66 (music) and the faces of `docs/chatter-faces-plan.md`.
 
+## S-69 · Station personalities, heard in their music
+- status: idea
+- area: Sound
+- effort: L
+
+Each station has a personality, say a loving mother or a formal butler, and it shows in how it
+talks and in the music that starts once you linger docked and shop. Docked, the work music
+fades (S-66); after a while the station's own music comes in. The user, 2026-11-25. Touches the
+station's voice in `src/voices.json` (`docs/chatter-faces-plan.md`) and the place tracks of S-67.
+

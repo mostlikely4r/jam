@@ -38,14 +38,42 @@ describe("music scheduler", () => {
     expect(untilStart(music, 100, { atWork: false })).toBeNull();
   });
 
-  it("fades out on docking and starts nothing while docked", () => {
-    const music = new MusicScheduler([track("a")], () => 0.5);
+  it("holds the track on docking and picks it up on undocking", () => {
+    const music = new MusicScheduler([track("a"), track("b")], () => 0.5);
     untilStart(music);
-    expect(music.update({ ...work, docked: true })).toEqual({ type: "fadeOut" });
+    const id = music.playing!.id;
+    expect(music.update({ ...work, docked: true })).toEqual({ type: "hold" });
     expect(music.playing).toBeNull();
     expect(untilStart(music, 500, { docked: true })).toBeNull();
-    // Out again, it waits the first delay as at the start.
+    // Out again, even before any work, the same track carries on at once.
+    const back = music.update({ ...work, atWork: false });
+    expect(back).toEqual({ type: "resume", track: expect.objectContaining({ id }) });
+    expect(music.playing?.id).toBe(id);
+  });
+
+  it("starts fresh after docking when nothing was held", () => {
+    const music = new MusicScheduler([track("a")], () => 0.5);
+    untilStart(music);
+    music.trackEnded("always");
+    music.update({ ...work, docked: true });
     expect(untilStart(music)).toBeLessThanOrEqual(MUSIC_TIMING.firstDelay[1]);
+  });
+
+  it("drops a held track when the music is turned off", () => {
+    const music = new MusicScheduler([track("a")], () => 0.5);
+    untilStart(music);
+    music.update({ ...work, docked: true });
+    expect(music.update({ ...work, docked: true, mode: "off" })).toBeNull();
+    expect(music.held).toBeNull();
+    expect(music.update(work)).toBeNull();
+  });
+
+  it("forgets a held track that ran out while fading", () => {
+    const music = new MusicScheduler([track("a")], () => 0.5);
+    untilStart(music);
+    music.update({ ...work, docked: true });
+    music.trackEnded("always");
+    expect(music.update(work)).toBeNull();
   });
 
   it("holds while paused", () => {

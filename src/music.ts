@@ -43,7 +43,16 @@ export const MUSIC_TIMING = {
   floatyShare: 0.25,
 };
 
-export type MusicAction = { type: "start"; track: Track } | { type: "fadeOut" } | null;
+/**
+ * `hold` fades a track out but keeps its place, and `resume` fades it back in from there: the
+ * song waits in the dock and picks up on undocking.
+ */
+export type MusicAction =
+  | { type: "start"; track: Track }
+  | { type: "fadeOut" }
+  | { type: "hold" }
+  | { type: "resume"; track: Track }
+  | null;
 
 export interface MusicInput {
   /** The ship has done something lately: moved, thrusted, shot, picked up ore, flown a course. */
@@ -60,6 +69,8 @@ export interface MusicInput {
 export class MusicScheduler {
   /** The track playing now, or null. */
   playing: Track | null = null;
+  /** The track faded out on docking, kept to pick up again on undocking. */
+  held: Track | null = null;
   /** Seconds of work left before the next track, or null when no count has begun. */
   private wait: number | null = null;
   private last: Track | null = null;
@@ -72,18 +83,28 @@ export class MusicScheduler {
 
   update(input: MusicInput): MusicAction {
     if (input.paused) return null;
-    if (this.playing) {
-      if (input.docked || input.mode === "off") {
-        this.playing = null;
-        // Back out and at work again, it waits the first delay, as at the start.
-        this.wait = null;
-        return { type: "fadeOut" };
-      }
-      return null;
+    if (input.mode === "off") {
+      this.held = null;
+      this.wait = null;
+      if (!this.playing) return null;
+      this.playing = null;
+      return { type: "fadeOut" };
     }
-    if (input.mode === "off" || input.docked) {
+    if (this.playing) {
+      if (!input.docked) return null;
+      this.held = this.playing;
+      this.playing = null;
+      return { type: "hold" };
+    }
+    if (input.docked) {
       this.wait = null;
       return null;
+    }
+    if (this.held) {
+      const track = this.held;
+      this.held = null;
+      this.playing = track;
+      return { type: "resume", track };
     }
     if (!input.atWork) return null;
     if (this.wait === null) this.wait = this.between(MUSIC_TIMING.firstDelay);
@@ -100,6 +121,7 @@ export class MusicScheduler {
   /** The track played to its end: a gap follows. */
   trackEnded(mode: MusicMode): void {
     this.playing = null;
+    this.held = null;
     this.wait = this.gap(mode);
   }
 
@@ -115,6 +137,7 @@ export class MusicScheduler {
   fail(id: string): void {
     this.failed.add(id);
     if (this.playing?.id === id) this.playing = null;
+    if (this.held?.id === id) this.held = null;
     this.wait = 0;
   }
 
@@ -182,7 +205,8 @@ export class MusicPlayer {
     const element = document.createElement("audio");
     element.preload = "auto";
     element.addEventListener("ended", () => {
-      if (!this.current) return;
+      // A held track can still run out during its fade: then there's nothing to pick up.
+      if (!this.current && !this.scheduler.held) return;
       this.current = null;
       this.scheduler.trackEnded(this.mode);
     });
@@ -229,10 +253,17 @@ export class MusicPlayer {
     const now = ctx.currentTime;
     gain.gain.cancelScheduledValues(now);
     gain.gain.setValueAtTime(gain.gain.value, now);
-    if (action.type === "fadeOut") {
+    if (action.type === "fadeOut" || action.type === "hold") {
+      // A held track keeps its src and place, so `resume` carries on from where it faded.
       this.current = null;
       gain.gain.linearRampToValueAtTime(0, now + MUSIC_TIMING.fadeOut);
       this.stopTimer = setTimeout(() => element.pause(), MUSIC_TIMING.fadeOut * 1000);
+      return;
+    }
+    if (action.type === "resume") {
+      this.current = action.track;
+      gain.gain.linearRampToValueAtTime(this.level, now + MUSIC_TIMING.fadeIn);
+      this.play(action.track);
       return;
     }
     this.current = action.track;

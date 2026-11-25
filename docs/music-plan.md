@@ -96,7 +96,8 @@ Built as below, with these differences:
 - **Timing** (my proposal):
   - The first track starts 10–20 s after work begins.
   - Fade in over 3 s.
-  - On docking, fade out over 5 s and start nothing new.
+  - On docking, fade out over 5 s and start nothing new. The track is held, and on undocking
+    it fades back in from where it stopped (*decided* after the first try).
   - On the pause menu, the track pauses, and resumes where it was.
   - Fast-forward (`timeScale`) doesn't touch music.
   - The gap after a track is a random 30–90 s of work.
@@ -118,7 +119,9 @@ Stop here for the user to try.
 
 **Tried** 2026-11-25 (the user's words): "so much better", "this makes playing feel 100%
 better", "it really sets the tone... whimsical.. smooth". One sadness: the music doesn't carry on
-around the station (open, see below). Next wish: the chatter faces swinging to the music (S-68).
+around the station. *Decided*: it still fades in the dock, but the track is held and picks up
+where it stopped on undocking (built the same day). A different kind of music while lingering
+docked belongs to the station personalities (S-69). Next wish: the chatter faces swinging to the music (S-68).
 
 ### 2. Menu, credits and the licence guard
 

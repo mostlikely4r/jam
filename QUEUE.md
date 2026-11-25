@@ -3,7 +3,7 @@
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
 ## Q-27 · Many mounts: every turret and tractor counts · build
-- state: queued
+- state: in progress
 - backlog: S-58
 - plan: docs/many-mounts-plan.md
 - added: 2026-11-25
@@ -174,6 +174,11 @@ moves over, the old bay to the locker; ore nearest the entry sells first.
 
 From the user trying hull buying. Two new shape kinds with their own handles, plus an "add
 default decal" button. Settle how each is drawn, edited and saved, then plan it.
+
+## Q-34 · Chatter faces swing to the music · spec
+- state: queued
+- backlog: S-68
+- added: 2026-11-25
 
 ## Done
 

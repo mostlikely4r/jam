@@ -116,6 +116,10 @@ Built as below, with these differences:
 
 Stop here for the user to try.
 
+**Tried** 2026-11-25 (the user's words): "so much better", "this makes playing feel 100%
+better", "it really sets the tone... whimsical.. smooth". One sadness: the music doesn't carry on
+around the station (open, see below). Next wish: the chatter faces swinging to the music (S-68).
+
 ### 2. Menu, credits and the licence guard
 
 - **Settings** in the pause menu, under the existing Volume and Mute:

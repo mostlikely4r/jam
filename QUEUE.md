@@ -2,6 +2,15 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-11 · Clouds, step 1: clouds you can see · build
+- state: queued
+- backlog: S-42
+- plan: docs/clouds-plan.md
+- added: 2026-11-24
+
+A new place kind: a turned ellipse with a ring and falloff, two looks (gas, dust) on a back or
+front layer. Visuals only, no effects, no AI. Stops for the user to fly through one.
+
 ## Q-28 · Dev tools: tab menu programs, hull switch, fit anywhere, hull names · build
 - state: queued
 - backlog: S-62
@@ -58,15 +67,6 @@ Step 1 (templates and a spawn point) stops for the user to try. Waits on Q-17.
 - added: 2026-11-24
 
 Stands alone. Step 1 (thresholds, looks, weaker thruster) stops for the user to try.
-
-## Q-11 · Clouds, step 1: clouds you can see · build
-- state: queued
-- backlog: S-42
-- plan: docs/clouds-plan.md
-- added: 2026-11-24
-
-A new place kind: a turned ellipse with a ring and falloff, two looks (gas, dust) on a back or
-front layer. Visuals only, no effects, no AI. Stops for the user to fly through one.
 
 ## Q-12 · Clouds, step 2: dampening, nanites and the arc · build
 - state: queued

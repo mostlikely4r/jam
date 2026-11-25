@@ -2979,6 +2979,7 @@ export class HullDesigner {
         angle: aim,
         scale: mount.scale,
         alpha: mount.alpha,
+        part: id,
         gun: gun ? { part: gun.id, wear: 0 } : null,
       });
       return;

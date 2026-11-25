@@ -1562,6 +1562,7 @@ export class Renderer {
         // The aim is smoothed between steps, so the gun doesn't jump on its base.
         angle: ship.prevTurretAngle + turn * alpha,
         scale: base.scale ?? 1,
+        part: turret.part,
         gun: gun ?? null,
         colours: { metal, rim: mix(metal, [255, 255, 255], 0.35) },
       });

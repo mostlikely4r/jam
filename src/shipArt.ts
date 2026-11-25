@@ -128,6 +128,13 @@ const HOT: Color = [255, 138, 58];
 const DEAD: Color = [46, 42, 40];
 
 const rgb = (c: Color) => `rgb(${c[0]},${c[1]},${c[2]})`;
+const rgba = (c: Color, a: number) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+/**
+ * The dark a tank's or a bay's well is filled with: the part's own metal, kept dark so what it holds
+ * reads, or the code's near-black where its art names no metal.
+ */
+const wellColor = (colours: PartColors | undefined): Color => (colours?.metal ? mix(colours.metal, [14, 18, 28], 0.7) : [14, 18, 28]);
 
 /** A `#rrggbb` colour as the triple the art works in, or `fallback` for anything else. */
 export function colorOf(css: string, fallback: Color = METAL): Color {
@@ -249,6 +256,18 @@ export function drawPart(ctx: CanvasRenderingContext2D, kind: PartKind, wear: nu
 }
 
 /**
+ * The colours a part's own art draws it in, or none where the art sets none of its own. Shared by
+ * everything that draws a part, whether through `drawPartArt` or in its own code.
+ */
+function artColours(id: PartId): PartColors | undefined {
+  const art = PART_ART[id];
+  const colours: PartColors = {};
+  if (art?.metal) colours.metal = colorOf(art.metal, METAL);
+  if (art?.rim) colours.rim = colorOf(art.rim, RIM);
+  return colours.metal || colours.rim ? colours : undefined;
+}
+
+/**
  * A part drawn as its own art has it: stretched, faded and in its own colours, over whatever the
  * mount or the ship already scales and fades it by. Draws nothing for a part that has no art of its own.
  */
@@ -258,9 +277,7 @@ export function drawPartArt(ctx: CanvasRenderingContext2D, id: PartId, wear: num
   ctx.save();
   if (art?.scaleX !== undefined || art?.scaleY !== undefined) ctx.scale(art.scaleX ?? 1, art.scaleY ?? 1);
   if (art?.alpha !== undefined) ctx.globalAlpha *= art.alpha;
-  const colours: PartColors = {};
-  if (art?.metal) colours.metal = colorOf(art.metal, METAL);
-  if (art?.rim) colours.rim = colorOf(art.rim, RIM);
+  const colours = artColours(id) ?? {};
   // A part with shapes of its own drawn in the file uses those, worn and scorched as the code's art is.
   if (art?.shapes && art.shapes.length > 0) {
     const palette = partPalette(colours);
@@ -344,6 +361,8 @@ export interface TurretArt {
   alpha?: number;
   /** The gun fitted on it, if one is, and how worn. */
   gun: Module | null;
+  /** The turret's own part, whose art stretches its base; without it the base draws as the code has it. */
+  part?: PartId;
   /** The turret's own colours, where it's damaged or tinted; the code's metal and rim otherwise. */
   colours?: PartColors;
 }
@@ -356,7 +375,11 @@ export function drawTurret(ctx: CanvasRenderingContext2D, art: TurretArt): void 
   ctx.save();
   if (art.alpha !== undefined && art.alpha < 1) ctx.globalAlpha *= art.alpha;
   ctx.translate(art.x, art.y);
-  // The base first, so the gun reads as turning on it.
+  // The base first, so the gun reads as turning on it. Its own art stretches it, as it stretches
+  // the part on any other mount.
+  const own = art.part ? PART_ART[art.part] : undefined;
+  ctx.save();
+  if (own?.scaleX !== undefined || own?.scaleY !== undefined) ctx.scale(own.scaleX ?? 1, own.scaleY ?? 1);
   ctx.fillStyle = rgb(art.colours?.metal ?? METAL);
   ctx.beginPath();
   ctx.arc(0, 0, TURRET_RADIUS * art.scale, 0, Math.PI * 2);
@@ -364,6 +387,7 @@ export function drawTurret(ctx: CanvasRenderingContext2D, art: TurretArt): void 
   ctx.strokeStyle = rgb(art.colours?.rim ?? RIM);
   ctx.lineWidth = 0.6 * art.scale;
   ctx.stroke();
+  ctx.restore();
   if (art.gun) {
     ctx.rotate(art.angle);
     ctx.scale(art.scale * TURRET_GUN, art.scale * TURRET_GUN);
@@ -398,7 +422,7 @@ export function drawHull(ctx: CanvasRenderingContext2D, model: ShipModel, hull: 
  * holds, or else the empty well where a bay would go (the middle if there's no bay mount).
  * A ship without a bay carries nothing at all.
  */
-export function bayBox(ship: ArtShip): Box & { part: PartId | null; alpha: number } {
+export function bayBox(ship: ArtShip): Box & { part: PartId | null; alpha: number; colours?: PartColors } {
   const mounts = hullMounts(ship.model);
   let spot = mounts.find((mount) => mount.types.includes("cargo bay"));
   let part: PartId | null = null;
@@ -414,27 +438,30 @@ export function bayBox(ship: ArtShip): Box & { part: PartId | null; alpha: numbe
   // Drawn bigger the more cells it has.
   const cargo = bay ? bay.w * bay.h : 0;
   const scale = spot?.scale ?? 1;
+  // And stretched, faded and coloured as its own part's art says, as any other part on a mount is.
+  const art = part ? PART_ART[part] : undefined;
   return {
     x: (spot?.x ?? 0) * R,
     y: (spot?.y ?? 0) * R,
     angle: spot ? facing(spot) : 0,
-    w: (4.6 + Math.min(4.6, cargo * 0.09)) * scale,
-    h: (3.2 + Math.min(2.6, cargo * 0.05)) * scale,
+    w: (4.6 + Math.min(4.6, cargo * 0.09)) * scale * (art?.scaleX ?? 1),
+    h: (3.2 + Math.min(2.6, cargo * 0.05)) * scale * (art?.scaleY ?? 1),
     part,
     // How transparent its mount draws it, as in game.
-    alpha: spot?.alpha ?? 1,
+    alpha: (spot?.alpha ?? 1) * (art?.alpha ?? 1),
+    colours: part ? artColours(part) : undefined,
   };
 }
 
 /** The bay's box: a dark well in the hull with a rim, a stronger one for a fitted bay. */
-export function drawBay(ctx: CanvasRenderingContext2D, box: Box & { part: PartId | null; alpha?: number }): void {
+export function drawBay(ctx: CanvasRenderingContext2D, box: Box & { part: PartId | null; alpha?: number; colours?: PartColors }): void {
   ctx.save();
   if ((box.alpha ?? 1) < 1) ctx.globalAlpha = box.alpha!;
   ctx.translate(box.x, box.y);
   ctx.rotate(box.angle);
-  ctx.fillStyle = "rgba(14, 18, 28, 0.85)";
+  ctx.fillStyle = rgba(wellColor(box.colours), 0.85);
   ctx.fillRect(-box.w / 2, -box.h / 2, box.w, box.h);
-  ctx.strokeStyle = box.part ? "rgba(200, 212, 232, 0.9)" : "rgba(160, 172, 192, 0.5)";
+  ctx.strokeStyle = rgba(box.colours?.rim ?? (box.part ? [200, 212, 232] : [160, 172, 192]), box.part ? 0.9 : 0.5);
   ctx.lineWidth = box.part ? 0.6 : 0.4;
   ctx.strokeRect(-box.w / 2, -box.h / 2, box.w, box.h);
   if (box.part) {
@@ -458,6 +485,8 @@ export interface TankBox extends Box {
   /** How full the ship's tanks are, 0 to 1: a hull with two of them shows the same level in each. */
   fill: number;
   alpha: number;
+  /** The tank's own colours, where its art names any. */
+  colours?: PartColors;
 }
 
 /**
@@ -471,16 +500,19 @@ export function tankBoxes(ship: ArtShip, fill: number): TankBox[] {
     if (!module || module.wear >= 1) continue;
     const capacity = partOf(module.part).tank ?? 0;
     if (capacity <= 0) continue;
+    // Stretched, faded and coloured as its own part's art says, as any other part on a mount is.
+    const art = PART_ART[module.part];
     boxes.push({
       x: mount.x * R,
       y: mount.y * R,
       angle: facing(mount),
       // Drawn a little bigger the more it holds, as a bay is.
-      w: (1.9 + Math.min(1.5, capacity * 0.035)) * mount.scale,
-      h: (1.4 + Math.min(1.0, capacity * 0.02)) * mount.scale,
+      w: (1.9 + Math.min(1.5, capacity * 0.035)) * mount.scale * (art?.scaleX ?? 1),
+      h: (1.4 + Math.min(1.0, capacity * 0.02)) * mount.scale * (art?.scaleY ?? 1),
       capacity,
       fill: Math.max(0, Math.min(1, fill)),
-      alpha: mount.alpha ?? 1,
+      alpha: (mount.alpha ?? 1) * (art?.alpha ?? 1),
+      colours: artColours(module.part),
     });
   }
   return boxes;
@@ -496,7 +528,7 @@ export function drawTanks(ctx: CanvasRenderingContext2D, boxes: TankBox[]): void
     if (box.alpha < 1) ctx.globalAlpha = box.alpha;
     ctx.translate(box.x, box.y);
     ctx.rotate(box.angle);
-    ctx.fillStyle = "rgba(14, 18, 28, 0.8)";
+    ctx.fillStyle = rgba(wellColor(box.colours), 0.8);
     ctx.fillRect(-box.w / 2, -box.h / 2, box.w, box.h);
     const inner = { w: box.w - 0.7, h: box.h - 0.7 };
     if (box.fill > 0) {
@@ -505,7 +537,7 @@ export function drawTanks(ctx: CanvasRenderingContext2D, boxes: TankBox[]): void
       // the front goes dark first as the tank empties.
       ctx.fillRect(-inner.w / 2, -inner.h / 2, inner.w * box.fill, inner.h);
     }
-    ctx.strokeStyle = "rgba(200, 212, 232, 0.75)";
+    ctx.strokeStyle = rgba(box.colours?.rim ?? [200, 212, 232], 0.75);
     ctx.lineWidth = 0.45;
     ctx.strokeRect(-box.w / 2, -box.h / 2, box.w, box.h);
     ctx.restore();

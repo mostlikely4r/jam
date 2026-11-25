@@ -25,6 +25,8 @@ and in play; at 50% fuel the back half of each tank is lit.
 
 ## 2. Part art width and height reach every part (I-5)
 
+*Built.*
+
 The note: "Art width and height do not seem to affect anything (like for the large fuel tank)."
 
 The part page in the designer saves `scaleX`, `scaleY`, `alpha` and the colours into

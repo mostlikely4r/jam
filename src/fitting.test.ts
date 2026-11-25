@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { homeSim } from "./home";
 import { copyHull, decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, PART_ART, refresh, removeHull, resetPartArt, resetPartStats, shipFileNow, thrustOf, useShipFile, type HullInfo, type PartArt } from "./fitting";
 import { SHIP_MODELS, type PartId, type ThrusterRole } from "./parts";
-import { bayBox, drawTanks, drawTurret, drawVectorShip } from "./shipArt";
+import { bayBox, drawTanks, drawTurret, drawVectorShip, tankBoxes } from "./shipArt";
 import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
 import { DOCK_OFFSET, SHIP_RADIUS, Sim } from "./sim";
@@ -799,6 +799,18 @@ describe("mounts as they draw in game", () => {
     }
   }
 
+  /** Runs `body` with a part's own art set, and puts it back after. */
+  function withArt(id: PartId, art: PartArt, body: () => void): void {
+    const was = PART_ART[id];
+    PART_ART[id] = art;
+    try {
+      body();
+    } finally {
+      if (was) PART_ART[id] = was;
+      else delete PART_ART[id];
+    }
+  }
+
   it("a mount's transparency and draw order carry through a ship file round trip", () => {
     withFile(
       () => {
@@ -878,6 +890,26 @@ describe("mounts as they draw in game", () => {
     // The whole of its height, rather than a level across it.
     expect(h).toBeCloseTo(2, 5);
     expect(y).toBeCloseTo(-1, 5);
+  });
+
+  it("a tank and a bay take their own part's art: its stretch and its fade", () => {
+    const ship = { ...newFitting("racer"), model: "racer" as const };
+    const tank = tankBoxes(ship, 1)[0];
+    const bay = bayBox(ship);
+    expect(bay.part).not.toBeNull();
+    const tall: PartArt = { scaleX: 2, scaleY: 3, alpha: 0.5 };
+    withArt("smallTank", tall, () =>
+      withArt(bay.part!, tall, () => {
+        const wider = tankBoxes(ship, 1)[0];
+        expect(wider.w / tank.w).toBeCloseTo(2, 5);
+        expect(wider.h / tank.h).toBeCloseTo(3, 5);
+        expect(wider.alpha).toBeCloseTo(tank.alpha * 0.5, 5);
+        const bigger = bayBox(ship);
+        expect(bigger.w / bay.w).toBeCloseTo(2, 5);
+        expect(bigger.h / bay.h).toBeCloseTo(3, 5);
+        expect(bigger.alpha).toBeCloseTo(bay.alpha * 0.5, 5);
+      }),
+    );
   });
 });
 
@@ -1045,6 +1077,25 @@ describe("a turret draws as a circle with its gun on it", () => {
     const disk = calls.find(([name]) => name === "arc")!;
     // Twice the mount's size, twice the circle.
     expect(disk[1][2]).toBeCloseTo(8.4, 5);
+  });
+
+  it("stretches its base as its own part's art says, and the gun is left to its own", () => {
+    const { ctx, calls } = recorder();
+    const was = PART_ART.turret;
+    PART_ART.turret = { scaleX: 2, scaleY: 0.5 };
+    try {
+      drawTurret(ctx, { x: 0, y: 0, angle: 0, scale: 1, part: "turret", gun: { part: "gun1", wear: 0 } });
+    } finally {
+      if (was) PART_ART.turret = was;
+      else delete PART_ART.turret;
+    }
+    // The base is drawn stretched, and put back before the gun turns on it.
+    const stretch = calls.findIndex(([name, args]) => name === "scale" && args[0] === 2 && args[1] === 0.5);
+    const disk = calls.findIndex(([name, args]) => name === "arc" && args[2] > 1);
+    const turn = calls.findIndex(([name]) => name === "rotate");
+    expect(stretch).toBeGreaterThan(-1);
+    expect(stretch).toBeLessThan(disk);
+    expect(disk).toBeLessThan(turn);
   });
 });
 

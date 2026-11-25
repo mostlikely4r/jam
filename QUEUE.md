@@ -2,10 +2,14 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-34 · Chatter faces swing to the music · spec
+## Q-35 · Chatter faces swing to the music · build
 - state: queued
 - backlog: S-68
+- plan: docs/chatter-faces-sway-plan.md
 - added: 2026-11-25
+
+Step 1 (tempo, the nod, the gallery preview) stops for the user to try the motion at 26px; step 2
+stops again once the log moves with a track.
 
 ## Q-28 · Dev tools: tab menu programs, hull switch, fit anywhere, hull names · build
 - state: queued
@@ -173,6 +177,13 @@ From the user trying hull buying. Two new shape kinds with their own handles, pl
 default decal" button. Settle how each is drawn, edited and saved, then plan it.
 
 ## Done
+
+## Q-34 · Chatter faces swing to the music · spec
+- state: done
+- done: 2026-11-25
+- backlog: S-68
+- plan: docs/chatter-faces-sway-plan.md
+- added: 2026-11-25
 
 ## Q-27 · Many mounts: every turret and tractor counts · build
 - state: done

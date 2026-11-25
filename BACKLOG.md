@@ -571,14 +571,16 @@ place; music from stations that fades with distance, and pirates with their own 
 before they're seen. Details in `docs/music-plan.md`, Not in this build.
 
 ## S-68 · Chatter faces swing to the music
-- status: idea
+- status: specced
 - area: Sound
 - effort: S
 - priority: P1
+- plan: docs/chatter-faces-sway-plan.md
 
 While a track plays, the little faces in front of the radio log sway or bob along with it. The
 user, 2026-11-25, after first playing with music: "one thing we definitely need soonish".
-Builds on S-66 (music) and the faces of `docs/chatter-faces-plan.md`.
+Builds on S-66 (music) and the faces of `docs/chatter-faces-plan.md`. Specced 2026-11-25: hand-set
+`bpm` per track, a nod per voice, the beat read off the audio position.
 
 ## S-69 · Station personalities, heard in their music
 - status: idea

@@ -70,3 +70,6 @@ Auto targeting program. Tweak: max range.
 
 ## I-15 · Objects should not 'despawn' when in the view of the player.
 - added: 2026-11-25 10:52
+
+## I-16 · It should be possible to rename hulls in the designer
+- added: 2026-11-25 10:53

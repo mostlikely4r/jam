@@ -26,3 +26,8 @@ With multiple thrusters the ship can thrust while turning too.
 - added: 2026-11-25 10:12
 
 Art with and height do not seem to effect anything (like for the large fuel tank).
+
+## I-6 · Hull color (more red when damaged) should be based on the % of the hull not the…
+- added: 2026-11-25 10:13
+
+Hull color (more red when damaged) should be based on the % of the hull not the flat. A 300 hull now starts blue instead of gray.

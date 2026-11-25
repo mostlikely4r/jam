@@ -36,3 +36,8 @@ Hull color (more red when damaged) should be based on the % of the hull not the 
 - added: 2026-11-25 10:15
 
 In the parts tab/cheat menu should be a option to add programs (like parts), a option to switch hull and a checkbox to allow fitting outside of stations docks
+
+## I-8 · There should be a quick way to sell items in your bay. Maybe shift or right cli…
+- added: 2026-11-25 10:22
+
+There should be a quick way to sell items in your bay. Maybe shift or right click?

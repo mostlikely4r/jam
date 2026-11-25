@@ -513,7 +513,7 @@ Three small fixes to the dock shop and ship screen. Selling modules back already
 station's parts, so I-10's second half needs no change.
 
 ## S-62 · Dev tools: programs and hull switch in the tab menu, fit anywhere, hull names
-- status: specced
+- status: building
 - area: Testing
 - effort: S
 - plan: docs/dev-tools-plan.md

@@ -79,6 +79,8 @@ export interface HullInfo {
   loadouts: Loadout[];
   /** What the hull is used for. */
   usedBy: HullUse[];
+  /** The name people read. Without one, its id in words. The id never changes, so saves and worlds needn't follow. */
+  name?: string;
   /** Credits a bare hull costs at a yard. Without one, the game's own rebuild cost. */
   price?: number;
   /** The weight of the bare hull. Without one, the game's base weight. */
@@ -253,7 +255,9 @@ function readHullInfo(raw: Partial<HullInfo> | undefined): HullInfo {
     const value = raw?.[key];
     return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
   };
-  return { programs: [...new Set(programs)], loadouts: readLoadouts(raw?.loadouts), usedBy, price: stat("price"), weight: stat("weight"), hull: stat("hull") };
+  // An empty name is no name: the id's words stand in.
+  const name = typeof raw?.name === "string" && raw.name.trim() !== "" ? raw.name.trim() : undefined;
+  return { programs: [...new Set(programs)], loadouts: readLoadouts(raw?.loadouts), usedBy, name, price: stat("price"), weight: stat("weight"), hull: stat("hull") };
 }
 
 /** A hull's loadouts read from a file: a name, program ids the game knows, and no repeated names. */
@@ -491,8 +495,13 @@ export function newGameHulls(): ShipModel[] {
   return SHIP_MODELS.filter((model) => hullInfo(model).usedBy.includes("newGame"));
 }
 
-/** A hull's name as people read it: its id in words, `racerCopy` being "Racer Copy". */
+/** A hull's name as people read it: its own name from the ship file, or its id in words, `racerCopy` being "Racer Copy". */
 export function hullName(model: string): string {
+  return HULL_INFO[model]?.name ?? hullIdName(model);
+}
+
+/** A hull's id in words, for when it has no name of its own: `racerCopy` is "Racer Copy". */
+export function hullIdName(model: string): string {
   const words = model
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .split(/[^A-Za-z0-9]+/)
@@ -1124,5 +1133,9 @@ export function copyHull(from: ShipModel, to: ShipModel): void {
   HULL_MOUNTS[to] = copy(HULL_MOUNTS[from] ?? []);
   HULL_EDGE[to] = copy(HULL_EDGE[from] ?? []);
   HULL_SHAPES[to] = copy(HULL_SHAPES[from] ?? []);
-  HULL_INFO[to] = { ...copy(HULL_INFO[from] ?? { programs: [], loadouts: [], usedBy: [] }), usedBy: [] };
+  const info = copy(HULL_INFO[from] ?? { programs: [], loadouts: [], usedBy: [] });
+  info.usedBy = [];
+  // A copy is its id's words for a name until the designer gives it one of its own.
+  delete info.name;
+  HULL_INFO[to] = info;
 }

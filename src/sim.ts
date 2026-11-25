@@ -301,6 +301,8 @@ export interface HullPlan {
   tankFuel: Partial<Record<MountId, number>>;
   /** Your programs the new computer has no slot for: still yours, just not loaded. */
   unloaded: PartId[];
+  /** Parts with nowhere to go: only a free hull switch, which leaves them adrift beside the ship. */
+  dropped: Module[];
 }
 
 export interface Rock extends Body {
@@ -4124,11 +4126,12 @@ export class Sim {
   private lockerOverflow = false;
 
   /**
-   * Makes a change to a docked ship that may need room in the player's locker. If the locker
-   * runs out of room, or the change says it failed, everything goes back as it was.
+   * Makes a change to a ship that may need room in the player's locker. If the locker runs out
+   * of room, or the change says it failed, everything goes back as it was. In flight there's no
+   * locker (fitting with `fitAnywhere` on), so only the ship is put back.
    */
-  private attempt(ship: Ship, base: Base, change: () => boolean): boolean {
-    const locker = ship === this.ship ? this.lockerAt(base) : null;
+  private attempt(ship: Ship, base: Base | null, change: () => boolean): boolean {
+    const locker = base && ship === this.ship ? this.lockerAt(base) : null;
     const account = this.accountOf(ship);
     const saved = {
       fit: { ...ship.fit },
@@ -4139,9 +4142,12 @@ export class Sim {
       tweaks: copyPicks(ship.tweaks),
       items: locker ? [...locker.items] : [],
       credits: account.credits,
-      baseCredits: base.account.credits,
-      partCarry: base.partCarry,
-      stock: new Map(base.stock),
+      baseCredits: base?.account.credits ?? 0,
+      partCarry: base?.partCarry ?? 0,
+      stock: base ? new Map(base.stock) : new Map<PartId, number>(),
+      // Fitting in flight can spill a module into space before the change is refused: it goes back.
+      loot: this.loot.length,
+      ores: this.ores.length,
     };
     this.lockerOverflow = false;
     const done = change();
@@ -4156,20 +4162,24 @@ export class Sim {
     ship.tweaks = saved.tweaks;
     if (locker) locker.items = saved.items;
     account.credits = saved.credits;
-    base.account.credits = saved.baseCredits;
-    base.partCarry = saved.partCarry;
-    base.stock = saved.stock;
+    this.loot.length = saved.loot;
+    this.ores.length = saved.ores;
+    if (base) {
+      base.account.credits = saved.baseCredits;
+      base.partCarry = saved.partCarry;
+      base.stock = saved.stock;
+    }
     refresh(ship);
     return false;
   }
 
   /**
-   * Whether a change to a docked ship would go through, without making it: for the screens to
-   * light up where a dragged item can go. Everything it touches is put back after.
+   * Whether a change to a ship would go through, without making it: for the screens to light up
+   * where a dragged item can go. Everything it touches is put back after.
    */
   dryRun(ship: Ship, change: () => boolean): boolean {
     const base = this.baseAt(ship);
-    if (!base) return false;
+    if (!base && !this.fitsHere(ship)) return false;
     const events = this.events.length;
     const loot = this.loot.length;
     const refused = this.buyRefused;
@@ -4212,9 +4222,9 @@ export class Sim {
     install(ship, id);
   }
 
-  /** Loads or unloads one of the pilot's programs. Only in a dock. Returns whether it changed. */
+  /** Loads or unloads one of the pilot's programs. Only where fitting happens. Returns whether it changed. */
   setProgram(ship: Ship, id: PartId, loaded: boolean): boolean {
-    if (!this.atShop(ship)) return false;
+    if (!this.fitsHere(ship)) return false;
     const changed = loaded ? install(ship, id) : uninstall(ship, id);
     if (changed && !loaded) this.dropOrderFor(ship, id);
     return changed;
@@ -4291,15 +4301,19 @@ export class Sim {
    * id, then one with the same role, then any that takes it, empty ones first. A part of the new
    * hull's own pushed off by one of yours, and a part of yours with no mount, go into the locker
    * here, or the new bay when the locker is full. Your cargo moves to the new bay.
+   *
+   * With `free` (the dev panel's hull switch) it doesn't matter where you are, what the station
+   * sells or what it costs, and a part with room in neither the locker nor the new bay is
+   * dropped rather than refused.
    */
-  planHull(ship: Ship, model: ShipModel): HullPlan | { refused: string } {
+  planHull(ship: Ship, model: ShipModel, free = false): HullPlan | { refused: string } {
     const base = this.baseAt(ship);
     if (ship !== this.ship) return { refused: "Only you can buy a hull" };
-    if (!base || !this.atShop(ship)) return { refused: "Only in a dock" };
-    if (!this.hullsSold(base).includes(model)) return { refused: "Not sold here" };
+    if (!free && (!base || !this.atShop(ship))) return { refused: "Only in a dock" };
+    if (!free && !this.hullsSold(base!).includes(model)) return { refused: "Not sold here" };
     if (model === ship.model) return { refused: "You fly one already" };
-    const price = this.hullPrice(model);
-    const tradeIn = this.hullPrice(ship.model);
+    const price = free ? 0 : this.hullPrice(model);
+    const tradeIn = free ? 0 : this.hullPrice(ship.model);
     const net = price - tradeIn;
     if (net > 0 && this.accountOf(ship).credits < net) return { refused: "Not enough credits" };
 
@@ -4386,17 +4400,20 @@ export class Sim {
     }
 
     // What has no mount: the locker first, then the new bay. With room in neither, no sale.
-    const lockerNow = this.lockers.get(base.id) ?? { rows: this.tuning.lockerFreeRows, items: [] };
-    const lockerGrid = this.lockerGrid(lockerNow);
+    const lockerNow = base ? this.lockers.get(base.id) ?? { rows: this.tuning.lockerFreeRows, items: [] } : null;
+    const lockerGrid = lockerNow ? this.lockerGrid(lockerNow) : null;
     const locker: Placed[] = [];
     const bay: PartId[] = [];
+    const dropped: Module[] = [];
     spare.sort((a, b) => cellCount(b) - cellCount(a));
     for (const module of [...spare, ...overflow]) {
-      const there = [...lockerNow.items, ...locker];
-      const inLocker = autoPlace(lockerGrid, there, module);
-      if (inLocker && canPlace(lockerGrid, there, inLocker)) {
-        locker.push(inLocker);
-        continue;
+      if (lockerNow && lockerGrid) {
+        const there = [...lockerNow.items, ...locker];
+        const inLocker = autoPlace(lockerGrid, there, module);
+        if (inLocker && canPlace(lockerGrid, there, inLocker)) {
+          locker.push(inLocker);
+          continue;
+        }
       }
       const inBay = grid ? this.planSpots(grid, hold, [module], undefined, true) : null;
       if (inBay) {
@@ -4404,7 +4421,12 @@ export class Sim {
         if (!overflow.includes(module)) bay.push(module.part);
         continue;
       }
+      // Your cargo isn't left to drift: a hull with no room for it is refused, whatever the switch says.
       if (overflow.includes(module)) return { refused: "No room for your cargo in the new bay or your locker here: unload first" };
+      if (free) {
+        dropped.push(module);
+        continue;
+      }
       return { refused: `No room for the ${partOf(module.part).label} in your locker here or the new bay` };
     }
 
@@ -4423,7 +4445,7 @@ export class Sim {
       poured -= fill;
     }
     const unloaded = ship.programs.slice(computerSize(after));
-    return { model, price, tradeIn, net, fit, moved, traded, locker, hold, bay, tankFuel, unloaded };
+    return { model, price, tradeIn, net, fit, moved, traded, locker, hold, bay, tankFuel, unloaded, dropped };
   }
 
   /**
@@ -4441,10 +4463,35 @@ export class Sim {
     // The yard builds the new hull from its parts and breaks the old one down into them.
     this.chargeForService(account, plan.price, base);
     this.chargeForService(account, -plan.tradeIn, base);
+    this.changeHull(ship, model, plan);
+    this.buyRefused = null;
+    this.events.push({ type: "sale", x: ship.x, y: ship.y });
+    return true;
+  }
+
+  /**
+   * For the dev panel: the player's hull becomes any hull, anywhere, for nothing, the way a
+   * bought one does. What has no room in the new bay or a locker drifts off beside the ship.
+   * Returns why it didn't happen, or null when it did.
+   */
+  devChangeHull(ship: Ship, model: ShipModel): string | null {
+    const plan = this.planHull(ship, model, true);
+    if ("refused" in plan) return plan.refused;
+    this.changeHull(ship, model, plan);
+    this.events.push({ type: "sale", x: ship.x, y: ship.y });
+    return null;
+  }
+
+  /**
+   * Makes a hull plan real: the new hull and the look that comes with it, what moved over, the
+   * fuel and the programs trimmed. The money, where there is any, is `buyHull`'s.
+   */
+  private changeHull(ship: Ship, model: ShipModel, plan: HullPlan): void {
+    const base = this.baseAt(ship);
     ship.model = model;
     ship.fit = plan.fit;
     ship.hold = plan.hold;
-    this.lockerAt(base).items.push(...plan.locker);
+    if (base) this.lockerAt(base).items.push(...plan.locker);
     // A new hull has its own look.
     ship.decals = newFitting(model, () => nextRandom(this.lookState)).decals;
     refresh(ship);
@@ -4459,10 +4506,9 @@ export class Sim {
     ship.tankFuel = plan.tankFuel;
     ship.fuel = kept;
     if (lost > 0) this.flow(FUEL, -lost);
+    // A free switch has no locker to fall back on: what fits nowhere goes adrift.
+    for (const module of plan.dropped) this.setAdrift(ship, module, 25);
     if (ship.tow && !this.hasClamp(ship)) this.letGoTow(ship);
-    this.buyRefused = null;
-    this.events.push({ type: "sale", x: ship.x, y: ship.y });
-    return true;
   }
 
   /**
@@ -4595,14 +4641,19 @@ export class Sim {
     if (!item || !this.canTake(ship, from)) return null;
     if (from.at === "mount") unfit(ship, from.mount);
     else if (from.at === "hold") ship.hold.splice(from.index, 1);
-    else this.lockerAt(this.baseAt(ship)!).items.splice(from.index, 1);
+    else {
+      const base = this.baseAt(ship);
+      if (!base) return null;
+      this.lockerAt(base).items.splice(from.index, 1);
+    }
     if (from.at === "mount" && partOf(item.part).kind === "computer") trimPrograms(ship);
     return item;
   }
 
   /**
-   * Puts a module from the bay or the locker on the ship. Only in a dock. What comes off goes
-   * where it came from, or into the locker; if there's no room there either, nothing changes.
+   * Puts a module from the bay or the locker on the ship. Only in a dock, or anywhere in flight
+   * with the dev switch on. What comes off goes where it came from, or into the bay; with room
+   * in neither, nothing changes.
    */
   fitItem(ship: Ship, from: ItemPlace, mount?: MountId): boolean {
     const done = this.fitItemNow(ship, from, mount);
@@ -4614,7 +4665,7 @@ export class Sim {
   private fitItemNow(ship: Ship, from: ItemPlace, mount?: MountId): boolean {
     const base = this.baseAt(ship);
     const item = this.itemAt(ship, from);
-    if (!base || !item || item.wear >= 1) return false;
+    if (!this.fitsHere(ship) || !item || item.wear >= 1) return false;
     const part = partOf(item.part);
     // Onto one mount in particular: a single part, not a pair or a turret, which go as they always do.
     if (mount !== undefined && (part.set ?? 1) === 1 && part.kind !== "turret") {
@@ -4639,17 +4690,19 @@ export class Sim {
    * one came from, at its spot if it fits there, else anywhere in that grid; if it fits nowhere
    * there, the fit is refused.
    */
-  private fitOn(ship: Ship, from: ItemPlace, item: Module, mount: MountId, base: Base): boolean {
+  private fitOn(ship: Ship, from: ItemPlace, item: Module, mount: MountId, base: Base | null): boolean {
     if (from.at === "mount" || !this.mountTakesHere(ship, mount, item.part)) return false;
+    // Only a dock has a locker to take what comes off the ship.
+    if (from.at === "locker" && !base) return false;
     const old = ship.fit[mount];
     if (old && partOf(old.part).kind === "turret") return false;
-    const locker = this.lockerAt(base);
-    const pile = from.at === "hold" ? ship.hold : locker.items;
+    const locker = base ? this.lockerAt(base) : null;
+    const pile = from.at === "hold" ? ship.hold : locker!.items;
     const placed = pile[from.index];
     if (!this.canTake(ship, from)) return false;
     const rest = pile.filter((each) => each !== placed);
     if (from.at === "hold") ship.hold = rest;
-    else locker.items = rest;
+    else locker!.items = rest;
     ship.fit[mount] = item;
     refresh(ship);
     if (partOf(item.part).kind === "computer") trimPrograms(ship);
@@ -4669,11 +4722,11 @@ export class Sim {
       if (!found) return false;
       ship.hold.push(found);
     } else {
-      const grid = this.lockerGrid(locker);
+      const grid = this.lockerGrid(locker!);
       const tries = [false, true].map((turned) => ({ module: old, x: placed.x, y: placed.y, turned }));
-      const found = tries.find((each) => canPlace(grid, locker.items, each)) ?? autoPlace(grid, locker.items, old);
+      const found = tries.find((each) => canPlace(grid, locker!.items, each)) ?? autoPlace(grid, locker!.items, old);
       if (!found) return false;
-      locker.items.push(found);
+      locker!.items.push(found);
     }
     return true;
   }
@@ -4694,12 +4747,14 @@ export class Sim {
   }
 
   /** Fits a module from the bay or locker on the mounts it goes on, the way a click on Fit does. */
-  private fitFrom(ship: Ship, from: ItemPlace, item: Module, base: Base): boolean {
+  private fitFrom(ship: Ship, from: ItemPlace, item: Module, base: Base | null): boolean {
     if (mountsFor(ship, item.part).length === 0) return false;
+    // Only a dock has a locker: in flight a part may only come from the bay.
+    if (from.at === "locker" && !base) return false;
     // A pair goes on as a pair: the other half has to be where this one is.
     const set = partOf(item.part).set ?? 1;
-    const locker = this.lockerAt(base);
-    const pile = (from.at === "hold" ? ship.hold : locker.items).map((placed) => placed.module);
+    const locker = base ? this.lockerAt(base) : null;
+    const pile = (from.at === "hold" ? ship.hold : locker!.items).map((placed) => placed.module);
     const pair = [item, ...pile.filter((other) => other !== item && other.part === item.part && other.wear < 1)].slice(0, set);
     if (pair.length < set) return false;
     if (from.at === "hold") {
@@ -4709,7 +4764,9 @@ export class Sim {
       const left = this.packed(ship, rest);
       if (grid && !left.every((placed) => sticks(grid, left, placed))) return false;
       ship.hold = rest;
-    } else locker.items = locker.items.filter((placed) => !pair.includes(placed.module));
+    } else {
+      locker!.items = locker!.items.filter((placed) => !pair.includes(placed.module));
+    }
     const mounts = mountsFor(ship, item.part);
     const off: Module[] = [];
     for (const [i, mount] of mounts.entries()) {
@@ -4728,10 +4785,12 @@ export class Sim {
     if (partOf(item.part).kind === "computer") trimPrograms(ship);
     this.settleHold(ship, base);
     // What came off goes where this came from: the bay if it has a spot, or else the locker.
+    // In flight there's no locker: what has no room in the bay undoes the fit.
     for (const module of off) {
       const spot = from.at === "hold" ? this.holdSpotFor(ship, module) : null;
       if (spot) ship.hold.push(spot);
-      else this.putInLocker(base, module);
+      else if (base) this.putInLocker(base, module);
+      else return false;
     }
     return true;
   }
@@ -4821,13 +4880,13 @@ export class Sim {
 
   /**
    * Moves an item into the bay, at a spot or wherever it goes best, if it sticks there and
-   * leaves room for the ore aboard. Only in a dock. From the bay itself, it moves the item.
+   * leaves room for the ore aboard. Only where fitting happens. From the bay itself, it moves
+   * the item.
    */
   toHold(ship: Ship, from: ItemPlace, at?: Spot): boolean {
     const item = this.itemAt(ship, from);
-    const base = this.baseAt(ship);
     const grid = this.bayGrid(ship);
-    if (!item || !base || !grid || !this.canTake(ship, from)) return false;
+    if (!item || !this.fitsHere(ship) || !grid || !this.canTake(ship, from)) return false;
     // A bay can't carry itself.
     if (from.at === "mount" && partOf(item.part).bay) return false;
     const rest = from.at === "hold" ? ship.hold.filter((_, index) => index !== from.index) : ship.hold;
@@ -5665,6 +5724,15 @@ export class Sim {
   /** In a dock: every base has a shop. */
   atShop(ship: Ship = this.ship): boolean {
     return this.isDocked(ship);
+  }
+
+  /**
+   * Whether fitting and programs work here: in a dock, as always, or anywhere for the player in
+   * flight with the dev switch on. Other ships fit only in a dock, so the switch never touches
+   * how traffic and pilots behave.
+   */
+  fitsHere(ship: Ship = this.ship): boolean {
+    return this.atShop(ship) || (this.tuning.fitAnywhere && ship === this.ship);
   }
 
   /**

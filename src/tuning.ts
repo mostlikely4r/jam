@@ -61,6 +61,9 @@ export const DEFAULTS = {
   partPriceScale: 1,
   partWeightScale: 1,
 
+  /** Dev switch: fitting, unloading programs and the like work in flight, the bay standing in for the locker. */
+  fitAnywhere: false,
+
   floaterStart: true,
   /** The hull the start menu puts the player in. Empty: the floater, or the racer, by `floaterStart`. */
   startHull: "",
@@ -443,6 +446,7 @@ export const GROUPS: Group[] = [
       { key: "partPriceScale", label: "Part A a module is made from: share of its price", min: 0, max: 5, step: 0.1 },
       { key: "partWeightScale", label: "Weight scale", min: 0, max: 5, step: 0.1 },
     ],
+    switches: [{ key: "fitAnywhere", label: "Fit anywhere: the ship screen works in flight, the bay standing in for the locker" }],
   },
   {
     title: "New ship",

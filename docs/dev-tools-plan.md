@@ -2,9 +2,9 @@
 
 Written 2026-11-25, from two inbox notes (I-7, I-16) the user wrote while testing hulls and parts.
 Both are tools for the user as designer and tester, not for players: the tab menu's Parts group
-and the hull designer. Nothing here is built yet.
+and the hull designer. Both are built (2026-11-25), as noted under each.
 
-## 1. The tab menu's Parts group (I-7)
+## 1. The tab menu's Parts group (I-7) (*built* 2026-11-25)
 
 *Decided* (the note): "In the parts tab/cheat menu should be an option to add programs (like
 parts), an option to switch hull and a checkbox to allow fitting outside of station docks."
@@ -36,7 +36,22 @@ Today the Parts group (`src/main.ts:1325`) has "Add to bay" for any item and "Gi
 lands in the bay; off, the same call is refused. A test that the free hull switch keeps the
 fitted parts that fit the new hull.
 
-## 2. Rename hulls in the designer (I-16)
+As built, all of it as proposed:
+
+- The program picker lists `PROGRAM_PARTS` (the programs as parts) rather than `PROGRAMS`: it
+  gives each one its label and id, which is what `devSet` takes.
+- `Sim.fitsHere(ship)` is the one gate: a dock, or `fitAnywhere` for the player's own ship only,
+  so turning the switch on never changes how traffic and pilots fit.
+- Hull switching: `planHull(…, free = true)` skips the dock, the list and the money, and returns a
+  `dropped` list for what the locker and the new bay both refuse; `buyHull` and the dev panel's
+  `devChangeHull` both end in a shared `changeHull`, which sets what has nowhere to go adrift
+  with `setAdrift` (the same rule a bay spill already uses in flight). The player's cargo is
+  still refused when the new bay can't take it: ore isn't dropped overboard.
+- `Inventory` has a `fits` getter for the screen's fitting, keeping the locker column, the shop
+  drop target and every Sell button on `docked`.
+- The tests are `src/devtools.test.ts`.
+
+## 2. Rename hulls in the designer (I-16) (*built* 2026-11-25)
 
 *Decided* (the note): "It should be possible to rename hulls in the designer."
 
@@ -57,6 +72,12 @@ real name, which is the case the note is about.
 **Check:** a test that `hullName` returns the saved name and falls back to the id's words; the
 designer's hull list sorts by the shown name (it already sorts by `hullName`).
 
+As built: the name lives in `hullInfo` (`HullInfo.name`), so the designer's save writes it with
+nothing new to the file's shape; `hullIdName` is the old body of `hullName`, kept for the
+field's placeholder and the fallback. A copy of a hull drops the name, so two hulls never share
+one: a copy shows its id's words until it's renamed. No shipped hull has a name, so nothing
+reads differently until one is given one.
+
 ## How we'll know
 
 - The checks above, `npm test` and `npm run build` (the editor-boundary check in the build covers
@@ -73,3 +94,5 @@ Nothing: hull buying (Q-18) and the designer's hull pages are built.
 
 - Changing a hull's id: only needed if ids ever show to players, and they don't.
 - A cheat for station stock or blueprints.
+- A hull picker that marks which hull you fly: the list's current value is the one flown, which
+  is enough for a tool.

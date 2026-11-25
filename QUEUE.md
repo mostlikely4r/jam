@@ -11,14 +11,6 @@
 A new place kind: a turned ellipse with a ring and falloff, two looks (gas, dust) on a back or
 front layer. Visuals only, no effects, no AI. Stops for the user to fly through one.
 
-## Q-28 · Dev tools: tab menu programs, hull switch, fit anywhere, hull names · build
-- state: queued
-- backlog: S-62
-- plan: docs/dev-tools-plan.md
-- added: 2026-11-25
-
-Tools for testing, not for players. Stands alone.
-
 ## Q-29 · Click move: the faster way, thrust while turning, top speed · build
 - state: queued
 - backlog: S-59
@@ -168,6 +160,16 @@ From the user trying hull buying. Two new shape kinds with their own handles, pl
 default decal" button. Settle how each is drawn, edited and saved, then plan it.
 
 ## Done
+
+## Q-28 · Dev tools: tab menu programs, hull switch, fit anywhere, hull names · build
+- state: done
+- done: 2026-11-25
+- backlog: S-62
+- plan: docs/dev-tools-plan.md
+- added: 2026-11-25
+
+Tools for testing, not for players. Stands alone. Built 2026-11-25: a program picker and a hull
+switch in the Parts group, a "Fit anywhere" switch, and a hull's own name in the designer.
 
 ## Q-35 · Chatter faces swing to the music · build
 - state: done

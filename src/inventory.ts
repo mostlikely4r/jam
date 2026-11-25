@@ -116,6 +116,8 @@ export class Inventory {
           ship.credits,
           base ? sim.lockerAt(base) : null,
           base ? sim.storageFree(base) : null,
+          // The dev switch changes what the screen lets you do in flight.
+          sim.tuning.fitAnywhere,
           // The designer can change a part's icon in place: it reaches a screen already open.
           PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join(),
         ])
@@ -138,8 +140,17 @@ export class Inventory {
     this.box.append(columns);
   }
 
+  /** In a dock. Only here can things be bought, sold and kept in a locker. */
   private get docked(): boolean {
     return this.sim.baseAt() !== null;
+  }
+
+  /**
+   * Where fitting happens: in a dock, or anywhere in flight with the dev switch on. In flight the
+   * bay stands in for the locker: what comes off a mount goes there, or the move is refused.
+   */
+  private get fits(): boolean {
+    return this.docked || this.sim.tuning.fitAnywhere;
   }
 
   private redraw(): void {
@@ -188,7 +199,9 @@ export class Inventory {
     this.selected = null;
     bar.textContent = this.docked
       ? "Drag things to move them, R turns what you hold. Click one for its buttons, shift click sells it. Drop on the shop to sell."
-      : "Fitting, loading and storing are done in a dock.";
+      : this.fits
+        ? "Fitting and programs work here: the bay is the only place a part can go, and there's no selling in flight."
+        : "Fitting, loading and storing are done in a dock.";
     return bar;
   }
 
@@ -201,18 +214,21 @@ export class Inventory {
         if (change()) this.selected = null;
         else this.message = this.refusal({ from: "item", place, module: item, turned: false, grab: { x: 0, y: 0 } }, null);
       });
-    if (!this.docked) return place.at === "hold" ? [act("Drop", () => sim.dropItem(ship, place.index))] : [];
+    if (!this.fits) return place.at === "hold" ? [act("Drop", () => sim.dropItem(ship, place.index))] : [];
     const out: HTMLButtonElement[] = [];
     // An item isn't a module: nothing to fit.
     if (place.at !== "mount" && !isItem(item.part)) out.push(act("Fit", () => sim.fitItem(ship, place)));
     if (place.at !== "hold") out.push(act("To bay", () => sim.toHold(ship, place)));
-    if (place.at !== "locker") out.push(act("To locker", () => sim.toLocker(ship, place)));
+    // The locker and the shop belong to a station.
+    if (this.docked && place.at !== "locker") out.push(act("To locker", () => sim.toLocker(ship, place)));
     if (place.at !== "mount") {
       const placed = place.at === "hold" ? ship.hold[place.index] : sim.lockerAt(sim.baseAt()!).items[place.index];
       const turned: Spot = { x: placed.x, y: placed.y, turned: !placed.turned };
       out.push(act("Turn", () => (place.at === "hold" ? sim.toHold(ship, place, turned) : sim.toLocker(ship, place, turned))));
-      out.push(this.button(`Sell ${sim.moduleValue(item)}`, () => this.sellAt(place, item)));
-    } else if (!partOf(item.part).builtIn) out.push(act(`Sell ${sim.moduleValue(item)}`, () => sim.sellPart(ship, item.part)));
+      if (this.docked) out.push(this.button(`Sell ${sim.moduleValue(item)}`, () => this.sellAt(place, item)));
+      // In flight a bay item can still be thrown out to drift.
+      else if (place.at === "hold") out.push(act("Drop", () => sim.dropItem(ship, place.index)));
+    } else if (this.docked && !partOf(item.part).builtIn) out.push(act(`Sell ${sim.moduleValue(item)}`, () => sim.sellPart(ship, item.part)));
     return out;
   }
 
@@ -323,13 +339,13 @@ export class Inventory {
       port.textContent = "+";
       setTip(port, () => `${mount.name}: empty. Takes ${mount.types.join(", ")}`);
     }
-    if (this.docked) port.dataset.drop = `mount:${mount.id}`;
+    if (this.fits) port.dataset.drop = `mount:${mount.id}`;
     this.ports.set(mount.id, port);
     if (!module) return port;
     const place: ItemPlace = { at: "mount", mount: mount.id };
     if (this.isSelected(place)) port.classList.add("selected");
     port.addEventListener("click", () => this.select(place));
-    if (this.docked) makeDraggable(port, () => ({ from: "item", place, module, turned: false, grab: this.centre(module, false) }), partOf(module.part).label);
+    if (this.fits) makeDraggable(port, () => ({ from: "item", place, module, turned: false, grab: this.centre(module, false) }), partOf(module.part).label);
     return port;
   }
 
@@ -349,7 +365,7 @@ export class Inventory {
       if (id) {
         const part = partOf(id);
         slot.append(partIcon(part, 20));
-        const click = this.docked ? ". Click to unload" : "";
+        const click = this.fits ? ". Click to unload" : "";
         setTip(slot, () => `${part.label}: ${ship.parts.has(id) ? "running" : "loaded, computer down"}${click}${this.tweaksTip(id)}`);
         this.programHandle(slot, id, true);
       }
@@ -363,7 +379,7 @@ export class Inventory {
       const chip = document.createElement("div");
       chip.className = "chip";
       chip.append(partIcon(part, 20));
-      setTip(chip, () => `${part.label}: yours, not loaded${this.docked ? ". Click to load" : ""}${this.tweaksTip(part.id)}`);
+      setTip(chip, () => `${part.label}: yours, not loaded${this.fits ? ". Click to load" : ""}${this.tweaksTip(part.id)}`);
       this.programHandle(chip, part.id, false);
       owned.append(chip);
     }
@@ -384,7 +400,7 @@ export class Inventory {
       event.stopPropagation();
       this.openTweaks(id, event.clientX, event.clientY);
     });
-    if (!this.docked) return;
+    if (!this.fits) return;
     element.addEventListener("click", () => {
       if (!this.sim.setProgram(this.sim.ship, id, !loaded)) this.message = loaded ? "It can't come out here" : "No free slot in the computer";
       else this.message = "";
@@ -512,7 +528,7 @@ export class Inventory {
     view.className = "grid";
     view.style.width = `${spec.w * CELL}px`;
     view.style.height = `${spec.h * CELL}px`;
-    if (this.docked) view.dataset.drop = kind;
+    if (kind === "hold" ? this.fits : this.docked) view.dataset.drop = kind;
     const bay = kind === "hold";
     if (spec.entry) {
       const packed = bay ? this.sim.packed(this.sim.ship) : items;
@@ -545,7 +561,7 @@ export class Inventory {
         if (this.docked && event.shiftKey) this.sellAt(place, item.module);
         else this.select(place);
       });
-      if (this.docked) {
+      if (this.fits) {
         let grab = this.centre(item.module, item.turned);
         // Held where it was picked up, so it lands the way it's carried.
         tile.addEventListener("pointerdown", (event) => {

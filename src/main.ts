@@ -19,7 +19,7 @@ import { ITEMS, itemDef } from "./items";
 import { PROGRAM_PARTS } from "./programs";
 import { computerSize, hullMax, hullName, mountsHolding, newFitting, newGameHulls, owns, tankMounts, } from "./fitting";
 import { drawVectorShip } from "./shipArt";
-import type { ShipModel } from "./parts";
+import { SHIP_MODELS, type ShipModel } from "./parts";
 import { blueprintIcon, iconEl } from "./icons";
 import { canSupplyLine, partCategory, shopCellState, SHOP_CATEGORIES, type ShopBadge } from "./shop";
 import { setTip } from "./tooltip";
@@ -1439,7 +1439,7 @@ function buildPanel(): void {
     if (group.title === "Parts") {
       // Any item, straight into the bay: what the designers make, and what a test ship needs.
       const note = document.createElement("p");
-      note.textContent = "Any item in the game, free for testing. It goes in your bay; a module fitted on the ship is another matter.";
+      note.textContent = "Any item in the game, free for testing. An item goes in your bay; a program's loaded if the computer has a slot. The switch under the sliders lets the ship screen work in flight.";
       const pick = document.createElement("select");
       for (const item of ITEMS) pick.append(new Option(`${item.name} (${item.type})`, item.id));
       const add = document.createElement("button");
@@ -1457,13 +1457,43 @@ function buildPanel(): void {
       const row = document.createElement("div");
       row.className = "row";
       row.append(pick, add);
+      // Any program, free: loaded if the computer has a slot, owned either way.
+      const programPick = document.createElement("select");
+      for (const part of PROGRAM_PARTS) programPick.append(new Option(part.label, part.id));
+      const give = document.createElement("button");
+      give.textContent = "Give program";
+      give.addEventListener("click", () => {
+        const id = programPick.value as PartId;
+        sim.devSet(sim.ship, id, true);
+        said.textContent = `${partOf(id).label}: ${sim.ship.programs.includes(id) ? "running" : "yours, not loaded, no free slot"}`;
+      });
+      const programRow = document.createElement("div");
+      programRow.className = "row";
+      programRow.append(programPick, give);
+      // Any hull, free, wherever the ship is: the carry-over a bought one gets, the station's list ignored.
+      const hullPick = document.createElement("select");
+      for (const model of SHIP_MODELS) hullPick.append(new Option(hullName(model), model));
+      hullPick.value = sim.ship.model;
+      const swap = document.createElement("button");
+      swap.textContent = "Switch hull";
+      swap.addEventListener("click", () => {
+        const why = sim.devChangeHull(sim.ship, hullPick.value as ShipModel);
+        if (why) said.textContent = why;
+        else {
+          hullPick.value = sim.ship.model;
+          said.textContent = `Flying the ${hullName(sim.ship.model).toLowerCase()} now`;
+        }
+      });
+      const hullRow = document.createElement("div");
+      hullRow.className = "row";
+      hullRow.append(hullPick, swap);
       const money = document.createElement("button");
       money.textContent = "Give money";
       money.addEventListener("click", () => {
         sim.ship.credits += 1000;
         money.blur();
       });
-      body.append(note, row, said, money);
+      body.append(note, row, programRow, hullRow, said, money);
     }
   }
 

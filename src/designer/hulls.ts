@@ -41,6 +41,7 @@ import {
   hullDefaults,
   addPoint,
   dragPoint,
+  hullIdName,
   hullInfo,
   hullName,
   isDecal,
@@ -722,6 +723,19 @@ export class HullDesigner {
       ),
     );
     const info = hullInfo(this.model);
+    // The name people read, in the shop and the start menu: its id in words until this says otherwise.
+    const named = document.createElement("input");
+    named.type = "text";
+    named.value = info.name ?? "";
+    named.placeholder = hullIdName(this.model);
+    named.addEventListener("change", () => {
+      const text = named.value.trim();
+      if (text === "") delete info.name;
+      else info.name = text;
+      this.changed();
+    });
+    const namedNote = document.createElement("p");
+    namedNote.textContent = "The name people read, in the shop, the start menu and this list. Empty: the id in words. The id itself never changes, so saves and worlds needn't follow a rename.";
     const usedBy = this.multi(
       `used:${this.model}`,
       info.usedBy,
@@ -780,7 +794,7 @@ export class HullDesigner {
     statsNote.textContent = `Left empty, the game's own: ${DEFAULTS.rebuildCost} credits for a bare hull, weight ${DEFAULTS.weight} and 100 hull points. Cargo room comes only from fitted bays: each hull comes with the small one.`;
     const out: HTMLElement[] = [
       intro,
-      this.section("hull", "Hull", models, ...this.hullButtons()),
+      this.section("hull", "Hull", models, this.labelled("Name", named), namedNote, ...this.hullButtons()),
       this.section("hullshape", "Shape", ...this.shapesEditor()),
       this.section("used", "Used by", usedBy, usedNote),
       this.section("programs", "Default programs", programs, programsNote),

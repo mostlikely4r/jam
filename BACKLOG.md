@@ -466,3 +466,84 @@ tractor's an arc, which exist only in the code's own art (`src/shipArt.ts`), so 
 make or match them. Wanted: an ellipse shape (two radii and a turn) and an arc (a radius, start
 and end angles, a line width), each with handles in the shape editor; and an "add default decal"
 button that adds the polygon our hulls' default shapes use as a decal.
+
+## S-58 · Many mounts: every turret and tractor counts
+- status: specced
+- area: Ships and gear
+- effort: M
+- plan: docs/many-mounts-plan.md
+- from: I-1, I-3, I-9
+
+Only the first turret takes a gun, only one tractor works and its cone ignores the mount. Each
+turret gets its own gun slot and angle; each tractor its own cone from its mount. Also answers I-9:
+any part on any mount it fits works once the code stops expecting one of each.
+
+## S-59 · Click move: the faster way, thrust while turning, a top speed tweak
+- status: specced
+- area: Movement and aiming
+- effort: M
+- plan: docs/click-move-thrust-plan.md
+- from: I-2, I-14
+
+The click pilot compares turn-and-burn with pushing direct from the real thrusters, fires what
+helps while it turns, and Click to move gets a top speed tweak.
+
+## S-60 · Ship art fixes: tanks drain front to back, part art everywhere, hull tint by share
+- status: specced
+- area: Polish
+- effort: S
+- plan: docs/ship-art-fixes-plan.md
+- from: I-4, I-5, I-6
+
+Three independent fixes in `src/shipArt.ts` and `src/render.ts`. The second makes S-45's longer
+tank a designer setting.
+
+## S-61 · Dock shop fixes: shift-click sells, programs ignore parts, your credits on top
+- status: specced
+- area: Inventory
+- effort: S
+- plan: docs/dock-shop-fixes-plan.md
+- from: I-8, I-10, I-11
+
+Three small fixes to the dock shop and ship screen. Selling modules back already returns the
+station's parts, so I-10's second half needs no change.
+
+## S-62 · Dev tools: programs and hull switch in the tab menu, fit anywhere, hull names
+- status: specced
+- area: Testing
+- effort: S
+- plan: docs/dev-tools-plan.md
+- from: I-7, I-16
+
+The tab menu's Parts group gives programs, switches hull and can allow fitting in flight; the
+designer gives a hull a shown name beside its id.
+
+## S-63 · Auto targeting: next main target rule, and a program that picks
+- status: specced
+- area: Programs
+- effort: M
+- plan: docs/auto-targeting-plan.md
+- from: I-13
+
+A Targeting tweak for which target becomes main next (order, nearest, in front, collision), and
+an Auto targeting program with a max range, so idle mining doesn't stop when the queue runs dry.
+
+## S-64 · Nothing vanishes in view
+- status: specced
+- area: World
+- effort: M
+- plan: docs/in-view-plan.md
+- from: I-15
+
+The sim watches the camera, not just the ship, and no sleep, record or forget rule takes anything
+the player can see. The guess: it was seen with the camera away from the ship (the pod ride).
+
+## S-65 · Blueprints for programs and hulls
+- status: specced
+- area: World
+- effort: L
+- plan: docs/blueprints-plan.md
+- from: I-12
+
+Stations get unlocked and wanted lists for programs and hulls, as for modules: funded by the
+player or the station, brought by the hauler.

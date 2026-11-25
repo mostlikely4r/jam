@@ -2,6 +2,71 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-25 · Dock shop fixes: shift-click sells, programs ignore parts, your credits · build
+- state: queued
+- backlog: S-61
+- plan: docs/dock-shop-fixes-plan.md
+- added: 2026-11-25
+
+Three small fixes, one commit each. Stands alone.
+
+## Q-26 · Ship art fixes: tank drain, part art everywhere, hull tint · build
+- state: queued
+- backlog: S-60
+- plan: docs/ship-art-fixes-plan.md
+- added: 2026-11-25
+
+Three small fixes, one commit each. The second makes the tank item of Q-13 a designer setting.
+
+## Q-27 · Many mounts: every turret and tractor counts · build
+- state: queued
+- backlog: S-58
+- plan: docs/many-mounts-plan.md
+- added: 2026-11-25
+
+Turrets first, then tractors. Bumps `SAVE_VERSION`.
+
+## Q-28 · Dev tools: tab menu programs, hull switch, fit anywhere, hull names · build
+- state: queued
+- backlog: S-62
+- plan: docs/dev-tools-plan.md
+- added: 2026-11-25
+
+Tools for testing, not for players. Stands alone.
+
+## Q-29 · Click move: the faster way, thrust while turning, top speed · build
+- state: queued
+- backlog: S-59
+- plan: docs/click-move-thrust-plan.md
+- added: 2026-11-25
+
+Step 1 (the top speed tweak) stops for the user to try; step 3 stops again.
+
+## Q-30 · Nothing vanishes in view · build
+- state: queued
+- backlog: S-64
+- plan: docs/in-view-plan.md
+- added: 2026-11-25
+
+Rests on a guess about where it was seen: step 1 (the camera as the viewer) stops for the user
+to try.
+
+## Q-31 · Auto targeting · build
+- state: queued
+- backlog: S-63
+- plan: docs/auto-targeting-plan.md
+- added: 2026-11-25
+
+Step 2 stops for the user to try idle mining with it.
+
+## Q-32 · Blueprints for programs and hulls · build
+- state: queued
+- backlog: S-65
+- plan: docs/blueprints-plan.md
+- added: 2026-11-25
+
+Hulls first, then programs; stops after hulls for the user to fund one. Bumps `SAVE_VERSION`.
+
 ## Q-19 · AI hulls: templates and spawn points · build
 - state: queued
 - backlog: S-49

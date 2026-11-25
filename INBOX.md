@@ -49,3 +49,8 @@ There should be a quick way to sell items in your bay. Maybe shift or right clic
 - added: 2026-11-25 10:25
 
 Selling modules should return the station parts?
+
+## I-11 · Player credits should shown at the top of the station shop screen. Sesion credi…
+- added: 2026-11-25 10:26
+
+Player credits should shown at the top of the station shop screen. Sesion credits can be removed there.

@@ -547,3 +547,22 @@ the player can see. The guess: it was seen with the camera away from the ship (t
 
 Stations get unlocked and wanted lists for programs and hulls, as for modules: funded by the
 player or the station, brought by the hauler.
+
+## S-66 · Music: funk under the work
+- status: specced
+- area: Sound
+- effort: M
+- plan: docs/music-plan.md
+
+Licensed tracks (CC0 or CC BY only) play while the ship is at work, with a now-playing line,
+credits and a small music menu. Disco, soul and funk; the Digital Love astronaut in the flow.
+
+## S-67 · Music later: hunt music, place tracks, station and pirate radio
+- status: parked
+- area: Sound
+- effort: L
+
+Rockier music when the player commits to a hunt (never as a warning); tracks only heard at one
+place; music from stations that fades with distance, and pirates with their own station, heard
+before they're seen. Details in `docs/music-plan.md`, Not in this build.
+

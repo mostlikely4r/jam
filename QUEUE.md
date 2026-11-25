@@ -2,6 +2,15 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-33 · Music: funk under the work · build
+- state: queued
+- backlog: S-66
+- plan: docs/music-plan.md
+- added: 2026-11-25
+
+Step 1 stops for the user to try one track under mining. Needs a CC0 or CC BY funk track from the
+user to try; builds and passes without one.
+
 ## Q-25 · Dock shop fixes: shift-click sells, programs ignore parts, your credits · build
 - state: queued
 - backlog: S-61

@@ -851,7 +851,7 @@ function loadLine(deposit: Deposit): ShopLine {
 
 function updateDepositShop(deposit: Deposit): void {
   const { ship } = sim;
-  const title = `Field deposit - holds ${sim.oreCount(deposit.ore)} ore, ${sim.depositRoom(deposit)} of ${tuning.depositCapacity} room free`;
+  const title = `Field deposit - your credits ${Math.floor(ship.credits)} - holds ${sim.oreCount(deposit.ore)} ore, ${sim.depositRoom(deposit)} of ${tuning.depositCapacity} room free`;
   if (shopHeading.textContent !== title) shopHeading.textContent = title;
   const state = `deposit ${sim.oreIn(ship)} ${sim.cargoSpace(ship)} ${ship.credits} ${sim.oreCount(deposit.ore)} ${tuning.depositPays} ${tuning.depositSells} ${tuning.depositCapacity}`;
   if (state === shopState) return;
@@ -867,7 +867,7 @@ function updateDepositShop(deposit: Deposit): void {
 function updatePirateShop(): void {
   const { ship } = sim;
   const held = sim.oreCount(sim.pirateOre);
-  const title = `Pirate base - ${held} ore for sale at ${tuning.depositSells} each`;
+  const title = `Pirate base - your credits ${Math.floor(ship.credits)} - ${held} ore for sale at ${tuning.depositSells} each`;
   if (shopHeading.textContent !== title) shopHeading.textContent = title;
   const amount = sim.pirateBaseBuyable(ship);
   const state = `pirate ${sim.oreIn(ship)} ${sim.cargoSpace(ship)} ${ship.credits} ${held} ${tuning.depositSells}`;
@@ -947,7 +947,8 @@ function updateShop(): void {
     return;
   }
   if (base) {
-    const title = `Dock shop - station ${Math.floor(base.account.credits)} credits - ${haulerText(base)}`;
+    // Your money, not the station's: the tab menu's debug line keeps the station's balance.
+    const title = `Dock shop - your credits ${Math.floor(ship.credits)} - ${haulerText(base)}`;
     if (shopHeading.textContent !== title) shopHeading.textContent = title;
   }
   if (!docked) shopOpen = false;

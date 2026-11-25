@@ -2,14 +2,6 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-25 · Dock shop fixes: shift-click sells, programs ignore parts, your credits · build
-- state: queued
-- backlog: S-61
-- plan: docs/dock-shop-fixes-plan.md
-- added: 2026-11-25
-
-Three small fixes, one commit each. Stands alone.
-
 ## Q-26 · Ship art fixes: tank drain, part art everywhere, hull tint · build
 - state: queued
 - backlog: S-60
@@ -191,6 +183,15 @@ From the user trying hull buying. Two new shape kinds with their own handles, pl
 default decal" button. Settle how each is drawn, edited and saved, then plan it.
 
 ## Done
+
+## Q-25 · Dock shop fixes: shift-click sells, programs ignore parts, your credits · build
+- state: done
+- done: 2026-11-25
+- backlog: S-61
+- plan: docs/dock-shop-fixes-plan.md
+- added: 2026-11-25
+
+Three small fixes, one commit each. Stands alone. Built 2026-11-25.
 
 ## Q-33 · Music: funk under the work · build
 - state: done

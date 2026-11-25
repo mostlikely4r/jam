@@ -1,10 +1,10 @@
 # Dock shop fixes plan
 
 Written 2026-11-25, from three inbox notes (I-8, I-10, I-11) the user wrote while trading in the
-dock. Three small fixes to the dock shop and ship screen; one commit each. Nothing here is built
-yet.
+dock. Three small fixes to the dock shop and ship screen; one commit each. Built 2026-11-25; each
+step is marked below as it landed.
 
-## 1. Quick sell from the bay (I-8)
+## 1. Quick sell from the bay (I-8) *built*
 
 The note: "There should be a quick way to sell items in your bay. Maybe shift or right click?"
 
@@ -22,7 +22,12 @@ get "Shift click sells it".
 **Check:** a test through the inventory's handler, or the sim call it makes, that a shift-click
 on a bay item while docked sells it and pays; undocked, nothing happens.
 
-## 2. Programs don't wait on the station's parts (I-10)
+**Built:** shift click sells, mounts are left out, and the hint line and the item's tooltip say so.
+The Sell button and the shift click now make the same call (`Inventory.sellAt`), so both say the
+station's own reason when a sale is turned down. The test is at the sim call: docked it sells and
+pays, out in space it is refused and the item stays (`items.test.ts`).
+
+## 2. Programs don't wait on the station's parts (I-10) *built*
 
 The note: "Programs should not cost the station parts. Selling modules should return the
 station parts?"
@@ -35,6 +40,12 @@ programs as "[out of parts]" and greys them out.
 **Fix:** `saleLine` treats a program as always supplied (the station's parts don't come into it).
 The drone line, which really does spend parts (`chargeForService`), keeps the check.
 
+**Built:** `canSupplyLine` in `src/shop.ts` says what a line needs, and `saleLine` asks it: a
+program is always supplied, a part comes from the store, a service (the drone) from the station's
+parts. Buying a program never spent parts (`Sim.buyPart`), so this was the shop line's side only.
+Tests: the pure rule (`shop.test.ts`) and a station with no parts A that sells a program and turns
+down a drone (`fitting.test.ts`).
+
 **Selling modules back already returns parts** (answer to the note's question, no change): a
 working module goes into the station's store whole, ready to sell again; a damaged one is broken
 down and its worth goes back into the station's parts A (`Sim.takeBack`, `sim.ts:3970`). The
@@ -43,7 +54,7 @@ pricing plan (`docs/pricing-plan.md`, Q-23) changes what the station pays, not t
 **Check:** a test that with a station's parts A at 0 the program's shop line is enabled for a
 buyer with the credits, and the drone's isn't.
 
-## 3. Your credits at the top of the shop (I-11)
+## 3. Your credits at the top of the shop (I-11) *built*
 
 The note: "Player credits should be shown at the top of the station shop screen. Session credits
 can be removed there."
@@ -58,6 +69,10 @@ menu's debug lines in `main.ts`, so the number isn't lost for testing). The depo
 
 **Check:** by eye; the heading's text changes when you buy something.
 
+**Built:** all three headings read `your credits`, and so do the deposit's and the pirate base's.
+The station's balance stays in the tab menu's debug lines (`<base> balance <credits>`), so no line
+was added.
+
 ## How we'll know
 
 - The checks above, `npm test` and `npm run build`.
@@ -68,6 +83,12 @@ menu's debug lines in `main.ts`, so the number isn't lost for testing). The depo
 ## Needs first
 
 Nothing.
+
+## Built 2026-11-25
+
+All three fixes, one commit each, from the plan above. Nothing came up in the review. The suite
+passes (884 tests) and the build is clean; the only `npm test` complaint was vitest's own
+`onTaskUpdate` worker timeout, with every test green.
 
 ## Not in this build
 

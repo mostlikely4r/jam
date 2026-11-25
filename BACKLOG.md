@@ -499,7 +499,7 @@ Three independent fixes in `src/shipArt.ts` and `src/render.ts`. The second make
 tank a designer setting.
 
 ## S-61 · Dock shop fixes: shift-click sells, programs ignore parts, your credits on top
-- status: specced
+- status: built
 - area: Inventory
 - effort: S
 - plan: docs/dock-shop-fixes-plan.md

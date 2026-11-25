@@ -41,3 +41,6 @@ In the parts tab/cheat menu should be a option to add programs (like parts), a o
 - added: 2026-11-25 10:22
 
 There should be a quick way to sell items in your bay. Maybe shift or right click?
+
+## I-9 · How easy is it to put tractors or thrusters on (turret) mounts?
+- added: 2026-11-25 10:24

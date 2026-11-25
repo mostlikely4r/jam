@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { homeSim } from "./home";
 import { copyHull, decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, PART_ART, refresh, removeHull, resetPartArt, resetPartStats, shipFileNow, thrustOf, useShipFile, type HullInfo, type PartArt } from "./fitting";
 import { SHIP_MODELS, type PartId, type ThrusterRole } from "./parts";
-import { bayBox, drawTanks, drawTurret, drawVectorShip, hullTint, tankBoxes } from "./shipArt";
+import { bayBox, drawBay, drawTanks, drawTurret, drawVectorShip, hullTint, tankBoxes } from "./shipArt";
 import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
 import { DOCK_OFFSET, SHIP_RADIUS, Sim } from "./sim";
@@ -875,6 +875,32 @@ describe("mounts as they draw in game", () => {
     );
   });
 
+  it("a tank and a bay take their own part's colours", () => {
+    const ship = { ...newFitting("racer"), model: "racer" as const };
+    const bay = bayBox(ship);
+    expect(bay.part).not.toBeNull();
+    // A context that records the colours drawn in, and nothing else.
+    const styles: string[] = [];
+    const ctx = new Proxy({} as CanvasRenderingContext2D, {
+      get: () => () => {},
+      set: (_target, name: string, value) => {
+        if (name === "fillStyle" || name === "strokeStyle") styles.push(String(value));
+        return true;
+      },
+    });
+    withArt("smallTank", { metal: "#204060", rim: "#ff0000" }, () => {
+      drawTanks(ctx, tankBoxes(ship, 1));
+      // The frame in the tank's own edge colour, the well in its metal, kept dark so the level reads.
+      expect(styles).toContain("rgba(255,0,0,0.75)");
+      expect(styles).toContain("rgba(19,32,48,0.8)");
+    });
+    withArt(bay.part!, { rim: "#00ff00" }, () => {
+      styles.length = 0;
+      drawBay(ctx, bayBox(ship));
+      expect(styles).toContain("rgba(0,255,0,0.9)");
+    });
+  });
+
   it("a tank's fuel sits at its back and goes dark from the front", () => {
     const calls: [string, number[]][] = [];
     const ctx = new Proxy({} as CanvasRenderingContext2D, {
@@ -1096,6 +1122,32 @@ describe("a turret draws as a circle with its gun on it", () => {
     expect(stretch).toBeGreaterThan(-1);
     expect(stretch).toBeLessThan(disk);
     expect(disk).toBeLessThan(turn);
+  });
+
+  it("fades its base as its own part's art says, and leaves the gun to its own", () => {
+    // The fade comes and goes inside its own save, before the gun turns on the base.
+    const calls: [string, number[]][] = [];
+    const ctx = new Proxy({} as CanvasRenderingContext2D, {
+      get: (_target, name: string) => (name === "globalAlpha" ? 1 : (...args: number[]) => void calls.push([name, args])),
+      set: (_target, name: string, value) => {
+        if (name === "globalAlpha") calls.push([name, [value as number]]);
+        return true;
+      },
+    });
+    const was = PART_ART.turret;
+    PART_ART.turret = { alpha: 0.4 };
+    try {
+      drawTurret(ctx, { x: 0, y: 0, angle: 0, scale: 1, part: "turret", gun: { part: "gun1", wear: 0 } });
+    } finally {
+      if (was) PART_ART.turret = was;
+      else delete PART_ART.turret;
+    }
+    const faded = calls.findIndex(([name, args]) => name === "globalAlpha" && args[0] === 0.4);
+    const turn = calls.findIndex(([name]) => name === "rotate");
+    const closed = calls.findIndex(([name], i) => i > faded && name === "restore");
+    expect(faded).toBeGreaterThan(-1);
+    expect(closed).toBeGreaterThan(faded);
+    expect(closed).toBeLessThan(turn);
   });
 });
 

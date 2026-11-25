@@ -375,7 +375,7 @@ export interface TurretArt {
   alpha?: number;
   /** The gun fitted on it, if one is, and how worn. */
   gun: Module | null;
-  /** The turret's own part, whose art stretches its base; without it the base draws as the code has it. */
+  /** The turret's own part, whose art stretches and fades its base; without it the base draws as the code has it. */
   part?: PartId;
   /** The turret's own colours, where it's damaged or tinted; the code's metal and rim otherwise. */
   colours?: PartColors;
@@ -389,10 +389,11 @@ export function drawTurret(ctx: CanvasRenderingContext2D, art: TurretArt): void 
   ctx.save();
   if (art.alpha !== undefined && art.alpha < 1) ctx.globalAlpha *= art.alpha;
   ctx.translate(art.x, art.y);
-  // The base first, so the gun reads as turning on it. Its own art stretches it, as it stretches
-  // the part on any other mount.
+  // The base first, so the gun reads as turning on it. Its own art stretches and fades it, as it
+  // stretches and fades the part on any other mount; the gun keeps to its own art.
   const own = art.part ? PART_ART[art.part] : undefined;
   ctx.save();
+  if (own?.alpha !== undefined) ctx.globalAlpha *= own.alpha;
   if (own?.scaleX !== undefined || own?.scaleY !== undefined) ctx.scale(own.scaleX ?? 1, own.scaleY ?? 1);
   ctx.fillStyle = rgb(art.colours?.metal ?? METAL);
   ctx.beginPath();

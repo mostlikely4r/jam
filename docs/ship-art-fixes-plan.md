@@ -1,8 +1,8 @@
 # Ship art fixes plan
 
 Written 2026-11-25, from three inbox notes (I-4, I-5, I-6) the user wrote while trying hulls and
-tanks. Three small, independent fixes to how a ship is drawn; one commit each. Nothing here is
-built yet.
+tanks. Three small, independent fixes to how a ship is drawn; one commit each. Built the same day,
+see the end.
 
 ## 1. Tanks empty front to back (I-4)
 
@@ -39,6 +39,10 @@ own code and never read `PART_ART`, so their settings do nothing.
 `scaleY`, and take its `alpha` and colours; `drawTurret` scales its base the same way. Everything
 the part page offers then shows on the ship, in the designer's preview and in game.
 
+*Built*, with one addition the plan left out: the turret's base also takes its part's `alpha`, not
+just its stretch. A turret faded on the part page otherwise stayed opaque, which breaks the same
+promise the stretch does.
+
 **Also settles S-45's longer tank** (proposal): with this in, the "fuel tanks draw twice as long"
 fix in S-45 (Q-13) is a width of 2 set on each tank's part page, no code. Q-13 can drop that item.
 
@@ -61,6 +65,8 @@ already use `hullMax`; nothing else found on 2026-11-25.
 
 **Check:** a test of the tint as a small pure function (move it out of `render.ts` into one
 `hullTint(hull, max)`): full is the base grey for any max, half is halfway to the damaged colour.
+As built it takes the ship's own colour too, `hullTint(base, hull, max)`: every ship already draws
+in its own colour (traffic, drones, pirates), and the tint is that colour worn, not a fixed grey.
 
 ## How we'll know
 
@@ -73,6 +79,24 @@ already use `hullMax`; nothing else found on 2026-11-25.
 ## Needs first
 
 Nothing.
+
+## Built 2026-11-25
+
+All three, one commit each: `e880913`, `a35ff05`, `d1d945d`, then the review's findings. Tests
+added in `src/fitting.test.ts`: a tank's fuel sits at its back and goes dark from the front; a
+tank and a bay take their part's stretch and fade; tanks and bays take its colours; the turret
+stretches and fades its base, with the gun kept to its own art; `hullTint` by share. The suite
+passes (892 tests) and the build is clean; the only `npm test` complaint is vitest's own
+`onTaskUpdate` worker timeout, with every test green.
+
+What changed from the plan, both noted above: `hullTint` takes the ship's own colour as well as
+its hull and maximum, and the turret's base fades with its part as well as stretching.
+
+Review raised two findings, both fixed: the turret's part alpha was ignored, and no test covered
+the colours reaching a tank or a bay.
+
+**Checked by eye:** not yet. The tank level, the stretched tank, the colours and the 300-hull tint
+are for the user to try (the **Try it** line above).
 
 ## Not in this build
 

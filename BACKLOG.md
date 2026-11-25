@@ -321,7 +321,8 @@ to locker, then to the new bay, then refusal; unload order follows the entry.
 - effort: S
 - from: I-1, I-2, I-3, I-7
 
-Four independent fixes, one change each; the first is built, three are left.
+Four independent fixes, one change each; the first is built, the last is settled elsewhere, two
+are left.
 - **Fit by mounts (I-7).** *Built 2026-11-25*, with the hull buying fixes: `fits` is gone from
   parts altogether, so mounts alone decide. The racer has a tractor mount but the shop said the
   tractor can't fit: `tractor` carried `fits: ["floater"]` in `src/parts.ts`, which overrode the
@@ -336,6 +337,9 @@ Four independent fixes, one change each; the first is built, three are left.
 - **Longer tank art (I-3).** *Decided:* fuel tanks draw twice as long on the ship
   (`src/shipArt.ts`). Visual only: grid shape, inventory and fuel held stay the same. Check the
   hulls in the designer that the longer tank still sits on the hull.
+  *Settled 2026-11-25 by S-60 (Q-26):* no code needed. Part art width and height reach every
+  part now, so a width of 2 on each tank's part page draws it twice as long, and the setting
+  shows on the ship, in the designer and in game.
 
 ## S-46 · Designer comforts: deselect, zoom, undo, layers, multi-select, part art, turret
 - status: built
@@ -489,7 +493,7 @@ The click pilot compares turn-and-burn with pushing direct from the real thruste
 helps while it turns, and Click to move gets a top speed tweak.
 
 ## S-60 · Ship art fixes: tanks drain front to back, part art everywhere, hull tint by share
-- status: specced
+- status: built
 - area: Polish
 - effort: S
 - plan: docs/ship-art-fixes-plan.md

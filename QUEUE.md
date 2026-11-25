@@ -2,14 +2,6 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-26 · Ship art fixes: tank drain, part art everywhere, hull tint · build
-- state: queued
-- backlog: S-60
-- plan: docs/ship-art-fixes-plan.md
-- added: 2026-11-25
-
-Three small fixes, one commit each. The second makes the tank item of Q-13 a designer setting.
-
 ## Q-27 · Many mounts: every turret and tractor counts · build
 - state: queued
 - backlog: S-58
@@ -155,7 +147,8 @@ brings the 60% buy share, frame-plus-parts hulls and the contracts, then stops f
 - added: 2026-11-24
 
 Four independent fixes; the decided spec is the S-45 text in BACKLOG.md. The first, fit by mounts
-(I-7), was built 2026-11-25 with the hull buying fixes: news links, traffic beams and tank art are
+(I-7), was built 2026-11-25 with the hull buying fixes; the tank art one is settled too, by S-60
+(Q-26): a width of 2 on each tank's part page in the designer. News links and traffic beams are
 left.
 
 ## Q-14 · Face target faces any target, main or closest · build
@@ -183,6 +176,16 @@ From the user trying hull buying. Two new shape kinds with their own handles, pl
 default decal" button. Settle how each is drawn, edited and saved, then plan it.
 
 ## Done
+
+## Q-26 · Ship art fixes: tank drain, part art everywhere, hull tint · build
+- state: done
+- done: 2026-11-25
+- backlog: S-60
+- plan: docs/ship-art-fixes-plan.md
+- added: 2026-11-25
+
+Three small fixes, one commit each. The second makes the tank item of Q-13 a designer setting.
+Built 2026-11-25.
 
 ## Q-25 · Dock shop fixes: shift-click sells, programs ignore parts, your credits · build
 - state: done

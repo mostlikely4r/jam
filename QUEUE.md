@@ -10,6 +10,11 @@
 
 Turrets first, then tractors. Bumps `SAVE_VERSION`.
 
+## Q-34 · Chatter faces swing to the music · spec
+- state: queued
+- backlog: S-68
+- added: 2026-11-25
+
 ## Q-28 · Dev tools: tab menu programs, hull switch, fit anywhere, hull names · build
 - state: queued
 - backlog: S-62
@@ -174,11 +179,6 @@ moves over, the old bay to the locker; ore nearest the entry sells first.
 
 From the user trying hull buying. Two new shape kinds with their own handles, plus an "add
 default decal" button. Settle how each is drawn, edited and saved, then plan it.
-
-## Q-34 · Chatter faces swing to the music · spec
-- state: queued
-- backlog: S-68
-- added: 2026-11-25
 
 ## Done
 

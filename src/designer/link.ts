@@ -171,6 +171,8 @@ export function stationsFor(world: World): StationSpec[] {
           storage: node.storage,
           unlocked: node.unlocked,
           wanted: node.wanted,
+          programs: node.programs,
+          hulls: node.hulls,
           ...(field !== undefined ? { field } : {}),
           projects: node.projects,
           radio: node.radio,

@@ -7,6 +7,7 @@ import type { Part } from "./parts";
 
 /** The shop's category headers, in the order they show. One with nothing under it is left out. */
 export const SHOP_CATEGORIES = [
+  "Hulls",
   "Engines and thrusters",
   "Weapons",
   "Tractors",
@@ -19,7 +20,7 @@ export const SHOP_CATEGORIES = [
 ] as const;
 export type ShopCategory = (typeof SHOP_CATEGORIES)[number];
 
-/** Which header a part's cell hangs under. The Station items aren't parts: they come last on their own. */
+/** Which header a part's cell hangs under. Hulls and the Station items aren't parts: they come first and last on their own. */
 export function partCategory(part: Part): ShopCategory {
   switch (part.kind) {
     case "thruster":

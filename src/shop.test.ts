@@ -32,6 +32,7 @@ describe("the shop grid", () => {
     expect(partCategory(PARTS.find((part) => part.id === "cockpitKite")!)).toBe("Cockpits");
     // The order the headers show in.
     expect(SHOP_CATEGORIES).toEqual([
+      "Hulls",
       "Engines and thrusters",
       "Weapons",
       "Tractors",

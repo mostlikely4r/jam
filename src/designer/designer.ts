@@ -31,7 +31,8 @@ import { shippedWorld } from "./shipped";
 import { layoutKey } from "../save";
 import { type Route } from "../route";
 import { FLIGHTS, tripBetween } from "./trips";
-import { type PartId } from "../parts";
+import { SHIP_MODELS, type PartId } from "../parts";
+import { PROGRAMS } from "../programs";
 import { multiSelect, withoutPick, withPick } from "./multiselect";
 
 /** The game's zoom limits, for the screen boxes. */
@@ -776,6 +777,26 @@ Layouts: ${layouts.join(", ")}`, "");
             node.wanted = on ? withPick(node.wanted, id as PartId) : withoutPick(node.wanted, id as PartId);
           }),
         ]),
+        ...this.group("Sells", [
+          this.text("Programs: the ones its shop sells. A program blueprint the station buys later is sold as well."),
+          this.pickList(
+            `programs:${node.id}`,
+            PROGRAMS.map((program) => ({ id: program.id, label: program.name })),
+            () => node.programs,
+            (id, on) => {
+              node.programs = on ? withPick(node.programs, id as PartId) : withoutPick(node.programs, id as PartId);
+            },
+          ),
+          this.text("Hulls: the ones a player can buy here, trading in the hull they fly."),
+          this.pickList(
+            `hulls:${node.id}`,
+            SHIP_MODELS.map((model) => ({ id: model, label: hullName(model) })),
+            () => node.hulls,
+            (id, on) => {
+              node.hulls = on ? withPick(node.hulls, id) : withoutPick(node.hulls, id);
+            },
+          ),
+        ]),
         ...this.group("Projects and radio", [
           this.text("A station that builds projects can fund a deposit by its field and turrets for itself and the deposit, from its own money and parts. One on the radio announces new blueprints and finished projects."),
           flag("projects", "Builds projects"),
@@ -906,6 +927,11 @@ Layouts: ${layouts.join(", ")}`, "");
     });
     rows.push(this.button("+ item", () => (set([...list, make(ITEMS[0].id)]), this.changed(), this.rebuild())));
     return rows;
+  }
+
+  /** A station's own list of programs or hulls: the multi-select over every one there is. */
+  private pickList(key: string, options: { id: string; label: string }[], picked: () => readonly string[], pick: (id: string, on: boolean) => void): HTMLElement {
+    return multiSelect({ key, options, picked, pick, changed: () => this.changed() });
   }
 
   /** One of a station's two lists of module items, picked out of every module there is. */

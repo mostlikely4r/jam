@@ -318,6 +318,31 @@ describe("blueprints per base", () => {
     expect(first.blueprintsOrdered.has("reverse")).toBe(false);
   });
 
+  it("sells only the programs on a station's list, every one without a list, and a bought blueprint as well", () => {
+    const { sim, outpost } = world({}, { programs: ["spinStabilizer"] });
+    const { ship } = sim;
+    const [home, second] = sim.bases;
+    ship.credits = 100000;
+    expect(sim.unlocked("autopilot", home)).toBe(true);
+    expect(sim.unlocked("spinStabilizer", second)).toBe(true);
+    expect(sim.unlocked("autopilot", second)).toBe(false);
+    expect(sim.shopLists("autopilot", second)).toBe(false);
+    dockAt(sim, ship, outpost);
+    expect(sim.buyPart(ship, "autopilot")).toBe(false);
+    // Nothing to fund while the shop needs no blueprints.
+    expect(sim.fundBlueprint(ship, "autopilot")).toBe(false);
+    expect(sim.buyPart(ship, "spinStabilizer")).toBe(true);
+    second.blueprints.add("autopilot");
+    expect(sim.unlocked("autopilot", second)).toBe(true);
+  });
+
+  it("sells the hulls on a station's list that the hull file has, and none without a list", () => {
+    const { sim } = world({}, { hulls: ["floater", "nonsense"] });
+    const [home, second] = sim.bases;
+    expect(sim.hullsSold(home)).toEqual([]);
+    expect(sim.hullsSold(second)).toEqual(["floater"]);
+  });
+
   it("only lets a base that builds projects order them", () => {
     const { sim, outpost } = world({ stationUnlocks: true, stationCashBuffer: 1e9 });
     const { ship } = sim;

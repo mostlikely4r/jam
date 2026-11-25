@@ -10,12 +10,13 @@ import { layoutKey, loadGame, loadStart, saveGame, saveInfo, type SaveSlot, type
 import { stringifyWorld } from "./designer/world";
 import { Audio } from "./audio";
 import { Radio } from "./radio";
-import { type Base, type Battery, type Deposit, DEPOSIT_REACH, SHIP_RADIUS, type Ship, Sim, STATION_HALF, TICK, targetSpot, type Targetable } from "./sim";
+import { type Base, type Battery, type Deposit, DEPOSIT_REACH, type HullPlan, SHIP_RADIUS, type Ship, Sim, STATION_HALF, TICK, targetSpot, type Targetable } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartIcon, type PartId } from "./parts";
 import { ITEMS, itemDef } from "./items";
 import { PROGRAM_PARTS } from "./programs";
-import { computerSize, hullMax, hullName, mountsHolding, newGameHulls, owns, tankMounts, } from "./fitting";
+import { computerSize, hullMax, hullName, mountsHolding, newFitting, newGameHulls, owns, tankMounts, } from "./fitting";
+import { drawVectorShip } from "./shipArt";
 import type { ShipModel } from "./parts";
 import { blueprintIcon, iconEl } from "./icons";
 import { partCategory, shopCellState, SHOP_CATEGORIES, type ShopBadge } from "./shop";
@@ -588,6 +589,8 @@ interface ShopLine {
   label?: string;
   /** What the dock shop's cell draws. */
   icon?: PartIcon;
+  /** What the cell draws instead of an icon: a hull's own drawing. */
+  art?: () => HTMLElement;
   enabled: boolean;
 }
 
@@ -686,7 +689,8 @@ function shopCell(line: ShopLine, onClick: () => void, drag?: PartId): HTMLButto
   const state = shopCellState(line);
   if (state.dim) cell.classList.add("dim");
   if (line.enabled && drag) makeDraggable(cell, () => ({ from: "shop", part: drag }), line.label ?? partOf(drag).label);
-  if (line.icon) cell.append(iconEl(line.icon, 26));
+  if (line.art) cell.append(line.art());
+  else if (line.icon) cell.append(iconEl(line.icon, 26));
   const badge = badgeEl(state.badge);
   if (badge) cell.append(badge);
   if (!line.enabled) cell.setAttribute("aria-disabled", "true");
@@ -834,8 +838,9 @@ function updateShop(): void {
     if (shopHeading.textContent !== title) shopHeading.textContent = title;
   }
   if (!docked) shopOpen = false;
+  if (!docked || !shopOpen) hullAsked = null;
   const locker = base ? sim.lockerAt(base) : null;
-  const state = `${shopOpen} ${sim.buyRefused} ${sim.oreIn(ship)} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.home} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.shopBase().blocks.map((job) => job.carrier?.home ?? "free").join()} ${buildingProject(sim.shopBase())?.partsLeft ?? 0} ${sim.hasClamp(ship)} ${sim.blockJobFor(ship)?.base.id ?? ""} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${sim.hub.size} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()}`;
+  const state = `${shopOpen} ${sim.buyRefused} ${sim.oreIn(ship)} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.home} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.shopBase().blocks.map((job) => job.carrier?.home ?? "free").join()} ${buildingProject(sim.shopBase())?.partsLeft ?? 0} ${sim.hasClamp(ship)} ${sim.blockJobFor(ship)?.base.id ?? ""} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${sim.hub.size} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()} ${ship.model} ${hullAsked} ${shopOpen && base ? hullOffers() : ""}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked || !shopOpen;
@@ -849,6 +854,7 @@ function updateShop(): void {
     refused.textContent = sim.buyRefused;
     shop.append(refused);
   }
+  if (hullAsked) shop.append(...hullQuestion(hullAsked));
   const open = document.createElement("button");
   open.className = "small";
   open.textContent = "Ship and locker";
@@ -877,7 +883,9 @@ function updateShop(): void {
     const cells =
       category === "Station"
         ? stationCells()
-        : forSale.filter((part) => partCategory(part) === category).flatMap((part) => {
+        : category === "Hulls"
+          ? hullCells()
+          : forSale.filter((part) => partCategory(part) === category).flatMap((part) => {
             const line = partLine(part);
             return line ? [shopCell(line, () => tradePart(part), line.tag === "buy" ? part.id : undefined)] : [];
           });
@@ -888,6 +896,118 @@ function updateShop(): void {
   }
   shop.append(grid);
   appendNews();
+}
+
+/** The hull the player clicked to buy, waiting on their yes: the shop asks once before trading in. */
+let hullAsked: ShipModel | null = null;
+
+/** A hull drawn small, nose up, with its own gear: what its cell in the shop shows. */
+function hullArt(model: ShipModel): HTMLElement {
+  const box = document.createElement("span");
+  box.className = "part-icon";
+  box.style.width = box.style.height = "26px";
+  box.style.borderColor = "#9aa6bd";
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 52;
+  canvas.style.width = canvas.style.height = "100%";
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    ctx.translate(26, 26);
+    ctx.rotate(-Math.PI / 2);
+    // A hull's outline is about a ship's radius of 12 units out from its middle, a bit more at the tips.
+    ctx.scale(52 / (12 * 3.2), 52 / (12 * 3.2));
+    drawVectorShip(ctx, { model, ...newFitting(model, () => 0) }, [111, 122, 140]);
+  }
+  box.append(canvas);
+  return box;
+}
+
+/** What a hull costs against the one you fly, in words. */
+function netText(net: number, tradeIn: number): string {
+  const trade = `less ${tradeIn} for your ${hullName(sim.ship.model).toLowerCase()}`;
+  if (net > 0) return `${trade}: you pay ${net}`;
+  if (net < 0) return `${trade}: you get ${-net} back`;
+  return `${trade}: an even swap`;
+}
+
+/** Part labels with how many of each, in words: "Turn thrusters ×2, Gun 2". */
+function partsText(ids: PartId[]): string {
+  const counts = new Map<PartId, number>();
+  for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+  return [...counts].map(([id, n]) => `${partOf(id).label}${n > 1 ? ` \u00d7${n}` : ""}`).join(", ");
+}
+
+/** The lines of what buying a hull does: price, what moves over, and where the rest goes. */
+function hullPlanLines(plan: HullPlan): string[] {
+  const lines = [`${plan.price} credits, ${netText(plan.net, plan.tradeIn)}`];
+  lines.push(plan.moved.length > 0 ? `Moves over: ${partsText(plan.moved.map((each) => each.part))}` : "Comes with its own gear only");
+  if (plan.locker.length > 0) lines.push(`To your locker: ${partsText(plan.locker.map((each) => each.module.part))}`);
+  if (plan.bay.length > 0) lines.push(`To the new bay: ${partsText(plan.bay)}`);
+  if (plan.unloaded.length > 0) lines.push(`Not loaded, no slot: ${partsText(plan.unloaded)}`);
+  return lines;
+}
+
+/**
+ * What every hull on sale here would do now, in words: part of the shop's redraw key, so a cell
+ * or the question never shows a plan that a rearranged locker or bay has changed.
+ */
+function hullOffers(): string {
+  return sim
+    .hullsSold(sim.shopBase())
+    .map((model) => {
+      const plan = sim.planHull(sim.ship, model);
+      return `${model}: ${"refused" in plan ? plan.refused : hullPlanLines(plan).join("; ")}`;
+    })
+    .join(" | ");
+}
+
+/** The Hulls category: what this station sells, the one you fly shown but not for sale. */
+function hullCells(): HTMLButtonElement[] {
+  const { ship } = sim;
+  return sim.hullsSold(sim.shopBase()).map((model) => {
+    const label = `${hullName(model)} hull`;
+    const art = () => hullArt(model);
+    if (model === ship.model) return shopCell({ tag: "yours", label, art, text: "You fly one", enabled: false }, () => {});
+    const plan = sim.planHull(ship, model);
+    if ("refused" in plan) {
+      const net = sim.hullPrice(model) - sim.hullPrice(ship.model);
+      const price = `${sim.hullPrice(model)} credits, ${netText(net, sim.hullPrice(ship.model))}`;
+      const poor = plan.refused === "Not enough credits";
+      return shopCell({ tag: poor ? "not enough money" : "refused", style: poor ? "poor" : undefined, label, art, text: `${price}\n${plan.refused}`, enabled: false }, () => {});
+    }
+    const text = [...hullPlanLines(plan), "Click to buy, trading in yours"].join("\n");
+    return shopCell({ tag: "buy", style: "buy", label, art, text, enabled: true }, () => {
+      hullAsked = model;
+    });
+  });
+}
+
+/** The shop's one question before a hull is bought: what it does, and a yes or a no. */
+function hullQuestion(model: ShipModel): HTMLElement[] {
+  const plan = sim.planHull(sim.ship, model);
+  if ("refused" in plan) {
+    hullAsked = null;
+    return [];
+  }
+  const ask = document.createElement("p");
+  ask.className = "ask";
+  ask.textContent = [`Buy the ${hullName(model).toLowerCase()} hull, trading in your ${hullName(sim.ship.model).toLowerCase()}?`, ...hullPlanLines(plan)].join("\n");
+  const yes = document.createElement("button");
+  yes.className = "small buy";
+  yes.textContent = "Buy it";
+  yes.addEventListener("click", () => {
+    hullAsked = null;
+    sim.buyHull(sim.ship, model);
+    yes.blur();
+  });
+  const no = document.createElement("button");
+  no.className = "small";
+  no.textContent = "Not now";
+  no.addEventListener("click", () => {
+    hullAsked = null;
+    no.blur();
+  });
+  return [ask, yes, no];
 }
 
 /** The Station category: the things that aren't parts, with icons set in code from the same glyph set. */

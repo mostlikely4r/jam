@@ -9,7 +9,8 @@
 import { clampEccentricity, orbitSpeeds, orbitState, type OrbitShape } from "../kepler";
 import { itemDef } from "../items";
 import { newGameHulls } from "../fitting";
-import type { PartId, ShipModel } from "../parts";
+import { SHIP_MODELS, type PartId, type ShipModel } from "../parts";
+import { PROGRAMS } from "../programs";
 import { DEFAULTS } from "../tuning";
 
 export const WORLD_VERSION = 1;
@@ -80,6 +81,13 @@ export interface WorldNode {
   unlocked: PartId[];
   /** Stations only: the modules it buys the blueprint for, when it can afford them. */
   wanted: PartId[];
+  /**
+   * Stations only: the programs it sells. A new station sells every program, as every station
+   * did before stations had a list. A program blueprint it buys later is sold as well.
+   */
+  programs: PartId[];
+  /** Stations only: the hulls it sells, by name. None, and it sells no hull. */
+  hulls: ShipModel[];
   /** Fields only: the items its rocks drop as well as plain ore, each with its chance on every ore roll. */
   drops: { item: string; chance: number }[];
   /** Stations only: the items in its store when the game starts (they come from nowhere). */
@@ -195,18 +203,28 @@ export function bodyDefaults(
  * sweep a ship far out sideways faster than it can fly.
  */
 export function placeDefaults(kind: NodeKind): Pick<WorldNode, PlaceKey> {
-  const none = { unlocked: [], wanted: [], drops: [], items: [], ...NOT_A_BASE };
+  const none = { unlocked: [], wanted: [], programs: [], hulls: [], drops: [], items: [], ...NOT_A_BASE };
   if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, shipyard: false, storage: 0, ...none };
   if (kind === "station") {
     // A new station builds nothing and keeps quiet until the designer says; its turrets, once it has them, are the game's usual.
     const guards = { guardCount: DEFAULTS.stationGuardCount, guardArc: DEFAULTS.stationGuardArc, guardDistance: DEFAULTS.stationGuardDistance };
-    return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true, storage: DEFAULTS.stationStorage, ...none, ...guards };
+    return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true, storage: DEFAULTS.stationStorage, ...none, programs: allPrograms(), ...guards };
   }
   if (kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: false, storage: 0, ...none };
   return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, shipyard: false, storage: 0, ...none };
 }
 
-type PlaceKey = "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "unlocked" | "wanted" | "drops" | "items" | BaseKey;
+type PlaceKey = "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "unlocked" | "wanted" | "programs" | "hulls" | "drops" | "items" | BaseKey;
+
+/** Every program there is, by id, in the programs file's order: what a station sells unless its list says otherwise. */
+export function allPrograms(): PartId[] {
+  return PROGRAMS.map((program) => program.id as PartId);
+}
+
+/** Whether a station's program list is every program there is, so the file can leave it out. */
+function sellsEveryProgram(programs: readonly string[]): boolean {
+  return allPrograms().every((id) => programs.includes(id));
+}
 type BaseKey = "projects" | "radio" | "guardCount" | "guardArc" | "guardDistance";
 
 /** What a place that isn't a station has for a station's own settings. */
@@ -407,6 +425,19 @@ function isModuleList(raw: unknown): PartId[] {
   return [...new Set(ids)] as PartId[];
 }
 
+/** A station's program list read from a file: the programs there are. */
+function isProgramList(raw: unknown): PartId[] {
+  if (!Array.isArray(raw)) return [];
+  const known = allPrograms();
+  return [...new Set(raw.filter((id): id is PartId => typeof id === "string" && known.includes(id as PartId)))];
+}
+
+/** A station's hull list read from a file: the hulls there are, by name. */
+function isHullList(raw: unknown): ShipModel[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.filter((id): id is ShipModel => typeof id === "string" && SHIP_MODELS.includes(id)))];
+}
+
 /** Reads a saved world, or null when it doesn't look like one. Missing numbers become 0. */
 export function parseWorld(text: string): World | null {
   try {
@@ -444,6 +475,9 @@ export function parseWorld(text: string): World | null {
         storage: num("storage", places.storage),
         unlocked: isModuleList(raw.unlocked),
         wanted: isModuleList(raw.wanted),
+        // A station saved without a program list sells every program, as it did before it had one.
+        programs: kind === "station" && !("programs" in raw) ? allPrograms() : kind === "station" ? isProgramList(raw.programs) : [],
+        hulls: kind === "station" ? isHullList(raw.hulls) : [],
         drops: readDrops(raw.drops),
         items: readItems(raw.items),
         projects: typeof raw.projects === "boolean" ? raw.projects : places.projects,
@@ -477,7 +511,7 @@ export function parseWorld(text: string): World | null {
  */
 const NODE_KEYS: (keyof WorldNode)[] = [
   "id", "name", "kind", "radius", "surface", "pull", "pullFull", "pullAccel", "atmosphere", "burnSpeed",
-  "rocks", "rockDrift", "rockInflow", "carryFull", "carryNone", "spawns", "shipyard", "storage", "unlocked", "wanted", "drops", "items",
+  "rocks", "rockDrift", "rockInflow", "carryFull", "carryNone", "spawns", "shipyard", "storage", "unlocked", "wanted", "programs", "hulls", "drops", "items",
   "projects", "radio", "guardCount", "guardArc", "guardDistance", "count", "angleVariance", "orbitVariance", "orbitRadius", "eccentricity", "periapsisAngle", "orbitPeriod", "orbitPhase",
   "spinPeriod", "spinPhase", "children",
 ];
@@ -492,6 +526,8 @@ function ordered(node: Record<string, unknown>): Record<string, unknown> {
   for (const key of NODE_KEYS) {
     if (!(key in node)) continue;
     if ((BASE_KEYS as string[]).includes(key) && node[key] === usual[key as BaseKey]) continue;
+    // Only a station has a program list, and one that sells every program is left out: that's what a missing list reads as.
+    if (key === "programs" && (node.kind !== "station" || sellsEveryProgram(node.programs as string[]))) continue;
     out[key] = node[key];
   }
   for (const key of Object.keys(node)) if (!(NODE_KEYS as string[]).includes(key)) out[key] = node[key];
@@ -502,7 +538,7 @@ export function stringifyWorld(world: World): string {
   // A spin start angle of 0, and a circular orbit, are left out, so layouts from before they existed read and save the same.
   const left = ["spinPhase", "eccentricity", "periapsisAngle"];
   // So are no drops, no starting items and no module lists, for the same reason.
-  const lists = ["drops", "items", "unlocked", "wanted"];
+  const lists = ["drops", "items", "unlocked", "wanted", "hulls"];
   const isNode = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value) && "kind" in value && "children" in value;
   const replacer = (key: string, value: unknown) => {

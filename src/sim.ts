@@ -1,8 +1,8 @@
 import { Chatter, type FaceKey } from "./chatter";
-import { type BayGrid, type BlueprintId, partFits, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, TOW_BUY_ORDER, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
+import { type BayGrid, type BlueprintId, partFits, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, SHIP_MODELS, TOW_BUY_ORDER, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
 import { hubRecipes, isOreItem, itemDef, oreItems, saleRecipes } from "./items";
 import { copyPicks, pickOf, PROGRAMS, setPick as setTweakPick } from "./programs";
-import { computerSize, DAMAGED_AT, facing, fitPart, hullInfo, hullMax, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Mount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works, fullTanks, shareTanks, tankCapacity, tankMounts } from "./fitting";
+import { computerSize, DAMAGED_AT, facing, fitPart, hullInfo, hullMax, hullMounts, isDecal, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Mount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works, fullTanks, shareTanks, tankCapacity, tankMounts } from "./fitting";
 import { ClickPilot, DronePilot, FacePilot, FighterPilot, LOW_HULL, type TurnAway } from "./pilot";
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
@@ -259,6 +259,37 @@ export type BuyInto = { at: "mount"; mount: MountId } | { at: "hold"; spot: Spot
 
 /** What a buy would do: the mounts it takes, or the spots it fills in the bay or locker, or why not. */
 type BuyPlan = { where: "mount"; mounts: MountId[] } | { where: "hold" | "locker"; spots: Placed[] } | { refused: string };
+
+/**
+ * What buying a hull would do, worked out before it's done (`docs/hull-buying-plan.md`): the
+ * price less the trade-in, the new hull's fit with your own parts moved onto it, and where the
+ * rest goes. The old hull's own gear goes with it, as the bare hull the trade-in pays for.
+ */
+export interface HullPlan {
+  model: ShipModel;
+  /** What the new hull costs bare, with its own gear: `hullPrice`. */
+  price: number;
+  /** What the old one fetches: its own bare price. */
+  tradeIn: number;
+  /** Price less trade-in: what you pay, or get back when it's below 0. */
+  net: number;
+  /** The new hull's mounts: its own gear, with your parts on top where they went. */
+  fit: Partial<Record<MountId, Module>>;
+  /** Your parts that move over, each from its old mount to its new one. */
+  moved: { part: PartId; from: MountId; to: MountId }[];
+  /** The old hull's own gear, which goes with it. */
+  traded: PartId[];
+  /** What goes into your locker here, at its spots. */
+  locker: Placed[];
+  /** The new bay's contents: your cargo, and any part the locker had no room for. */
+  hold: Placed[];
+  /** The parts that go in the new bay rather than on a mount or in the locker. */
+  bay: PartId[];
+  /** What each tank on the new hull holds: a moved tank its own, the new hull's own the old one's. */
+  tankFuel: Partial<Record<MountId, number>>;
+  /** Your programs the new computer has no slot for: still yours, just not loaded. */
+  unloaded: PartId[];
+}
 
 export interface Rock extends Body {
   /** Still on its way in from outside the field. */
@@ -600,6 +631,10 @@ export interface StationSpec {
   unlocked?: PartId[];
   /** The modules it would buy the blueprint for, when it can afford them. */
   wanted?: PartId[];
+  /** The programs it sells. Without one, every program; a program blueprint it buys is sold as well. */
+  programs?: PartId[];
+  /** The hulls it sells, by name. Without one it sells no hull. */
+  hulls?: ShipModel[];
   /** Cells of storage: the player's lockers and its store of whole modules come out of it. Without one, the tuning's `stationStorage`. */
   storage?: number;
   /** Items in its store when the game starts. These come from nowhere: the plan's listed holes (docs/item-system-plan.md). */
@@ -2871,7 +2906,20 @@ export class Sim {
     }
     if (isProject(id)) return false;
     if (itemDef(id)?.type === "module") return base.blueprints.has(id);
-    return !this.tuning.stationUnlocks || this.blueprintTier(id) === 0 || base.blueprints.has(id);
+    if (base.blueprints.has(id)) return true;
+    // A program is sold where the station's list has it; blueprints, where the shop needs them, on top.
+    if (isProgram(id as PartId) && !this.sellsProgram(base, id as PartId)) return false;
+    return !this.tuning.stationUnlocks || this.blueprintTier(id) === 0;
+  }
+
+  /** Whether a station's list has a program: every program, for a station with no list. */
+  sellsProgram(base: Base, id: PartId): boolean {
+    return base.spec.programs?.includes(id) ?? true;
+  }
+
+  /** The hulls a base sells, by name: those on its list that the hull file has. */
+  hullsSold(base: Base = this.shopBase()): ShipModel[] {
+    return (base.spec.hulls ?? []).filter((model) => SHIP_MODELS.includes(model));
   }
 
   blueprintPrice(id: BlueprintId): number {
@@ -2913,6 +2961,8 @@ export class Sim {
    */
   private canOrder(id: BlueprintId, base: Base): boolean {
     if (isProject(id) && !base.spec.projects) return false;
+    // A program off a station's list can't be funded there while the shop needs no blueprints: there is nothing to fund.
+    if (isProgram(id as PartId) && !this.tuning.stationUnlocks) return false;
     if (id === "depositGuards" && !this.unlocked("deposit", base)) return false;
     if (this.unlocked(id, base) || base.blueprintsOrdered.has(id)) return false;
     if (itemDef(id)?.type === "module" && !base.wanted.has(id as PartId)) return false;
@@ -2927,6 +2977,8 @@ export class Sim {
    * neither sells nor wants isn't shown, as nobody can fund it there. Anything else is always listed.
    */
   shopLists(id: PartId, base: Base = this.shopBase()): boolean {
+    // A program off the station's list isn't shown unless it can be funded here.
+    if (isProgram(id)) return this.unlocked(id, base) || base.blueprintsOrdered.has(id) || this.canOrder(id, base);
     if (itemDef(id)?.type !== "module") return true;
     // Fuel tanks are the fuel experiment's: off, the shop is the shop it always was.
     if (!this.tuning.fuel && partOf(id).kind === "tank") return false;
@@ -4182,6 +4234,178 @@ export class Sim {
     if (isProgram(id)) return null;
     const plan = this.planBuy(ship, id);
     return "where" in plan ? plan.where : null;
+  }
+
+  /**
+   * What buying a hull would do for the player, changing nothing: why not, or the plan. Your
+   * parts the old hull didn't come with move to the new one, each onto the mount with the same
+   * id, then one with the same role, then any that takes it, empty ones first. A part of the new
+   * hull's own pushed off by one of yours, and a part of yours with no mount, go into the locker
+   * here, or the new bay when the locker is full. Your cargo moves to the new bay.
+   */
+  planHull(ship: Ship, model: ShipModel): HullPlan | { refused: string } {
+    const base = this.baseAt(ship);
+    if (ship !== this.ship) return { refused: "Only you can buy a hull" };
+    if (!base || !this.atShop(ship)) return { refused: "Only in a dock" };
+    if (!this.hullsSold(base).includes(model)) return { refused: "Not sold here" };
+    if (model === ship.model) return { refused: "You fly one already" };
+    const price = this.hullPrice(model);
+    const tradeIn = this.hullPrice(ship.model);
+    const net = price - tradeIn;
+    if (net > 0 && this.accountOf(ship).credits < net) return { refused: "Not enough credits" };
+
+    const own = hullDefaults(ship.model);
+    const fit: Partial<Record<MountId, Module>> = {};
+    for (const [mount, part] of Object.entries(hullDefaults(model)) as [MountId, PartId][]) fit[mount] = { part, wear: 0 };
+    const oldMounts = mountsOf(ship);
+    const newMounts = hullMounts(model);
+    const traded: PartId[] = [];
+    const moved: HullPlan["moved"] = [];
+    const spare: Module[] = [];
+    const mine: [MountId, Module][] = [];
+    for (const [mount, module] of Object.entries(ship.fit) as [MountId, Module | undefined][]) {
+      if (!module) continue;
+      if (own[mount] === module.part) traded.push(module.part);
+      else mine.push([mount, module]);
+    }
+    // A turret goes first, so the gun that rode on it can ride on it again.
+    const isTurret = (module: Module | undefined) => module !== undefined && partOf(module.part).kind === "turret";
+    mine.sort(([, a], [, b]) => Number(isTurret(b)) - Number(isTurret(a)));
+    const taken = new Set<MountId>();
+    const hasTurret = () => newMounts.some((mount) => isTurret(fit[mount.id]));
+    const mountFor = (from: MountId, module: Module): MountId | null => {
+      const part = partOf(module.part);
+      if (part.kind === "program" || part.kind === "cockpit" || isDecal(module.part) || !partFits(part, model)) return null;
+      // A gun goes on the turret when there is one, as it does when bought.
+      if (part.kind === "gun" && hasTurret()) return taken.has("turretGun") ? null : "turretGun";
+      const takes = newMounts.filter((mount) => !taken.has(mount.id) && mountTakes(mount, module.part));
+      const role = oldMounts.find((mount) => mount.id === from)?.role;
+      const pick =
+        takes.find((mount) => mount.id === from) ??
+        (role ? takes.find((mount) => mount.role === role) : undefined) ??
+        takes.find((mount) => !fit[mount.id]) ??
+        takes[0];
+      return pick?.id ?? null;
+    };
+    for (const [from, module] of mine) {
+      const to = mountFor(from, module);
+      if (!to) {
+        spare.push(module);
+        continue;
+      }
+      const off = fit[to];
+      if (off) spare.push(off);
+      fit[to] = module;
+      taken.add(to);
+      moved.push({ part: module.part, from, to });
+    }
+    // A turret left without a gun takes one of the new hull's own that was pushed off.
+    if (hasTurret() && !fit.turretGun) {
+      const gun = spare.find((module) => partOf(module.part).kind === "gun" && !mine.some(([, each]) => each === module));
+      if (gun) {
+        spare.splice(spare.indexOf(gun), 1);
+        fit.turretGun = gun;
+      }
+    }
+
+    // The cargo: where it is, if the new bay is the same and all of it still fits, or packed in again, biggest first.
+    let grid: BayGrid | null = null;
+    for (const module of Object.values(fit)) {
+      const bay = module && module.wear < 1 ? partOf(module.part).bay : undefined;
+      if (bay) {
+        grid = bay;
+        break;
+      }
+    }
+    let hold: Placed[] = [];
+    const overflow: Module[] = [];
+    const sameBay = grid !== null && grid === this.bayGrid(ship);
+    if (sameBay && ship.hold.every((item) => canPlace(grid!, ship.hold, item))) hold = [...ship.hold];
+    else {
+      for (const module of ship.hold.map((item) => item.module).sort((a, b) => cellCount(b) - cellCount(a))) {
+        const spot = grid ? autoPlace(grid, hold, module) : null;
+        if (spot) hold.push(spot);
+        else overflow.push(module);
+      }
+    }
+
+    // What has no mount: the locker first, then the new bay. With room in neither, no sale.
+    const lockerNow = this.lockers.get(base.id) ?? { rows: this.tuning.lockerFreeRows, items: [] };
+    const lockerGrid = this.lockerGrid(lockerNow);
+    const locker: Placed[] = [];
+    const bay: PartId[] = [];
+    spare.sort((a, b) => cellCount(b) - cellCount(a));
+    for (const module of [...spare, ...overflow]) {
+      const there = [...lockerNow.items, ...locker];
+      const inLocker = autoPlace(lockerGrid, there, module);
+      if (inLocker && canPlace(lockerGrid, there, inLocker)) {
+        locker.push(inLocker);
+        continue;
+      }
+      const inBay = grid ? this.planSpots(grid, hold, [module], undefined, true) : null;
+      if (inBay) {
+        hold.push(...inBay);
+        if (!overflow.includes(module)) bay.push(module.part);
+        continue;
+      }
+      if (overflow.includes(module)) return { refused: "No room for your cargo in the new bay or your locker here: unload first" };
+      return { refused: `No room for the ${partOf(module.part).label} in your locker here or the new bay` };
+    }
+
+    // Fuel: a tank that moved keeps its own; the old hull's own tanks pour theirs into the new hull's own.
+    const after: Fitting & { model: ShipModel } = { model, fit, software: ship.software, programs: [], tweaks: ship.tweaks, parts: new Set(), hold, oreBlocks: [] };
+    const tankFuel: Partial<Record<MountId, number>> = {};
+    for (const { part, from, to } of moved) if ((partOf(part).tank ?? 0) > 0) tankFuel[to] = ship.tankFuel[from] ?? 0;
+    let poured = 0;
+    for (const [mount, module] of Object.entries(ship.fit) as [MountId, Module | undefined][]) {
+      if (module && own[mount] === module.part) poured += ship.tankFuel[mount] ?? 0;
+    }
+    for (const tank of tankMounts(after)) {
+      if (tankFuel[tank.mount.id] !== undefined) continue;
+      const fill = Math.min(poured, tank.capacity);
+      tankFuel[tank.mount.id] = fill;
+      poured -= fill;
+    }
+    const unloaded = ship.programs.slice(computerSize(after));
+    return { model, price, tradeIn, net, fit, moved, traded, locker, hold, bay, tankFuel, unloaded };
+  }
+
+  /**
+   * Buys a hull for the player at the dock they're in, trading in the one they fly, as
+   * `planHull` lays out. Returns whether it went through; why not is in `buyRefused`.
+   */
+  buyHull(ship: Ship, model: ShipModel): boolean {
+    const plan = this.planHull(ship, model);
+    if ("refused" in plan) {
+      if (ship === this.ship) this.buyRefused = plan.refused;
+      return false;
+    }
+    const base = this.baseAt(ship)!;
+    const account = this.accountOf(ship);
+    // The yard builds the new hull from its parts and breaks the old one down into them.
+    this.chargeForService(account, plan.price, base);
+    this.chargeForService(account, -plan.tradeIn, base);
+    ship.model = model;
+    ship.fit = plan.fit;
+    ship.hold = plan.hold;
+    this.lockerAt(base).items.push(...plan.locker);
+    // A new hull has its own look.
+    ship.decals = newFitting(model, () => nextRandom(this.lookState)).decals;
+    refresh(ship);
+    trimPrograms(ship);
+    ship.hull = hullMax(model);
+    ship.gunCooldowns.clear();
+    ship.turretAngle = ship.prevTurretAngle = 0;
+    // What no tank holds any more leaves the world, so the ledger still adds up.
+    const kept = Object.values(plan.tankFuel).reduce<number>((sum, held) => sum + (held ?? 0), 0);
+    const lost = Math.max(0, ship.fuel - kept);
+    ship.tankFuel = plan.tankFuel;
+    ship.fuel = kept;
+    if (lost > 0) this.flow(FUEL, -lost);
+    if (ship.tow && !this.hasClamp(ship)) this.letGoTow(ship);
+    this.buyRefused = null;
+    this.events.push({ type: "sale", x: ship.x, y: ship.y });
+    return true;
   }
 
   /**

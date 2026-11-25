@@ -3,12 +3,13 @@
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
 ## Q-18 · Hull buying · build
-- state: queued
+- state: in progress
 - backlog: S-48
 - plan: docs/hull-buying-plan.md
 - added: 2026-11-24
 
-Station sell lists, then buying with trade-in. Step 2 waits on Q-17. Stops for the user to try.
+Station sell lists, then buying with trade-in. Both steps built 2026-11-25; waiting on the user
+to try it (the plan's **Try it** line).
 
 ## Q-19 · AI hulls: templates and spawn points · build
 - state: queued

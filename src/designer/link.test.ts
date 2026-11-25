@@ -3,7 +3,8 @@ import { bodyAt, orbitsAt } from "../sim";
 import { DEFAULTS } from "../tuning";
 import shipped from "./world.json";
 import { anchorsFor, bodiesFor, fieldsFor, layoutFor, linkSummary, linkedNodes, pirateBaseFor, spawnsFor, stationsFor } from "./link";
-import { limitCarrying, makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk } from "./world";
+import { allPrograms, limitCarrying, makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk } from "./world";
+import { shippedWorld } from "./shipped";
 
 describe("the link between the designer and the game", () => {
   it("finds the planet, field, station and pirate base", () => {
@@ -168,6 +169,40 @@ describe("the link between the designer and the game", () => {
     const text = stringifyWorld(world).replace('"tractorAll"', '"tractorAll", "reverse", "nonsense", "cockpitKite"');
     const back = walk(parseWorld(text)!).find((entry) => entry.node.name === "Outpost")!.node;
     expect(back.unlocked).toEqual(["tractorAll", "reverse"]);
+  });
+
+  it("gives a station every program and no hull unless its lists say, and a saved world keeps them", () => {
+    const world = seedWorld();
+    const { station } = linkedNodes(world);
+    expect(station!.programs).toEqual(allPrograms());
+    expect(station!.hulls).toEqual([]);
+    // Every program and no hull is what a missing list reads as, so the file says nothing of either.
+    const plain = stringifyWorld(world);
+    expect(plain).not.toContain('"programs"');
+    expect(plain).not.toContain('"hulls"');
+    expect(linkedNodes(parseWorld(plain)!).station!.programs).toEqual(allPrograms());
+    // A shorter list is written, an empty one too, and unknown names are dropped on the way back.
+    Object.assign(station!, { programs: ["retro"], hulls: ["floater"] });
+    const text = stringifyWorld(world).replace('"retro"', '"retro", "nonsense"').replace('"floater"', '"floater", "nonsense"');
+    const back = linkedNodes(parseWorld(text)!).station!;
+    expect(back.programs).toEqual(["retro"]);
+    expect(back.hulls).toEqual(["floater"]);
+    station!.programs = [];
+    expect(linkedNodes(parseWorld(stringifyWorld(world))!).station!.programs).toEqual([]);
+    const spec = stationsFor(world).find((each) => each.name === "Station")!;
+    expect(spec.programs).toEqual([]);
+    expect(spec.hulls).toEqual(["floater"]);
+    // Only a station has the lists.
+    expect(linkedNodes(world).field!.programs).toEqual([]);
+  });
+
+  it("loads the shipped world with every station selling every program and no hull", () => {
+    const stations = walk(shippedWorld()).filter((entry) => entry.node.kind === "station");
+    expect(stations.length).toBeGreaterThan(0);
+    for (const { node } of stations) {
+      expect(node.programs).toEqual(allPrograms());
+      expect(node.hulls).toEqual([]);
+    }
   });
 
   it("hands every station over as a dock, with its shipyard, copies included", () => {

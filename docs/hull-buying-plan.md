@@ -1,7 +1,8 @@
 # Hull buying plan
 
 Written 2026-11-24. Third of five plans from one talk about reworking the hull designer (see
-`docs/designer-comforts-plan.md` for the list). Nothing here is built yet.
+`docs/designer-comforts-plan.md` for the list). Both steps are built (2026-11-25); step 2 waits on
+the user trying it.
 
 ## Why
 
@@ -30,6 +31,11 @@ Items marked *decided* are the user's calls; the rest is my proposal, open to ve
   station (`hullPrice` of the old model). The shop shows the net price: new minus trade-in.
 - **Your parts move over wherever they fit** (*decided*). Proposal for the details:
   - The new hull arrives with its default fit ("Bare hull comes with"), as the price says.
+  - **The old hull's own gear goes with it** (*decided* 2026-11-25, while building): the trade-in
+    pays for the bare hull, and a bare hull includes its default parts, so a part on a mount
+    whose default it is goes with the trade-in. Only parts you fitted yourself move over. A plain
+    racer becomes a plain floater with nothing in the locker, rather than a floater flying the
+    racer's gun and computer with duplicate thrusters, tanks and a bay in the locker.
   - Each of your fitted parts goes onto a mount of the new hull that takes it, preferring the
     mount with the same id, then the same role, then any fitting one. Where it lands on a mount
     that had a default part, that default part becomes yours and goes where a leftover goes.
@@ -47,14 +53,20 @@ Items marked *decided* are the user's calls; the rest is my proposal, open to ve
 
 ## The build
 
-### 1. Station sell lists
+### 1. Station sell lists (*built* 2026-11-25)
 
 Add `hulls` (and the programs and items lists, filled from today's behaviour) to station nodes in
 `src/designer/world.ts`: reading, defaults, the fixed key order in `npm run world`. Edit them in the
 world designer with the multi-select. Run `npm run world` to rewrite `world.json` and re-warm
 `src/start.json`. Nothing sells a hull yet.
 
-### 2. Buying a hull
+As built: no separate items list. The shop sells no item that isn't a module, and `unlocked`
+already is the station's list of modules, so it stays the items list. `programs` is every program
+for a station without one (and is left out of `world.json` when it is), so today's world reads and
+writes unchanged; a program blueprint a station buys still adds to it. `hulls` is empty by
+default. Both are edited in the station's new **Sells** group.
+
+### 2. Buying a hull (*built* 2026-11-25)
 
 A `buyHull(model)` in `src/sim.ts` with a planning half that says what would happen (like
 `planBuy` / `whereBuyGoes` do for parts), so the shop can show it before the buy. The shop's Hulls
@@ -62,6 +74,33 @@ category in `src/main.ts` / the shop grid. Bump `SAVE_VERSION` (now 9 in `src/sa
 station lists go into the save.
 
 Then stop for the user to try: buy a hull, check the parts land where expected.
+
+As built:
+
+- `Sim.planHull(ship, model)` works the purchase out without changing anything and
+  `Sim.buyHull` does it; the refusal reason lands in `buyRefused`, as a part's does. Only the
+  player buys hulls, only docked, only a hull on the station's list and not the one they fly.
+- Payment: the station's parts build the new hull (`chargeForService` of its price) and the old
+  one is broken back into parts (the same, negative, for the trade-in), so only the difference
+  moves in credits. No check that the station holds enough parts, the same as a player rebuild.
+- Mount choice: same id, then same role, then an empty mount that takes it, then any that takes
+  it. A turret moves first, so its gun can go back on it; a turret left gunless takes a gun the
+  new hull's own pushed off.
+- Cargo stays where it is when the new bay is the same bay; otherwise it is packed in again,
+  biggest first. Leftovers (displaced defaults, parts with no mount, cargo that didn't fit) go to
+  the locker, then the new bay, else the sale is refused (cargo: "unload first").
+- Fuel: a moved tank keeps its own; the fuel in the old hull's own tanks pours into the new
+  hull's own; a tank that goes to the locker takes its fuel out of the world, as a tank taken off
+  always has. The new hull gets fresh decals and full hull points.
+- The shop: a Hulls category first in the grid, each hull drawn small with its own gear. The
+  tooltip and a question above the grid list the price against the trade-in, what moves over,
+  what goes to the locker or the bay and which programs won't load; "Buy it" or "Not now".
+- No `SAVE_VERSION` bump: the lists live in the world, not the save, and the ship's model and
+  fit were saved already.
+- Tests: `src/hullbuy.test.ts`, plus station list tests in `src/stations.test.ts` and
+  `src/designer/link.test.ts`.
+- Every hull costs the tuning's `rebuildCost` until the hull designer gives it a price, so a
+  racer-for-floater swap is even until one is set.
 
 ## How we'll know
 
@@ -90,3 +129,8 @@ Then stop for the user to try: buy a hull, check the parts land where expected.
 - Keeping the old hull (storage) and owning several ships.
 - Stations building hulls from parts and ore, like module blueprints.
 - AI ships buying hulls: see `docs/ai-hulls-plan.md`, where stations rebuild from templates.
+- No hull is on any station's list in `world.json` yet: which station sells what is design work
+  for the world designer.
+- A separate items list: the shop sells no item that isn't a module, so `unlocked` is the list
+  for now. One is needed once stations sell other items.
+- Whether a station needs the parts to build a hull before it sells one.

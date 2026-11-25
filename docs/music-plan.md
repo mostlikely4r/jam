@@ -120,7 +120,7 @@ Stop here for the user to try.
 **Tried** 2026-11-25 (the user's words): "so much better", "this makes playing feel 100%
 better", "it really sets the tone... whimsical.. smooth". One sadness: the music doesn't carry on
 around the station. *Decided*: it still fades in the dock, but the track is held and picks up
-where it stopped on undocking (built the same day). A different kind of music while lingering
+where it stopped on undocking (built and tried the same day: "works"). A different kind of music while lingering
 docked belongs to the station personalities (S-69). Next wish: the chatter faces swinging to the music (S-68).
 
 ### 2. Menu, credits and the licence guard

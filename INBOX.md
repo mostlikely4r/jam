@@ -59,3 +59,8 @@ Player credits should shown at the top of the station shop screen. Sesion credit
 - added: 2026-11-25 10:28
 
 Programs and hulls should have blueprints which station can 'want' or 'have unlocked'.
+
+## I-13 · Targeting system tweak: 'next main target nearest/most in front/collision'
+- added: 2026-11-25 10:35
+
+Auto targeting program. Tweak: max range.

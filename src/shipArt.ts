@@ -487,7 +487,7 @@ export function tankBoxes(ship: ArtShip, fill: number): TankBox[] {
 }
 
 /**
- * Each tank's box on the hull: a dark well filled amber from the bottom as it holds fuel, red when
+ * Each tank's box on the hull: a dark well filled amber along its length as it holds fuel, red when
  * nearly empty. It sits inside the hull, faded by its mount, so the level reads through it.
  */
 export function drawTanks(ctx: CanvasRenderingContext2D, boxes: TankBox[]): void {
@@ -501,7 +501,9 @@ export function drawTanks(ctx: CanvasRenderingContext2D, boxes: TankBox[]): void
     const inner = { w: box.w - 0.7, h: box.h - 0.7 };
     if (box.fill > 0) {
       ctx.fillStyle = box.fill < 0.25 ? "#ff6b5c" : "#ffb03a";
-      ctx.fillRect(-inner.w / 2, inner.h / 2 - inner.h * box.fill, inner.w, inner.h * box.fill);
+      // The level runs the tank's length, its own facing: the fuel sits against the back of it and
+      // the front goes dark first as the tank empties.
+      ctx.fillRect(-inner.w / 2, -inner.h / 2, inner.w * box.fill, inner.h);
     }
     ctx.strokeStyle = "rgba(200, 212, 232, 0.75)";
     ctx.lineWidth = 0.45;

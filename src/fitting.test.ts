@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { homeSim } from "./home";
 import { copyHull, decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, PART_ART, refresh, removeHull, resetPartArt, resetPartStats, shipFileNow, thrustOf, useShipFile, type HullInfo, type PartArt } from "./fitting";
 import { SHIP_MODELS, type PartId, type ThrusterRole } from "./parts";
-import { bayBox, drawTurret, drawVectorShip } from "./shipArt";
+import { bayBox, drawTanks, drawTurret, drawVectorShip } from "./shipArt";
 import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
 import { DOCK_OFFSET, SHIP_RADIUS, Sim } from "./sim";
@@ -861,6 +861,23 @@ describe("mounts as they draw in game", () => {
       () => (spot.alpha = 0.4),
       () => expect(bayBox({ ...newFitting("racer"), model: "racer" as const }).alpha).toBeCloseTo(0.4, 5),
     );
+  });
+
+  it("a tank's fuel sits at its back and goes dark from the front", () => {
+    const calls: [string, number[]][] = [];
+    const ctx = new Proxy({} as CanvasRenderingContext2D, {
+      get: (_target, name: string) => (...args: number[]) => void calls.push([name, args]),
+      set: () => true,
+    });
+    // Half full: the well first, then the fuel in it.
+    drawTanks(ctx, [{ x: 0, y: 0, angle: 0, w: 3.7, h: 2.7, capacity: 10, fill: 0.5, alpha: 1 }]);
+    const [x, y, w, h] = calls.filter(([name]) => name === "fillRect")[1][1];
+    // Against the back of the box, half its inner length, so the front half is what's dark.
+    expect(x).toBeCloseTo(-1.5, 5);
+    expect(x + w).toBeCloseTo(0, 5);
+    // The whole of its height, rather than a level across it.
+    expect(h).toBeCloseTo(2, 5);
+    expect(y).toBeCloseTo(-1, 5);
   });
 });
 

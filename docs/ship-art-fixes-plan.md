@@ -6,6 +6,8 @@ built yet.
 
 ## 1. Tanks empty front to back (I-4)
 
+*Built.*
+
 *Decided* (the note): "Fuel tanks should empty front to back (now they left to right)."
 
 Today `drawTanks` (`src/shipArt.ts`, after `tankBoxes`) fills a tank's box from its local

@@ -39,6 +39,11 @@ export class Audio {
     source.start();
   }
 
+  /** Where music plugs in: under the master gain, so volume and Mute cover it. Null before `start`. */
+  musicOutput(): { ctx: AudioContext; destination: AudioNode } | null {
+    return this.ctx && this.master ? { ctx: this.ctx, destination: this.master } : null;
+  }
+
   toggleMute(): void {
     this.muted = !this.muted;
     this.applyGain();

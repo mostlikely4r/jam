@@ -9,6 +9,8 @@ import { shippedWorld } from "./designer/shipped";
 import { layoutKey, loadGame, loadStart, saveGame, saveInfo, type SaveSlot, type StartFile } from "./save";
 import { stringifyWorld } from "./designer/world";
 import { Audio } from "./audio";
+import { MUSIC_TIMING, MusicPlayer, MusicScheduler, nowPlayingText, usableTracks } from "./music";
+import musicList from "./music.json";
 import { Radio } from "./radio";
 import { type Base, type Battery, type Deposit, DEPOSIT_REACH, type HullPlan, SHIP_RADIUS, type Ship, Sim, STATION_HALF, TICK, targetSpot, type Targetable } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
@@ -77,6 +79,18 @@ const dockHint = document.getElementById("dockhint") as HTMLDivElement;
 let shopOpen = false;
 const renderer = new Renderer(canvas);
 const audio = new Audio();
+const nowPlaying = document.getElementById("nowplaying") as HTMLDivElement;
+let nowPlayingTimer: ReturnType<typeof setTimeout> | null = null;
+/** Music under the work (docs/music-plan.md): the line that names a track doubles as its credit. */
+const music = new MusicPlayer(new MusicScheduler(usableTracks(musicList)), 0.6, (track) => {
+  nowPlaying.textContent = nowPlayingText(track);
+  nowPlaying.classList.add("shown");
+  if (nowPlayingTimer) clearTimeout(nowPlayingTimer);
+  nowPlayingTimer = setTimeout(() => nowPlaying.classList.remove("shown"), 6000);
+});
+/** Real seconds since the player's ship last did something: moved, thrusted, shot, took ore, flew a course. */
+let idleSeconds = Infinity;
+let oreBefore = 0;
 /** `?dev` on the address shows the tuning panel, the status lines and every pointer. */
 const dev = new URLSearchParams(location.search).has("dev");
 renderer.dev = dev;
@@ -1739,6 +1753,27 @@ let accumulator = 0;
 let fps = 60;
 let hudTimer = 0;
 
+/**
+ * Whether the ship is at work, for the music: anything it did in the last little while counts,
+ * auto-mining too, since it's the ship that's busy and not the hands. Shots carry no owner, so a
+ * shot close by the ship is taken as its own.
+ */
+function updateMusic(paused: boolean, seconds: number): void {
+  const { ship } = sim;
+  const ore = sim.oreIn(ship);
+  const busy =
+    Math.hypot(ship.vx, ship.vy) > MUSIC_TIMING.crawl ||
+    ship.firing.size > 0 ||
+    ship.controls.fire ||
+    sim.clickPilot.flying ||
+    ore > oreBefore ||
+    sim.events.some((event) => event.type === "shot" && Math.hypot(event.x - ship.x, event.y - ship.y) < SHIP_RADIUS * 4);
+  oreBefore = ore;
+  if (!paused) idleSeconds = busy ? 0 : idleSeconds + seconds;
+  music.connect(audio.musicOutput());
+  music.update({ atWork: idleSeconds < MUSIC_TIMING.workMemory, docked: sim.baseAt(ship) !== null, paused, seconds });
+}
+
 function frame(now: number): void {
   const paused = pausedNow();
   const seconds = Math.min(MAX_FRAME_SECONDS, (now - lastTime) / 1000);
@@ -1782,6 +1817,7 @@ function frame(now: number): void {
       (event) => Math.hypot(event.x - sim.ship.x, event.y - sim.ship.y) < HEARING_DISTANCE,
     ),
   );
+  updateMusic(paused || !inGame, seconds);
   sim.events.length = 0;
   audio.setThrust(!paused && sim.ship.firing.size > 0);
   updateShop();

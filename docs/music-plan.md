@@ -42,9 +42,28 @@ files, so the user's two tracks from there can't be used. A test enforces the al
 
 ## What to build
 
-### 1. One track under the work, and the now-playing line
+### 1. One track under the work, and the now-playing line (*built* 2026-11-25)
 
 The smallest version that can be tried.
+
+Built as below, with these differences:
+- The scheduler also takes `docked`. A track fades only on docking (or Off); merely going
+  idle in space lets it play out, and the gap counts only while at work.
+- "Moving" means faster than 20 units a second (`MUSIC_TIMING.crawl`).
+- Shots carry no owner, so a `shot` event within 4 ship radii of the ship counts as its own
+  (that is what catches auto-mining). Ore taken shows as `sim.oreIn` going up.
+- The wait counts frame seconds while unpaused (capped at 0.1 s a frame, like the game). A
+  throttled background tab runs it slow, along with the game.
+- A track whose licence isn't on the list is dropped at load with a console warning
+  (`usableTracks`). The guard test itself is in step 2.
+- Checked in the browser with a synthesized test tone (removed): it fades in, the line
+  shows, it pauses with the menu, and Skip fades it out and starts the gap.
+- The user's first four tracks are in (Kevin MacLeod, CC BY 4.0, all marked `funk`):
+  "Aerosol of my Love", "Disco con Tutti", "Funkorama", "Your Call". About 27 MB.
+- `CREDITS.md` was pulled forward from step 2, since the files ship in the public repo now.
+  Step 2 still has the README line, the in-game Credits page and the guard test.
+- A refused `play()` (not a broken file) counts as the track ending, so a gap and another
+  try follow instead of the player waiting forever (from review).
 
 - **Track list:** `src/music.json`, an array of
   `{ id, file, title, artist, licence, source, mood, attribution? }`.

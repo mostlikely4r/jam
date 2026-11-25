@@ -3,7 +3,7 @@
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
 ## Q-33 · Music: funk under the work · build
-- state: queued
+- state: in progress
 - backlog: S-66
 - plan: docs/music-plan.md
 - added: 2026-11-25

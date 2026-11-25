@@ -1,0 +1,42 @@
+[
+  {
+    "id": "aerosol-of-my-love",
+    "file": "aerosol-of-my-love.mp3",
+    "title": "Aerosol of my Love",
+    "artist": "Kevin MacLeod",
+    "licence": "CC BY 4.0",
+    "source": "https://incompetech.com",
+    "mood": "funk",
+    "attribution": "\"Aerosol of my Love\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+  },
+  {
+    "id": "disco-con-tutti",
+    "file": "disco-con-tutti.mp3",
+    "title": "Disco con Tutti",
+    "artist": "Kevin MacLeod",
+    "licence": "CC BY 4.0",
+    "source": "https://incompetech.com",
+    "mood": "funk",
+    "attribution": "\"Disco con Tutti\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+  },
+  {
+    "id": "funkorama",
+    "file": "funkorama.mp3",
+    "title": "Funkorama",
+    "artist": "Kevin MacLeod",
+    "licence": "CC BY 4.0",
+    "source": "https://incompetech.com",
+    "mood": "funk",
+    "attribution": "\"Funkorama\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+  },
+  {
+    "id": "your-call",
+    "file": "your-call.mp3",
+    "title": "Your Call",
+    "artist": "Kevin MacLeod",
+    "licence": "CC BY 4.0",
+    "source": "https://incompetech.com",
+    "mood": "funk",
+    "attribution": "\"Your Call\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+  }
+]

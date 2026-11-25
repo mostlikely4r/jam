@@ -66,6 +66,9 @@
       #shop { position: fixed; right: 12px; bottom: 44px; width: 430px; max-height: calc(100vh - 64px); overflow-y: auto;
               box-sizing: border-box; padding: 10px 12px; background: #0b0f18e8; border: 1px solid #5fae66; }
       #shop[hidden] { display: none; }
+      #nowplaying { position: fixed; left: 14px; bottom: 14px; pointer-events: none; font-size: 13px; color: #cfd8e6;
+                    text-shadow: 0 1px 2px #000; opacity: 0; transition: opacity 1.5s; }
+      #nowplaying.shown { opacity: 1; }
       #chatter { position: fixed; right: 12px; top: 12px; width: 380px; pointer-events: none; font-size: 13px;
                  text-shadow: 0 1px 2px #000; }
       body:has(#panel:not([hidden])) #chatter { right: 302px; }
@@ -203,6 +206,7 @@
     <canvas id="view"></canvas>
     <div id="hud" hidden></div>
     <div id="chatter"></div>
+    <div id="nowplaying"></div>
     <div id="shop" hidden></div>
     <div id="inventory" hidden></div>
     <div id="dockhint" hidden>B: shop</div>

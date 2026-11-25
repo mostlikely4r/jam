@@ -549,7 +549,7 @@ Stations get unlocked and wanted lists for programs and hulls, as for modules: f
 player or the station, brought by the hauler.
 
 ## S-66 · Music: funk under the work
-- status: specced
+- status: building
 - area: Sound
 - effort: M
 - plan: docs/music-plan.md

@@ -1,4 +1,4 @@
-import { isProgram, partOf, PARTS, SHIP_MODELS, type Part, type PartIcon, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "./parts";
+import { isProgram, partOf, PARTS, SHIP_MODELS, type Part, type PartIcon, type PartId, type ShipModel, type ThrusterRole } from "./parts";
 import shipFile from "./hulls.json";
 import { hasGlyph } from "./glyphs";
 import { itemDef } from "./items";
@@ -731,15 +731,6 @@ export function facing(mount: MountPlace): number {
   return (mount.angle * Math.PI) / 180;
 }
 
-/** The first mount whose module is of this kind, with the module. */
-export function mountWith(ship: Fitting & { model: ShipModel }, kind: PartKind): { mount: Mount; module: Module } | null {
-  for (const mount of mountsOf(ship)) {
-    const module = ship.fit[mount.id];
-    if (module && partOf(module.part).kind === kind) return { mount, module };
-  }
-  return null;
-}
-
 /**
  * What a ship's thrusters do where they sit. A pushing thruster pushes the way its flame doesn't
  * go, at full strength whichever way that is. A turn thruster turns by its lever: how far from
@@ -816,21 +807,47 @@ export function newFitting(model: ShipModel, random: () => number = Math.random)
   return fitting;
 }
 
-/** The mount holding a turret, if one is on. */
-export function turretMount(ship: Fitting & { model: ShipModel }): Mount | null {
-  for (const mount of hullMounts(ship.model)) {
+/** The mounts holding a turret, in the hull's order: every one has its own gun. */
+export function turretMounts(ship: Fitting & { model: ShipModel }): Mount[] {
+  return hullMounts(ship.model).filter((mount) => {
     const module = ship.fit[mount.id];
-    if (module && partOf(module.part).kind === "turret") return mount;
-  }
-  return null;
+    return module !== undefined && partOf(module.part).kind === "turret";
+  });
 }
 
-/** The mounts a ship has now: its hull's, plus a turret's gun mount while one is on. */
+/** The mount holding the first turret, if one is on. */
+export function turretMount(ship: Fitting & { model: ShipModel }): Mount | null {
+  return turretMounts(ship)[0] ?? null;
+}
+
+/** The prefix of a turret's own gun mount: a turret on a mount brings one, named after the mount. */
+const TURRET_GUN = "turretGun:";
+
+/** The gun mount a turret's mount brings. */
+export function turretGunId(mount: MountId): MountId {
+  return `${TURRET_GUN}${mount}`;
+}
+
+/** Whether a mount id is the gun mount a turret brings. */
+export function isTurretGun(mount: MountId): boolean {
+  return mount.startsWith(TURRET_GUN);
+}
+
+/** The mounts a ship has now: its hull's, plus a gun mount for every turret that's on. */
 export function mountsOf(ship: Fitting & { model: ShipModel }): Mount[] {
   const mounts = hullMounts(ship.model);
-  const base = turretMount(ship);
-  if (!base) return mounts;
-  return [...mounts, { id: "turretGun", name: "Turret gun", types: ["gun"], x: base.x, y: base.y, angle: base.angle, scale: base.scale }];
+  const turrets = turretMounts(ship);
+  if (turrets.length === 0) return mounts;
+  const guns = turrets.map((base) => ({ id: turretGunId(base.id), name: "Turret gun", types: ["gun"], x: base.x, y: base.y, angle: base.angle, scale: base.scale }));
+  return [...mounts, ...guns];
+}
+
+/** The working tractor modules of a ship, each with its mount. The clamp is no beam. */
+export function tractorMounts(ship: Fitting & { model: ShipModel }): { mount: Mount; module: Module }[] {
+  return mountsOf(ship).flatMap((mount) => {
+    const module = ship.fit[mount.id];
+    return works(module) && partOf(module.part).kind === "tractor" && module.part !== "clamp" ? [{ mount, module }] : [];
+  });
 }
 
 /**
@@ -887,8 +904,17 @@ export function mountsFor(ship: Fitting & { model: ShipModel }, id: PartId): Mou
   const part = partOf(id);
   // Decals and cockpit glass are looks only: never fitted for real.
   if (part.kind === "program" || part.kind === "cockpit" || isDecal(id)) return [];
-  // A gun goes on the turret when there is one.
-  if (part.kind === "gun" && turretMount(ship)) return ["turretGun"];
+  // A gun takes the first turret without one, then a free mount of its own, then swaps onto a turret.
+  if (part.kind === "gun") {
+    const spots = mountsOf(ship).filter((mount) => !mount.decal && mountTakes(mount, id));
+    const empty = spots.filter((mount) => !ship.fit[mount.id]);
+    const armed = spots.filter((mount) => {
+      const held = ship.fit[mount.id];
+      return held !== undefined && partOf(held.part).kind === "gun";
+    });
+    const pick = empty.find((mount) => isTurretGun(mount.id)) ?? empty[0] ?? armed.find((mount) => isTurretGun(mount.id)) ?? armed[0];
+    return pick ? [pick.id] : [];
+  }
   const mounts = hullMounts(ship.model).filter((mount) => mountTakes(mount, id));
   const ids = [...mounts.filter((mount) => !ship.fit[mount.id]), ...mounts.filter((mount) => ship.fit[mount.id])].map((mount) => mount.id);
   // A set keeps the hull's order, so a pair goes on left then right.
@@ -917,11 +943,11 @@ export function fitPart(ship: Fitting & { model: ShipModel }, id: PartId, wear =
     if (old) off.push(old);
     ship.fit[mount] = { part: id, wear };
   }
-  // A gun that was on the gun mount moves up onto the new turret.
+  // A gun that was on the turret's own mount moves up onto the new turret.
   if (partOf(id).kind === "turret") {
     const gun = off.find((module) => partOf(module.part).kind === "gun");
     if (gun) {
-      ship.fit.turretGun = gun;
+      ship.fit[turretGunId(mounts[0])] = gun;
       off.splice(off.indexOf(gun), 1);
     }
     // Swapping one turret for another, the gun stays on: its mount is the same.
@@ -936,8 +962,8 @@ export function unfit(ship: Fitting & { model: ShipModel }, mount: MountId): Mod
   if (!module) return null;
   delete ship.fit[mount];
   if (partOf(module.part).kind === "turret") {
-    const gun = ship.fit.turretGun;
-    delete ship.fit.turretGun;
+    const gun = ship.fit[turretGunId(mount)];
+    delete ship.fit[turretGunId(mount)];
     if (gun) ship.fit[mount] = gun;
   }
   refresh(ship);

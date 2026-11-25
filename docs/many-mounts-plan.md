@@ -1,7 +1,7 @@
 # Many mounts plan
 
 Written 2026-11-25, from three inbox notes the user wrote while fitting hulls in the designer
-(I-1, I-3, I-9). Nothing here is built yet.
+(I-1, I-3, I-9). Built 2026-11-25, both steps (`Q-27`).
 
 ## Why
 
@@ -49,7 +49,7 @@ expects one of each:
 
 ## The build
 
-### 1. Turrets
+### 1. Turrets — *built*
 
 - `fitting.ts`: `turretMounts(ship)` (all of them) replaces `turretMount`; `mountsOf` adds a
   `turretGun:<id>` mount per turret; `mountsFor`, `fitPart` and `unfit` handle the gun of the
@@ -65,7 +65,7 @@ expects one of each:
 - **Saves:** a saved `turretGun` key moves to the first turret's `turretGun:<id>` on load. Bump
   `SAVE_VERSION` (`src/save.ts`, now 10).
 
-### 2. Tractors
+### 2. Tractors — *built*
 
 - `sim.ts`: `tractorMounts(ship)` (working tractor modules, the clamp left out); `tractorOn` is
   "any of them, and room in the bay"; `pullOre` catches with each one's cone from its own apex;
@@ -74,6 +74,25 @@ expects one of each:
   way; the lines to caught ore stay as they are.
 - AI traffic that buys a tractor keeps buying one; nothing in its buy order changes.
 
+### What changed from the plan
+
+- The helpers live where the other mount helpers are: `turretMounts`, `turretGunId`,
+  `isTurretGun` and `tractorMounts` in `fitting.ts`, so the renderer asks them too.
+  `mountSpot(ship, mount)` is new in `sim.ts`: where a mount sits in world units, shared by the
+  turret aim, a tractor's apex and its cone.
+- `tractorCone` keeps its name but takes the tractor's own part instead of the ship, so each beam
+  is as wide as the part that makes it.
+- Two places asked a single ship-wide turret angle and now ask for the best-lined-up turret:
+  `Sim.turretOff`, used by `bot.ts` (when to fire) and `pilot.ts` (whether the gun is on the rock).
+- `render.ts` took the turret from `ship.fit.gun` — the mount the floater happens to call "gun" —
+  so a turret on any other mount drew nothing. It now draws every turret the ship has.
+- `mountWith` had no other caller once `pullOre` stopped needing "the first tractor": it's gone.
+- The old `turretGun` key is moved onto the first turret's own mount in `Sim.restore`'s per-ship
+  fill, as the plan asked. No save in that shape can reach it — the `SAVE_VERSION` bump turns
+  those away at the door — so it's a safety net for a snapshot made by hand or by a test, and
+  `src/start.json` was re-warmed for version 11 (`npm run warm -- 60 1 --ship`).
+- `src/designer/homepair.test.ts` pins `SAVE_VERSION` so a bump is deliberate: it now pins 11.
+
 ## How we'll know
 
 - Tests (`src/fitting.test.ts`, `src/sim.test.ts`): a hull with two turret mounts takes two
@@ -81,7 +100,9 @@ expects one of each:
   goes on the plain gun mount; taking a turret off drops its own gun back. Two tractor mounts
   facing opposite ways catch ore behind and ahead; ore outside both cones isn't caught. A save
   with the old `turretGun` key loads with the gun on the first turret.
-- `npm test` and `npm run build`.
+- `npm test` and `npm run build`. The tests above are in `src/fitting.test.ts` ("each mount
+  counts on its own"), `src/sim.test.ts` ("turret mount"), `src/hullbuy.test.ts` (two turrets
+  carried onto a hull with two) and `src/save.test.ts`.
 - **Try it:** in the designer, give a hull two turret mounts and two tractor mounts facing
   different ways (or tick "tractor" on a turret mount, for I-9). Start in that hull, buy two
   turrets, two guns and two tractors. Both turrets turn and fire; there are two cones in the right
@@ -97,3 +118,4 @@ Nothing: mounts, turrets and tractors are all built (`docs/fitting-plan.md`, Q-1
 - Clamps on more than one mount.
 - Stacked pull strength from several tractors.
 - The traffic tractor beam lines (S-45, its own fix).
+- The clamp on more than one mount, and turrets picking their own targets: as above.

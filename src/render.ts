@@ -1,6 +1,6 @@
 import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
-import { DAMAGED_AT, facing, hullMax, hullMounts, tankCapacity, turretMount, works, type Module } from "./fitting";
+import { DAMAGED_AT, facing, hullMax, hullMounts, tankCapacity, tractorMounts, turretGunId, turretMounts, works, type Module } from "./fitting";
 import { footprint, gridRect, type Rect } from "./grid";
 import { isItem, partOf } from "./parts";
 import { isOreItem } from "./items";
@@ -20,6 +20,7 @@ import {
   PIRATE_BASE_RADIUS,
   Sim,
   SHIP_RADIUS,
+  mountSpot,
   STATION_HALF,
   TICK,
   targetSpot,
@@ -666,7 +667,7 @@ export class Renderer {
     }
   }
 
-  /** A line to each piece of ore the beam has caught, and for the player a faint cone at full range. */
+  /** A line to each piece of ore the beam has caught, and for the player a faint cone at full range of each tractor. */
   private drawTractor(
     sim: Sim,
     ship: Ship,
@@ -678,21 +679,26 @@ export class Renderer {
     if (!sim.tractorOn(ship)) return;
     const { ctx } = this;
     const range = sim.tuning.tractorRange;
-    const tractorCone = sim.tractorCone(ship);
     ctx.lineWidth = 1;
     if (showRange) {
       ctx.strokeStyle = "rgba(111, 224, 200, 0.12)";
-      ctx.beginPath();
-      if (tractorCone >= 360) {
-        ctx.arc(x, y, range, 0, Math.PI * 2);
-      } else {
-        const angle = lerp(ship.prevAngle, ship.angle, alpha);
-        const half = (tractorCone / 2) * (Math.PI / 180);
-        ctx.moveTo(x, y);
-        ctx.arc(x, y, range, angle - half, angle + half);
-        ctx.closePath();
+      const angle = lerp(ship.prevAngle, ship.angle, alpha);
+      // One cone or circle per tractor, from its own mount, turned its own way.
+      for (const { mount, module } of tractorMounts(ship)) {
+        const cone = sim.tractorCone(module.part);
+        const spot = mountSpot({ x, y, angle }, mount);
+        ctx.beginPath();
+        if (cone >= 360) {
+          ctx.arc(spot.x, spot.y, range, 0, Math.PI * 2);
+        } else {
+          const look = angle + facing(mount);
+          const half = (cone / 2) * (Math.PI / 180);
+          ctx.moveTo(spot.x, spot.y);
+          ctx.arc(spot.x, spot.y, range, look - half, look + half);
+          ctx.closePath();
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
     }
     ctx.strokeStyle = "rgba(111, 224, 200, 0.45)";
     ctx.beginPath();
@@ -1547,21 +1553,23 @@ export class Renderer {
     this.drawCargo(ship);
     // Critical: it's coming apart.
     if (ship.critical > 0) for (let i = 0; i < 3; i++) this.drawSparks((Math.random() - 0.5) * r * 2, (Math.random() - 0.5) * r * 1.6);
-    const turret = ship.fit.gun && partOf(ship.fit.gun.part).kind === "turret" ? ship.fit.gun : null;
-    if (turret) {
-      const gun = ship.fit.turretGun;
-      const turn = Math.atan2(
-        Math.sin(ship.turretAngle - ship.prevTurretAngle),
-        Math.cos(ship.turretAngle - ship.prevTurretAngle),
-      );
-      const base = turretMount(ship) ?? { x: 0, y: 0, scale: 1 };
+    // Every turret draws on its own mount, with its own gun, turned its own way.
+    for (const base of turretMounts(ship)) {
+      const turret = ship.fit[base.id];
+      if (!turret) continue;
+      const slot = turretGunId(base.id);
+      const gun = ship.fit[slot];
+      const held = ship.turretAngles[slot] ?? facing(base);
+      const before = ship.prevTurretAngles[slot] ?? held;
+      const turn = Math.atan2(Math.sin(held - before), Math.cos(held - before));
       const metal = colorOf(moduleColor(turret, "#c9d4e6"));
       drawTurret(ctx, {
         x: base.x * r,
         y: base.y * r,
         // The aim is smoothed between steps, so the gun doesn't jump on its base.
-        angle: ship.prevTurretAngle + turn * alpha,
+        angle: before + turn * alpha,
         scale: base.scale ?? 1,
+        alpha: base.alpha,
         part: turret.part,
         gun: gun ?? null,
         colours: { metal, rim: mix(metal, [255, 255, 255], 0.35) },

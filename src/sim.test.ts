@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { HULL_MOUNTS, mountOf, refresh, tweakMounts } from "./fitting";
 import { FIRST_FIELD, HOME, type Home, homeFields, homeOf, homeSim, rehome } from "./home";
 import { PARTS, type PartId } from "./parts";
 import { roundTrip } from "./save";
@@ -184,10 +185,13 @@ describe("turret mount", () => {
   it("turns toward the aim at its own speed, relative to the ship", () => {
     const sim = turretSim();
     sim.tuning.turretTurnSpeed = 90;
+    const base = mountOf("floater", "gun")!;
+    // Each turret aims from where it sits, so a spot straight up the screen is a touch off its line.
+    const want = Math.atan2(1000 - base.y * SHIP_RADIUS, -base.x * SHIP_RADIUS);
     run(sim, 0.5);
-    expect(sim.ship.turretAngle).toBeCloseTo(Math.PI / 4, 1);
+    expect(sim.ship.turretAngles["turretGun:gun"]).toBeCloseTo(Math.PI / 4, 2);
     run(sim, 1);
-    expect(sim.ship.turretAngle).toBeCloseTo(Math.PI / 2, 2);
+    expect(sim.ship.turretAngles["turretGun:gun"]).toBeCloseTo(want, 2);
   });
 
   it("fires where it points, with a third of the gun's range", () => {
@@ -196,8 +200,33 @@ describe("turret mount", () => {
     sim.controls.fire = true;
     sim.step();
     const shot = sim.shots[0];
-    expect(Math.atan2(shot.vy - sim.ship.vy, shot.vx - sim.ship.vx)).toBeCloseTo(Math.PI / 2, 2);
+    const turret = sim.ship.angle + (sim.ship.turretAngles["turretGun:gun"] ?? 0);
+    expect(Math.atan2(shot.vy - sim.ship.vy, shot.vx - sim.ship.vx)).toBeCloseTo(turret, 2);
     expect(shot.life).toBeCloseTo(sim.tuning.shotLife * sim.tuning.turretRange, 2);
+  });
+
+  it("two turrets on two mounts each fire along their own", () => {
+    const sim = turretSim();
+    // A second turret mount, turned a quarter and off to one side, with its own turret and gun.
+    HULL_MOUNTS.floater.push({ ...mountOf("floater", "gun")!, id: "gunTwo", name: "Second turret", x: 0.3, y: 0.7, angle: 90, default: undefined });
+    try {
+      sim.ship.fit.gunTwo = { part: "turret", wear: 0 };
+      sim.ship.fit["turretGun:gunTwo"] = { part: "gun1", wear: 0 };
+      refresh(sim.ship);
+      expect(Object.keys(sim.ship.fit).filter((id) => id.startsWith("turretGun:")).sort()).toEqual(["turretGun:gun", "turretGun:gunTwo"]);
+      // Each turret's gun is its own row of auto-mine's "Fires", as every gun mount is.
+      expect(tweakMounts(sim.ship, { each: "gun" }).map((mount) => mount.id)).toEqual(["turretGun:gun", "turretGun:gunTwo"]);
+      run(sim, 2);
+      sim.controls.fire = true;
+      sim.step();
+      expect(sim.shots.length).toBe(2);
+      // Both turn to the same spot, each from where it sits.
+      for (const shot of sim.shots) expect(Math.atan2(shot.vy - sim.ship.vy, shot.vx - sim.ship.vx)).toBeCloseTo(Math.PI / 2, 1);
+      // From its own mount: the second turret's shots start off the first one's line.
+      expect(sim.shots[0].x).not.toBeCloseTo(sim.shots[1].x, 1);
+    } finally {
+      HULL_MOUNTS.floater.splice(HULL_MOUNTS.floater.findIndex((mount) => mount.id === "gunTwo"), 1);
+    }
   });
 
   it("without a turret the gun fires from the nose at full range", () => {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { refresh } from "./fitting";
 import { homeSim } from "./home";
 import { layoutKey, loadStart, makeStart, roundTrip, type StartFile } from "./save";
 import { Sim, TICK } from "./sim";
@@ -185,5 +186,19 @@ describe("the shipped start", () => {
     // The world has run: the base that sells the all-round tractor has put up word of it.
     expect(sim.bases.some((base) => base.board.some((report) => report.item === "tractorAll"))).toBe(true);
     for (let i = 0; i < Math.round(5 / TICK); i++) sim.step();
+  });
+});
+
+describe("a save from before each turret had its own gun mount", () => {
+  it("puts the one gun mount's gun on the first turret's own", () => {
+    const sim = homeSim(1, { ...DEFAULTS });
+    sim.ship.model = "floater";
+    sim.ship.fit.gun = { part: "turret", wear: 0 };
+    sim.ship.fit.turretGun = { part: "gun1", wear: 0.1 };
+    refresh(sim.ship);
+    const into = homeSim(2, { ...DEFAULTS });
+    roundTrip(sim, into);
+    expect(into.ship.fit["turretGun:gun"]).toEqual({ part: "gun1", wear: 0.1 });
+    expect(into.ship.fit.turretGun).toBeUndefined();
   });
 });

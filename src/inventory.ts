@@ -1,4 +1,4 @@
-import { computerSize, DAMAGED_AT, mountsOf, programSlots, tankCapacity, tweakMounts, type Module, type Mount, type MountId } from "./fitting";
+import { computerSize, DAMAGED_AT, isTurretGun, mountsOf, programSlots, tankCapacity, tweakMounts, type Module, type Mount, type MountId } from "./fitting";
 import { canPlace, entryCells, fits, footprint, reachable, sticks, type GridSpec, type Placed } from "./grid";
 import { isItem, partOf, PARTS, type PartId } from "./parts";
 import { pickOf, programDef, PROGRAM_PARTS, type ProgramTweak } from "./programs";
@@ -253,7 +253,7 @@ export class Inventory {
       drawVectorShip(ctx, ship, [111, 122, 140], sim.tuning.fuel ? (capacity > 0 ? ship.fuel / capacity : 0) : null);
     }
     print.append(canvas);
-    const mounts = mountsOf(ship).filter((mount) => !mount.decal && (ship.fit[mount.id] || mount.id !== "turretGun"));
+    const mounts = mountsOf(ship).filter((mount) => !mount.decal && (ship.fit[mount.id] || !isTurretGun(mount.id)));
     const spots = this.portSpots(mounts, scale);
     const lines = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     lines.setAttribute("width", String(PRINT));

@@ -472,7 +472,7 @@ and end angles, a line width), each with handles in the shape editor; and an "ad
 button that adds the polygon our hulls' default shapes use as a decal.
 
 ## S-58 · Many mounts: every turret and tractor counts
-- status: specced
+- status: built
 - area: Ships and gear
 - effort: M
 - plan: docs/many-mounts-plan.md

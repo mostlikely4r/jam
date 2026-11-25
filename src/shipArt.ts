@@ -4,7 +4,7 @@
  * dish), each drawn where its mount sits, turned the way it faces and at its size; what's inside
  * the hull (computer, bay) doesn't show. Damaged parts are handed back so the caller can spark them.
  */
-import { DAMAGED_AT, decalOf, facing, hullEdge, hullMounts, hullShapes, PART_ART, type ArtShape, type HullPoint, type Module, type Mount, type MountId } from "./fitting";
+import { DAMAGED_AT, decalOf, facing, hullEdge, hullMounts, hullShapes, isTurretGun, PART_ART, type ArtShape, type HullPoint, type Module, type Mount, type MountId } from "./fitting";
 import { partOf, type PartId, type PartKind, type ShipModel } from "./parts";
 import type { Box } from "./grid";
 
@@ -176,7 +176,7 @@ function outsideParts(ship: ArtShip): { id: MountId; part: PartId; x: number; y:
     const module = ship.fit[mount.id];
     if (!module) continue;
     const kind = partOf(module.part).kind;
-    if (kind === "computer" || kind === "section" || kind === "tank" || kind === "turret" || mount.id === "turretGun") continue;
+    if (kind === "computer" || kind === "section" || kind === "tank" || kind === "turret" || isTurretGun(mount.id)) continue;
     // Destroyed, a bay carries nothing any more: see `bayBox`.
     out.push({ id: mount.id, part: module.part, x: mount.x * R, y: mount.y * R, angle: facing(mount), scale: mount.scale, kind, wear: module.wear, alpha: mount.alpha ?? 1, order: mount.order ?? 0, main: mount.role === "thrusterMain" });
   }

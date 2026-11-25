@@ -370,7 +370,7 @@ describe("drone", () => {
       sim.devSet(pilot.ship, "turret", true);
       let turned = 0;
       run(sim, 240, () => {
-        if (pilot.task === "shooting") turned = Math.max(turned, Math.abs(pilot.ship.turretAngle));
+        if (pilot.task === "shooting") for (const angle of Object.values(pilot.ship.turretAngles)) turned = Math.max(turned, Math.abs(angle ?? 0));
       });
       expect(pilot.ship.trips + sim.oreIn(pilot.ship)).toBeGreaterThan(0);
       expect(turned).toBeGreaterThan(0.3);

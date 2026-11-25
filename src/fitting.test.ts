@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { homeSim } from "./home";
-import { copyHull, decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, PART_ART, refresh, removeHull, resetPartArt, resetPartStats, shipFileNow, thrustOf, useShipFile, type HullInfo, type PartArt } from "./fitting";
+import { copyHull, decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, PART_ART, refresh, removeHull, resetPartArt, resetPartStats, shipFileNow, thrustOf, unfit, useShipFile, type HullInfo, type Mount, type PartArt } from "./fitting";
 import { SHIP_MODELS, type PartId, type ThrusterRole } from "./parts";
 import { bayBox, drawBay, drawTanks, drawTurret, drawVectorShip, hullTint, tankBoxes } from "./shipArt";
 import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
-import { DOCK_OFFSET, SHIP_RADIUS, Sim } from "./sim";
+import { DOCK_OFFSET, SHIP_RADIUS, Sim, TICK, type Loose } from "./sim";
 
 /** How much ore an empty bay of this part holds, at one ore per cell. */
 const bayCells = (id: "smallBay" | "bay" | "largeBay") => partOfForTest(id).bay!.w * partOfForTest(id).bay!.h;
@@ -120,10 +120,10 @@ describe("the shop fits what it sells", () => {
     const { ship } = sim;
     expect(buyAndFit(sim, "turret")).toBe(true);
     expect(ship.fit.gun!.part).toBe("turret");
-    expect(ship.fit.turretGun!.part).toBe("gun2");
+    expect(ship.fit["turretGun:gun"]!.part).toBe("gun2");
     expect(sim.sellPart(ship, "turret")).toBe(true);
     expect(ship.fit.gun!.part).toBe("gun2");
-    expect(ship.fit.turretGun).toBeUndefined();
+    expect(ship.fit["turretGun:gun"]).toBeUndefined();
   });
 
   it("strafe thrusters come as a pair, one on each side", () => {
@@ -1481,3 +1481,92 @@ describe("moving things on the blueprint", () => {
   });
 });
 
+
+describe("each mount counts on its own", () => {
+  /** A floater with one more mount than it ships with, taken away afterwards. */
+  function withFloater(extra: Partial<Mount>, body: (sim: Sim) => void): void {
+    const was = shipFileNow();
+    try {
+      HULL_MOUNTS.floater.push({ ...mountOf("floater", "gun")!, default: undefined, ...extra });
+      body(docked("floater"));
+    } finally {
+      useShipFile(was);
+    }
+  }
+
+  /** A piece of ore at rest, where it's put. */
+  const looseAt = (x: number, y: number): Loose => ({ x, y, px: x, py: y, vx: 0, vy: 0, item: "ore", wear: 0, count: 1, kind: 0 });
+
+  it("takes a turret on each turret mount, with a gun of its own for each", () => {
+    withFloater({ id: "gunTwo", name: "Second turret", types: ["gun", "turret"], angle: 90 }, (sim) => {
+      const { ship } = sim;
+      expect(buyAndFit(sim, "turret")).toBe(true);
+      expect(buyAndFit(sim, "turret")).toBe(true);
+      expect(ship.fit.gun!.part).toBe("turret");
+      expect(ship.fit.gunTwo!.part).toBe("turret");
+      // The hull's own gun went up onto the first turret, and the second is not armed yet.
+      expect(ship.fit["turretGun:gun"]!.part).toBe("gun2");
+      expect(ship.fit["turretGun:gunTwo"]).toBeUndefined();
+      // A gun takes a turret without one before a mount of its own.
+      expect(buyAndFit(sim, "gun1")).toBe(true);
+      expect(ship.fit["turretGun:gunTwo"]!.part).toBe("gun1");
+      expect(ship.fit.gunTwo!.part).toBe("turret");
+      // Each turret's own gun comes back down onto its mount when the turret goes.
+      expect(unfit(ship, "gunTwo")!.part).toBe("turret");
+      expect(ship.fit.gunTwo!.part).toBe("gun1");
+      expect(ship.fit["turretGun:gunTwo"]).toBeUndefined();
+      expect(ship.fit["turretGun:gun"]!.part).toBe("gun2");
+    });
+  });
+
+  it("puts a gun on a plain mount while a turret holds the other", () => {
+    withFloater({ id: "gunTwo", name: "Second gun", types: ["gun"] }, (sim) => {
+      const { ship } = sim;
+      expect(buyAndFit(sim, "gun1")).toBe(true);
+      expect(ship.fit.gunTwo!.part).toBe("gun1");
+      // The turret takes the hull's own mount, and the gun that was on it.
+      expect(buyAndFit(sim, "turret")).toBe(true);
+      expect(ship.fit["turretGun:gun"]!.part).toBe("gun2");
+      expect(ship.fit.gunTwo!.part).toBe("gun1");
+      // Every mount armed, a gun swaps onto the first turret, as it always did.
+      expect(mountsFor(ship, "gun2")).toEqual(["turretGun:gun"]);
+    });
+  });
+
+  it("two tractors catch ore each from its own mount, behind as well as ahead", () => {
+    withFloater({ id: "tractorTwo", name: "Rear tractor", types: ["tractor"], x: -0.5, y: 0, angle: 180 }, (sim) => {
+      const { ship } = sim;
+      // Out of the dock, still, the nose along +x.
+      ship.x = ship.px = ship.x + 2000;
+      ship.angle = ship.prevAngle = 0;
+      ship.vx = ship.vy = ship.spin = 0;
+      ship.fit.tractor = { part: "tractor", wear: 0 };
+      ship.fit.tractorTwo = { part: "tractor", wear: 0 };
+      refresh(ship);
+      expect(sim.tractorOn(ship)).toBe(true);
+      const ahead = looseAt(ship.x + 100, ship.y);
+      const behind = looseAt(ship.x - 100, ship.y);
+      const aside = looseAt(ship.x, ship.y + 100);
+      sim.ores.push(ahead, behind, aside);
+      sim.step();
+      expect(ahead.caughtBy).toBe(ship);
+      expect(behind.caughtBy).toBe(ship);
+      // Neither dish looks sideways: what is beside the ship waits.
+      expect(aside.caughtBy).toBeUndefined();
+      // Caught once each: the second beam widens what is caught, it doesn't pull harder.
+      expect(Math.hypot(ahead.vx - ship.vx, ahead.vy - ship.vy)).toBeLessThanOrEqual(sim.tuning.tractorPull * TICK);
+      // The all-round dish takes what a cone couldn't reach.
+      ship.fit.tractor = { part: "tractorAll", wear: 0 };
+      refresh(ship);
+      sim.step();
+      expect(aside.caughtBy).toBe(ship);
+    });
+  });
+
+  it("a clamp is no beam", () => {
+    const sim = docked("racer");
+    sim.devSet(sim.ship, "clamp", true);
+    expect(sim.ship.parts.has("clamp")).toBe(true);
+    expect(sim.tractorOn(sim.ship)).toBe(false);
+  });
+});

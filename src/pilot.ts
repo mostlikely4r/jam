@@ -261,9 +261,10 @@ class ShipPilot {
       this.steer(sim, 0, 0, SETTLE_SPEED, nose);
     }
 
-    const gun = ship.angle + (turret ? ship.turretAngle : 0);
+    // A turret does the aiming, so the nose is free; the gun reads the turret's own line.
+    const off = turret ? sim.turretOff(ship, aim - ship.angle) : Math.abs(wrapAngle(aim - ship.angle));
     const spread = Math.atan2(rock.radius * 0.7, distance);
-    const aimed = Math.abs(wrapAngle(aim - gun)) < spread;
+    const aimed = off < spread;
     const range = tuning.shotSpeed * tuning.shotLife * (turret ? tuning.turretRange : 1);
     const inRange = distance < range * 0.9;
     const steady = turret || !this.burning || this.correctingDirectly;

@@ -157,8 +157,9 @@ describe("saves", () => {
     expect(Math.hypot(guns.guns[0].x - into.station.x, guns.guns[0].y - into.station.y)).toBeCloseTo(DEFAULTS.stationGuardDistance, 3);
   });
 
-  it("turn away a save from before the field and station were the layout's own", () => {
-    expect(SAVE_VERSION).toBe(10);
+  it("turn away a start saved by an older version, and take this one", () => {
+    // Pinned, so bumping the version is always a deliberate turn away from old saves.
+    expect(SAVE_VERSION).toBe(11);
     const sim = play(seedWorld());
     const layout = layoutKey("any");
     const start = makeStart(sim, layout);

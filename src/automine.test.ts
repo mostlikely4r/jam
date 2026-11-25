@@ -230,6 +230,9 @@ describe("auto-mine II", () => {
 });
 
 describe("turret tracking", () => {
+  /** The floater's one turret's angle, on the gun mount it came onto. */
+  const turretAngle = (sim: Sim) => sim.ship.turretAngles["turretGun:gun"] ?? 0;
+
   /** The floater with its turret, still, nose along +x. */
   function turretSim(): Sim {
     const sim = quietSim({ floaterStart: true });
@@ -246,17 +249,17 @@ describe("turret tracking", () => {
     sim.devSet(sim.ship, "turretTracking", true);
     sim.selectTarget(sim.ship, rockAt(sim, 0, 300));
     shotsOver(sim, 1.5);
-    expect(sim.ship.turretAngle).toBeCloseTo(Math.PI / 2 - sim.ship.angle, 1);
+    expect(turretAngle(sim)).toBeCloseTo(Math.PI / 2 - sim.ship.angle, 1);
     sim.selectTarget(sim.ship, null);
     shotsOver(sim, 1.5);
-    expect(Math.abs(Math.atan2(Math.sin(sim.ship.turretAngle + sim.ship.angle), Math.cos(sim.ship.turretAngle + sim.ship.angle)))).toBeLessThan(0.1);
+    expect(Math.abs(Math.atan2(Math.sin(turretAngle(sim) + sim.ship.angle), Math.cos(turretAngle(sim) + sim.ship.angle)))).toBeLessThan(0.1);
   });
 
   it("without the program, the turret follows the aim, whatever is picked", () => {
     const sim = turretSim();
     sim.selectTarget(sim.ship, rockAt(sim, 0, 300));
     shotsOver(sim, 1.5);
-    expect(Math.abs(sim.ship.turretAngle + sim.ship.angle)).toBeLessThan(0.1);
+    expect(Math.abs(turretAngle(sim) + sim.ship.angle)).toBeLessThan(0.1);
   });
 
   it("with auto-mine, the turret works through the picked rocks with no hand on the trigger", () => {

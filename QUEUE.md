@@ -2,14 +2,6 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-27 · Many mounts: every turret and tractor counts · build
-- state: in progress
-- backlog: S-58
-- plan: docs/many-mounts-plan.md
-- added: 2026-11-25
-
-Turrets first, then tractors. Bumps `SAVE_VERSION`.
-
 ## Q-34 · Chatter faces swing to the music · spec
 - state: queued
 - backlog: S-68
@@ -181,6 +173,16 @@ From the user trying hull buying. Two new shape kinds with their own handles, pl
 default decal" button. Settle how each is drawn, edited and saved, then plan it.
 
 ## Done
+
+## Q-27 · Many mounts: every turret and tractor counts · build
+- state: done
+- done: 2026-11-25
+- backlog: S-58
+- plan: docs/many-mounts-plan.md
+- added: 2026-11-25
+
+Turrets first, then tractors. Bumps `SAVE_VERSION`. Built 2026-11-25: each turret has its own gun
+mount and angle, each tractor its own cone, and `SAVE_VERSION` is 11.
 
 ## Q-26 · Ship art fixes: tank drain, part art everywhere, hull tint · build
 - state: done

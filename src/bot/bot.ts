@@ -1065,7 +1065,7 @@ export class Bot {
     }
     // A turret turns to the aim on its own, so it may fire while the ship is still coming in.
     const want = Math.atan2(aimY - ship.y, aimX - ship.x) - ship.angle;
-    const off = Math.abs(Math.atan2(Math.sin(want - ship.turretAngle), Math.cos(want - ship.turretAngle)));
+    const off = sim.turretOff(ship, want);
     this.trigger(sim, off < (this.firing ? AIM_ANGLE * 3 : AIM_ANGLE), "at a rock", distance);
   }
 

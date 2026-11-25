@@ -2,7 +2,7 @@ import { Chatter, type FaceKey } from "./chatter";
 import { type BayGrid, type BlueprintId, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, SHIP_MODELS, TOW_BUY_ORDER, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
 import { hubRecipes, isOreItem, itemDef, oreItems, saleRecipes } from "./items";
 import { copyPicks, pickOf, PROGRAMS, setPick as setTweakPick } from "./programs";
-import { computerSize, DAMAGED_AT, facing, fitPart, hullInfo, hullMax, hullMounts, isDecal, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Mount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works, fullTanks, shareTanks, tankCapacity, tankMounts } from "./fitting";
+import { computerSize, DAMAGED_AT, facing, fitPart, hullInfo, hullMax, hullMounts, isDecal, isTurretGun, mountTakes, mountsOf, thrustOf, tractorMounts, turretGunId, turretMounts, type Mount, type Fitting, type MountPlace, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works, fullTanks, shareTanks, tankCapacity, tankMounts } from "./fitting";
 import { ClickPilot, DronePilot, FacePilot, FighterPilot, LOW_HULL, type TurnAway } from "./pilot";
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
@@ -30,6 +30,18 @@ const FOREVER = 1e9;
 const WARM_UP_AWAY = 4e6;
 export const TRAFFIC_SLEEP_DISTANCE = 12000;
 export const SHIP_RADIUS = 12;
+
+/**
+ * Where a mount sits, in world units: the ship's own spot plus the mount's offset, turned round
+ * with the ship.
+ */
+export function mountSpot(ship: { x: number; y: number; angle: number }, mount: MountPlace): { x: number; y: number } {
+  const cos = Math.cos(ship.angle);
+  const sin = Math.sin(ship.angle);
+  const x = mount.x * SHIP_RADIUS;
+  const y = mount.y * SHIP_RADIUS;
+  return { x: ship.x + x * cos - y * sin, y: ship.y + x * sin + y * cos };
+}
 /** How far a held rock's edge stays from the ship's own: the clamp arm's length. */
 export const TOW_GAP = 6;
 /** The fastest a caught rock is steered in at, and how near the refinery spot counts as arrived. */
@@ -199,10 +211,10 @@ export interface Ship extends Body, Fitting {
   cooldown: number;
   /** Seconds until each gun mount may fire on its own, as auto-mine fires them. Not saved. */
   gunCooldowns: Map<MountId, number>;
-  /** Which way the turret points, relative to the nose. 0 without a turret. */
-  turretAngle: number;
-  prevTurretAngle: number;
-  /** The world spot the turret turns toward, or null to face forward. */
+  /** Which way each turret points, relative to the nose, by its gun mount. None without a turret. */
+  turretAngles: Partial<Record<MountId, number>>;
+  prevTurretAngles: Partial<Record<MountId, number>>;
+  /** The world spot the turrets turn toward, or null to face their own way. */
   aim: { x: number; y: number } | null;
   /**
    * What the ship has picked, the main target first and the rest of the queue after it.
@@ -1394,6 +1406,13 @@ export class Sim {
       ship.tweaks = copyPicks(ship.tweaks);
       // A save from before the tanks were modules kept only the total: share it over them.
       if ((ship as Partial<Ship>).tankFuel === undefined) ship.tankFuel = shareTanks(ship, ship.fuel);
+      // A save from when every turret shared one gun mount: its gun goes on the first turret's own.
+      const stale = ship.fit.turretGun;
+      const first = turretMounts(ship)[0];
+      if (stale && first) {
+        delete ship.fit.turretGun;
+        if (!ship.fit[turretGunId(first.id)]) ship.fit[turretGunId(first.id)] = stale;
+      }
       return ship;
     };
     this.controls = data.controls;
@@ -2799,8 +2818,8 @@ export class Sim {
       hull: hullMax(model),
       cooldown: 0,
       gunCooldowns: new Map(),
-      turretAngle: 0,
-      prevTurretAngle: 0,
+      turretAngles: {},
+      prevTurretAngles: {},
       aim: null,
       targets: [],
       firing: new Map(),
@@ -4272,12 +4291,17 @@ export class Sim {
     const isTurret = (module: Module | undefined) => module !== undefined && partOf(module.part).kind === "turret";
     mine.sort(([, a], [, b]) => Number(isTurret(b)) - Number(isTurret(a)));
     const taken = new Set<MountId>();
-    const hasTurret = () => newMounts.some((mount) => isTurret(fit[mount.id]));
+    // The new hull's turrets, once they've been put on: each brings its own gun mount.
+    const turrets = () => newMounts.filter((mount) => isTurret(fit[mount.id]));
+    const freeGunSlot = () => turrets().map((mount) => turretGunId(mount.id)).find((slot) => !taken.has(slot) && !fit[slot]);
     const mountFor = (from: MountId, module: Module): MountId | null => {
       const part = partOf(module.part);
       if (part.kind === "program" || part.kind === "cockpit" || isDecal(module.part)) return null;
-      // A gun goes on the turret when there is one, as it does when bought.
-      if (part.kind === "gun" && hasTurret()) return taken.has("turretGun") ? null : "turretGun";
+      // A gun goes on the first turret without one, as it does when bought.
+      if (part.kind === "gun") {
+        const slot = freeGunSlot();
+        if (slot) return slot;
+      }
       const takes = newMounts.filter((mount) => !taken.has(mount.id) && mountTakes(mount, module.part));
       const role = oldMounts.find((mount) => mount.id === from)?.role;
       const pick =
@@ -4300,11 +4324,13 @@ export class Sim {
       moved.push({ part: module.part, from, to });
     }
     // A turret left without a gun takes one of the new hull's own that was pushed off.
-    if (hasTurret() && !fit.turretGun) {
+    for (const mount of turrets()) {
+      const slot = turretGunId(mount.id);
+      if (fit[slot]) continue;
       const gun = spare.find((module) => partOf(module.part).kind === "gun" && !mine.some(([, each]) => each === module));
       if (gun) {
         spare.splice(spare.indexOf(gun), 1);
-        fit.turretGun = gun;
+        fit[slot] = gun;
       }
     }
 
@@ -4395,7 +4421,8 @@ export class Sim {
     trimPrograms(ship);
     ship.hull = hullMax(model);
     ship.gunCooldowns.clear();
-    ship.turretAngle = ship.prevTurretAngle = 0;
+    ship.turretAngles = {};
+    ship.prevTurretAngles = {};
     // What no tank holds any more leaves the world, so the ledger still adds up.
     const kept = Object.values(plan.tankFuel).reduce<number>((sum, held) => sum + (held ?? 0), 0);
     const lost = Math.max(0, ship.fuel - kept);
@@ -4573,8 +4600,7 @@ export class Sim {
     const spot = mountsOf(ship).find((each) => each.id === mount);
     const part = partOf(id);
     if (!spot || spot.decal || part.kind === "program" || part.kind === "cockpit") return false;
-    // With a turret on, a gun goes only on the turret.
-    if (part.kind === "gun" && turretMount(ship) && mount !== "turretGun") return false;
+    // A gun can go on any mount that takes it: each turret's own, or a plain gun mount.
     return mountTakes(spot, id);
   }
 
@@ -4626,7 +4652,7 @@ export class Sim {
   private moveMount(ship: Ship, from: MountId, to: MountId): boolean {
     const moving = ship.fit[from];
     const there = ship.fit[to];
-    if (!moving || from === to || from === "turretGun" || to === "turretGun") return false;
+    if (!moving || from === to || isTurretGun(from) || isTurretGun(to)) return false;
     if (partOf(moving.part).kind === "turret" || (there && partOf(there.part).kind === "turret")) return false;
     if (!this.mountTakesHere(ship, to, moving.part)) return false;
     if (there && !this.mountTakesHere(ship, from, there.part)) return false;
@@ -4664,7 +4690,7 @@ export class Sim {
     if (partOf(item.part).kind === "turret") {
       const gun = off.find((module) => partOf(module.part).kind === "gun");
       if (gun) {
-        ship.fit.turretGun = gun;
+        ship.fit[turretGunId(mounts[0])] = gun;
         off.splice(off.indexOf(gun), 1);
       }
     }
@@ -6538,12 +6564,14 @@ export class Sim {
 
   /** Whether a ship's tractor beam is working: fitted, and room in the bay for a piece of ore. */
   tractorOn(ship: Ship): boolean {
-    return (ship.parts.has("tractor") || ship.parts.has("tractorAll")) && this.cargoSpace(ship) > 0;
+    // The usual hull has neither: this runs for every ship every tick, so it says no cheaply.
+    if (!ship.parts.has("tractor") && !ship.parts.has("tractorAll")) return false;
+    return this.cargoSpace(ship) > 0 && tractorMounts(ship).length > 0;
   }
 
-  /** How wide a ship's beam catches, in degrees: the all-round tractor's all the way round. */
-  tractorCone(ship: Ship): number {
-    return ship.parts.has("tractorAll") ? 360 : this.tuning.tractorCone;
+  /** How wide one tractor's beam catches, in degrees: the all-round tractor's all the way round. */
+  tractorCone(tractor: PartId): number {
+    return tractor === "tractorAll" ? 360 : this.tuning.tractorCone;
   }
 
   // The clamp: one outside thing held and flown with the ship (docs/clamp-tow-plan.md).
@@ -7202,20 +7230,26 @@ export class Sim {
   }
 
   /**
-   * Catches loose ore in range inside the beam's cone ahead of the ship, then steers what it
-   * has caught toward the ship, so it arrives instead of circling it. Caught ore stays caught
-   * wherever it drifts within range; ore another ship has caught is left to that ship.
+   * Catches loose ore in range inside any working tractor's cone, then steers what it has caught
+   * toward the ship, so it arrives instead of circling it. Caught ore stays caught wherever it
+   * drifts within range; ore another ship has caught is left to that ship. Two tractors widen what
+   * is caught: one beam catching a piece is enough, and the pull is shared, not doubled.
    */
   private pullOre(ship: Ship, dt: number): void {
     if (!this.tractorOn(ship)) return;
     const { tractorRange, tractorPull, tractorSpeed } = this.tuning;
     const most = tractorPull * dt;
-    const edge = Math.cos(((Math.min(this.tractorCone(ship), 360) / 2) * Math.PI) / 180);
-    // The dish looks the way its mount faces.
-    const dish = mountWith(ship, "tractor");
-    const look = ship.angle + (dish ? facing(dish.mount) : 0);
-    const noseX = Math.cos(look);
-    const noseY = Math.sin(look);
+    // Each dish looks the way its own mount faces, from where that mount sits.
+    const beams = tractorMounts(ship).map(({ mount, module }) => {
+      const spot = mountSpot(ship, mount);
+      return {
+        x: spot.x,
+        y: spot.y,
+        noseX: Math.cos(ship.angle + facing(mount)),
+        noseY: Math.sin(ship.angle + facing(mount)),
+        edge: Math.cos(((Math.min(this.tractorCone(module.part), 360) / 2) * Math.PI) / 180),
+      };
+    });
     for (const ore of this.ores) {
       if (ore.caughtBy && ore.caughtBy !== ship) continue;
       const dx = ship.x - ore.x;
@@ -7223,7 +7257,13 @@ export class Sim {
       const distance = Math.hypot(dx, dy);
       if (distance > tractorRange || distance === 0) continue;
       if (ore.caughtBy !== ship) {
-        if (-(dx * noseX + dy * noseY) / distance < edge) continue;
+        const caught = beams.some((beam) => {
+          const bx = beam.x - ore.x;
+          const by = beam.y - ore.y;
+          const span = Math.hypot(bx, by);
+          return span === 0 || -(bx * beam.noseX + by * beam.noseY) / span >= beam.edge;
+        });
+        if (!caught) continue;
         ore.caughtBy = ship;
       }
       const changeX = ship.vx + (dx / distance) * tractorSpeed - ore.vx;
@@ -7366,20 +7406,41 @@ export class Sim {
     this.turnTurret(ship, dt);
   }
 
-  /** The turret turns toward its aim at a fixed speed relative to the ship, so the ship's own turning adds or takes away. */
+  /**
+   * Each turret turns toward its aim at a fixed speed relative to the ship, so the ship's own
+   * turning adds or takes away. With nothing aimed at, each rests the way its own mount faces.
+   */
   private turnTurret(ship: Ship, dt: number): void {
-    ship.prevTurretAngle = ship.turretAngle;
-    if (!ship.parts.has("turret")) {
-      ship.turretAngle = 0;
-      return;
-    }
+    // Nothing to turn on a hull without one, which is most of them, every tick.
+    if (!ship.parts.has("turret")) return;
     const wrap = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
-    // Turret tracking turns it to the picked rock; with none, it follows the aim as ever.
+    // Turret tracking turns them to the picked rock; with none, they follow the aim as ever.
     const aim = this.trackedRock(ship) ?? ship.aim;
-    const want = aim ? wrap(Math.atan2(aim.y - ship.y, aim.x - ship.x) - ship.angle) : wrap(facing(turretMount(ship) ?? { x: 0, y: 0, angle: 0, scale: 1 }));
     const step = ((this.tuning.turretTurnSpeed * Math.PI) / 180) * dt;
-    const change = Math.max(-step, Math.min(step, wrap(want - ship.turretAngle)));
-    ship.turretAngle = wrap(ship.turretAngle + change);
+    for (const mount of mountsOf(ship)) {
+      if (!isTurretGun(mount.id)) continue;
+      const held = ship.turretAngles[mount.id] ?? facing(mount);
+      ship.prevTurretAngles[mount.id] = held;
+      // Each aims from where it sits, not from the middle of the ship.
+      const spot = aim ? mountSpot(ship, mount) : null;
+      const want = aim && spot ? wrap(Math.atan2(aim.y - spot.y, aim.x - spot.x) - ship.angle) : facing(mount);
+      const change = Math.max(-step, Math.min(step, wrap(want - held)));
+      ship.turretAngles[mount.id] = wrap(held + change);
+    }
+  }
+
+  /**
+   * How far the best-lined-up of a ship's turrets is from a way to shoot, in radians: the hull
+   * with no turret at all counts as a half turn, so nothing lines up.
+   */
+  turretOff(ship: Ship, want: number): number {
+    let off = Math.PI;
+    for (const mount of mountsOf(ship)) {
+      if (!isTurretGun(mount.id)) continue;
+      const held = ship.turretAngles[mount.id] ?? facing(mount);
+      off = Math.min(off, Math.abs(Math.atan2(Math.sin(want - held), Math.cos(want - held))));
+    }
+    return off;
   }
 
   /**
@@ -8560,13 +8621,13 @@ export class Sim {
 
   /**
    * Where one gun's shot starts and which way it flies: from the line through its mount, just
-   * clear of the hull, the way the gun faces (a turret's gun, the way the turret points), and
+   * clear of the hull, the way the gun faces (a turret's gun, the way its own turret points), and
    * how far it carries against the ship.
    */
   private gunLine(ship: Ship, mount: Mount): { x: number; y: number; angle: number; reach: number; turret: boolean } {
     const { tuning } = this;
-    const turret = mount.id === "turretGun";
-    const aim = turret ? ship.turretAngle : facing(mount);
+    const turret = isTurretGun(mount.id);
+    const aim = (turret ? ship.turretAngles[mount.id] : undefined) ?? facing(mount);
     const angle = ship.angle + aim;
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);

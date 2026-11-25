@@ -202,12 +202,36 @@ describe("buying a hull", () => {
     const sim = docked("floater", ["turretHull"]);
     const { ship } = sim;
     ship.fit.gun = { part: "turret", wear: 0 };
-    ship.fit.turretGun = { part: "gun1", wear: 0.1 };
+    ship.fit["turretGun:gun"] = { part: "gun1", wear: 0.1 };
     refresh(ship);
     expect(sim.buyHull(ship, "turretHull")).toBe(true);
     expect(ship.fit.gun!.part).toBe("turret");
-    expect(ship.fit.turretGun).toEqual({ part: "gun1", wear: 0.1 });
+    expect(ship.fit["turretGun:gun"]).toEqual({ part: "gun1", wear: 0.1 });
     // The new hull's own gun was pushed off by the turret: it's yours, in the locker.
+    expect(sim.lockerAt(sim.baseAt()!).items.map((each) => each.module.part)).toEqual(["gun2"]);
+  });
+
+  it("carries two turrets onto a hull with two, each keeping its own gun", () => {
+    // Two hulls alike, each with a second turret mount, so the swap has somewhere for both to go.
+    for (const model of ["twinOld", "twinNew"] as ShipModel[]) {
+      copyHull("floater", model);
+      HULL_MOUNTS[model].push({ ...HULL_MOUNTS[model].find((mount) => mount.id === "gun")!, id: "gunTwo", name: "Second turret", angle: 90, default: undefined });
+    }
+    const sim = docked("floater", ["twinNew"]);
+    const { ship } = sim;
+    ship.model = "twinOld";
+    ship.fit.gun = { part: "turret", wear: 0 };
+    ship.fit.gunTwo = { part: "turret", wear: 0 };
+    ship.fit["turretGun:gun"] = { part: "gun1", wear: 0 };
+    ship.fit["turretGun:gunTwo"] = { part: "gun2", wear: 0 };
+    refresh(ship);
+    expect(sim.buyHull(ship, "twinNew")).toBe(true);
+    expect(ship.fit.gun!.part).toBe("turret");
+    expect(ship.fit.gunTwo!.part).toBe("turret");
+    // Each gun follows its turret into that turret's own mount on the new hull.
+    expect(ship.fit["turretGun:gun"]!.part).toBe("gun1");
+    expect(ship.fit["turretGun:gunTwo"]!.part).toBe("gun2");
+    // The new hull's own gun was pushed off the mount its turret took: it's yours, in the locker.
     expect(sim.lockerAt(sim.baseAt()!).items.map((each) => each.module.part)).toEqual(["gun2"]);
   });
 

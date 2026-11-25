@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { homeSim } from "./home";
 import { copyHull, HULL_INFO, HULL_MOUNTS, hullDefaults, hullMax, refresh, shipFileNow, useShipFile } from "./fitting";
-import { partOf, type PartId, type ShipModel } from "./parts";
+import { type PartId, type ShipModel } from "./parts";
 import { roundTrip } from "./save";
 import { DEFAULTS } from "./tuning";
 import { DOCK_OFFSET, type HullPlan, Sim } from "./sim";
@@ -130,12 +130,12 @@ describe("buying a hull", () => {
   it("puts a part no mount takes into the locker", () => {
     const sim = docked("floater", ["racer"]);
     const { ship } = sim;
-    // The tractor is the floater's alone.
-    ship.fit.tractor = { part: "tractor", wear: 0 };
+    // Only the floater's gun mount takes a turret.
+    ship.fit.gun = { part: "turret", wear: 0 };
     refresh(ship);
     expect(sim.buyHull(ship, "racer")).toBe(true);
-    expect(ship.fit.tractor).toBeUndefined();
-    expect(sim.lockerAt(sim.baseAt()!).items.map((each) => each.module.part)).toEqual(["tractor"]);
+    expect(ship.fit.gun!.part).toBe("gun1");
+    expect(sim.lockerAt(sim.baseAt()!).items.map((each) => each.module.part)).toEqual(["turret"]);
   });
 
   it("puts what the locker has no room for in the new bay, and refuses when that's full too", () => {
@@ -199,24 +199,16 @@ describe("buying a hull", () => {
 
   it("puts your turret on the new hull and your gun back on it", () => {
     copyHull("floater", "turretHull");
-    // The turret is the floater's alone: let it fit the copy too, for this test.
-    const turret = partOf("turret");
-    const fits = turret.fits;
-    turret.fits = [...(fits ?? []), "turretHull"];
-    try {
-      const sim = docked("floater", ["turretHull"]);
-      const { ship } = sim;
-      ship.fit.gun = { part: "turret", wear: 0 };
-      ship.fit.turretGun = { part: "gun1", wear: 0.1 };
-      refresh(ship);
-      expect(sim.buyHull(ship, "turretHull")).toBe(true);
-      expect(ship.fit.gun!.part).toBe("turret");
-      expect(ship.fit.turretGun).toEqual({ part: "gun1", wear: 0.1 });
-      // The new hull's own gun was pushed off by the turret: it's yours, in the locker.
-      expect(sim.lockerAt(sim.baseAt()!).items.map((each) => each.module.part)).toEqual(["gun2"]);
-    } finally {
-      turret.fits = fits;
-    }
+    const sim = docked("floater", ["turretHull"]);
+    const { ship } = sim;
+    ship.fit.gun = { part: "turret", wear: 0 };
+    ship.fit.turretGun = { part: "gun1", wear: 0.1 };
+    refresh(ship);
+    expect(sim.buyHull(ship, "turretHull")).toBe(true);
+    expect(ship.fit.gun!.part).toBe("turret");
+    expect(ship.fit.turretGun).toEqual({ part: "gun1", wear: 0.1 });
+    // The new hull's own gun was pushed off by the turret: it's yours, in the locker.
+    expect(sim.lockerAt(sim.baseAt()!).items.map((each) => each.module.part)).toEqual(["gun2"]);
   });
 
   it("isn't offered by a station without the hull on its list, nor away from a dock", () => {

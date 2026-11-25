@@ -144,16 +144,20 @@ function path(ctx: CanvasRenderingContext2D, points: Point[]): void {
   ctx.closePath();
 }
 
-/** The fitted modules worth drawing: everything on the outside, turret and its gun left to `drawTurret`. */
-function outsideParts(ship: ArtShip): { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number }[] {
-  const out: { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number }[] = [];
+/**
+ * The fitted modules worth drawing: everything on the outside, turret and its gun left to
+ * `drawTurret`. `main` is a mount whose role is the main thruster, whatever its id, so a mirrored
+ * or renamed main mount draws the big engine bell too.
+ */
+function outsideParts(ship: ArtShip): { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number; main: boolean }[] {
+  const out: { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number; main: boolean }[] = [];
   for (const mount of hullMounts(ship.model)) {
     const module = ship.fit[mount.id];
     if (!module) continue;
     const kind = partOf(module.part).kind;
     if (kind === "computer" || kind === "section" || kind === "tank" || kind === "turret" || mount.id === "turretGun") continue;
     // Destroyed, a bay carries nothing any more: see `bayBox`.
-    out.push({ id: mount.id, part: module.part, x: mount.x * R, y: mount.y * R, angle: facing(mount), scale: mount.scale, kind, wear: module.wear, alpha: mount.alpha ?? 1, order: mount.order ?? 0 });
+    out.push({ id: mount.id, part: module.part, x: mount.x * R, y: mount.y * R, angle: facing(mount), scale: mount.scale, kind, wear: module.wear, alpha: mount.alpha ?? 1, order: mount.order ?? 0, main: mount.role === "thrusterMain" });
   }
   return out;
 }
@@ -540,13 +544,13 @@ export function drawVectorShip(ctx: CanvasRenderingContext2D, ship: ArtShip, hul
 }
 
 /** One fitted module at its mount, with its transparency, and where it sits if it's broken. */
-function drawFitted(ctx: CanvasRenderingContext2D, part: { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number }): Point | null {
+function drawFitted(ctx: CanvasRenderingContext2D, part: { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; main: boolean }): Point | null {
   ctx.save();
   ctx.translate(part.x, part.y);
   ctx.rotate(part.angle);
   ctx.scale(part.scale, part.scale);
   if (part.alpha < 1) ctx.globalAlpha = part.alpha;
-  drawPartArt(ctx, part.part, part.wear, part.id === "thrusterMain");
+  drawPartArt(ctx, part.part, part.wear, part.main);
   ctx.restore();
   if (part.wear < DAMAGED_AT) return null;
   const x = part.x;

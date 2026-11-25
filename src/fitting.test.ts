@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { homeSim } from "./home";
-import { decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, PART_ART, refresh, resetPartArt, resetPartStats, shipFileNow, thrustOf, useShipFile, type HullInfo, type PartArt } from "./fitting";
+import { copyHull, decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, PART_ART, refresh, removeHull, resetPartArt, resetPartStats, shipFileNow, thrustOf, useShipFile, type HullInfo, type PartArt } from "./fitting";
 import { SHIP_MODELS, type PartId, type ThrusterRole } from "./parts";
 import { bayBox, drawTurret, drawVectorShip } from "./shipArt";
 import { DEFAULTS } from "./tuning";
@@ -65,6 +65,26 @@ describe("mounts", () => {
   it("only the floater's gun mount takes a turret", () => {
     expect(mountsFor({ ...newFitting("racer"), model: "racer" }, "turret")).toEqual([]);
     expect(mountsFor({ ...newFitting("floater"), model: "floater" }, "turret")).toEqual(["gun"]);
+  });
+
+  it("lets the mounts alone decide: the racer's tractor mount takes the cone tractor and the clamp", () => {
+    const racer = { ...newFitting("racer"), model: "racer" };
+    expect(mountsFor(racer, "tractor")).toEqual(["tractor"]);
+    expect(mountsFor(racer, "clamp")).toEqual(["tractor"]);
+  });
+
+  it("takes a hull out of play, and copying brings one in", () => {
+    const shipped = shipFileNow();
+    try {
+      copyHull("racer", "spare");
+      expect(SHIP_MODELS).toContain("spare");
+      removeHull("spare");
+      expect(SHIP_MODELS).not.toContain("spare");
+      expect(HULL_MOUNTS.spare).toBeUndefined();
+      expect(HULL_INFO.spare).toBeUndefined();
+    } finally {
+      useShipFile(shipped);
+    }
   });
 });
 
@@ -667,13 +687,13 @@ describe("hulls, defaults and decals", () => {
     expect(cockpit.decal).toBe(true);
     // It can show a decal, and every decal it offers fits it. Which shapes a hull carries is the
     // hull's look, so how many of them there are is not this test's business.
-    const shown = decalChoices("floater", cockpit);
+    const shown = decalChoices(cockpit);
     expect(shown.length).toBeGreaterThan(0);
     for (const id of shown) expect(mountTakes(cockpit, id)).toBe(true);
     // A wide hull takes the wide glass.
     expect(shown).toContain("cockpitBar");
     // The racer's cockpit takes the small ones only.
-    expect(decalChoices("racer", mountOf("racer", "cockpit")!).sort()).toEqual(["cockpitDome", "cockpitKite", "cockpitVisor"]);
+    expect(decalChoices(mountOf("racer", "cockpit")!).sort()).toEqual(["cockpitDome", "cockpitKite", "cockpitVisor"]);
     // Nothing real is fitted to it, and no decal goes on a real mount.
     expect(mountTakes(cockpit, "gun1")).toBe(false);
     expect(mountTakes(mountOf("floater", "gun")!, "cockpitKite")).toBe(false);
@@ -693,7 +713,7 @@ describe("hulls, defaults and decals", () => {
 
   it("a ship without a decal of its own, such as one from an old save, shows the first that fits", () => {
     const racer = { model: "racer" as const, fit: {} };
-    const first = decalChoices("racer", mountOf("racer", "cockpit")!)[0];
+    const first = decalChoices(mountOf("racer", "cockpit")!)[0];
     expect(decalOf(racer, mountOf("racer", "cockpit")!)).toBe(first);
     // And one that no longer fits is replaced.
     expect(decalOf({ ...racer, decals: { cockpit: "cockpitBar" } }, mountOf("racer", "cockpit")!)).toBe(first);
@@ -704,7 +724,7 @@ describe("hulls, defaults and decals", () => {
       () => (mountOf("floater", "gun")!.decal = true),
       () => {
         expect(mountTakes(mountOf("floater", "gun")!, "gun1")).toBe(false);
-        expect(decalChoices("floater", mountOf("floater", "gun")!)).toEqual([]);
+        expect(decalChoices(mountOf("floater", "gun")!)).toEqual([]);
       },
     );
   });
@@ -733,6 +753,37 @@ describe("hulls, defaults and decals", () => {
       expect(() => drawVectorShip(ctx, ship, [120, 150, 190])).not.toThrow();
     }
     expect(calls).toContain("ellipse");
+  });
+
+  it("draws the engine bell on a main thruster mount by its role, whatever the mount is called", () => {
+    const shipped = shipFileNow();
+    const record = () => {
+      const calls: string[] = [];
+      const ctx = new Proxy({} as CanvasRenderingContext2D, {
+        get: (_target, name: string) => {
+          if (name === "createRadialGradient" || name === "createLinearGradient") return () => ({ addColorStop() {} });
+          return (...args: unknown[]) => void calls.push(`${name}(${args.map((arg) => (typeof arg === "number" ? arg.toFixed(3) : "")).join()})`);
+        },
+        set: () => true,
+      });
+      return { calls, ctx };
+    };
+    try {
+      const plain = record();
+      drawVectorShip(plain.ctx, { ...newFitting("racer", () => 0), model: "racer" }, [120, 150, 190]);
+      // The same hull with its main mount renamed, as a mirrored copy of it is.
+      copyHull("racer", "renamed");
+      HULL_MOUNTS.renamed.find((mount) => mount.id === "thrusterMain")!.id = "mount1";
+      // The same decals both times: a new fitting picks them at random otherwise.
+      const ship = { ...newFitting("racer", () => 0), model: "renamed" };
+      ship.fit.mount1 = ship.fit.thrusterMain;
+      delete ship.fit.thrusterMain;
+      const renamed = record();
+      drawVectorShip(renamed.ctx, ship, [120, 150, 190]);
+      expect(renamed.calls).toEqual(plain.calls);
+    } finally {
+      useShipFile(shipped);
+    }
   });
 });
 

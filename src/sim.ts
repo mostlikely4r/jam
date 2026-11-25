@@ -1,5 +1,5 @@
 import { Chatter, type FaceKey } from "./chatter";
-import { type BayGrid, type BlueprintId, partFits, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, SHIP_MODELS, TOW_BUY_ORDER, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
+import { type BayGrid, type BlueprintId, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, SHIP_MODELS, TOW_BUY_ORDER, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
 import { hubRecipes, isOreItem, itemDef, oreItems, saleRecipes } from "./items";
 import { copyPicks, pickOf, PROGRAMS, setPick as setTweakPick } from "./programs";
 import { computerSize, DAMAGED_AT, facing, fitPart, hullInfo, hullMax, hullMounts, isDecal, mountTakes, mountsOf, mountWith, thrustOf, turretMount, type Mount, type Fitting, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works, fullTanks, shareTanks, tankCapacity, tankMounts } from "./fitting";
@@ -4275,7 +4275,7 @@ export class Sim {
     const hasTurret = () => newMounts.some((mount) => isTurret(fit[mount.id]));
     const mountFor = (from: MountId, module: Module): MountId | null => {
       const part = partOf(module.part);
-      if (part.kind === "program" || part.kind === "cockpit" || isDecal(module.part) || !partFits(part, model)) return null;
+      if (part.kind === "program" || part.kind === "cockpit" || isDecal(module.part)) return null;
       // A gun goes on the turret when there is one, as it does when bought.
       if (part.kind === "gun" && hasTurret()) return taken.has("turretGun") ? null : "turretGun";
       const takes = newMounts.filter((mount) => !taken.has(mount.id) && mountTakes(mount, module.part));
@@ -4572,7 +4572,7 @@ export class Sim {
   private mountTakesHere(ship: Ship, mount: MountId, id: PartId): boolean {
     const spot = mountsOf(ship).find((each) => each.id === mount);
     const part = partOf(id);
-    if (!spot || spot.decal || !partFits(part, ship.model) || part.kind === "program" || part.kind === "cockpit") return false;
+    if (!spot || spot.decal || part.kind === "program" || part.kind === "cockpit") return false;
     // With a turret on, a gun goes only on the turret.
     if (part.kind === "gun" && turretMount(ship) && mount !== "turretGun") return false;
     return mountTakes(spot, id);

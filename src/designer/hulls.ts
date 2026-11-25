@@ -28,6 +28,7 @@
  */
 import {
   copyHull,
+  removeHull,
   decalChoices,
   DECAL_PARTS,
   facing,
@@ -72,7 +73,7 @@ import {
   type ShipFile,
   itemOwned,
 } from "../fitting";
-import { PART_KINDS, partFits, partOf, PARTS, SHIP_MODELS, type PartIcon, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "../parts";
+import { PART_KINDS, partOf, PARTS, SHIP_MODELS, type PartIcon, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "../parts";
 import { ITEMS, ITEM_TYPES, itemDef, itemsFileNow, SHIPPED_ITEMS, useItemsFile, type ItemDef, type ItemsFile, type ItemType } from "../items";
 import { PROGRAMS, PROGRAM_PARTS, programDef, programsFileNow, SHIPPED_PROGRAMS, useProgramsFile, needsMet, type ProgramDef, type ProgramsFile } from "../programs";
 import type { GlyphId } from "../glyphs";
@@ -81,6 +82,23 @@ import { DEFAULTS } from "../tuning";
 import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPartArt, drawTanks, drawTurret, METAL_HEX, RIM_HEX, tankBoxes } from "../shipArt";
 import { multiSelect, withoutPick, withPick } from "./multiselect";
 import { UndoStack } from "./undo";
+import { shippedWorld } from "./shipped";
+import { walk } from "./world";
+
+/** The hulls the game's own code flies by name (traffic, a new game, pirates, defenders): never removed. */
+const CODE_HULLS: readonly ShipModel[] = ["racer", "floater", "defender", "pirate", "drone"];
+
+/** Why a hull can't be removed, in words, or null when it can: the code flies it, or the world file names it. */
+export function whyKeepHull(model: ShipModel): string | null {
+  if (CODE_HULLS.includes(model)) return "One of the game's own hulls: its code flies it by name.";
+  if (SHIP_MODELS.length <= 1) return "The last hull.";
+  const named = walk(shippedWorld())
+    .map((entry) => entry.node)
+    .filter((node) => node.spawns.includes(model) || node.hulls.includes(model))
+    .map((node) => node.name);
+  if (named.length > 0) return `The world file names it at ${named.join(", ")}: take it off there first.`;
+  return null;
+}
 
 const R = 12;
 const DRAFT_KEY = "jam-ships-draft";
@@ -198,11 +216,11 @@ const wrapDegrees = (angle: number) => {
 };
 
 /** What a mount is drawn holding: the hull's own part there, or else the first part that fits it. A decal mount holds none: its decal is drawn on the hull. */
-function shownPart(model: ShipModel, mount: Mount): PartId | null {
+function shownPart(mount: Mount): PartId | null {
   if (mount.decal) return null;
   const own = mount.default;
-  if (own && mountTakes(mount, own) && partFits(partOf(own), model)) return own;
-  return FITTED.find((part) => partFits(part, model) && mountTakes(mount, part.id))?.id ?? null;
+  if (own && mountTakes(mount, own)) return own;
+  return FITTED.find((part) => mountTakes(mount, part.id))?.id ?? null;
 }
 
 /** The programs a hull's own computer runs, and the most any computer it can mount runs. */
@@ -210,7 +228,7 @@ function computerSlots(model: ShipModel): { own: number; largest: number } {
   const slots = (id: PartId | undefined) => (id && partOf(id).kind === "computer" ? partOf(id).slots ?? 0 : 0);
   const own = Object.values(hullDefaults(model)).reduce((most, id) => Math.max(most, slots(id)), 0);
   const largest = PARTS.filter(
-    (part) => part.kind === "computer" && partFits(part, model) && HULL_MOUNTS[model].some((mount) => mountTakes(mount, part.id)),
+    (part) => part.kind === "computer" && HULL_MOUNTS[model].some((mount) => mountTakes(mount, part.id)),
   ).reduce((most, part) => Math.max(most, part.slots ?? 0), 0);
   return { own, largest };
 }
@@ -762,8 +780,8 @@ export class HullDesigner {
     statsNote.textContent = `Left empty, the game's own: ${DEFAULTS.rebuildCost} credits for a bare hull, weight ${DEFAULTS.weight} and 100 hull points. Cargo room comes only from fitted bays: each hull comes with the small one.`;
     const out: HTMLElement[] = [
       intro,
-      this.section("hull", "Hull", models),
-      this.section("hullshape", "Shape", ...this.shapesEditor(), this.button("Copy this hull", () => this.copyHull(), "on")),
+      this.section("hull", "Hull", models, ...this.hullButtons()),
+      this.section("hullshape", "Shape", ...this.shapesEditor()),
       this.section("used", "Used by", usedBy, usedNote),
       this.section("programs", "Default programs", programs, programsNote),
       this.section("loadouts", "Loadouts", ...this.loadoutsEditor(info)),
@@ -778,7 +796,8 @@ export class HullDesigner {
       this.section("mounts", "Mounts", list, add),
     ];
     const mount = this.mount();
-    if (!mount) return out;
+    // The keys show whatever is picked, so they're there before a mount is.
+    if (!mount) return [...out, this.keysSection()];
 
     const name = document.createElement("label");
     name.textContent = "Name";
@@ -832,7 +851,7 @@ export class HullDesigner {
       },
     );
     const takes = document.createElement("p");
-    const fitting = FITTED.filter((part) => partFits(part, this.model) && mountTakes(mount, part.id));
+    const fitting = FITTED.filter((part) => mountTakes(mount, part.id));
     const fits = fitting.map((part) => part.label);
     takes.textContent = mount.decal
       ? fits.length
@@ -859,7 +878,7 @@ export class HullDesigner {
     // the part the bare hull comes with (a decal mount, on its first fitting decal), and none
     // or any part that fits can be picked instead.
     const choices: [string, string][] = mount.decal
-      ? decalChoices(this.model, mount).map((id): [string, string] => [id, partOf(id).label])
+      ? decalChoices(mount).map((id): [string, string] => [id, partOf(id).label])
       : fitting.map((part): [string, string] => [part.id, part.label]);
     const chosen = this.preview[`${this.model}:${mount.id}`];
     const shown =
@@ -961,20 +980,6 @@ export class HullDesigner {
     tools.append(this.button("Mirrored copy", () => this.mirrorMount(mount)));
     tools.append(this.button("Remove mount", () => this.removeMount(mount), "danger"));
 
-    const keys = document.createElement("div");
-    keys.className = "keys";
-    keys.textContent = [
-      "Drag a mount: move it (Shift snaps to 0.05)",
-      "Drag the knob, or wheel: turn it (Shift: 1°, else 15°)",
-      "Ctrl + wheel, or + and −: size",
-      "Nothing selected: the wheel zooms toward the pointer, 0 fits it back",
-      "Ctrl-Z: undo    Ctrl-Shift-Z or Ctrl-Y: redo",
-      "Arrows: nudge (Shift: finer)    Q / E: turn",
-      "Tab: next mount    Delete: remove it    Esc: nothing selected, then close",
-      "",
-      "Green arrows: which way each thruster pushes the ship.",
-    ].join("\n");
-
     return [
       ...out,
       this.section(
@@ -994,7 +999,7 @@ export class HullDesigner {
         this.does,
         tools,
       ),
-      this.section("keys", "Keys", keys),
+      this.keysSection(),
     ];
   }
 
@@ -1038,7 +1043,6 @@ export class HullDesigner {
     );
     const where = document.createElement("p");
     const lines = hullList().map((model) => {
-      if (!partFits(part, model)) return `${hullName(model)}: not for this ship`;
       const mounts = HULL_MOUNTS[model].filter((mount) => mountTakes(mount, part.id)).map((mount) => mount.name);
       return `${hullName(model)}: ${mounts.length ? mounts.join(", ") : "nowhere"}`;
     });
@@ -2101,7 +2105,7 @@ export class HullDesigner {
         lines.push(`A thruster here pushes the ship ${parts.join(", ")} (full strength whichever way it faces; no twist).`);
       }
     }
-    const shown = shownPart(this.model, mount);
+    const shown = shownPart(mount);
     const kind = shown ? partOf(shown).kind : null;
     if (kind === "gun" || kind === "turret") lines.push(side(mount.angle, "A gun here fires") + (kind === "turret" ? "; a turret rests that way and aims itself." : "."));
     if (kind === "tractor") lines.push(side(mount.angle, "A tractor here catches ore") + " (the all-round one all round).");
@@ -2226,6 +2230,45 @@ export class HullDesigner {
     if (this.shape === null || this.shape === "edge") return;
     this.shapes().splice(this.shape, 1);
     this.selectShape(null, false);
+    this.changed();
+  }
+
+  /** The page's keys, picked mount or not. */
+  private keysSection(): HTMLElement {
+    const keys = document.createElement("div");
+    keys.className = "keys";
+    keys.textContent = [
+      "Drag a mount: move it (Shift snaps to 0.05)",
+      "Drag the knob, or wheel: turn it (Shift: 1°, else 15°)",
+      "Ctrl + wheel, or + and −: size",
+      "Nothing selected: the wheel zooms toward the pointer, 0 fits it back",
+      "Ctrl-Z: undo    Ctrl-Shift-Z or Ctrl-Y: redo",
+      "Arrows: nudge (Shift: finer)    Q / E: turn",
+      "Tab: next mount    Delete: remove it    Esc: nothing selected, then close",
+      "",
+      "Green arrows: which way each thruster pushes the ship.",
+    ].join("\n");
+    return this.section("keys", "Keys", keys);
+  }
+
+  /** New hull, a copy of the one shown, and Remove, with why not when it can't be removed. */
+  private hullButtons(): HTMLElement[] {
+    const why = whyKeepHull(this.model);
+    const remove = this.button("Remove hull", () => this.removeHull(), "danger");
+    remove.disabled = why !== null;
+    const note = document.createElement("p");
+    note.textContent = why ?? "A new hull starts as a copy of this one. Ctrl-Z undoes a removal until you save.";
+    return [this.button("New hull (copy of this one)", () => this.copyHull(), "on"), remove, note];
+  }
+
+  /** Takes the shown hull out, unless something still needs it, and shows the first one left. */
+  private removeHull(): void {
+    if (whyKeepHull(this.model) !== null) return;
+    removeHull(this.model);
+    this.model = hullList()[0];
+    this.selectShape(null, false);
+    this.selected = HULL_MOUNTS[this.model]?.[0]?.id ?? null;
+    this.onMountsChanged();
     this.changed();
   }
 
@@ -2839,7 +2882,7 @@ export class HullDesigner {
         const turning = mount.role === "thrusterRotateLeft" || mount.role === "thrusterRotateRight";
         this.arrow(x, y, push.x, push.y, (on ? 60 : 34) * (turning ? Math.min(2, Math.max(0.15, Math.abs(turn))) : 1), green);
       }
-      const shown = shownPart(model, mount);
+      const shown = shownPart(mount);
       const kind = shown ? partOf(shown).kind : null;
       const a = facing(mount);
       if (kind === "gun" || kind === "turret") {
@@ -2865,7 +2908,7 @@ export class HullDesigner {
       const [x, y] = this.toScreen(mount.x, mount.y);
       const on = mount.id === this.selected && !onParts;
       const hover = mount.id === this.hover;
-      const lit = onParts && mountTakes(mount, this.part) && partFits(partOf(this.part), model);
+      const lit = onParts && mountTakes(mount, this.part);
       ctx.strokeStyle = lit ? "#8fe3a1" : on ? "#ffd479" : hover ? "#ffffff" : "rgba(220,230,250,0.6)";
       ctx.lineWidth = on || lit ? 2 : 1.2;
       ctx.beginPath();
@@ -2911,9 +2954,9 @@ export class HullDesigner {
   private previewOf(model: ShipModel, mount: Mount): PartId | null {
     const chosen = this.preview[`${model}:${mount.id}`];
     if (chosen === "none") return null;
-    if (chosen) return partFits(partOf(chosen), model) && mountTakes(mount, chosen) ? chosen : null;
-    if (mount.decal) return decalChoices(model, mount)[0] ?? null;
-    return mount.default && mountTakes(mount, mount.default) && partFits(partOf(mount.default), model) ? mount.default : null;
+    if (chosen) return mountTakes(mount, chosen) ? chosen : null;
+    if (mount.decal) return decalChoices(mount)[0] ?? null;
+    return mount.default && mountTakes(mount, mount.default) ? mount.default : null;
   }
 
   /** One mount's preview part, drawn on the blueprint as it shows in game, transparency and all. */
@@ -2929,7 +2972,7 @@ export class HullDesigner {
       // A turret is a circle with its gun on it: here the gun follows the pointer, so it turns.
       const [sx, sy] = this.toScreen(mount.x, mount.y);
       const aim = this.at ? Math.atan2(this.at[1] - sy, this.at[0] - sx) : facing(mount);
-      const gun = FITTED.find((each) => each.kind === "gun" && partFits(each, model));
+      const gun = FITTED.find((each) => each.kind === "gun");
       drawTurret(ctx, {
         x: mount.x * R,
         y: mount.y * R,

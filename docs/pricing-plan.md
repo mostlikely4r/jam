@@ -125,6 +125,9 @@ Then stop for the user to try.
   hull's worth (plus extras when the lost ship is rebuilt); an AI selling a part gets 60%.
 - The loop from this thread, as a test: buy a floater, move its gun and computer to the locker,
   trade back for a racer, sell both. Credits end lower than they started.
+- The free bay, as a test (found by the user trying hull buying): with a large bay fitted, buy
+  hulls back and forth and sell each small bay a new hull pushes off. Credits end lower than they
+  started, because each new hull's price included its small bay.
 - `npm test` and `npm run build` pass. Run `npm run parity` in the background: the economy shifts
   (dearer rebuilds, stations keeping 40% on what they buy back), and its log says how much.
 - **Try it:** start a racer, dock, open the shop. Hover a part you own: its sell value is 60% of

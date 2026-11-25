@@ -112,8 +112,6 @@ export interface Part {
   /** A fuel tank: how much fuel it holds (docs/fuel-plan.md). A ship's tank is the sum of its own. */
   tank?: number;
   description: string;
-  /** The ships it can be fitted to, by hull name. Without this, any ship. */
-  fits?: ShipModel[];
   /** 0 = sold from the start, 1 and 2 = once haulers have bought enough of the station's ore. */
   tier: 0 | 1 | 2;
   /**
@@ -143,10 +141,6 @@ export interface Part {
 
 /** The controls a thruster can answer to: which one fires it is up to its mount. */
 export type ThrusterRole = "thrusterMain" | "thrusterReverse" | "thrusterStrafeLeft" | "thrusterStrafeRight" | "thrusterRotateLeft" | "thrusterRotateRight";
-
-export function partFits(part: Part, model: ShipModel): boolean {
-  return part.fits === undefined || part.fits.includes(model);
-}
 
 /**
  * The icon colour families, one per kind of part, so a shop grid reads by category at a glance:
@@ -207,7 +201,6 @@ export const PARTS: Part[] = [
     price: 300,
     weight: 0.1,
     description: "Catches loose ore ahead and pulls it in",
-    fits: ["floater"],
     tier: 2,
     icon: { ...TRACTOR_COLORS, glyph: "coneBeam" },
   },
@@ -233,7 +226,6 @@ export const PARTS: Part[] = [
     price: 350,
     weight: 0.1,
     description: "Holds one rock and flies it with you. G grabs and lets go",
-    fits: ["floater"],
     tier: 2,
     icon: { ...TRACTOR_COLORS, glyph: "magnet" },
   },
@@ -246,7 +238,6 @@ export const PARTS: Part[] = [
     price: 300,
     weight: 0.1,
     description: "Your gun turns to follow the mouse, with a third of its range",
-    fits: ["floater"],
     tier: 1,
     icon: { ...GUN_COLORS, glyph: "turret" },
   },

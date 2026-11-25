@@ -106,8 +106,9 @@ brings the 60% buy share, frame-plus-parts hulls and the contracts, then stops f
 - backlog: S-45
 - added: 2026-11-24
 
-Four independent fixes; the decided spec is the S-45 text in BACKLOG.md. The racer tractor fit
-(I-7) is the one the user hit in play.
+Four independent fixes; the decided spec is the S-45 text in BACKLOG.md. The first, fit by mounts
+(I-7), was built 2026-11-25 with the hull buying fixes: news links, traffic beams and tank art are
+left.
 
 ## Q-14 · Face target faces any target, main or closest · build
 - state: queued
@@ -124,6 +125,14 @@ default), no target no effect.
 
 The decided spec is the S-44 text in BACKLOG.md: a bigger bay bought replaces the smallest, cargo
 moves over, the old bay to the locker; ore nearest the entry sells first.
+
+## Q-24 · Hull designer: ellipse and arc shapes, a default decal · spec
+- state: queued
+- backlog: S-57
+- added: 2026-11-25
+
+From the user trying hull buying. Two new shape kinds with their own handles, plus an "add
+default decal" button. Settle how each is drawn, edited and saved, then plan it.
 
 ## Done
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FIRST_FIELD, HOME, type Home, homeFields, homeOf, homeSim, rehome } from "./home";
-import { PARTS, partFits, type PartId } from "./parts";
+import { PARTS, type PartId } from "./parts";
 import { roundTrip } from "./save";
 import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
 import { bodyAt, DOCK_OFFSET, type FieldSpec, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, type SolidBody, STATION_HALF, TICK } from "./sim";
@@ -1716,8 +1716,6 @@ describe("the new ship", () => {
       sim.devSet(sim.ship, "tractorAll", true);
       run(sim, 10);
       expect(sim.oreIn(sim.ship)).toBe(1);
-      const racer = PARTS.find((part) => part.id === "tractorAll")!;
-      expect(partFits(racer, "racer")).toBe(true);
     });
 
     it("keeps hold of caught ore when the ship turns away", () => {
@@ -1748,13 +1746,13 @@ describe("the new ship", () => {
       expect(sim.ores[0].vx).toBe(0);
     });
 
-    it("can be bought for the new ship but not the first", () => {
+    it("can be bought for either ship: its tractor mount decides, not the hull", () => {
       for (const floaterStart of [true, false]) {
         const sim = floater({ floaterStart });
         sim.ship.credits = 1000;
         sim.ship.x = sim.station.x + DOCK_OFFSET;
         sim.ship.y = sim.station.y;
-        expect(sim.buyPart(sim.ship, "tractor")).toBe(floaterStart);
+        expect(sim.buyPart(sim.ship, "tractor")).toBe(true);
       }
     });
   });

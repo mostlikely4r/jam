@@ -1,4 +1,4 @@
-import { isProgram, partFits, partOf, PARTS, SHIP_MODELS, type Part, type PartIcon, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "./parts";
+import { isProgram, partOf, PARTS, SHIP_MODELS, type Part, type PartIcon, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "./parts";
 import shipFile from "./hulls.json";
 import { hasGlyph } from "./glyphs";
 import { itemDef } from "./items";
@@ -714,14 +714,14 @@ export function mountTakes(mount: Mount, id: PartId): boolean {
 }
 
 /** The decal parts a decal mount can show on a hull. */
-export function decalChoices(model: ShipModel, mount: Mount): PartId[] {
+export function decalChoices(mount: Mount): PartId[] {
   if (!mount.decal) return [];
-  return PARTS.filter((part) => partFits(part, model) && mountTakes(mount, part.id)).map((part) => part.id);
+  return PARTS.filter((part) => mountTakes(mount, part.id)).map((part) => part.id);
 }
 
 /** The decal a ship shows on a mount: the one it was given, or else the first that fits. */
 export function decalOf(ship: { model: ShipModel; decals?: Partial<Record<MountId, PartId>> }, mount: Mount): PartId | null {
-  const choices = decalChoices(ship.model, mount);
+  const choices = decalChoices(mount);
   const own = ship.decals?.[mount.id];
   return own && choices.includes(own) ? own : choices[0] ?? null;
 }
@@ -792,7 +792,7 @@ export function thrustOf(ship: Fitting & { model: ShipModel }): Thrust {
 export function hullDefaults(model: ShipModel): Partial<Record<MountId, PartId>> {
   const defaults: Partial<Record<MountId, PartId>> = {};
   for (const mount of hullMounts(model)) {
-    if (mount.default && mountTakes(mount, mount.default) && partFits(partOf(mount.default), model)) defaults[mount.id] = mount.default;
+    if (mount.default && mountTakes(mount, mount.default)) defaults[mount.id] = mount.default;
   }
   return defaults;
 }
@@ -810,7 +810,7 @@ export function newFitting(model: ShipModel, random: () => number = Math.random)
     install(fitting, id);
   }
   for (const mount of hullMounts(model)) {
-    const choices = decalChoices(model, mount);
+    const choices = decalChoices(mount);
     if (choices.length > 0) fitting.decals![mount.id] = choices[Math.min(choices.length - 1, Math.floor(random() * choices.length))];
   }
   return fitting;
@@ -886,7 +886,7 @@ export function refresh(ship: Fitting): void {
 export function mountsFor(ship: Fitting & { model: ShipModel }, id: PartId): MountId[] {
   const part = partOf(id);
   // Decals and cockpit glass are looks only: never fitted for real.
-  if (part.kind === "program" || part.kind === "cockpit" || isDecal(id) || !partFits(part, ship.model)) return [];
+  if (part.kind === "program" || part.kind === "cockpit" || isDecal(id)) return [];
   // A gun goes on the turret when there is one.
   if (part.kind === "gun" && turretMount(ship)) return ["turretGun"];
   const mounts = hullMounts(ship.model).filter((mount) => mountTakes(mount, id));
@@ -1077,6 +1077,20 @@ export function flipPoints(points: HullPoint[]): HullPoint[] {
  * What it's used for starts empty, so a copy doesn't quietly join the new game's ships. The copy
  * is a copy: changing it leaves the hull it came from alone.
  */
+/**
+ * Takes a hull out of play: its name, outline, shapes, mounts and stats. What the hull designer's
+ * Remove does; a ship or a world that still names it falls back as `hullNamed` says.
+ */
+export function removeHull(model: ShipModel): void {
+  const at = SHIP_MODELS.indexOf(model);
+  if (at < 0) return;
+  SHIP_MODELS.splice(at, 1);
+  delete HULL_MOUNTS[model];
+  delete HULL_EDGE[model];
+  delete HULL_SHAPES[model];
+  delete HULL_INFO[model];
+}
+
 export function copyHull(from: ShipModel, to: ShipModel): void {
   const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
   if (HULL_MOUNTS[to]) return;

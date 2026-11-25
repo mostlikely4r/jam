@@ -321,10 +321,11 @@ to locker, then to the new bay, then refusal; unload order follows the entry.
 - effort: S
 - from: I-1, I-2, I-3, I-7
 
-Four independent fixes, one change each.
-- **Fit by mounts (I-7).** The racer has a tractor mount but the shop says the tractor can't fit:
-  `tractor` carries `fits: ["floater"]` in `src/parts.ts`, which overrides the hull's mounts.
-  *Decided:* mounts decide. Drop the hand-written `fits` from `tractor` and `turret` (any other
+Four independent fixes, one change each; the first is built, three are left.
+- **Fit by mounts (I-7).** *Built 2026-11-25*, with the hull buying fixes: `fits` is gone from
+  parts altogether, so mounts alone decide. The racer has a tractor mount but the shop said the
+  tractor can't fit: `tractor` carried `fits: ["floater"]` in `src/parts.ts`, which overrode the
+  hull's mounts. *Decided:* mounts decide. Drop the hand-written `fits` from `tractor` and `turret` (any other
   part too), so any hull with a matching mount takes the part. Test: the racer can buy and fit
   the tractor.
 - **News links (I-1).** Every news board line that names a place gets the click link that sets
@@ -445,3 +446,23 @@ unreadable call-sign, and an emote whose features (crest, antennae, glow) you le
 A single `price(seller, buyer, item, amount)` over an item's worth. Stations buy back at 60%; a
 hull is worth its frame plus its parts; ore keeps full price by a standing contract; the hauler,
 deposit and black market deals become contracts. Closes the hull-swap money loop.
+
+## S-56 · Hull pictures sized to the hull
+- status: idea
+- area: Inventory
+- from: the user trying hull buying, 2026-11-25
+
+Bigger hulls don't fit their pictures: the ship screen's blueprint, the shop's hull icon and the
+start menu cards draw every hull at a scale made for a racer-sized ship. Scale each picture to the
+hull's own outline (and its mounts). Maybe part of a later inventory rework.
+
+## S-57 · Hull designer: ellipse and arc shapes, and a default decal
+- status: idea
+- area: Ships and gear
+- from: the user trying hull buying, 2026-11-25
+
+A shape is a polygon, a circle or a rect. The dome cockpit's art has a turned ellipse and the
+tractor's an arc, which exist only in the code's own art (`src/shipArt.ts`), so the editor can't
+make or match them. Wanted: an ellipse shape (two radii and a turn) and an arc (a radius, start
+and end angles, a line width), each with handles in the shape editor; and an "add default decal"
+button that adds the polygon our hulls' default shapes use as a decal.

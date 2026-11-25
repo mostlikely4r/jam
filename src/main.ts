@@ -12,7 +12,7 @@ import { Audio } from "./audio";
 import { Radio } from "./radio";
 import { type Base, type Battery, type Deposit, DEPOSIT_REACH, type HullPlan, SHIP_RADIUS, type Ship, Sim, STATION_HALF, TICK, targetSpot, type Targetable } from "./sim";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
-import { type BlueprintId, isGear, isProgram, isProject, PARTS, partFits, partOf, type Part, type PartIcon, type PartId } from "./parts";
+import { type BlueprintId, isGear, isProgram, isProject, PARTS, partOf, type Part, type PartIcon, type PartId } from "./parts";
 import { ITEMS, itemDef } from "./items";
 import { PROGRAM_PARTS } from "./programs";
 import { computerSize, hullMax, hullName, mountsHolding, newFitting, newGameHulls, owns, tankMounts, } from "./fitting";
@@ -554,9 +554,9 @@ function showPage(page: "main" | "help" | "settings"): void {
 function tradePart(part: Part): void {
   const { ship } = sim;
   if (isProgram(part.id) && ship.software.has(part.id)) sim.setProgram(ship, part.id, !ship.programs.includes(part.id));
-  else if (owns(ship, part.id)) sim.sellPart(ship, part.id);
+  else if (sellsHere(part)) sim.sellPart(ship, part.id);
   else if (sim.unlocked(part.id)) sim.buyPart(ship, part.id);
-  else if (partFits(part, sim.ship.model)) sim.fundBlueprint(sim.ship, part.id);
+  else sim.fundBlueprint(sim.ship, part.id);
   if (!panel.hidden) buildPanel();
 }
 
@@ -1183,7 +1183,7 @@ function partLine(part: Part): ShopLine | null {
         ? { tag: "load", style: "buy", label: part.label, icon: part.icon, text: "Yours, not running. Click to load it", enabled: true }
         : { tag: "no free slot", label: part.label, icon: part.icon, text: "Yours, not running\nNo free slot in the computer", enabled: false };
     }
-  } else if (owns(ship, part.id)) {
+  } else if (sellsHere(part)) {
     if (part.builtIn) return null;
     const value = mountsHolding(ship, part.id).reduce((sum, mount) => sum + sim.moduleValue(ship.fit[mount]!), 0);
     return { tag: "sell", style: "sell", label: part.label, icon: part.icon, text: `Sell for ${value} credits, -${(part.weight * tuning.partWeightScale).toFixed(2)} weight`, enabled: true };
@@ -1201,6 +1201,14 @@ function partLine(part: Part): ShopLine | null {
   const goes = replacedBy(part);
   if (goes) detail.push(goes);
   return saleLine(price, part.label, detail.join("\n"), part.id, part.icon);
+}
+
+/**
+ * Whether a part's cell sells the one you have rather than buying another: you have it fitted and
+ * no free mount would take a second. With a mount still free, the cell buys one for it.
+ */
+function sellsHere(part: Part): boolean {
+  return owns(sim.ship, part.id) && sim.whereBuyGoes(sim.ship, part.id) !== "mount";
 }
 
 /** Where buying a part would put it, in words, or nothing when it goes on a mount. A buy never takes anything off. */

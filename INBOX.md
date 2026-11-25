@@ -18,3 +18,6 @@ With multiple thrusters the ship can thrust while turning too.
 
 -Only 1 pull cone is shown and it is not rotated or shifted to the tractors position.
 -Only 1 tractor currently works.
+
+## I-4 · Fuel tanks should empty front to back (now they left to right).
+- added: 2026-11-25 10:11

@@ -12,3 +12,9 @@ then delete it here. Format: see vibeview/FORMAT.md -->
 
 Click move should check what is faster.. turn front to face direction and main thrust vs side/back thrust. 
 With multiple thrusters the ship can thrust while turning too.
+
+## I-3 · Multiple normal tractors on a ship:
+- added: 2026-11-25 10:10
+
+-Only 1 pull cone is shown and it is not rotated or shifted to the tractors position.
+-Only 1 tractor currently works.

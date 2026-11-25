@@ -1,8 +1,9 @@
 # Hull buying plan
 
 Written 2026-11-24. Third of five plans from one talk about reworking the hull designer (see
-`docs/designer-comforts-plan.md` for the list). Both steps are built (2026-11-25); step 2 waits on
-the user trying it.
+`docs/designer-comforts-plan.md` for the list). Both steps are built and were tried by the user
+(2026-11-25). What the try turned up is in commit 58936d4, `docs/pricing-plan.md` (prices) and
+S-56, S-57 in the backlog.
 
 ## Why
 

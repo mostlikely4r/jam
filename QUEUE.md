@@ -2,15 +2,6 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-18 · Hull buying · build
-- state: in progress
-- backlog: S-48
-- plan: docs/hull-buying-plan.md
-- added: 2026-11-24
-
-Station sell lists, then buying with trade-in. Both steps built 2026-11-25; waiting on the user
-to try it (the plan's **Try it** line).
-
 ## Q-19 · AI hulls: templates and spawn points · build
 - state: queued
 - backlog: S-49
@@ -135,6 +126,16 @@ From the user trying hull buying. Two new shape kinds with their own handles, pl
 default decal" button. Settle how each is drawn, edited and saved, then plan it.
 
 ## Done
+
+## Q-18 · Hull buying · build
+- state: done
+- done: 2026-11-25
+- backlog: S-48
+- plan: docs/hull-buying-plan.md
+- added: 2026-11-24
+
+Station sell lists, then buying with trade-in. Built and tried 2026-11-25; the fixes from the try
+are in 58936d4, the rest went to Q-24, S-56 and the pricing plan (Q-23).
 
 ## Q-17 · Hulls as data, and the shape editor · build
 - state: done

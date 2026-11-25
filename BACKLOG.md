@@ -358,7 +358,7 @@ hull plus visual shapes with colour roles, mirror drawing and Shift snap, copy h
 drawn part art. Groundwork for S-48 and S-49.
 
 ## S-48 · Hulls for sale at stations, with a trade-in
-- status: building
+- status: built
 - area: Ships and gear
 - effort: M
 - plan: docs/hull-buying-plan.md

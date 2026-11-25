@@ -170,6 +170,16 @@ export function usableTracks(list: unknown[]): Track[] {
   });
 }
 
+/** The music settings from a saved settings object; an older save without them gets the defaults. */
+export function musicSettingsFrom(saved: Record<string, unknown>): { musicMode: MusicMode; musicVolume: number } {
+  const mode = saved.musicMode;
+  const volume = saved.musicVolume;
+  return {
+    musicMode: mode === "off" || mode === "occasional" || mode === "always" ? mode : "always",
+    musicVolume: typeof volume === "number" && volume >= 0 && volume <= 1 ? volume : 0.6,
+  };
+}
+
 /** The line shown when a track starts, which doubles as its attribution. */
 export function nowPlayingText(track: Track): string {
   return `♪ ${track.title} · ${track.artist} · ${track.licence}`;
@@ -191,7 +201,7 @@ export class MusicPlayer {
   constructor(
     readonly scheduler: MusicScheduler,
     /** The music gain's level, 0 to 1, under the main volume. */
-    private level: number,
+    public level: number,
     private readonly onStart: (track: Track) => void,
   ) {}
 
@@ -225,6 +235,11 @@ export class MusicPlayer {
   }
 
   mode: MusicMode = "always";
+
+  /** The track playing now, paused with the menu or not; null between tracks and while held in the dock. */
+  get playing(): Track | null {
+    return this.scheduler.playing;
+  }
 
   update(input: Omit<MusicInput, "mode">): void {
     if (!this.element) return;

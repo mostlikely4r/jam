@@ -9,7 +9,7 @@ import { shippedWorld } from "./designer/shipped";
 import { layoutKey, loadGame, loadStart, saveGame, saveInfo, type SaveSlot, type StartFile } from "./save";
 import { stringifyWorld } from "./designer/world";
 import { Audio } from "./audio";
-import { MUSIC_TIMING, MusicPlayer, MusicScheduler, nowPlayingText, usableTracks } from "./music";
+import { MUSIC_TIMING, type MusicMode, MusicPlayer, MusicScheduler, musicSettingsFrom, nowPlayingText, usableTracks } from "./music";
 import musicList from "./music.json";
 import { Radio } from "./radio";
 import { type Base, type Battery, type Deposit, DEPOSIT_REACH, type HullPlan, SHIP_RADIUS, type Ship, Sim, STATION_HALF, TICK, targetSpot, type Targetable } from "./sim";
@@ -82,7 +82,8 @@ const audio = new Audio();
 const nowPlaying = document.getElementById("nowplaying") as HTMLDivElement;
 let nowPlayingTimer: ReturnType<typeof setTimeout> | null = null;
 /** Music under the work (docs/music-plan.md): the line that names a track doubles as its credit. */
-const music = new MusicPlayer(new MusicScheduler(usableTracks(musicList)), 0.6, (track) => {
+const musicTracks = usableTracks(musicList);
+const music = new MusicPlayer(new MusicScheduler(musicTracks), 0.6, (track) => {
   nowPlaying.textContent = nowPlayingText(track);
   nowPlaying.classList.add("shown");
   if (nowPlayingTimer) clearTimeout(nowPlayingTimer);
@@ -317,26 +318,41 @@ function chooseShip(model: ShipModel): void {
 const pauseOverlay = document.getElementById("pause") as HTMLDivElement;
 
 /** The player's own settings, kept apart from the tuning. */
+interface Settings {
+  volume: number;
+  muted: boolean;
+  musicMode: MusicMode;
+  musicVolume: number;
+}
 const SETTINGS_KEY = "jam-settings";
 const settings = loadSettings();
 audio.volume = settings.volume;
 audio.muted = settings.muted;
+music.mode = settings.musicMode;
+music.setLevel(settings.musicVolume);
 
-function loadSettings(): { volume: number; muted: boolean } {
+function loadSettings(): Settings {
   try {
-    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}");
-    return {
-      volume: typeof saved.volume === "number" ? saved.volume : 0.5,
-      muted: saved.muted === true,
-    };
+    return readSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}"));
   } catch {
-    return { volume: 0.5, muted: false };
+    return readSettings({});
   }
+}
+
+/** Settings as saved, with defaults for anything an older save lacks or got wrong. */
+function readSettings(saved: Record<string, unknown>): Settings {
+  return {
+    volume: typeof saved.volume === "number" ? saved.volume : 0.5,
+    muted: saved.muted === true,
+    ...musicSettingsFrom(saved),
+  };
 }
 
 function saveSettings(): void {
   settings.volume = audio.volume;
   settings.muted = audio.muted;
+  settings.musicMode = music.mode;
+  settings.musicVolume = music.level;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
@@ -458,7 +474,7 @@ function heading(text: string, level: "h1" | "h2" = "h2"): HTMLElement {
   return element;
 }
 
-function showPage(page: "main" | "help" | "settings"): void {
+function showPage(page: "main" | "help" | "settings" | "credits"): void {
   const title = heading("JAM", "h1");
   const sub = document.createElement("p");
   sub.className = "sub";
@@ -497,6 +513,7 @@ function showPage(page: "main" | "help" | "settings"): void {
       menuButton("Resume", () => setPaused(false)),
       menuButton("Help", () => showPage("help")),
       menuButton("Settings", () => showPage("settings")),
+      menuButton("Credits", () => showPage("credits")),
       save,
       load,
       newGame,
@@ -519,6 +536,10 @@ function showPage(page: "main" | "help" | "settings"): void {
         }),
       );
     }
+    return;
+  }
+  if (page === "credits") {
+    pauseBox.replaceChildren(title, sub, heading("Credits"), ...creditLines(), back);
     return;
   }
   if (page === "help") {
@@ -561,7 +582,80 @@ function showPage(page: "main" | "help" | "settings"): void {
     saveSettings();
   });
   mute.append(muteBox, " Mute (M)");
-  pauseBox.replaceChildren(title, sub, heading("Settings"), volumeLabel, volume, mute, back);
+  pauseBox.replaceChildren(title, sub, heading("Settings"), volumeLabel, volume, mute, ...musicSettings(), back);
+}
+
+/** Music: how often it plays, how loud under the main volume, and Skip while a track plays. */
+function musicSettings(): HTMLElement[] {
+  const modes: [MusicMode, string][] = [
+    ["off", "Off"],
+    ["occasional", "Occasional"],
+    ["always", "Always"],
+  ];
+  const choice = document.createElement("div");
+  choice.className = "choice";
+  for (const [mode, label] of modes) {
+    choice.append(
+      menuButton(label, () => {
+        music.mode = mode;
+        saveSettings();
+        showPage("settings");
+      }, music.mode === mode ? "on" : ""),
+    );
+  }
+  const level = document.createElement("input");
+  level.type = "range";
+  level.min = "0";
+  level.max = "100";
+  level.value = String(Math.round(music.level * 100));
+  level.addEventListener("input", () => {
+    music.setLevel(Number(level.value) / 100);
+    saveSettings();
+  });
+  const levelLabel = document.createElement("label");
+  levelLabel.textContent = "Music volume";
+  const parts: HTMLElement[] = [heading("Music"), choice, levelLabel, level];
+  const playing = music.playing;
+  if (playing) {
+    parts.push(
+      menuButton(`Skip ${playing.title}`, () => {
+        music.skip();
+        showPage("settings");
+      }),
+    );
+  }
+  if (musicTracks.length === 0) {
+    const none = document.createElement("p");
+    none.textContent = "No tracks yet.";
+    parts.push(none);
+  }
+  return parts;
+}
+
+/** Each track's credit, from the track list: the attribution its source asks for, or the plain facts. */
+function creditLines(): HTMLElement[] {
+  if (musicTracks.length === 0) {
+    const none = document.createElement("p");
+    none.textContent = "No music yet.";
+    return [heading("Music"), none];
+  }
+  const lines: HTMLElement[] = [heading("Music")];
+  for (const track of musicTracks) {
+    const line = document.createElement("p");
+    line.className = "credit";
+    const text = track.attribution ?? `"${track.title}" ${track.artist}, ${track.licence}`;
+    line.textContent = text;
+    if (/^https?:\/\//.test(track.source)) {
+      const link = document.createElement("a");
+      link.href = track.source;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = track.source;
+      line.append(document.createElement("br"), link);
+    }
+    lines.push(line);
+  }
+  return lines;
 }
 
 /** Buys a part, or sells it back if it's fitted. A program the pilot owns is loaded or unloaded instead. */

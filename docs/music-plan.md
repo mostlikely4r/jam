@@ -123,7 +123,19 @@ around the station. *Decided*: it still fades in the dock, but the track is held
 where it stopped on undocking (built and tried the same day: "works"). A different kind of music while lingering
 docked belongs to the station personalities (S-69). Next wish: the chatter faces swinging to the music (S-68).
 
-### 2. Menu, credits and the licence guard
+### 2. Menu, credits and the licence guard (*built* 2026-11-25)
+
+Built as below, with these differences:
+- The mode is three buttons side by side, the chosen one lit, not a dropdown.
+- The settings reader is `musicSettingsFrom` in `src/music.ts`, so the defaults for old saves
+  are tested. A music volume outside 0–1 falls back to the default.
+- The README line names no artist, so it stays right as tracks are added: "Music and other
+  credits are in CREDITS.md."
+- Skip shows while a track plays, paused under the menu or not, but not while one is held
+  in the dock.
+- The guard test also checks that moods are `funk` or `floaty` and that ids are unique.
+- The review found nothing.
+
 
 - **Settings** in the pause menu, under the existing Volume and Mute:
   - **Music:** Off / Occasional / Always.

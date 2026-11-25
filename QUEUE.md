@@ -2,15 +2,6 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-33 · Music: funk under the work · build
-- state: in progress
-- backlog: S-66
-- plan: docs/music-plan.md
-- added: 2026-11-25
-
-Step 1 stops for the user to try one track under mining. Needs a CC0 or CC BY funk track from the
-user to try; builds and passes without one.
-
 ## Q-25 · Dock shop fixes: shift-click sells, programs ignore parts, your credits · build
 - state: queued
 - backlog: S-61
@@ -200,6 +191,16 @@ From the user trying hull buying. Two new shape kinds with their own handles, pl
 default decal" button. Settle how each is drawn, edited and saved, then plan it.
 
 ## Done
+
+## Q-33 · Music: funk under the work · build
+- state: done
+- done: 2026-11-25
+- backlog: S-66
+- plan: docs/music-plan.md
+- added: 2026-11-25
+
+Both steps built 2026-11-25 (step 1 tried), with four Kevin MacLeod tracks. Docked, the track is
+held and picks up on undocking (the user's call after the first try). Later: S-67, S-68, S-69.
 
 ## Q-18 · Hull buying · build
 - state: done

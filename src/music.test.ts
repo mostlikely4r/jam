@@ -1,5 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { MUSIC_TIMING, type MusicInput, MusicScheduler, type Track } from "./music";
+import { LICENCES, MUSIC_TIMING, type MusicInput, MusicScheduler, musicSettingsFrom, type Track, usableTracks } from "./music";
+import musicList from "./music.json";
 
 const track = (id: string, mood: Track["mood"] = "funk"): Track => ({
   id,
@@ -159,5 +161,54 @@ describe("music scheduler", () => {
     };
     expect(pick(0.1)).toBe("floaty");
     expect(pick(0.9)).toBe("funk");
+  });
+});
+
+describe("track list", () => {
+  const tracks = musicList as Track[];
+  const credits = readFileSync(new URL("../CREDITS.md", import.meta.url), "utf8");
+
+  it("has only allowed licences, names and sources", () => {
+    for (const each of tracks) {
+      expect(LICENCES, each.id).toContain(each.licence);
+      expect(each.title.trim(), each.id).not.toBe("");
+      expect(each.artist.trim(), each.id).not.toBe("");
+      expect(each.source.trim(), each.id).not.toBe("");
+      expect(["funk", "floaty"], each.id).toContain(each.mood);
+    }
+    expect(new Set(tracks.map((each) => each.id)).size).toBe(tracks.length);
+  });
+
+  it("has every file in public/music", () => {
+    for (const each of tracks) expect(existsSync(new URL(`../public/music/${each.file}`, import.meta.url)), each.file).toBe(true);
+  });
+
+  it("credits every track in CREDITS.md", () => {
+    for (const each of tracks) {
+      expect(credits, each.id).toContain(each.title);
+      expect(credits, each.id).toContain(each.artist);
+    }
+  });
+
+  it("drops a track with a licence off the list", () => {
+    const bad = { ...track("x"), licence: "CC BY-NC 4.0" };
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      expect(usableTracks([track("a"), bad])).toEqual([track("a")]);
+    } finally {
+      console.warn = warn;
+    }
+  });
+});
+
+describe("music settings", () => {
+  it("gives defaults to an older save", () => {
+    expect(musicSettingsFrom({ volume: 0.3 })).toEqual({ musicMode: "always", musicVolume: 0.6 });
+  });
+
+  it("keeps what was saved, and drops nonsense", () => {
+    expect(musicSettingsFrom({ musicMode: "occasional", musicVolume: 0.2 })).toEqual({ musicMode: "occasional", musicVolume: 0.2 });
+    expect(musicSettingsFrom({ musicMode: "loud", musicVolume: 7 })).toEqual({ musicMode: "always", musicVolume: 0.6 });
   });
 });

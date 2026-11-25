@@ -25,3 +25,7 @@ npm run dev
 | Q / E | Rotate |
 | Space | Fire |
 | Esc | Pause and help |
+
+## Credits
+
+Music and other credits are in [CREDITS.md](CREDITS.md).

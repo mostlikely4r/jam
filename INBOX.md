@@ -54,3 +54,8 @@ Selling modules should return the station parts?
 - added: 2026-11-25 10:26
 
 Player credits should shown at the top of the station shop screen. Sesion credits can be removed there.
+
+## I-12 · Programs and hulls should have blueprints which station can 'want' or 'have unl…
+- added: 2026-11-25 10:28
+
+Programs and hulls should have blueprints which station can 'want' or 'have unlocked'.

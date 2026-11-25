@@ -498,6 +498,24 @@ describe("pickup and sale", () => {
     expect(base.stock.get(ORE) ?? 0).toBe(0);
   });
 
+  it("sells what a quick click picks: a shift click in the bay, docked, and nothing out in space", () => {
+    const { sim, outpost } = world();
+    const { ship } = sim;
+    // Out in space the same call is turned down, so a shift click there sells nothing.
+    ship.hold.push(sim.holdSpotFor(ship, { part: ORE, wear: 0 })!);
+    const credits = ship.credits;
+    expect(sim.sellItem(ship, { at: "hold", index: 0 })).toBe(false);
+    expect(ship.hold).toHaveLength(1);
+    expect(ship.credits).toBe(credits);
+    // In a dock it is the sale the Sell button makes: the item goes and the credits come.
+    dockAt(sim, ship, outpost);
+    run(sim, 0.1);
+    expect(sim.baseAt(ship)).not.toBeNull();
+    expect(sim.sellItem(ship, { at: "hold", index: 0 })).toBe(true);
+    expect(ship.hold).toHaveLength(0);
+    expect(ship.credits).toBe(credits + itemDef(ORE)!.price);
+  });
+
   it("refuses when the station has no room, with the reason, and keeps the item", () => {
     const { sim, outpost } = world({ stationStartParts: 0 }, { storage: 400 });
     const { ship } = sim;

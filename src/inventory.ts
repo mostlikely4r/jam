@@ -187,7 +187,7 @@ export class Inventory {
     }
     this.selected = null;
     bar.textContent = this.docked
-      ? "Drag things to move them, R turns what you hold. Click one for its buttons. Drop on the shop to sell."
+      ? "Drag things to move them, R turns what you hold. Click one for its buttons, shift click sells it. Drop on the shop to sell."
       : "Fitting, loading and storing are done in a dock.";
     return bar;
   }
@@ -211,9 +211,22 @@ export class Inventory {
       const placed = place.at === "hold" ? ship.hold[place.index] : sim.lockerAt(sim.baseAt()!).items[place.index];
       const turned: Spot = { x: placed.x, y: placed.y, turned: !placed.turned };
       out.push(act("Turn", () => (place.at === "hold" ? sim.toHold(ship, place, turned) : sim.toLocker(ship, place, turned))));
-      out.push(act(`Sell ${sim.moduleValue(item)}`, () => sim.sellItem(ship, place)));
+      out.push(this.button(`Sell ${sim.moduleValue(item)}`, () => this.sellAt(place, item)));
     } else if (!partOf(item.part).builtIn) out.push(act(`Sell ${sim.moduleValue(item)}`, () => sim.sellPart(ship, item.part)));
     return out;
+  }
+
+  /**
+   * Sells what's in the bay or the locker: the Sell button and a shift click make the same sale,
+   * and the message line says why when the station won't take it.
+   */
+  private sellAt(place: ItemPlace, module: Module): void {
+    const { sim } = this;
+    if (sim.sellItem(sim.ship, place)) {
+      this.message = "";
+      this.selected = null;
+    } else this.message = sim.sellRefused ?? this.refusal({ from: "item", place, module, turned: false, grab: { x: 0, y: 0 } }, null);
+    this.redraw();
   }
 
   // The ship: blueprint, ports and programs.
@@ -523,11 +536,15 @@ export class Inventory {
       tile.append(partIcon(part, tileIconSize(w, h)));
       setTip(tile, () => {
         const lines = [`${part.label}${condition(item.module)}`];
-        if (this.docked) lines.push(`Sell value ${this.sim.moduleValue(item.module)} credits`);
+        if (this.docked) lines.push(`Sell value ${this.sim.moduleValue(item.module)} credits. Shift click sells it`);
         return lines.join("\n");
       });
       if (this.isSelected(place)) tile.classList.add("selected");
-      tile.addEventListener("click", () => this.select(place));
+      // Shift click sells it: the quick way, without picking it up first.
+      tile.addEventListener("click", (event) => {
+        if (this.docked && event.shiftKey) this.sellAt(place, item.module);
+        else this.select(place);
+      });
       if (this.docked) {
         let grab = this.centre(item.module, item.turned);
         // Held where it was picked up, so it lands the way it's carried.

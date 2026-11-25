@@ -44,3 +44,8 @@ There should be a quick way to sell items in your bay. Maybe shift or right clic
 
 ## I-9 · How easy is it to put tractors or thrusters on (turret) mounts?
 - added: 2026-11-25 10:24
+
+## I-10 · Programs should not cost the station parts.
+- added: 2026-11-25 10:25
+
+Selling modules should return the station parts?

@@ -6,6 +6,7 @@ import { isItem, partOf } from "./parts";
 import { isOreItem } from "./items";
 import { pickOf } from "./programs";
 import { relativeLine, willCollide, type Motion } from "./relative";
+import { cloudAt, cloudPuffs, cloudStops, strengthAt, type CloudPuff } from "./clouds";
 import { bayBox, colorOf, drawTurret, drawVectorShip, hullTint, mix } from "./shipArt";
 import { canvasTip } from "./tooltip";
 import {
@@ -32,9 +33,21 @@ import {
   type SimEvent,
   type Down,
   type Targetable,
+  type CloudSpec,
 } from "./sim";
 
 const ORE_COLORS = ["#ff9d5c", "#6fe0c8", "#e9d36a"];
+/** Each cloud's puffs or specks, worked out once: the same cloud looks the same every frame. */
+const cloudInsides = new Map<string, CloudPuff[]>();
+function cloudInside(cloud: CloudSpec): CloudPuff[] {
+  const key = `${cloud.id}:${cloud.look}`;
+  let inside = cloudInsides.get(key);
+  if (!inside) {
+    inside = cloudPuffs(cloud);
+    cloudInsides.set(key, inside);
+  }
+  return inside;
+}
 /** How long the mark where a pirate was last seen takes to fade away. */
 const GHOST_MILLISECONDS = 30000;
 const PING_SECONDS = 1.4;
@@ -365,6 +378,7 @@ export class Renderer {
       Math.abs(x - camX) < halfW + r && Math.abs(y - camY) < halfH + r;
 
     this.drawBodies(sim, alpha, visible);
+    this.drawClouds(sim, alpha, "back", visible);
     this.stationSpots = [];
     for (const base of sim.bases) this.drawStation(sim, base, alpha);
     this.drawDeposits(sim, alpha);
@@ -406,6 +420,8 @@ export class Renderer {
     if (!sim.down?.exploded) this.drawShip(ship, shipX, shipY, alpha, [200, 215, 235]);
     this.drawNote(sim, shipX, shipY);
     if (sim.down && sim.down.stage === "pod") this.drawPod(sim.down, alpha);
+    // The front layer goes over every ship, which is the whole point of it: it hides things.
+    this.drawClouds(sim, alpha, "front", visible);
     this.drawRelative(sim, alpha);
     this.drawTargets(sim, alpha);
 
@@ -518,6 +534,73 @@ export class Renderer {
         ctx.fill();
       }
     });
+  }
+
+  /**
+   * Clouds: soft ellipses you fly through, with a hole, a fade and a turn. Gas is a smooth glow
+   * with a few puffs in it; dust is dimmer and grainy. Nothing is solid: a cloud is only a look so
+   * far (docs/clouds-plan.md, step 1).
+   */
+  private drawClouds(sim: Sim, alpha: number, layer: "back" | "front", visible: (x: number, y: number, r: number) => boolean): void {
+    if (sim.clouds.length === 0) return;
+    const { ctx, view } = this;
+    const time = sim.now - (1 - alpha) * TICK;
+    // Lower draw order first, ties in the layout's own order.
+    const ordered = sim.clouds
+      .filter((cloud) => cloud.layer === layer)
+      .map((cloud, index) => ({ cloud, index }))
+      .sort((a, b) => a.cloud.drawOrder - b.cloud.drawOrder || a.index - b.index);
+    for (const { cloud } of ordered) {
+      const at = cloudAt(cloud, time);
+      if (!visible(at.x, at.y, cloud.radius)) continue;
+      const halfWidth = Math.max(0.5, cloud.width / 2);
+      const halfHeight = Math.max(0.5, cloud.height / 2);
+      const [red, green, blue] = colorOf(cloud.color, [127, 178, 230]);
+      const paint = (strength: number) => `rgba(${red}, ${green}, ${blue}, ${strength})`;
+      const cos = Math.cos(at.turn);
+      const sin = Math.sin(at.turn);
+      ctx.save();
+      ctx.translate(at.x, at.y);
+      ctx.rotate(at.turn);
+      ctx.scale(halfWidth, halfHeight);
+      // In the cloud's own unit circle the shape's rule is the gradient's stops, so the fill
+      // and `cloudStrength` can't drift apart. Scaled, it is the ellipse itself.
+      const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      for (const d of cloudStops(cloud)) glow.addColorStop(d, paint(strengthAt(cloud, d) * cloud.opacity));
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(0, 0, 1, 0, Math.PI * 2);
+      ctx.fill();
+      if (cloud.look === "gas") {
+        for (const puff of cloudInside(cloud)) {
+          const strength = strengthAt(cloud, Math.hypot(puff.x, puff.y)) * cloud.opacity * puff.brightness;
+          if (strength < 0.01) continue;
+          const soft = ctx.createRadialGradient(puff.x, puff.y, 0, puff.x, puff.y, puff.size);
+          soft.addColorStop(0, paint(strength));
+          soft.addColorStop(1, paint(0));
+          ctx.fillStyle = soft;
+          ctx.beginPath();
+          ctx.arc(puff.x, puff.y, puff.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+      if (cloud.look !== "dust") continue;
+      // Specks are dots of a screen size, so they stay dots however the cloud is stretched.
+      for (const speck of cloudInside(cloud)) {
+        const strength = strengthAt(cloud, Math.hypot(speck.x, speck.y)) * cloud.opacity * speck.brightness;
+        if (strength < 0.02) continue;
+        const along = speck.x * halfWidth;
+        const across = speck.y * halfHeight;
+        const x = at.x + along * cos - across * sin;
+        const y = at.y + along * sin + across * cos;
+        if (!visible(x, y, 2)) continue;
+        ctx.fillStyle = paint(strength);
+        ctx.beginPath();
+        ctx.arc(x, y, speck.size / view.scale, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
 
   /** A station and its dock, with the ore and parts its base holds. */

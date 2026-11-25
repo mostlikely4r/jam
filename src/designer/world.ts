@@ -17,10 +17,16 @@ export const WORLD_VERSION = 1;
 
 /** Bodies are solid and drawn filled. The rest are places, drawn as outlines. */
 export const BODY_KINDS = ["star", "planet", "moon", "asteroid"] as const;
-export const PLACE_KINDS = ["anchor", "field", "station", "pirate base"] as const;
+export const PLACE_KINDS = ["anchor", "field", "station", "pirate base", "cloud"] as const;
 export type NodeKind = (typeof BODY_KINDS)[number] | (typeof PLACE_KINDS)[number];
 
 export const SURFACES = ["none", "damage", "death"] as const;
+/** A cloud's two looks: a smooth glow, or a dimmer grainy one. */
+export const CLOUD_LOOKS = ["gas", "dust"] as const;
+export type CloudLook = (typeof CLOUD_LOOKS)[number];
+/** Which side of the ships a cloud is drawn on: behind the stations, rocks and ships, or over them. */
+export const CLOUD_LAYERS = ["back", "front"] as const;
+export type CloudLayer = (typeof CLOUD_LAYERS)[number];
 /** The hulls a new game offers, by name: those `src/hulls.json` marks `newGame`. */
 export function shipChoices(): ShipModel[] {
   return newGameHulls();
@@ -100,6 +106,23 @@ export interface WorldNode {
   guardCount: number;
   guardArc: number;
   guardDistance: number;
+  /** Clouds only: gas glows smoothly; dust is dimmer and grainy. */
+  look: CloudLook;
+  /** Clouds only: the colour it glows, `#rrggbb`. */
+  color: string;
+  /** Clouds only: how far it reaches the long way and the short way. `radius` follows the longer. */
+  width: number;
+  height: number;
+  /** Clouds only: an inner edge that leaves a hole, as a share of the distance to the edge. 0 is none. */
+  ringInner: number;
+  /** Clouds only: how far the edge fades, the same share. 0 is a hard edge. */
+  falloff: number;
+  /** Clouds only: how much it covers where its strength is 1. */
+  opacity: number;
+  /** Clouds only: back draws over the planets and under the stations, rocks and ships; front over the ships. */
+  layer: CloudLayer;
+  /** Clouds only: lower draws first. Ties go in tree order. */
+  drawOrder: number;
   /** How many go round in this orbit, itself included. Copies are the same thing without children. */
   count: number;
   /** How far each copy may wander from even spacing, as a % of half the gap between them. */
@@ -202,8 +225,29 @@ export function bodyDefaults(
  * open space between them carries nothing: a spinning station carrying everything would
  * sweep a ship far out sideways faster than it can fly.
  */
+/** The colour each look comes in, so a new cloud looks right before anyone touches it. */
+export const CLOUD_LOOK_COLORS: Record<CloudLook, string> = { gas: "#7fb2e6", dust: "#b9a089" };
+
+/** A new cloud's first look: gas, in the colour gas comes, six thousand across, half covering. */
+export const CLOUD_DEFAULTS: Pick<WorldNode, CloudKey> = {
+  look: "gas",
+  color: CLOUD_LOOK_COLORS.gas,
+  width: 6000,
+  height: 3000,
+  ringInner: 0,
+  falloff: 0.4,
+  opacity: 0.5,
+  layer: "back",
+  drawOrder: 0,
+};
+
+/** A cloud's reach, as picking, drawing and culling read it: half its longer side. */
+export function cloudRadius(width: number, height: number): number {
+  return Math.max(width, height) / 2;
+}
+
 export function placeDefaults(kind: NodeKind): Pick<WorldNode, PlaceKey> {
-  const none = { unlocked: [], wanted: [], programs: [], hulls: [], drops: [], items: [], ...NOT_A_BASE };
+  const none = { ...CLOUD_DEFAULTS, unlocked: [], wanted: [], programs: [], hulls: [], drops: [], items: [], ...NOT_A_BASE };
   if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, shipyard: false, storage: 0, ...none };
   if (kind === "station") {
     // A new station builds nothing and keeps quiet until the designer says; its turrets, once it has them, are the game's usual.
@@ -214,7 +258,10 @@ export function placeDefaults(kind: NodeKind): Pick<WorldNode, PlaceKey> {
   return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, shipyard: false, storage: 0, ...none };
 }
 
-type PlaceKey = "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "unlocked" | "wanted" | "programs" | "hulls" | "drops" | "items" | BaseKey;
+type PlaceKey = "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "unlocked" | "wanted" | "programs" | "hulls" | "drops" | "items" | BaseKey | CloudKey;
+
+/** A cloud's own settings. Left out of every node that isn't a cloud, so other layouts save as they always did. */
+type CloudKey = "look" | "color" | "width" | "height" | "ringInner" | "falloff" | "opacity" | "layer" | "drawOrder";
 
 /** Every program there is, by id, in the programs file's order: what a station sells unless its list says otherwise. */
 export function allPrograms(): PartId[] {
@@ -316,7 +363,14 @@ export function makeChild(world: World, parent: WorldNode, kind: NodeKind): Worl
     (far, child) => Math.max(far, child.orbitRadius * (1 + child.eccentricity) + child.radius),
     Math.max(parent.radius, parent.pull),
   );
-  const radius = kind === "star" ? 100000 : kind === "planet" ? 12000 : kind === "moon" ? 3000 : kind === "asteroid" ? 600 : kind === "field" ? 5200 : 300;
+  const radius =
+    kind === "star" ? 100000
+    : kind === "planet" ? 12000
+    : kind === "moon" ? 3000
+    : kind === "asteroid" ? 600
+    : kind === "field" ? 5200
+    : kind === "cloud" ? cloudRadius(CLOUD_DEFAULTS.width, CLOUD_DEFAULTS.height)
+    : 300;
   const orbitRadius = Math.round(outermost + radius * 3 + 2000);
   // Kepler-ish: further out goes round slower. Only a starting point.
   const orbitPeriod = Math.round(3600 * Math.pow(orbitRadius / 20000, 1.5));
@@ -454,11 +508,17 @@ export function parseWorld(text: string): World | null {
       // Saved before bodies had ground and full pull: those come from the kind's defaults.
       const defaults = bodyDefaults(kind, num("radius"));
       const places = placeDefaults(kind);
+      // A cloud's own numbers: a bad one falls back to the default rather than to nothing.
+      const cloudNum = (key: CloudKey) =>
+        typeof raw[key] === "number" && Number.isFinite(raw[key]) ? (raw[key] as number) : (places[key] as number);
+      const share = (key: CloudKey) => Math.min(1, Math.max(0, cloudNum(key)));
+      const width = Math.max(1, cloudNum("width"));
+      const height = Math.max(1, cloudNum("height"));
       return {
         id: raw.id,
         name: typeof raw.name === "string" ? raw.name : raw.kind,
         kind,
-        radius: num("radius"),
+        radius: kind === "cloud" ? cloudRadius(width, height) : num("radius"),
         surface: (SURFACES as readonly unknown[]).includes(raw.surface) ? (raw.surface as Surface) : defaults.surface,
         pull: num("pull", defaults.pull),
         pullFull: num("pullFull", defaults.pullFull),
@@ -485,6 +545,15 @@ export function parseWorld(text: string): World | null {
         guardCount: Math.max(0, Math.floor(num("guardCount", places.guardCount))),
         guardArc: num("guardArc", places.guardArc),
         guardDistance: num("guardDistance", places.guardDistance),
+        look: (CLOUD_LOOKS as readonly unknown[]).includes(raw.look) ? (raw.look as CloudLook) : places.look,
+        color: typeof raw.color === "string" && /^#[0-9a-f]{6}$/i.test(raw.color) ? raw.color.toLowerCase() : places.color,
+        width,
+        height,
+        ringInner: share("ringInner"),
+        falloff: share("falloff"),
+        opacity: share("opacity"),
+        layer: raw.layer === "front" ? "front" : places.layer,
+        drawOrder: Math.round(cloudNum("drawOrder")),
         count: Math.max(1, Math.floor(num("count", 1))),
         angleVariance: num("angleVariance"),
         orbitVariance: num("orbitVariance"),
@@ -512,12 +581,16 @@ export function parseWorld(text: string): World | null {
 const NODE_KEYS: (keyof WorldNode)[] = [
   "id", "name", "kind", "radius", "surface", "pull", "pullFull", "pullAccel", "atmosphere", "burnSpeed",
   "rocks", "rockDrift", "rockInflow", "carryFull", "carryNone", "spawns", "shipyard", "storage", "unlocked", "wanted", "programs", "hulls", "drops", "items",
-  "projects", "radio", "guardCount", "guardArc", "guardDistance", "count", "angleVariance", "orbitVariance", "orbitRadius", "eccentricity", "periapsisAngle", "orbitPeriod", "orbitPhase",
+  "projects", "radio", "guardCount", "guardArc", "guardDistance", "look", "color", "width", "height", "ringInner", "falloff", "opacity", "layer", "drawOrder",
+  "count", "angleVariance", "orbitVariance", "orbitRadius", "eccentricity", "periapsisAngle", "orbitPeriod", "orbitPhase",
   "spinPeriod", "spinPhase", "children",
 ];
 
 /** A station's own settings, left out where they're the kind's default, so only a station that differs says so. */
 const BASE_KEYS: BaseKey[] = ["projects", "radio", "guardCount", "guardArc", "guardDistance"];
+
+/** The cloud's own settings, in the order they're written. Only a cloud keeps them. */
+const CLOUD_KEYS: CloudKey[] = ["look", "color", "width", "height", "ringInner", "falloff", "opacity", "layer", "drawOrder"];
 
 /** A node's keys in the fixed order, then anything else it carries, as it came. */
 function ordered(node: Record<string, unknown>): Record<string, unknown> {
@@ -526,6 +599,8 @@ function ordered(node: Record<string, unknown>): Record<string, unknown> {
   for (const key of NODE_KEYS) {
     if (!(key in node)) continue;
     if ((BASE_KEYS as string[]).includes(key) && node[key] === usual[key as BaseKey]) continue;
+    // Only a cloud has a cloud's settings: every other node saves without them, as it always did.
+    if ((CLOUD_KEYS as string[]).includes(key) && node.kind !== "cloud") continue;
     // Only a station has a program list, and one that sells every program is left out: that's what a missing list reads as.
     if (key === "programs" && (node.kind !== "station" || sellsEveryProgram(node.programs as string[]))) continue;
     out[key] = node[key];

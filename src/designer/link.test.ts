@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { bodyAt, orbitsAt } from "../sim";
 import { DEFAULTS } from "../tuning";
 import shipped from "./world.json";
-import { anchorsFor, bodiesFor, fieldsFor, layoutFor, linkSummary, linkedNodes, pirateBaseFor, spawnsFor, stationsFor } from "./link";
+import { anchorsFor, bodiesFor, cloudsFor, fieldsFor, layoutFor, linkSummary, linkedNodes, pirateBaseFor, spawnsFor, stationsFor } from "./link";
 import { allPrograms, limitCarrying, makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk } from "./world";
 import { shippedWorld } from "./shipped";
 
@@ -169,6 +169,26 @@ describe("the link between the designer and the game", () => {
     const text = stringifyWorld(world).replace('"tractorAll"', '"tractorAll", "reverse", "nonsense", "cockpitKite"');
     const back = walk(parseWorld(text)!).find((entry) => entry.node.name === "Outpost")!.node;
     expect(back.unlocked).toEqual(["tractorAll", "reverse"]);
+  });
+
+  it("hands each cloud over on its own, copies included, where the field carries it", () => {
+    const world = seedWorld();
+    const { planet, field } = linkedNodes(world);
+    const cloud = makeChild(world, field!, "cloud");
+    Object.assign(cloud, { name: "Nebula", look: "dust", color: "#b9a089", width: 8000, height: 4000, opacity: 0.6, layer: "front", drawOrder: 2, count: 2 });
+    cloud.radius = 4000;
+    field!.children.push(cloud);
+    const clouds = cloudsFor(world);
+    expect(clouds.map((each) => each.name)).toEqual(["Nebula", "Nebula 2"]);
+    expect(clouds[0]).toMatchObject({ id: `${cloud.id}:0`, look: "dust", color: "#b9a089", width: 8000, height: 4000, radius: 4000, opacity: 0.6, layer: "front", drawOrder: 2 });
+    // It goes round with the field, and the game's frame is centred on what the field orbits.
+    const t = 300;
+    const at = positions(world, t);
+    const there = orbitsAt(clouds[0].orbits, t);
+    expect(there.x).toBeCloseTo(at.get(cloud)!.x - at.get(planet!)!.x, 3);
+    expect(there.y).toBeCloseTo(at.get(cloud)!.y - at.get(planet!)!.y, 3);
+    // A cloud is a real place, not map only.
+    expect(linkSummary(world)).not.toContain("Map only");
   });
 
   it("gives a station every program and no hull unless its lists say, and a saved world keeps them", () => {

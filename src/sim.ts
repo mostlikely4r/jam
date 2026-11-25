@@ -888,6 +888,34 @@ export interface AnchorSpec {
   rings?: OrbitRing[];
 }
 
+/**
+ * A cloud from the designer: a soft place with a shape and a look, which nothing collides with.
+ * Where it is and how strong it is at a point come from `src/clouds.ts`.
+ */
+export interface CloudSpec {
+  id: string;
+  name: string;
+  /** Gas glows smoothly; dust is dimmer and grainy. */
+  look: "gas" | "dust";
+  /** `#rrggbb`. */
+  color: string;
+  /** The ellipse's full width and height. */
+  width: number;
+  height: number;
+  /** The hole's edge and the fade, as shares of the distance to the cloud's edge. */
+  ringInner: number;
+  falloff: number;
+  opacity: number;
+  layer: "back" | "front";
+  drawOrder: number;
+  /** Half its longer side: what culling measures. */
+  radius: number;
+  spinPeriod: number;
+  /** Its turn at time 0, in radians. */
+  spinPhase: number;
+  orbits: Orbit[];
+}
+
 /** One true orbit for the chart: the chain to what it goes round, and how far out. A thing's own chain loses it when the thing is an ancestor of the frame's centre. */
 export interface OrbitRing {
   center: Orbit[];
@@ -1269,6 +1297,8 @@ export class Sim {
   bodies: SolidBody[] = [];
   /** Anchors from the designer: invisible places for things to orbit, found by having them on screen. */
   anchors: AnchorSpec[] = [];
+  /** Clouds from the designer: soft places drawn over or under everything, which nothing collides with. */
+  clouds: CloudSpec[] = [];
   /** Half the world the screen shows around the ship, in world units. The game sets it from the window. */
   screen = { halfWidth: 1200, halfHeight: 675 };
   /** Where new games start, by ship. Several for one ship: one is picked at random. None: by the field. */

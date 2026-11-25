@@ -1,7 +1,11 @@
 import {
   BODY_KINDS,
   PLACE_KINDS,
+  CLOUD_LAYERS,
+  CLOUD_LOOKS,
+  CLOUD_LOOK_COLORS,
   closestApproach,
+  cloudRadius,
   pathTo,
   copyPositions,
   isBody,
@@ -22,8 +26,11 @@ import {
   type Surface,
   type World,
   type WorldNode,
+  type CloudLayer,
+  type CloudLook,
 } from "./world";
 import { hullName } from "../fitting";
+import { colorOf } from "../shipArt";
 import { clampEccentricity, orbitEllipse, phaseToward } from "../kepler";
 import { ITEMS, moduleItems } from "../items";
 import { linkSummary, linkedNodes, useLayout, type GameLink, type ShipMarkKind } from "./link";
@@ -68,6 +75,7 @@ const COLORS: Record<NodeKind, string> = {
   moon: "#a9b2c0",
   asteroid: "#9a8a74",
   anchor: "#7f8ba0",
+  cloud: "#9fc8ff",
   field: "#d8c37a",
   station: "#8fe3a1",
   "pirate base": "#ff7a6b",
@@ -673,18 +681,37 @@ Layouts: ${layouts.join(", ")}`, "");
     const kind = document.createElement("select");
     for (const value of [...BODY_KINDS, ...PLACE_KINDS]) kind.append(new Option(value, value, false, value === node.kind));
     kind.addEventListener("change", () => {
-      node.kind = kind.value as NodeKind;
+      const next = kind.value as NodeKind;
+      // A cloud is a shape in the sky, not a place with children: it can't take a tree over.
+      if (next === "cloud" && node.children.length > 0) {
+        kind.value = node.kind;
+        this.status.textContent = `${node.name} has children, and a cloud has none: move or delete them first.`;
+        return;
+      }
+      node.kind = next;
+      // A cloud reaches as far as half its longer side.
+      if (next === "cloud") node.radius = cloudRadius(node.width, node.height);
       this.changed();
       this.rebuild();
     });
     parts.push(this.labelled("Kind (bodies are solid and filled; the rest are places)", kind));
 
     const fixedSize = node.kind === "station" || node.kind === "pirate base";
-    const size: HTMLElement[] = [
-      fixedSize
-        ? this.text("Drawn at the game's own size. The circle on the map is only a guide.")
-        : this.number(node, "radius", body ? "Radius (surface)" : "Radius (size)", (v) => `${this.screens(v * 2)} across`),
-    ];
+    const size: HTMLElement[] = [];
+    if (node.kind === "cloud") {
+      // A cloud's own two sides, which set its reach: half the longer one.
+      size.push(
+        this.number(node, "width", "Width across, the long way", (v) => `${this.screens(v)} across`),
+        this.number(node, "height", "Height across, the short way", (v) => `${this.screens(v)} across`),
+        this.text("Its stretch is the cloud's own; how it's turned comes from the spin below."),
+      );
+    } else {
+      size.push(
+        fixedSize
+          ? this.text("Drawn at the game's own size. The circle on the map is only a guide.")
+          : this.number(node, "radius", body ? "Radius (surface)" : "Radius (size)", (v) => `${this.screens(v * 2)} across`),
+      );
+    }
     if (body) {
       const surface = document.createElement("select");
       const meanings: Record<Surface, string> = { none: "nothing: not solid", damage: "a knock, hurting by speed like a rock", death: "death" };
@@ -700,6 +727,44 @@ Layouts: ${layouts.join(", ")}`, "");
       );
     }
     parts.push(...this.group(body ? "Size, ground and air" : "Size", size));
+    if (node.kind === "cloud") {
+      const looks: Record<CloudLook, string> = { gas: "gas: a smooth glow with soft puffs in it", dust: "dust: dimmer and grainy" };
+      const look = document.createElement("select");
+      for (const value of CLOUD_LOOKS) look.append(new Option(looks[value], value, false, value === node.look));
+      look.addEventListener("change", () => {
+        node.look = look.value as CloudLook;
+        // Until a colour is picked by hand, a cloud takes the colour its look comes in.
+        if (Object.values(CLOUD_LOOK_COLORS).includes(node.color)) node.color = CLOUD_LOOK_COLORS[node.look];
+        this.changed();
+        this.rebuild();
+      });
+      const layers: Record<CloudLayer, string> = { back: "back: over the planets, under the stations, rocks and ships", front: "front: over the ships" };
+      const layer = document.createElement("select");
+      for (const value of CLOUD_LAYERS) layer.append(new Option(layers[value], value, false, value === node.layer));
+      layer.addEventListener("change", () => {
+        node.layer = layer.value as CloudLayer;
+        this.changed();
+      });
+      const colour = document.createElement("input");
+      colour.type = "color";
+      colour.value = node.color;
+      colour.addEventListener("input", () => {
+        node.color = colour.value;
+        this.changed();
+      });
+      parts.push(
+        ...this.group("Cloud", [
+          this.text("A soft, see-through place: nothing is solid in it and no ship notices it yet. Lower draw order goes first; ties go in the tree's own order."),
+          this.labelled("Look", look),
+          this.labelled("Colour", colour),
+          this.number(node, "ringInner", "Hole's edge, as a share of the way to the cloud's edge (0: no hole)", (v) => (v > 0 ? `empty out to ${Math.round(v * 100)}% of the way` : "no hole")),
+          this.number(node, "falloff", "Fade, as a share of the way to the cloud's edge (0: a hard edge)", (v) => (v > 0 ? `fades over the last ${Math.round(v * 100)}%, at the edge and again in from the hole` : "hard edges")),
+          this.number(node, "opacity", "How much it covers at full strength", (v) => `${Math.round(v * 100)}% cover`),
+          this.labelled("Layer", layer),
+          this.number(node, "drawOrder", "Draw order (lower draws first)", (v) => `${Math.round(v)}`),
+        ]),
+      );
+    }
     if (body) {
       parts.push(
         ...this.group("Pull", [
@@ -808,7 +873,7 @@ Layouts: ${layouts.join(", ")}`, "");
         ...this.group("Starting items", this.itemRows(node.items, "n", (item) => ({ item, n: 1 }), (next) => (node.items = next), "Items in this station's store when a new game begins. They come from nowhere.")),
       );
     }
-    if (!isRoot && !body) {
+    if (!isRoot && !body && node.kind !== "cloud") {
       const ships = multiSelect({
         key: `spawns:${node.id}`,
         options: shipChoices().map((ship) => ({ id: ship, label: `the ${hullName(ship)}` })),
@@ -835,22 +900,25 @@ Layouts: ${layouts.join(", ")}`, "");
       );
     }
 
-    const addKind = document.createElement("select");
-    for (const value of [...BODY_KINDS, ...PLACE_KINDS]) addKind.append(new Option(value, value));
-    addKind.value = node.kind === "star" ? "planet" : node.kind === "planet" ? "moon" : "anchor";
-    const row = document.createElement("div");
-    row.className = "row";
-    row.append(
-      addKind,
-      this.button("Add child", () => {
-        const child = makeChild(this.world, node, addKind.value as NodeKind);
-        node.children.push(child);
-        this.selected = child;
-        this.changed();
-        this.rebuild();
-      }),
-    );
-    parts.push(row);
+    // A cloud has nothing orbiting it: it is a shape in the sky, not a place with children.
+    if (node.kind !== "cloud") {
+      const addKind = document.createElement("select");
+      for (const value of [...BODY_KINDS, ...PLACE_KINDS]) addKind.append(new Option(value, value));
+      addKind.value = node.kind === "star" ? "planet" : node.kind === "planet" ? "moon" : "anchor";
+      const row = document.createElement("div");
+      row.className = "row";
+      row.append(
+        addKind,
+        this.button("Add child", () => {
+          const child = makeChild(this.world, node, addKind.value as NodeKind);
+          node.children.push(child);
+          this.selected = child;
+          this.changed();
+          this.rebuild();
+        }),
+      );
+      parts.push(row);
+    }
     const actions = document.createElement("div");
     actions.className = "row";
     actions.append(
@@ -1017,7 +1085,13 @@ Layouts: ${layouts.join(", ")}`, "");
       | "storage"
       | "guardCount"
       | "guardArc"
-      | "guardDistance",
+      | "guardDistance"
+      | "width"
+      | "height"
+      | "ringInner"
+      | "falloff"
+      | "opacity"
+      | "drawOrder",
     text: string,
     hint: (value: number) => string,
   ): HTMLLabelElement {
@@ -1031,9 +1105,15 @@ Layouts: ${layouts.join(", ")}`, "");
     input.addEventListener("input", () => {
       let value = Number(input.value);
       if (input.value === "" || !Number.isFinite(value)) return;
-      // An orbit has to stay an ellipse.
+      // An orbit has to stay an ellipse, a share of a cloud has to stay a share, and a cloud a size.
       if (key === "eccentricity") value = clampEccentricity(value);
+      if (key === "ringInner" || key === "falloff" || key === "opacity") value = Math.min(1, Math.max(0, value));
+      if (key === "width" || key === "height") value = Math.max(1, value);
+      // A draw order is a whole number, as the file keeps it.
+      if (key === "drawOrder") value = Math.round(value);
       node[key] = value;
+      // A cloud reaches as far as half its longer side, which is what picking and culling read.
+      if (key === "width" || key === "height") node.radius = cloudRadius(node.width, node.height);
       help.textContent = hint(value);
       this.changed();
     });
@@ -1371,6 +1451,8 @@ Layouts: ${layouts.join(", ")}`, "");
           ctx.fillRect(0, 0, this.width, this.height);
           ctx.globalAlpha = 1;
         }
+      } else if (node.kind === "cloud") {
+        this.cloudOnMap(node, pos);
       } else if (ring(pos.x, pos.y, node.radius)) {
         ctx.setLineDash(node.kind === "anchor" ? [3, 5] : node.kind === "field" ? [10, 6] : []);
         ctx.strokeStyle = color;
@@ -1446,6 +1528,39 @@ Layouts: ${layouts.join(", ")}`, "");
     this.drawRoute(at);
     this.drawScreenBoxes();
     this.drawScaleBar();
+  }
+
+  /**
+   * A cloud on the map: its turned ellipse, outlined in its kind's colour and lightly filled at
+   * its opacity, with the edge of its hole dashed when it has one.
+   */
+  private cloudOnMap(node: WorldNode, pos: { x: number; y: number }): void {
+    const { ctx } = this;
+    const across = Math.max(1, node.width / 2) * this.scale;
+    const down = Math.max(1, node.height / 2) * this.scale;
+    if (Math.max(across, down) < 1) return;
+    const p = this.toScreen(pos.x, pos.y);
+    const [red, green, blue] = colorOf(node.color, [127, 178, 230]);
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(spinAngle(node, this.t));
+    ctx.beginPath();
+    ctx.ellipse(0, 0, across, down, 0, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${red}, ${green}, ${blue}, ${Math.min(0.5, node.opacity * 0.5)})`;
+    ctx.fill();
+    // Outlined in its own colour, like every other place is outlined in its kind's.
+    ctx.strokeStyle = node.color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    if (node.ringInner > 0) {
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, across * node.ringInner, down * node.ringInner, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.lineWidth = 1;
+    ctx.restore();
   }
 
   /** While the Carrying group is open: how far the selected place carries, as rings from its edge. */

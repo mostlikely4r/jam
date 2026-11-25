@@ -3,7 +3,7 @@
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
 ## Q-11 · Clouds, step 1: clouds you can see · build
-- state: queued
+- state: in progress
 - backlog: S-42
 - plan: docs/clouds-plan.md
 - added: 2026-11-24

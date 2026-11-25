@@ -267,7 +267,7 @@ The faces are on the radio log, but the shapes aren't settled. Gus reads as the 
 Gus and Pip are strangers today. Step 2 of `docs/chatter-faces-plan.md`: count meetings, warm the lines up from stranger to regular to friend, save the meetings with the game, and two tweaks beside radio range so the whole arc can be seen in minutes. Their packs get regular and friend lines; a level with no line for a kind falls back a level, then to the shared list.
 
 ## S-42 · Clouds: soft places with stacking effects
-- status: specced
+- status: building
 - area: World
 - plan: docs/clouds-plan.md
 

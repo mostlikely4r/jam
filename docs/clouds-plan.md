@@ -66,6 +66,23 @@ Items marked *decided* are the user's calls. The rest is my proposal, open to ve
 
 ### Step 1: clouds you can see
 
+**Built 2026-11-25.** What changed from the plan, all small:
+
+- The renderer asks `cloudStops` (in `src/clouds.ts`) where the gradient's stops go, so the drawn
+  fade is the same rule `strengthAt` gives rather than a second guess at it. A hard edge (`falloff`
+  0) is drawn as two stops a thousandth apart.
+- Each look has a default colour (`CLOUD_LOOK_COLORS`), and switching a cloud's look in the panel
+  moves it to that look's colour while it is still one of the defaults.
+- A cloud's `radius` is worked out from `width` and `height` on load as well, so a hand-edited file
+  can't disagree with it.
+- Puffs and specks are seeded from the cloud's id in `cloudPuffs` and cached per cloud in the
+  renderer, so they are the same every frame and no work is done twice.
+- Tested as below, plus the gradient stops staying in order inside the edge.
+- The two clouds are children of the field at `n5`, a short trip from the home field: gas at its
+  centre, turning slowly on the back layer; dust circling inside it on the front.
+- A node with children can't be turned into a cloud: the panel says why and leaves the kind as it
+  was, rather than dropping a tree.
+
 **The world file** (`src/designer/world.ts`)
 
 - Add `"cloud"` to `PLACE_KINDS`.
@@ -133,7 +150,7 @@ Items marked *decided* are the user's calls. The rest is my proposal, open to ve
 - Both orbit with that field and overlap part of its rocks, so mining in one is possible.
   Then run `npm run world`.
 
-**Stop here for the user to try.**
+**Stop here for the user to try:** the five steps under *Step 1 Try it* below.
 
 ### Step 2: terrain, one penalty and one gift
 

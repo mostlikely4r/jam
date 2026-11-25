@@ -4,7 +4,7 @@
  * centred on whatever the first field orbits. Nothing goes through the tuning: the layout is
  * the one place a place is described (docs/home-pair-plan.md).
  */
-import { TICK, type AnchorSpec, type FieldSpec, type Orbit, type OrbitRing, type PirateBaseSpec, type Sim, type SolidBody, type Spawn, type StationSpec } from "../sim";
+import { TICK, type AnchorSpec, type CloudSpec, type FieldSpec, type Orbit, type OrbitRing, type PirateBaseSpec, type Sim, type SolidBody, type Spawn, type StationSpec } from "../sim";
 import { shipChoices, copiesOf, isBody, parentOf, pathTo, walk, type Copy, type NodeKind, type World, type WorldNode } from "./world";
 
 /** A whole layout as the game takes it. */
@@ -15,6 +15,7 @@ export interface Layout {
   stations: StationSpec[];
   pirates: PirateBaseSpec | null;
   anchors: AnchorSpec[];
+  clouds: CloudSpec[];
 }
 
 /** The designer's way into the running game. */
@@ -200,6 +201,33 @@ export function anchorsFor(world: World): AnchorSpec[] {
     );
 }
 
+/** Every cloud in the tree and its copies, for the renderer to draw and later for what they do. */
+export function cloudsFor(world: World): CloudSpec[] {
+  const place = placer(world);
+  return walk(world)
+    .map((entry) => entry.node)
+    .filter((node) => node.kind === "cloud" && node !== world.root)
+    .flatMap((node) =>
+      [null, ...copiesOf(node)].map((copy, index) => ({
+        id: `${node.id}:${index}`,
+        name: index === 0 ? node.name : `${node.name} ${index + 1}`,
+        look: node.look,
+        color: node.color,
+        width: node.width,
+        height: node.height,
+        ringInner: node.ringInner,
+        falloff: node.falloff,
+        opacity: node.opacity,
+        layer: node.layer,
+        drawOrder: node.drawOrder,
+        radius: node.radius,
+        spinPeriod: node.spinPeriod,
+        spinPhase: toRadians(node.spinPhase),
+        orbits: place(node, copy),
+      })),
+    );
+}
+
 /** Every place a new game can start, copies included, by ship. */
 export function spawnsFor(world: World): Spawn[] {
   const place = placer(world);
@@ -253,6 +281,7 @@ export function layoutFor(world: World): Layout {
     stations: stationsFor(world),
     pirates: pirateBaseFor(world),
     anchors: anchorsFor(world),
+    clouds: cloudsFor(world),
   };
 }
 
@@ -261,10 +290,11 @@ export function useLayout(world: World, game: GameLink): void {
   game.apply(layoutFor(world));
 }
 
-/** Puts a layout into a sim: its bodies, anchors and starts, then its places. */
+/** Puts a layout into a sim: its bodies, anchors, clouds and starts, then its places. */
 export function applyTo(sim: Sim, layout: Layout): void {
   sim.bodies = layout.bodies;
   sim.anchors = layout.anchors;
+  sim.clouds = layout.clouds;
   sim.spawns = layout.spawns;
   sim.applyLayout(layout.fields, layout.stations, layout.pirates);
 }
@@ -299,8 +329,8 @@ function carrying(node: WorldNode): [number, number] {
 export function linkSummary(world: World): string {
   const pirates = firstPirateBase(world);
   const nodes = walk(world).map((entry) => entry.node);
-  // Every body, field, station and anchor is real, and the first pirate base.
-  const real = nodes.filter((node) => isBody(node.kind) || node.kind === "field" || node.kind === "station" || node.kind === "anchor" || node === pirates);
+  // Every body, field, station, anchor and cloud is real, and the first pirate base.
+  const real = nodes.filter((node) => isBody(node.kind) || node.kind === "field" || node.kind === "station" || node.kind === "anchor" || node.kind === "cloud" || node === pirates);
   const places = nodes.filter((node) => !real.includes(node));
   const lines: string[] = [];
   if (places.length > 0) lines.push(`Map only: ${places.map((node) => node.name).join(", ")}`);

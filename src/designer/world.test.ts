@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { closestApproach, spinAngle, makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk, type World } from "./world";
+import { closestApproach, cloudRadius, makeChild, parseWorld, positions, seedWorld, spinAngle, stringifyWorld, walk, type World } from "./world";
+import shipped from "./world.json";
 
 const find = (world: World, id: string) => walk(world).find((entry) => entry.node.id === id)!.node;
 
@@ -83,5 +84,51 @@ describe("world layout", () => {
     expect(find(parseWorld(text)!, "planet").spinPhase).toBe(0);
     find(world, "planet").spinPhase = 33;
     expect(find(parseWorld(stringifyWorld(world))!, "planet").spinPhase).toBe(33);
+  });
+
+  it("survives a save and load as a cloud, with its own settings", () => {
+    const world = seedWorld();
+    const cloud = makeChild(world, find(world, "field"), "cloud");
+    Object.assign(cloud, { name: "Nebula", look: "dust", color: "#b9a089", width: 8000, height: 4000, ringInner: 0.3, falloff: 0.2, opacity: 0.75, layer: "front", drawOrder: 4 });
+    cloud.radius = cloudRadius(cloud.width, cloud.height);
+    find(world, "field").children.push(cloud);
+    const read = parseWorld(stringifyWorld(world))!;
+    expect(find(read, cloud.id)).toEqual(cloud);
+  });
+
+  it("takes a cloud's reach from its own sides, whichever way it is stretched", () => {
+    const world = seedWorld();
+    const cloud = makeChild(world, find(world, "field"), "cloud");
+    Object.assign(cloud, { width: 9000, height: 3000 });
+    cloud.radius = 1;
+    find(world, "field").children.push(cloud);
+    expect(find(parseWorld(stringifyWorld(world))!, cloud.id).radius).toBe(4500);
+  });
+
+  it("clamps a cloud's bad numbers rather than taking them", () => {
+    const world = seedWorld();
+    const cloud = makeChild(world, find(world, "field"), "cloud");
+    find(world, "field").children.push(cloud);
+    const raw = JSON.parse(stringifyWorld(world));
+    const findRaw = (node: Record<string, unknown>): Record<string, unknown> =>
+      node.id === cloud.id ? node : (node.children as Record<string, unknown>[]).map(findRaw).find(Boolean) as Record<string, unknown>;
+    const there = findRaw(raw.root);
+    Object.assign(there, { width: -20, height: 0, ringInner: 5, falloff: -2, opacity: 2, drawOrder: 3.7, look: "smoke", layer: "sideways", color: "blue" });
+    const read = find(parseWorld(JSON.stringify(raw))!, cloud.id);
+    expect(read).toMatchObject({ width: 1, height: 1, radius: 0.5, ringInner: 1, falloff: 0, opacity: 1, drawOrder: 4, look: "gas", layer: "back", color: "#7fb2e6" });
+  });
+
+  it("saves no cloud's settings on a node that isn't a cloud", () => {
+    const world = parseWorld(JSON.stringify(shipped))!;
+    const dropClouds = (node: World["root"]): void => {
+      node.children = node.children.filter((child) => child.kind !== "cloud");
+      node.children.forEach(dropClouds);
+    };
+    dropClouds(world.root);
+    const text = stringifyWorld(world);
+    for (const key of ["look", "color", "width", "height", "ringInner", "falloff", "opacity", "layer", "drawOrder"]) {
+      expect(text).not.toContain(`"${key}"`);
+    }
+    expect(stringifyWorld(parseWorld(text)!)).toBe(text);
   });
 });

@@ -48,16 +48,6 @@ Rests on a guess about where it was seen: step 1 (the camera as the viewer) stop
 to try.
 strong: rests on a guess about where things are seen, so the ground is unclear.
 
-## Q-31 · Auto targeting · build
-- state: queued
-- who: cheap
-- backlog: S-63
-- plan: docs/auto-targeting-plan.md
-- added: 2026-11-25
-
-Step 2 stops for the user to try idle mining with it.
-cheap: precise plan on top of targeting that is already built.
-
 ## Q-32 · Blueprints for programs and hulls · build
 - state: queued
 - who: strong
@@ -178,6 +168,17 @@ moves over, the old bay to the locker; ore nearest the entry sells first.
 cheap: the spec is settled in S-44.
 
 ## Done
+
+## Q-31 · Auto targeting · build
+- state: done
+- who: cheap
+- backlog: S-63
+- plan: docs/auto-targeting-plan.md
+- added: 2026-11-25
+- done: 2026-11-26
+
+Step 2 stops for the user to try idle mining with it.
+cheap: precise plan on top of targeting that is already built.
 
 ## Q-8 · Faces: the combining pool · spec
 - state: done

@@ -15,6 +15,17 @@ take turns. Set one to fade: it breathes. Save, fly, and look at traffic on the 
 lights blink out of step with yours. Then drop the lights again if you don't want them yet (tools
 only).
 
+## P-4 · Auto targeting: pick and mine without clicking
+- from: Q-31
+- plan: docs/auto-targeting-plan.md
+- added: 2026-11-26
+
+Buy Targeting, Auto-mine and Auto targeting (or give them from the tab menu's Parts group). Stop in
+a field, right click Auto targeting in the ship screen (I) and set Max range to 600. Don't click
+anything: the nearest rock gets a box and the guns start; when it's mined out, the next one does.
+Then right click Targeting and try Next main target: pick three rocks, mine the main one out, and
+see which takes its place under Nearest, Most in front and Collision.
+
 ## Passed
 
 ## P-2 · Hull shapes: the new kinds, the default shade, the cockpits as shapes

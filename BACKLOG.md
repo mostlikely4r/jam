@@ -525,7 +525,7 @@ The tab menu's Parts group gives programs, switches hull and can allow fitting i
 designer gives a hull a shown name beside its id.
 
 ## S-63 · Auto targeting: next main target rule, and a program that picks
-- status: specced
+- status: built
 - area: Programs
 - effort: M
 - plan: docs/auto-targeting-plan.md

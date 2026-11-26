@@ -32,14 +32,22 @@ export function relativeLine(
 }
 
 /**
- * Whether two things on straight paths come within their radii added together, at some point
- * in the next `seconds`. Only honest while nothing turns, thrusts or bounces.
+ * When two things on straight paths come closest, in seconds from now (never before now), and
+ * how close they are then. Only honest while nothing turns, thrusts or bounces.
  */
-export function willCollide(target: Motion, reference: Motion, seconds: number): boolean {
+export function closestApproach(target: Motion, reference: Motion, seconds: number): { at: number; distance: number } {
   const { vx, vy } = relativeVelocity(target, reference);
   const dx = target.x - reference.x;
   const dy = target.y - reference.y;
   const speed2 = vx * vx + vy * vy;
-  const closest = speed2 > 0 ? Math.max(0, Math.min(seconds, -(dx * vx + dy * vy) / speed2)) : 0;
-  return Math.hypot(dx + vx * closest, dy + vy * closest) <= target.radius + reference.radius;
+  const at = speed2 > 0 ? Math.max(0, Math.min(seconds, -(dx * vx + dy * vy) / speed2)) : 0;
+  return { at, distance: Math.hypot(dx + vx * at, dy + vy * at) };
+}
+
+/**
+ * Whether two things on straight paths come within their radii added together, at some point
+ * in the next `seconds`. Only honest while nothing turns, thrusts or bounces.
+ */
+export function willCollide(target: Motion, reference: Motion, seconds: number): boolean {
+  return closestApproach(target, reference, seconds).distance <= target.radius + reference.radius;
 }

@@ -47,6 +47,7 @@ export type PartId =
   | "turretTracking"
   | "autoMine"
   | "autoMine2"
+  | "autoTarget"
   | "faceTarget"
   | "towControl"
   | "racerMain"

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { homeSim } from "./home";
 import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
-import { type Loose, type Rock, Sim } from "./sim";
+import { type Loose, type Rock, Sim, TICK } from "./sim";
 
 /** A still field with four rocks, and Targeting loaded in the player's ship. */
 const DEFAULTS = {
@@ -41,6 +41,25 @@ function place(target: Rock | Loose, x: number, y: number): void {
 /** A piece of loose ore at a spot. */
 function ore(x: number, y: number): Loose {
   return { x, y, px: x, py: y, vx: 0, vy: 0, item: "ore", wear: 0, count: 1, kind: 0 };
+}
+
+/** Steps the sim for a while, so the once-a-second Auto targeting searches come round. */
+function stepSeconds(sim: Sim, seconds: number): void {
+  for (let i = 0; i < Math.round(seconds / TICK); i++) sim.step();
+}
+
+/** A rock or a loose thing moving at a speed, still where `place` put it. */
+function drift(target: Rock | Loose, vx: number, vy: number): void {
+  target.vx = vx;
+  target.vy = vy;
+}
+
+/** A sim with Auto targeting loaded as well, the nose along +x, and nothing picked. */
+function autoSim(): Sim {
+  const sim = targetSim();
+  sim.ship.angle = sim.ship.prevAngle = 0;
+  sim.devSet(sim.ship, "autoTarget", true);
+  return sim;
 }
 
 describe("targeting", () => {
@@ -230,5 +249,246 @@ describe("targeting", () => {
     const bare = sim as unknown as { bareHull(ship: Sim["ship"]): void };
     bare.bareHull(sim.ship);
     expect(sim.ship.tweaks.targeting?.boxPicks).toBe("ships");
+  });
+});
+
+describe("the next main target", () => {
+  /** Three rocks round a ship at 0, 0 with its nose along +x, picked in the order given. */
+  function three(sim: Sim): { a: Rock; b: Rock; c: Rock } {
+    const [a, b, c, spare] = sim.rocks;
+    place(a, 100, 0);
+    place(b, 0, 100);
+    place(c, 100, 20);
+    place(spare, 5000, 0);
+    sim.toggleTarget(sim.ship, a);
+    sim.toggleTarget(sim.ship, b);
+    sim.toggleTarget(sim.ship, c);
+    expect(sim.ship.targets).toEqual([a, b, c]);
+    return { a, b, c };
+  }
+
+  /** The main target goes from the world, as a rock mined out does, and the queue is kept. */
+  function lose(sim: Sim, gone: Rock): void {
+    sim.rocks.splice(sim.rocks.indexOf(gone), 1);
+    sim.step();
+  }
+
+  it("takes the next in the queue by default, as it always did", () => {
+    const sim = targetSim();
+    const { a, b } = three(sim);
+    lose(sim, a);
+    expect(sim.mainTarget(sim.ship)).toBe(b);
+    expect(sim.ship.targets).toEqual([b, sim.ship.targets[1]]);
+  });
+
+  it("takes the nearest under Nearest, and the queue keeps its own order", () => {
+    const sim = targetSim();
+    const [a, b, c, spare] = sim.rocks;
+    place(a, 100, 0);
+    // Picked second but further off than the third: the queue's order would say b.
+    place(b, 100, 20);
+    place(c, 0, 100);
+    place(spare, 5000, 0);
+    sim.toggleTarget(sim.ship, a);
+    sim.toggleTarget(sim.ship, b);
+    sim.toggleTarget(sim.ship, c);
+    expect(sim.setTweak(sim.ship, "targeting", "nextMain", "nearest")).toBe(true);
+    lose(sim, a);
+    expect(sim.mainTarget(sim.ship)).toBe(c);
+    // Only the head moved: the queue is still in the order it was picked in.
+    expect(sim.ship.targets).toEqual([c, b]);
+    lose(sim, c);
+    expect(sim.mainTarget(sim.ship)).toBe(b);
+  });
+
+  it("takes the most in front under Most in front, ties going to the nearer", () => {
+    const sim = targetSim();
+    const [a, b, c, spare] = sim.rocks;
+    place(a, 100, 0);
+    // Nearly ahead, and a little further off than the one dead abeam.
+    place(b, 100, 20);
+    place(c, 0, 100);
+    place(spare, 5000, 0);
+    sim.toggleTarget(sim.ship, a);
+    sim.toggleTarget(sim.ship, b);
+    sim.toggleTarget(sim.ship, c);
+    expect(sim.setTweak(sim.ship, "targeting", "nextMain", "front")).toBe(true);
+    lose(sim, a);
+    // Nearest would have said c (100 away) over b (102); in front is b, a fifth of a radian off.
+    expect(sim.mainTarget(sim.ship)).toBe(b);
+  });
+
+  it("takes the one that comes closest soonest under Collision, else the nearest", () => {
+    const sim = targetSim();
+    const [main, slow, fast, still] = sim.rocks;
+    place(main, 100, 0);
+    // Both on a course for the ship, the far one soonest: it is the one to look out for.
+    place(slow, 900, 10);
+    drift(slow, -100, 0);
+    place(fast, 1400, 0);
+    drift(fast, -300, 0);
+    // Near, and going nowhere near the ship: the nearest when nothing is on a course.
+    place(still, 200, 0);
+    sim.toggleTarget(sim.ship, main);
+    sim.toggleTarget(sim.ship, slow);
+    sim.toggleTarget(sim.ship, fast);
+    expect(sim.setTweak(sim.ship, "targeting", "nextMain", "collide")).toBe(true);
+    lose(sim, main);
+    expect(sim.mainTarget(sim.ship)).toBe(fast);
+    // With the fast one gone, the slower course is the only one left.
+    lose(sim, fast);
+    expect(sim.mainTarget(sim.ship)).toBe(slow);
+  });
+
+  it("runs where a main target breaks, the pieces taking its place first", () => {
+    const sim = targetSim();
+    const [a, b, c, spare] = sim.rocks;
+    place(a, 100, 0);
+    // Nearer than every piece of a can land, so Nearest must say b.
+    place(b, 30, 0);
+    place(c, 5000, 0);
+    place(spare, 5000, 0);
+    a.tier = 2;
+    sim.toggleTarget(sim.ship, a);
+    sim.toggleTarget(sim.ship, b);
+    expect(sim.setTweak(sim.ship, "targeting", "nextMain", "nearest")).toBe(true);
+    sim.breakRock(a);
+    expect(sim.mainTarget(sim.ship)).toBe(b);
+    // Under In order picked the pieces keep the place, the largest first, as before.
+    const sim2 = targetSim();
+    const [d, e] = sim2.rocks;
+    place(d, 100, 0);
+    place(e, 30, 0);
+    d.tier = 2;
+    sim2.toggleTarget(sim2.ship, d);
+    sim2.toggleTarget(sim2.ship, e);
+    sim2.breakRock(d);
+    expect(sim2.mainTarget(sim2.ship)).not.toBe(e);
+  });
+});
+
+describe("auto targeting", () => {
+  it("with nothing picked, picks the nearest rock in reach", () => {
+    const sim = autoSim();
+    const [a, b, c, d] = sim.rocks;
+    place(a, 400, 0);
+    place(b, 900, 0);
+    place(c, 5000, 0);
+    place(d, 5000, 0);
+    stepSeconds(sim, 1.2);
+    expect(sim.ship.targets).toEqual([a]);
+  });
+
+  it("never picks past its max range, and picks again when it's raised", () => {
+    const sim = autoSim();
+    const [a, b, c, d] = sim.rocks;
+    place(a, 400, 0);
+    place(b, 900, 0);
+    place(c, 5000, 0);
+    place(d, 5000, 0);
+    expect(sim.setTweak(sim.ship, "autoTarget", "maxRange", "300")).toBe(true);
+    stepSeconds(sim, 1.2);
+    expect(sim.ship.targets).toEqual([]);
+    expect(sim.setTweak(sim.ship, "autoTarget", "maxRange", "600")).toBe(true);
+    stepSeconds(sim, 1.2);
+    expect(sim.ship.targets).toEqual([a]);
+  });
+
+  it("does nothing while anything is picked", () => {
+    const sim = autoSim();
+    const [a, b, c, d] = sim.rocks;
+    place(a, 400, 0);
+    place(b, 900, 0);
+    place(c, 5000, 0);
+    place(d, 5000, 0);
+    sim.selectTarget(sim.ship, b);
+    stepSeconds(sim, 3);
+    expect(sim.ship.targets).toEqual([b]);
+  });
+
+  it("picks again the rock it picked is mined out", () => {
+    const sim = autoSim();
+    const [a, b, c, d] = sim.rocks;
+    a.tier = 0;
+    place(a, 400, 0);
+    place(b, 900, 0);
+    place(c, 5000, 0);
+    place(d, 5000, 0);
+    stepSeconds(sim, 1.2);
+    expect(sim.ship.targets).toEqual([a]);
+    // The bottom rung breaks into nothing, so the queue is empty and the search runs again.
+    sim.breakRock(a);
+    stepSeconds(sim, 1.2);
+    expect(sim.ship.targets).toEqual([b]);
+  });
+
+  it("picks rocks unless the Picks tweak says otherwise", () => {
+    const sim = autoSim();
+    const [a, b, c, d] = sim.rocks;
+    place(a, 400, 0);
+    place(b, 5000, 0);
+    place(c, 5000, 0);
+    place(d, 5000, 0);
+    const piece = ore(200, 0);
+    sim.ores.push(piece);
+    // A nearer piece of ore, and a rock is still what the default picks.
+    stepSeconds(sim, 1.2);
+    expect(sim.ship.targets).toEqual([a]);
+    sim.clearTargets(sim.ship);
+    expect(sim.setTweak(sim.ship, "autoTarget", "picks", "ore")).toBe(true);
+    stepSeconds(sim, 1.2);
+    expect(sim.ship.targets).toEqual([piece]);
+    // Nothing to pick as the ore goes.
+    sim.clearTargets(sim.ship);
+    sim.ores.length = 0;
+    expect(sim.setTweak(sim.ship, "autoTarget", "picks", "ships")).toBe(true);
+    stepSeconds(sim, 1.2);
+    expect(sim.ship.targets).toEqual([]);
+  });
+
+  it("needs Targeting loaded to pick anything", () => {
+    const sim = autoSim();
+    const [a, b, c, d] = sim.rocks;
+    place(a, 400, 0);
+    place(b, 5000, 0);
+    place(c, 5000, 0);
+    place(d, 5000, 0);
+    sim.devSet(sim.ship, "targeting", false);
+    stepSeconds(sim, 1.2);
+    expect(sim.ship.targets).toEqual([]);
+  });
+
+  it("never picks a ship it shares an owner with, its own drones included", () => {
+    const sim = homeSim(1, { ...DEFAULTS, testDrones: 2, droneLimit: 2 });
+    const { ship } = sim;
+    Object.assign(ship, { x: 0, y: 0, px: 0, py: 0, vx: 0, vy: 0 });
+    sim.devSet(ship, "targeting", true);
+    sim.devSet(ship, "autoTarget", true);
+    expect(sim.setTweak(ship, "autoTarget", "picks", "ships")).toBe(true);
+    const [first, second] = sim.drones.map((pilot) => pilot.ship);
+    expect(sim.drones).toHaveLength(2);
+    // A test drone starts as nobody's; a bought one is its buyer's.
+    first.owner = ship;
+    second.owner = ship;
+    // Held where they're put: a drone flies off on its own trip otherwise.
+    const held = (near: { x: number; y: number }, far: { x: number; y: number }) => () => {
+      Object.assign(near, { x: 100, y: 0, px: 100, py: 0 });
+      Object.assign(far, { x: 200, y: 0, px: 200, py: 0 });
+    };
+    let hold = held(second, first);
+    for (let i = 0; i < Math.round(1.2 / TICK); i++) {
+      hold();
+      sim.step();
+    }
+    // Both are the player's own drones, so neither is picked.
+    expect(ship.targets).toEqual([]);
+    // A ship nobody owns is fair game, even with one of its own drones nearer.
+    second.owner = null;
+    hold = held(first, second);
+    for (let i = 0; i < Math.round(1.2 / TICK); i++) {
+      hold();
+      sim.step();
+    }
+    expect(ship.targets).toEqual([second]);
   });
 });

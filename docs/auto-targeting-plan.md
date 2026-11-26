@@ -1,7 +1,8 @@
 # Auto targeting plan
 
 Written 2026-11-25, from an inbox note (I-13) the user wrote while mining with Targeting and
-Auto-mine. Builds on `docs/targeting-plan.md`. Nothing here is built yet.
+Auto-mine. Builds on `docs/targeting-plan.md`. Built 2026-11-26 (Q-31): both steps, tests and
+all. What landed differently from the proposal is under **Built**.
 
 ## Why
 
@@ -43,13 +44,13 @@ picking: idle mining (the vision's first target, rated 3) stops when the queue r
 ### 1. Next main target
 
 The tweak on Targeting, used where the primary drops (`upkeepShipTargets` and the target's death
-paths). Tests for each option with three rocks set up around a ship.
+paths). Tests for each option with three rocks set up around a ship. *Built.*
 
 ### 2. Auto targeting
 
 The program, its two tweaks, and a step that runs once a second (not every tick: it searches),
 only on a ship that has it loaded and an empty queue, in flight (`programsFly`). Ships other than
-the player can own it, but none buys it yet.
+the player can own it, but none buys it yet. *Built.*
 
 Stop here for the user to try: park beside a few rocks with Auto-mine and Auto targeting and look
 away. Does the hold fill, and does it pick sensibly?
@@ -76,3 +77,49 @@ Targeting, its tweaks and Auto-mine are built. Nothing else.
 - Turret tracking per turret (the many mounts plan leaves all turrets on one aim).
 - AI ships buying Auto targeting.
 - Smarter picks (most ore, rarest ore first): later, with the goods flow.
+
+## Built
+
+2026-11-26, one build, no stop: both steps, `npm test` and `npm run build` passing.
+
+- **The maths** is `closestApproach` in `src/relative.ts`, which `willCollide` now reads, so the
+  Next main target rule and Relative lines' "Targets that will collide" are one sum.
+- **The rule** is `Sim.pickMain`, run by `settleMain` wherever the main target leaves: the upkeep
+  filter each tick, and a rock breaking into pieces (the pieces take its place first, as before).
+  Only the head of the queue moves; the rest stays in the order it was picked in.
+- **The program** is `autoTarget` in `src/programs.json`: 500 credits, tier 1, needs Targeting.
+  Its step, `Sim.autoTarget`, keeps a per-ship wait outside the save (as gun cooldowns are) and
+  searches once a second on a ship in flight with nothing picked.
+
+What landed differently from the proposal:
+
+- **"Ore" means anything loose**, dropped loot included, not loose ore alone: both are what a
+  tractor pilot would want picked (`"item" in target`, the same test the box's Everything uses).
+- **The max range is capped by the lock range**, so raising it past a lowered `targetRange` tuning
+  can't pick what the lock range would drop again next tick.
+- **A ctrl-click of the player's own still overrules it**: taking the main target out of the queue
+  by hand leaves the next in the queue as main, as it did, whatever the tweak says. The tweak is
+  for a main target that *goes* (mined out, picked up, out of range, broken), not one removed.
+- **Nothing new is saved**, so `SAVE_VERSION` stays as it is: targets were already not saved, and
+  the search's wait is a `WeakMap` on the sim.
+
+**How we'll know**, as tested: `src/targeting.test.ts` has each Next main target option against
+three rocks round a ship (In order picked, Nearest, Most in front, Collision, the pieces of a
+broken main target), and Auto targeting picking the nearest rock in reach, nothing past its max
+range and everything once it's raised, nothing while something is picked, picking again when its
+rock is mined out, rocks unless the Picks tweak says otherwise (loose ore, then ships), and
+nothing at all without Targeting. `src/relative.test.ts` has `closestApproach` and
+`src/programs.test.ts` the two shipped programs' tweaks. `Sim.autoTarget` is in `farside.ts` as
+running everywhere, since only flown ships hold targets.
+
+The review raised one finding, fixed: with Picks on Ships the search only kept out a ship's own
+drones, so a drone with the program could still pick its owner, or a fellow drone. `ownerRoot` now
+keeps out any ship whose owner, however many owners up, is the same one: a player and their drones
+are one, and two ownerless ships are nobody's together. `src/targeting.test.ts` pins it: nothing
+picked with only its own drones round it, and the nearest stranger picked over a nearer drone.
+
+The idle-mining no-player run (background, logged, not a gate): the shipped world, a floater with
+the mining kit parked beside its nearest rock and never touched, 10 game minutes each. Auto-mine
+alone mined nothing; Auto-mine plus Auto targeting took 36 ore, the first at once and the last at
+7.9 minutes — the bay filling up, since nothing docks to sell it. Script thrown away; the numbers
+went into this plan.

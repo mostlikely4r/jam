@@ -60,6 +60,29 @@
             }
           ],
           "default": "rocks"
+        },
+        {
+          "id": "nextMain",
+          "name": "Next main target",
+          "options": [
+            {
+              "id": "picked",
+              "name": "In order picked"
+            },
+            {
+              "id": "nearest",
+              "name": "Nearest"
+            },
+            {
+              "id": "front",
+              "name": "Most in front"
+            },
+            {
+              "id": "collide",
+              "name": "Collision"
+            }
+          ],
+          "default": "picked"
         }
       ]
     },
@@ -177,6 +200,68 @@
           ],
           "default": "on",
           "each": "gun"
+        }
+      ],
+      "needs": [
+        "targeting"
+      ]
+    },
+    {
+      "id": "autoTarget",
+      "name": "Auto targeting",
+      "short": "atarg",
+      "description": "Picks the next thing for you while you've picked nothing, so Auto-mine keeps going when the queue runs dry. Needs Targeting loaded",
+      "price": 500,
+      "tier": 1,
+      "icon": {
+        "glyph": "crosshair",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0",
+        "mark": "A"
+      },
+      "tweaks": [
+        {
+          "id": "picks",
+          "name": "Picks",
+          "options": [
+            {
+              "id": "rocks",
+              "name": "Rocks"
+            },
+            {
+              "id": "ore",
+              "name": "Loose ore"
+            },
+            {
+              "id": "ships",
+              "name": "Ships"
+            }
+          ],
+          "default": "rocks"
+        },
+        {
+          "id": "maxRange",
+          "name": "Max range",
+          "options": [
+            {
+              "id": "lock",
+              "name": "Lock range"
+            },
+            {
+              "id": "1000",
+              "name": "1000"
+            },
+            {
+              "id": "600",
+              "name": "600"
+            },
+            {
+              "id": "300",
+              "name": "300"
+            }
+          ],
+          "default": "lock"
         }
       ],
       "needs": [

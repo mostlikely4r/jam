@@ -6,6 +6,7 @@ import { computerSize, DAMAGED_AT, facing, fitPart, hullInfo, hullMax, hullMount
 import { ClickPilot, DronePilot, FacePilot, FighterPilot, LOW_HULL, type TurnAway } from "./pilot";
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
+import { closestApproach as closestMeeting, type Motion } from "./relative";
 import { orbitState } from "./kepler";
 import { autoPlace, canPlace, cellsOf, floatsAfterRemoval, footprint, reachable, reachableCells, sticks, usedCells, type GridSpec, type Placed } from "./grid";
 import { pilotKind, type StepProfile } from "./profile/step";
@@ -1048,6 +1049,38 @@ export function targetSpot(target: Targetable): TargetSpot {
 export type BoxPicks = "rocks" | "ships" | "everything";
 
 /**
+ * How the next main target is chosen when the main one goes, from Targeting's "Next main
+ * target" tweak: the next in the queue, the closest, the one most in front, or the one that
+ * comes closest soonest.
+ */
+export type MainPick = "picked" | "nearest" | "front" | "collide";
+
+/** What the Auto targeting program picks, from its "Picks" tweak. */
+export type AutoTargetPicks = "rocks" | "ore" | "ships";
+
+/**
+ * How far Auto targeting reaches, by its "Max range" tweak. `null` is the lock range: every
+ * pick is measured against the lock range anyway, so a longer one can never take.
+ */
+const AUTO_TARGET_RANGES: Record<string, number | null> = { lock: null, "1000": 1000, "600": 600, "300": 300 };
+
+/** Seconds between an Auto targeting search: it looks over everything, so not every tick. */
+const AUTO_TARGET_SECONDS = 1;
+
+/** A thing's motion where it is now, in the shape the Relative lines sums want. */
+function motionOf(target: Targetable): Motion {
+  const spot = targetSpot(target);
+  return { x: spot.x, y: spot.y, vx: spot.vx, vy: spot.vy, radius: spot.radius };
+}
+
+/** How far off a ship's nose a thing is, from 0 (dead ahead) to `Math.PI` (dead astern). */
+function offNose(ship: Ship, target: Targetable): number {
+  const spot = targetSpot(target);
+  const off = Math.atan2(spot.y - ship.y, spot.x - ship.x) - ship.angle;
+  return Math.abs(Math.atan2(Math.sin(off), Math.cos(off)));
+}
+
+/**
  * The player's ship is gone: its pod flies itself to the nearest shipyard, then the player
  * picks a bare hull or a rebuild of what they had, which takes a while.
  */
@@ -1327,6 +1360,8 @@ export class Sim {
    * it (those come from nowhere), so the items there are in all equal the first count plus this.
    */
   itemFlow = new Map<PartId, number>();
+  /** Seconds until each ship's next Auto targeting search, by ship. Not saved. */
+  private autoTargetWaits = new WeakMap<Ship, number>();
   /** Set while the player has lost their ship and not yet got a new one. */
   down: Down | null = null;
   /**
@@ -2128,7 +2163,114 @@ export class Sim {
       ship.targets = [];
       return;
     }
+    const main = ship.targets[0] ?? null;
     ship.targets = ship.targets.filter((target) => this.targetAlive(target) && this.inRange(ship, target));
+    this.settleMain(ship, main);
+  }
+
+  /**
+   * The main target went, by whatever path (mined out, picked up, out of range, broken): the
+   * "Next main target" tweak says which of the rest takes its place. Only the head of the queue
+   * moves, so the queue itself stays in the order it was picked in.
+   */
+  private settleMain(ship: Ship, went: Targetable | null): void {
+    if (!went || ship.targets.length === 0 || ship.targets[0] === went) return;
+    const rule = pickOf(ship.tweaks, "targeting", "nextMain") as MainPick;
+    const next = this.pickMain(ship, ship.targets, rule);
+    if (!next || next === ship.targets[0]) return;
+    ship.targets.splice(ship.targets.indexOf(next), 1);
+    ship.targets.unshift(next);
+  }
+
+  /**
+   * Which of these the main target should be, by one rule: the next in the queue, the closest,
+   * the smallest angle off the nose, or the one on a course to pass closest soonest (among those
+   * that won't come near, the nearest). Ties keep the queue's order.
+   */
+  private pickMain(ship: Ship, queue: Targetable[], rule: MainPick): Targetable | null {
+    if (queue.length === 0) return null;
+    if (rule === "picked") return queue[0];
+    const away = (target: Targetable) => Math.hypot(targetSpot(target).x - ship.x, targetSpot(target).y - ship.y);
+    if (rule === "nearest") return queue.reduce((best, each) => (away(each) < away(best) ? each : best));
+    if (rule === "front") {
+      return queue.reduce((best, each) => {
+        const off = offNose(ship, each);
+        const bestOff = offNose(ship, best);
+        if (off < bestOff - 1e-9) return each;
+        return Math.abs(off - bestOff) <= 1e-9 && away(each) < away(best) ? each : best;
+      });
+    }
+    // Collision: the same sum Relative lines uses, looked as far ahead as its own tweak does.
+    const mine: Motion = { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy, radius: SHIP_RADIUS };
+    const ahead = queue
+      .map((target) => ({ target, near: closestMeeting(motionOf(target), mine, this.tuning.collideSeconds) }))
+      .filter((each) => each.near.distance <= targetSpot(each.target).radius + SHIP_RADIUS);
+    if (ahead.length === 0) return this.pickMain(ship, queue, "nearest");
+    return ahead.reduce((best, each) => (each.near.at < best.near.at ? each : best)).target;
+  }
+
+  /**
+   * Whose ship this is, however many owners up: itself when nobody owns it, so two ownerless
+   * ships are nobody's together. A player and their drones are one.
+   */
+  private ownerRoot(ship: Ship): Ship {
+    let at = ship;
+    while (at.owner) at = at.owner;
+    return at;
+  }
+
+  /** How far Auto targeting reaches, by its "Max range" tweak: never past the lock range. */
+  private autoTargetRange(ship: Ship): number {
+    const wide = AUTO_TARGET_RANGES[pickOf(ship.tweaks, "autoTarget", "maxRange")];
+    return Math.min(wide ?? this.tuning.targetRange, this.tuning.targetRange);
+  }
+
+  /** Whether Auto targeting's "Picks" tweak names this: rocks, anything loose, or ships. */
+  private autoTargetKind(ship: Ship, target: Targetable): boolean {
+    const picks = pickOf(ship.tweaks, "autoTarget", "picks") as AutoTargetPicks;
+    if (picks === "ships") return "model" in target;
+    if (picks === "ore") return "item" in target;
+    return isRock(target);
+  }
+
+  /**
+   * The one thing Auto targeting picks while the queue is empty, or null when there's nothing in
+   * reach: rocks, loose ore or ships by its "Picks" tweak, never itself, a ship it shares an
+   * owner with (a drone, or its own owner) or a station. Ranked by Targeting's "Next main target"
+   * rule; "In order picked" reads as nearest, there being no order to keep yet.
+   */
+  private autoTargetPick(ship: Ship): Targetable | null {
+    const reach = this.autoTargetRange(ship);
+    const mine = this.ownerRoot(ship);
+    const near = this.targetables().filter(
+      (target) =>
+        target !== ship &&
+        this.pickable(target) &&
+        this.autoTargetKind(ship, target) &&
+        !("model" in target && this.ownerRoot(target) === mine) &&
+        Math.hypot(targetSpot(target).x - ship.x, targetSpot(target).y - ship.y) <= reach,
+    );
+    const rule = pickOf(ship.tweaks, "targeting", "nextMain") as MainPick;
+    return this.pickMain(ship, near, rule === "picked" ? "nearest" : rule);
+  }
+
+  /**
+   * Auto targeting: once a second (it looks over everything, so not every tick), a ship in flight
+   * with nothing picked picks one thing and stops there. What the player picks is left alone.
+   */
+  private autoTarget(ships: Ship[], dt: number): void {
+    for (const ship of ships) {
+      if (!ship.parts.has("autoTarget") || !ship.parts.has("targeting")) continue;
+      const left = (this.autoTargetWaits.get(ship) ?? 0) - dt;
+      if (left > 0) {
+        this.autoTargetWaits.set(ship, left);
+        continue;
+      }
+      this.autoTargetWaits.set(ship, AUTO_TARGET_SECONDS);
+      if (ship.targets.length > 0 || !this.programsFly(ship)) continue;
+      const pick = this.autoTargetPick(ship);
+      if (pick) ship.targets = [pick];
+    }
   }
 
   /**
@@ -5138,6 +5280,7 @@ export class Sim {
     this.burnOreOnBodies();
     lap?.("ships");
     this.upkeepTargets(pilots);
+    this.autoTarget([this.ship, ...pilots.map((pilot) => pilot.ship)], dt);
     this.moveShots(dt);
     lap?.("shots");
     this.fireShots(this.ship);
@@ -8931,6 +9074,8 @@ export class Sim {
       const at = ship.targets.indexOf(rock);
       if (at < 0) continue;
       ship.targets.splice(at, 1, ...heirs.filter((piece) => this.inRange(ship, piece)));
+      // It was the main target: the pieces take its place, and the rule for the next one runs.
+      if (at === 0) this.settleMain(ship, rock);
     }
 
     const rolls = rock.tier + 1;

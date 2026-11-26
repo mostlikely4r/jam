@@ -67,6 +67,10 @@ export const STEP_PARTS: Record<string, FarSide> = {
   },
   burnOreOnBodies: { out: "in view only", far: "Only loose ore burns, and loose ore out of view doesn't move." },
   upkeepTargets: { out: "everywhere", note: "Only the player picks targets for now, and the player's ship is always flown." },
+  autoTarget: {
+    out: "everywhere",
+    note: "Only flown ships hold targets to search from, and the player is always flown. A record out of view picks nothing, which is what it needs: its mining is a rate, not a queue.",
+  },
   moveShots: { out: "in view only", far: "Fights out of view are flown: the dice only say when one starts. Stray shots between traffic aren't modelled yet." },
   fireShots: { out: "in view only", far: "As for shots." },
   collectOre: { out: "in view only", far: "Records collect at the end of a mining stay, all at once (`takeOre`)." },

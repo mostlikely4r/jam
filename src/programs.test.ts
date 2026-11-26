@@ -64,12 +64,26 @@ describe("program tweaks", () => {
 
   it("the shipped Relative lines needs Targeting, and Targeting has its Box picks tweak", () => {
     const targeting = programDef("targeting")!;
-    expect(targeting.tweaks?.map((tweak) => tweak.id)).toEqual(["boxPicks"]);
+    expect(targeting.tweaks?.map((tweak) => tweak.id)).toEqual(["boxPicks", "nextMain"]);
     expect(targeting.tweaks?.[0].options.map((option) => option.id)).toEqual(["rocks", "ships", "everything"]);
     expect(targeting.tweaks?.[0].default).toBe("rocks");
+    expect(targeting.tweaks?.[1].options.map((option) => option.id)).toEqual(["picked", "nearest", "front", "collide"]);
+    // The rule nobody chose is the one the game always had.
+    expect(targeting.tweaks?.[1].default).toBe("picked");
     const lines = programDef("relativeLines")!;
     expect(lines.needs).toEqual(["targeting"]);
     expect(lines.tweaks?.map((tweak) => tweak.id)).toEqual(["show", "relativeTo"]);
+  });
+
+  it("the shipped Auto targeting needs Targeting, and picks what its tweaks say", () => {
+    const program = programDef("autoTarget")!;
+    expect(program.needs).toEqual(["targeting"]);
+    expect(program.tier).toBe(1);
+    expect(program.tweaks?.map((tweak) => tweak.id)).toEqual(["picks", "maxRange"]);
+    expect(program.tweaks?.[0].default).toBe("rocks");
+    // The lock range is how far Targeting reaches anyway.
+    expect(program.tweaks?.[1].default).toBe("lock");
+    expect(program.tweaks?.[1].options.map((option) => option.id)).toEqual(["lock", "1000", "600", "300"]);
   });
 
   it("a missing or unknown pick reads as the default", () => {

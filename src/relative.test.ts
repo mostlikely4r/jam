@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { relativeLine, relativeVelocity, willCollide, type Motion } from "./relative";
+import { closestApproach, relativeLine, relativeVelocity, willCollide, type Motion } from "./relative";
 
 /** A moving thing at x, y with velocity vx, vy, and a radius. */
 function moving(x: number, y: number, vx: number, vy: number, radius = 4): Motion {
@@ -59,5 +59,17 @@ describe("relative lines", () => {
 
   it("sees something already touching as colliding", () => {
     expect(willCollide(moving(0, 0, 0, 0, 5), moving(8, 0, 0, 0, 4), 0.1)).toBe(true);
+  });
+
+  it("says when two courses come closest, and how close", () => {
+    // Closing at 40 a second from 100 apart: closest at 2.5 seconds, and they touch.
+    const meeting = closestApproach(moving(0, 0, 20, 0, 5), moving(100, 0, -20, 0, 4), 10);
+    expect(meeting).toEqual({ at: 2.5, distance: 0 });
+    // A near miss passes 12 across at the same moment.
+    expect(closestApproach(moving(0, 12, 20, 0, 5), moving(100, 0, -20, 0, 4), 10)).toEqual({ at: 2.5, distance: 12 });
+    // Pulling apart: the closest is now, not later.
+    expect(closestApproach(moving(0, 0, -20, 0, 5), moving(100, 0, 20, 0, 4), 10).at).toBe(0);
+    // Meeting only after the seconds looked ahead: the closest within them is the end of them.
+    expect(closestApproach(moving(0, 0, 1, 0, 5), moving(100, 0, -1, 0, 4), 10).at).toBe(10);
   });
 });

@@ -483,7 +483,7 @@ turret gets its own gun slot and angle; each tractor its own cone from its mount
 any part on any mount it fits works once the code stops expecting one of each.
 
 ## S-59 · Click move: the faster way, thrust while turning, a top speed tweak
-- status: building
+- status: built
 - area: Movement and aiming
 - effort: M
 - plan: docs/click-move-thrust-plan.md

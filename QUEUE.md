@@ -2,6 +2,41 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-39 · Face cast, step 1: the pool and the roll page · build
+- state: queued
+- who: strong
+- backlog: S-39
+- plan: docs/face-cast-plan.md
+- added: 2026-11-26
+
+Stops for the user to roll and keep faces on the dev page (F under `?dev`).
+strong: rests on a guess (that parts knowing their moods roll faces worth keeping); design by eye.
+
+## Q-40 · Face cast: first interviews · other
+- state: queued
+- who: pair
+- after: Q-39
+- backlog: S-39
+- plan: docs/face-cast-plan.md
+- added: 2026-11-26
+
+Bring kept faces into chat, one at a time; the agent follows "The interview" in the plan and writes
+each entry in `src/cast.json`. Gus and Pip get interviewed too. Needs the pack format of step 2;
+until it is built, write the fields as the plan names them.
+pair: the answers are the user's.
+
+## Q-41 · Face cast, steps 2–3: knobs, situations and dealing the cast · build
+- state: queued
+- who: strong
+- after: Q-39, Q-10, Q-40
+- backlog: S-39
+- plan: docs/face-cast-plan.md
+- added: 2026-11-26
+
+Knobs read by chatter, the new situation line kinds, the cast dealt to every base and saved.
+Bumps `SAVE_VERSION`. Stops for the user to play.
+strong: changes the save format and widens Q-10's regulars record.
+
 ## Q-30 · Nothing vanishes in view · build
 - state: queued
 - who: strong
@@ -74,19 +109,6 @@ cheap: precise plan; step 1 is played.
 Haulers bring fuel from a body; the station gets a fuel stock, prices and markups. Waits for 2b.
 strong: the supply chain touches haulers, station stock and prices.
 
-## Q-8 · Faces: the combining pool · spec
-- state: queued
-- who: pair
-- backlog: S-39
-- added: 2026-11-23
-
-Name the parts and let a face be assembled from them, so a few hundred variants can be generated
-and the good ones kept, and so aliens are extra shapes in a pool rather than new art. The
-vocabulary and the renderer are built (`src/faces.ts`, `src/voices.json`); what's missing is the
-pool and the selection. Write the plan first; the gallery can then show combinations instead of one
-hand-written face per voice.
-pair: still a spec.
-
 ## Q-9 · Faces: settle the shapes · other
 - state: queued
 - who: pair
@@ -94,9 +116,10 @@ pair: still a spec.
 - plan: docs/chatter-faces-plan.md
 - added: 2026-11-23
 
-Little to build: the dev page already puts the open calls side by side. Ask for the letters (brows,
-scar, lean, plain traffic, station), put the picks into `src/voices.json`, delete the options block,
-and check the faces again at 26px in the radio log. Waits on the user's word, not on Q-8.
+Little to build: the dev page already puts the open calls side by side. Since the face cast plan
+(`docs/face-cast-plan.md`) only Gus's and Pip's calls are left: ask for the letters (Gus's brows and
+scar, Pip's lean), put the picks into `src/voices.json`, and delete the options block. Plain traffic
+keeps the generic face and the station display becomes the station role's leaning in the pool.
 pair: needs the user's picks.
 
 ## Q-10 · Faces: familiarity · build
@@ -155,6 +178,13 @@ moves over, the old bay to the locker; ore nearest the entry sells first.
 cheap: the spec is settled in S-44.
 
 ## Done
+
+## Q-8 · Faces: the combining pool · spec
+- state: done
+- done: 2026-11-26
+- backlog: S-39
+- plan: docs/face-cast-plan.md
+- added: 2026-11-23
 
 ## Q-38 · Live shapes: colour change and glow · build
 - state: done

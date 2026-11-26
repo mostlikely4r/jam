@@ -249,10 +249,11 @@ Expansion as a sim (2026-11-13, "that's then, this is now"): the start is one pl
 Raised 2026-11-20 (targeting spec thread): a tractor tweak "drag all / drag targets", since ore B, dropped items and limited cargo make a selective tractor matter; future tractors might drag rocks or ships. Not in the targeting spec.
 
 ## S-39 · Faces from a pool, not one drawing each
-- status: idea
+- status: specced
 - area: Comms
+- plan: docs/face-cast-plan.md
 
-Faces are shapes with numbers in `src/voices.json`, so a new face means writing new numbers. The user's hope (2026-11-23), on seeing four of them: name the parts — lids, rings, stars, carets, brows, mouths, marks — and let a face be assembled from the pool, so hundreds of variants can be generated and the good ones kept. That is also how aliens arrive later: a species is a pool with extra shapes in it, not new art. Needs a plan of its own; step 0 of `docs/chatter-faces-plan.md` built the vocabulary it would draw from.
+Faces are shapes with numbers in `src/voices.json`, so a new face means writing new numbers. The user's hope (2026-11-23), on seeing four of them: name the parts — lids, rings, stars, carets, brows, mouths, marks — and let a face be assembled from the pool, so hundreds of variants can be generated and the good ones kept. That is also how aliens arrive later: a species is a pool with extra shapes in it, not new art. Needs a plan of its own; step 0 of `docs/chatter-faces-plan.md` built the vocabulary it would draw from. Specced 2026-11-26 as the face cast: rolls on the dev page, kept faces interviewed in chat into people with knobs, and the cast dealt to traffic, defenders, pirates and stations at every base.
 
 ## S-40 · Settle the face shapes
 - status: building

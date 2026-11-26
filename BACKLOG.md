@@ -461,7 +461,8 @@ start menu cards draw every hull at a scale made for a racer-sized ship. Scale e
 hull's own outline (and its mounts). Maybe part of a later inventory rework.
 
 ## S-57 · Hull designer: ellipse and arc shapes, and a default decal
-- status: idea
+- status: specced
+- plan: docs/hull-shapes-plan.md
 - area: Ships and gear
 - from: the user trying hull buying, 2026-11-25
 
@@ -611,3 +612,17 @@ across the bar); and moods colouring the motion, once S-68's "the nod is the cha
 by play. `Nod` in `src/sway.ts` is the place: `kind` grows a value and `swayAt` gives it a pose,
 and both the gallery preview and the `sway` block in `src/voices.json` pick it up with no other
 change.
+
+## S-71 · Live elements on hulls and parts
+- status: idea
+- area: Ships and gear
+- from: the Q-24 spec talk, 2026-11-26
+
+Shapes that move or react, so ships look alive: blink (nav lights, a beacon, with a period and a
+phase), pulse (a slow glow), lights that follow the ship's state (throttle, turning, firing,
+damage), spin (a dish or a gyro ring turning on its own), and a glint lit by the star as the ship
+turns. The drawing code would get a small "now" (time and the ship's state) once, then each
+behaviour is a field on a shape. It serves the reveal: a faint blinking light on the first ship you
+only notice on your tenth flight. Its own spec session (the user's call). Particles emitted from
+shapes are parked here too: they cost more (emitters per ship, many ships on screen). The shape
+kinds it builds on are in `docs/hull-shapes-plan.md`.

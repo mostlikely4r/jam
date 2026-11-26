@@ -2,6 +2,17 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-36 · Hull designer shapes: new kinds, gradients, default shade, code art to the file · build
+- state: queued
+- who: cheap
+- backlog: S-57
+- plan: docs/hull-shapes-plan.md
+- added: 2026-11-26
+
+One build, no stop: the shape kinds and fade, the editor's handles, part colours, then the cockpit
+and tractor art moved into the file with a looks-the-same test.
+cheap: precise plan, and the old drawing kept as a test fixture catches any drift.
+
 ## Q-30 · Nothing vanishes in view · build
 - state: queued
 - who: strong
@@ -154,17 +165,14 @@ The decided spec is the S-44 text in BACKLOG.md: a bigger bay bought replaces th
 moves over, the old bay to the locker; ore nearest the entry sells first.
 cheap: the spec is settled in S-44.
 
-## Q-24 · Hull designer: ellipse and arc shapes, a default decal · spec
-- state: queued
-- who: pair
-- backlog: S-57
-- added: 2026-11-25
-
-From the user trying hull buying. Two new shape kinds with their own handles, plus an "add
-default decal" button. Settle how each is drawn, edited and saved, then plan it.
-pair: still a spec.
-
 ## Done
+
+## Q-24 · Hull designer: ellipse and arc shapes, a default decal · spec
+- state: done
+- done: 2026-11-26
+- backlog: S-57
+- plan: docs/hull-shapes-plan.md
+- added: 2026-11-25
 
 ## Q-11 · Clouds, step 1: clouds you can see · build
 - state: done

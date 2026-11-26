@@ -47,6 +47,11 @@ Read by `/spec` and `/build`.
 - **Plans:** `docs/<name>-plan.md`, in the style of `docs/fitting-plan.md`. Plans stay after they
   are built, as a record of why. Mark the user's own calls *decided*; the rest is proposal.
 - **Private:** nothing that spoils a surprise goes in the README or what a new player sees.
+- **Designer files:** `src/hulls.json`, `src/items.json`, `src/programs.json` and
+  `src/designer/world.json` are what the designer's Save buttons write, through the dev server,
+  straight into the files. A change in one that isn't yours is the user's work, never a leftover:
+  do not revert it (`git checkout`, `git restore`, a stash) or fold it into a commit of your own —
+  say what it holds and ask.
 - **Quick check:** `npm run test:fast`.
 - **Full check:** `npm test`, then `npm run build`. Both must pass.
 - **Background only:** `npm run parity` and the `src/profile` scripts, with output to a log.

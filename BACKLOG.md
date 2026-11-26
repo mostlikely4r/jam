@@ -629,5 +629,33 @@ shapes are parked here too: they cost more (emitters per ship, many ships on scr
 kinds it builds on are in `docs/hull-shapes-plan.md`.
 
 First slice specced 2026-11-26 (`docs/live-shapes-plan.md`): colour change (snap or fade) and
-glow as options on any shape, each ship on its own timing, tools only. State lights, spin, the
-glint and particles stay here.
+glow as options on any shape, each ship on its own timing, tools only. The rest moved out:
+state lights to S-72, spin to S-73, the glint and particles to S-74.
+
+## S-72 · Lights that follow the ship's state
+- status: idea
+- area: Ships and gear
+- from: the S-71 spec talk, 2026-11-26
+
+Shapes that change with what the ship is doing: throttle, turning, firing, low fuel, damage, or a
+docking light that only blinks on approach. Builds on S-71's first slice
+(`docs/live-shapes-plan.md`): a state rule would drive the same "how lit" amount that colour
+change and glow use, so no new drawing is needed. The user chose looks first, so this waits until
+that slice has been played.
+
+## S-73 · Spinning shapes
+- status: idea
+- area: Ships and gear
+- from: the S-71 spec talk, 2026-11-26
+
+A shape that turns on its own, such as a dish or a gyro ring, with a speed and a pivot. Another
+option on any shape, like S-71's colour change and glow, using the same art clock and per-ship
+phase (`docs/live-shapes-plan.md`).
+
+## S-74 · Star glint and particles from shapes
+- status: parked
+- area: Ships and gear
+- from: S-71, 2026-11-26
+
+Two later ideas from S-71. A glint on a shape lit by the star as the ship turns. Particles emitted
+from shapes, which cost more: an emitter per ship, with many ships on screen.

@@ -192,9 +192,9 @@ Nothing unbuilt. It builds on the shape kinds and gradients of Q-36 (built 2026-
 
 The rest of S-71, each for later:
 
-- **Lights that follow the ship's state**: throttle, turning, firing, fuel, damage. The user chose
+- **Lights that follow the ship's state** (S-72): throttle, turning, firing, fuel, damage. The user chose
   looks first (*decided*); a state rule would later drive the same lit amount.
-- **Spin**: a dish or a gyro ring turning on its own.
-- **A glint lit by the star** as the ship turns.
-- **Particles** from shapes.
+- **Spin** (S-73): a dish or a gyro ring turning on its own.
+- **A glint lit by the star** as the ship turns (S-74).
+- **Particles** from shapes (S-74).
 - **Lights on today's ships**: tools only (*decided*); the user adds them.

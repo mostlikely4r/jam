@@ -68,6 +68,8 @@ export const DEFAULTS = {
   /** The hull the start menu puts the player in. Empty: the floater, or the racer, by `floaterStart`. */
   startHull: "",
   floaterEngine: 0.2,
+  /** The floater's speed under a drone or traffic. A click move has its own rule, and its own
+   * top speed tweak, so this isn't in the tab menu: nothing a player flies reads it. */
   clickSpeed: 80,
   /** A course's top speed. The burn out and the brake in keep the trip time right; this only
    * keeps a very long course sane, so stars sit near this and moons well under it. */
@@ -452,7 +454,6 @@ export const GROUPS: Group[] = [
     title: "New ship",
     sliders: [
       { key: "floaterEngine", label: "Engine power, all thrusters", min: 0.05, max: 1, step: 0.05 },
-      { key: "clickSpeed", label: "Click to move speed", min: 20, max: 400, step: 10 },
       { key: "autopilotSpeed", label: "Autopilot top speed", min: 1000, max: 60000, step: 500 },
       { key: "dragSeconds", label: "Drag order: seconds of drift the line shows", min: 1, max: 15, step: 0.5 },
       { key: "nudgeShare", label: "Nudge from the destination: share of a full drag", min: 0.05, max: 1, step: 0.05 },

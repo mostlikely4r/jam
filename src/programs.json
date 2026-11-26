@@ -165,10 +165,35 @@
       "id": "clickMove",
       "name": "Click to move",
       "short": "click",
-      "description": "Right click shifts you there, double click stops there. Drag to leave with a drift",
+      "description": "Right click shifts you there, double click stops there. Drag to leave with a drift. Right click it in the ship screen (I) to set its top speed",
       "price": 400,
       "tier": 2,
-      "icon": { "glyph": "cursor", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+      "icon": { "glyph": "cursor", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" },
+      "tweaks": [
+        {
+          "id": "topSpeed",
+          "name": "Top speed",
+          "default": "trip",
+          "options": [
+            { "id": "trip", "name": "Trip" },
+            { "id": "400", "name": "400" },
+            { "id": "200", "name": "200" },
+            { "id": "100", "name": "100" },
+            { "id": "50", "name": "50" }
+          ]
+        },
+        {
+          "id": "relativeSpeed",
+          "name": "Relative speed limit",
+          "default": "60",
+          "options": [
+            { "id": "limit", "name": "The limit" },
+            { "id": "75", "name": "75%" },
+            { "id": "60", "name": "60%" },
+            { "id": "40", "name": "40%" }
+          ]
+        }
+      ]
     },
     {
       "id": "clickRoute",

@@ -1,5 +1,6 @@
-import { computerSize } from "./fitting";
-import { DRONE_BUY_ORDER, type PartId } from "./parts";
+import { computerSize, thrustOf } from "./fitting";
+import { DRONE_BUY_ORDER, type PartId, type ThrusterRole } from "./parts";
+import { pickOf } from "./programs";
 import { planRoute, type Route, type Vec } from "./route";
 import {
   type Base,
@@ -30,8 +31,18 @@ const BRAKE_MARGIN = 0.5;
 const BURN_START_ANGLE = 0.12;
 /** Keeps an ongoing burn going within this angle, so it's one burn and not a flicker. */
 const BURN_KEEP_ANGLE = 0.6;
-/** Corrections up to this size are made without turning, if the thrusters allow it. */
-const DIRECT_LIMIT = 80;
+/** A thruster's push has to lie this much along a change to be worth firing for it: about 72 degrees. */
+const USEFUL_SHARE = 0.3;
+/**
+ * The pair the nose is turned for has to be nearly on the change (about 18 degrees): below that
+ * the turn is cheaper than what a burn made across the change leaves to undo.
+ */
+const ALIGNED_SHARE = 0.95;
+/**
+ * A push less straight than this along a change (about 45 degrees) spends more of itself making
+ * motion across the change, to be got rid of later, than the turn it saves is worth.
+ */
+const STRAIGHT_PUSH = 0.7;
 /** Time to bring the nose to bear when braking with the reverse thruster. */
 const REVERSE_BRAKE_SECONDS = 0.3;
 const ORE_SIGHT = 800;
@@ -191,6 +202,22 @@ function pathLength(path: Vec[]): number {
 const FUEL_CHECK_SECONDS = 2;
 
 /**
+ * One way the ship can push along a needed change without turning. A control fires one of its
+ * pair of thrusters, and its push lies along the change by `share`.
+ */
+interface PushWay {
+  /** The control it fires, and which way: +1 or -1 on that control. */
+  control: "thrust" | "strafe";
+  sign: number;
+  /** Its full push in the ship's frame, as an acceleration in units a second squared. */
+  x: number;
+  y: number;
+  /** The share of that push that lies along the change, -1 to 1, and what that comes to per second. */
+  share: number;
+  along: number;
+}
+
+/**
  * Flying skills any automated pilot can use. It only reads what a pilot can see and
  * only sets the ship's controls, so it obeys the same physics and fit as any other ship.
  */
@@ -200,6 +227,8 @@ class ShipPilot {
   protected thrusting = false;
   /** The current correction doesn't need the nose, so the gun stays usable. */
   protected correctingDirectly = false;
+  /** The way this correction is being made, decided when it starts: see `fastestWay`. */
+  private way: "direct" | "nose" | "reverse" | null = null;
   /** The direction the rotation thrusters are pushing, or 0. */
   private spinPush = 0;
   /** What the last check of a trip home came to, and when the next one is due. */
@@ -323,7 +352,7 @@ class ShipPilot {
     const along = vx * heading.x + vy * heading.y;
     const acrossX = vx - along * heading.x;
     const acrossY = vy - along * heading.y;
-    const coasting = along <= speed && along >= speed * COAST_SHARE;
+    const coasting = along <= speed && along >= speed * this.coastShare(sim);
     const change = coasting ? 0 : speed - along;
     const tolerance = distance < NEAR_DISTANCE ? NEAR_TOLERANCE : TRAVEL_TOLERANCE;
     this.steer(
@@ -332,7 +361,7 @@ class ShipPilot {
       heading.y * change - acrossY,
       tolerance,
       this.flightNose(heading),
-      this.coastNose(vx, vy),
+      this.coastNose(sim, vx, vy),
     );
   }
 
@@ -432,7 +461,7 @@ class ShipPilot {
   }
 
   /** Where the nose goes while coasting, or null to leave it. */
-  protected coastNose(_vx: number, _vy: number): number | null {
+  protected coastNose(_sim: Sim, _vx: number, _vy: number): number | null {
     return null;
   }
 
@@ -507,6 +536,14 @@ class ShipPilot {
     return Math.min(tuning.droneCruiseSpeed, nearField);
   }
 
+  /**
+   * How much of its speed limit a flight holds to: it stops burning once it's this close, and
+   * coasts on to its target. Below 1, so it doesn't hunt for the last of the speed.
+   */
+  protected coastShare(_sim: Sim): number {
+    return COAST_SHARE;
+  }
+
   /** The braking acceleration, and the time it takes to turn for it: the two stopping sums share these. */
   private braking(sim: Sim): { accel: number; flipSeconds: number } {
     const { ship } = this;
@@ -519,6 +556,19 @@ class ShipPilot {
       ? REVERSE_BRAKE_SECONDS
       : Math.max(Math.PI / SPIN_LIMIT + 0.5, 2.5 * Math.sqrt(Math.PI / spinAccel));
     return { accel, flipSeconds };
+  }
+
+  /** About how long it takes to turn the nose around, from its rotation thrust and top spin. */
+  protected flipSeconds(sim: Sim): number {
+    const accel = ((sim.tuning.rotationThrust * Math.PI) / 180) * sim.shipResponse(this.ship);
+    const peak = Math.sqrt(accel * Math.PI);
+    if (peak <= SPIN_LIMIT) return (2 * peak) / accel;
+    return Math.PI / SPIN_LIMIT + SPIN_LIMIT / accel;
+  }
+
+  /** How long a turn through one angle takes, on the same reckoning as a whole turn. */
+  protected turnTime(sim: Sim, angle: number): number {
+    return (Math.abs(angle) / Math.PI) * this.flipSeconds(sim);
   }
 
   /** The fastest speed from which the ship can still turn and stop within a distance. */
@@ -617,11 +667,11 @@ class ShipPilot {
   }
 
   /**
-   * Applies a needed velocity change. Small ones go straight to the thrusters if
-   * they cover that direction. Otherwise it turns the nose and burns. With a reverse
-   * thruster it may turn the nose away from the need and burn backward, if that's
-   * the shorter turn. When there's nothing to correct it coasts, with the nose on
-   * `hold` if there's somewhere to look.
+   * Applies a needed velocity change, the quickest way the fitted thrusters allow: pushing with
+   * what already points along it, or turning the nose to it and burning, or turning round to
+   * burn the reverse. Which of the three it is gets decided once per correction, so a hair's
+   * breadth of difference doesn't flip it back and forth. When there's nothing to correct it
+   * coasts, with the nose on `hold` if there's somewhere to look.
    */
   protected steer(
     sim: Sim,
@@ -637,43 +687,148 @@ class ShipPilot {
     else if (need < tolerance * SETTLED_SHARE) this.burning = false;
 
     if (this.burning) {
-      if (this.correctDirectly(sim, needX, needY, need, tolerance, hold)) return;
+      const way = this.way ?? (this.way = this.fastestWay(sim, needX, needY));
+      if (way === "direct" && this.correctDirectly(sim, needX, needY, hold)) return;
+      // Nothing it can push there after all, or the need turned while it tried: decide again.
+      if (way === "direct") this.way = null;
       const needAngle = Math.atan2(needY, needX);
-      const backward = needAngle + Math.PI;
-      const useReverse =
-        ship.parts.has("reverse") &&
-        Math.abs(wrapAngle(backward - ship.angle)) < Math.abs(wrapAngle(needAngle - ship.angle));
-      const burnAngle = useReverse ? backward : needAngle;
+      const burnAngle = way === "reverse" ? needAngle + Math.PI : needAngle;
       this.turnTo(sim, burnAngle);
       const off = Math.abs(wrapAngle(burnAngle - ship.angle));
       this.thrusting = off < (this.thrusting ? BURN_KEEP_ANGLE : BURN_START_ANGLE);
-      if (this.thrusting) ship.controls.thrust = useReverse ? -1 : 1;
+      if (this.thrusting) ship.controls.thrust = way === "reverse" ? -1 : 1;
+      // Not lined up yet: whatever already points at the change still helps, so it fires now.
+      else this.pushWhileTurning(sim, needX, needY);
       return;
     }
+    this.way = null;
     this.thrusting = false;
     this.turnTo(sim, hold ?? coast ?? ship.angle);
   }
 
-  /** Makes a correction without turning. Returns false if the thrusters can't cover it. */
-  protected correctDirectly(
-    sim: Sim,
-    needX: number,
-    needY: number,
-    need: number,
-    tolerance: number,
-    hold: number | null,
-  ): boolean {
+  /**
+   * The ways the ship can push along a needed change without turning: at most one per control,
+   * the better of its pair, and only where the push really lies along the change. All of it
+   * comes from the thrusters fitted and where they sit (`thrustOf`), so a strong reverse or a
+   * strafe that also pushes forward counts for what it does rather than for what it's called.
+   */
+  protected waysAlong(sim: Sim, needX: number, needY: number): PushWay[] {
     const { ship } = this;
-    if (!ship.parts.has("strafe") || (need > DIRECT_LIMIT && hold === null)) return false;
+    const { tuning } = sim;
+    const need = Math.hypot(needX, needY);
+    if (need === 0) return [];
     const cos = Math.cos(ship.angle);
     const sin = Math.sin(ship.angle);
-    const forward = needX * cos + needY * sin;
-    const side = -needX * sin + needY * cos;
-    const small = tolerance * SETTLED_SHARE;
-    if (forward < -small && !ship.parts.has("reverse")) return false;
+    // The change in the ship's frame: forward along the nose, side to the right.
+    const ux = (needX * cos + needY * sin) / need;
+    const uy = (-needX * sin + needY * cos) / need;
+    const { push } = thrustOf(ship);
+    const ways: PushWay[] = [];
+    const each = (control: PushWay["control"], role: ThrusterRole, sign: number, force: number) => {
+      const p = push[role];
+      if (!p || force <= 0) return;
+      const size = Math.hypot(p.x, p.y);
+      if (size === 0) return;
+      const share = (p.x * ux + p.y * uy) / size;
+      if (share < (control === "thrust" ? ALIGNED_SHARE : USEFUL_SHARE)) return;
+      ways.push({ control, sign, x: p.x * force, y: p.y * force, share, along: force * share * size });
+    };
+    each("thrust", "thrusterMain", 1, tuning.thrust);
+    each("thrust", "thrusterReverse", -1, tuning.reverseThrust);
+    each("strafe", "thrusterStrafeRight", 1, tuning.sideThrust);
+    each("strafe", "thrusterStrafeLeft", -1, tuning.sideThrust);
+    // One way per control: a pair's halves fight each other, so the better one fires.
+    return (["thrust", "strafe"] as const).flatMap((control) => {
+      let best: PushWay | null = null;
+      for (const way of ways) if (way.control === control && (!best || way.along > best.along)) best = way;
+      return best ? [best] : [];
+    });
+  }
 
-    if (Math.abs(forward) > small) ship.controls.thrust = Math.sign(forward);
-    if (Math.abs(side) > small) ship.controls.strafe = Math.sign(side);
+  /**
+   * The push the thrusters give along a change without turning, and how straight it is: the share
+   * of all that push which lies along the change. Two thrusters can cover a change between them
+   * that neither covers alone, so the pair is judged together.
+   */
+  protected directWay(sim: Sim, needX: number, needY: number): { ways: PushWay[]; accel: number; straight: number } {
+    const { ship } = this;
+    const ways = this.waysAlong(sim, needX, needY);
+    const need = Math.hypot(needX, needY) || 1;
+    const cos = Math.cos(ship.angle);
+    const sin = Math.sin(ship.angle);
+    const ux = (needX * cos + needY * sin) / need;
+    const uy = (-needX * sin + needY * cos) / need;
+    let x = 0;
+    let y = 0;
+    let accel = 0;
+    for (const way of ways) {
+      x += way.x;
+      y += way.y;
+      accel += way.along;
+    }
+    const size = Math.hypot(x, y);
+    return { ways, accel, straight: size === 0 ? 0 : (x * ux + y * uy) / size };
+  }
+
+  /**
+   * The quickest of the three ways to make a change: turning the nose to it and burning,
+   * turning round to burn the reverse, or pushing with what already points that way. Each way
+   * ends by the turn it takes plus the burn that follows, so a ship with a strong reverse
+   * where it wants it doesn't turn at all, and one whose reverse is weak turns and burns.
+   */
+  protected fastestWay(sim: Sim, needX: number, needY: number): "direct" | "nose" | "reverse" {
+    const { ship } = this;
+    const { tuning } = sim;
+    const need = Math.hypot(needX, needY);
+    if (need === 0) return "direct";
+    const { push } = thrustOf(ship);
+    const needAngle = Math.atan2(needY, needX);
+    // What the nose pushes along the change, and what the reverse does with the nose turned round.
+    const forward = tuning.thrust * (push.thrusterMain?.x ?? 0);
+    const backward = -tuning.reverseThrust * (push.thrusterReverse?.x ?? 0);
+    const direct = this.directWay(sim, needX, needY);
+    /** How long a way takes: the turn first, then the burn that follows it. */
+    const seconds = (angle: number, accel: number) =>
+      accel <= 0 ? Infinity : this.turnTime(sim, angle) + need / accel;
+    const nose = seconds(wrapAngle(needAngle - ship.angle), forward);
+    const reverse = seconds(wrapAngle(needAngle + Math.PI - ship.angle), backward);
+    // Pushing across the change leaves motion across it that has to be undone later, at the
+    // main's push: making the whole change this way leaves need × tan(off) of it to cancel.
+    const across = Math.tan(Math.min(Math.PI / 2 - 1e-3, Math.acos(Math.max(-1, Math.min(1, direct.straight)))));
+    const pushing =
+      direct.accel <= 0 || direct.straight < STRAIGHT_PUSH ? Infinity : need / direct.accel + (need * across) / tuning.thrust;
+    if (pushing < nose && pushing < reverse) return "direct";
+    return reverse < nose ? "reverse" : "nose";
+  }
+
+  /**
+   * While the nose comes round, the side thrusters fire: they point where they point, so their
+   * push is there now, at the share of it that helps. The pair waiting on the nose stays off,
+   * since a burn that far off the change spends itself turning the ship's own motion, and then
+   * the aim it is chasing never settles.
+   */
+  private pushWhileTurning(sim: Sim, needX: number, needY: number): void {
+    const push = this.directWay(sim, needX, needY);
+    if (push.straight < STRAIGHT_PUSH) return;
+    for (const way of push.ways) {
+      if (way.control !== "strafe") continue;
+      this.ship.controls.strafe = way.sign * way.share;
+    }
+  }
+
+  /** Makes a correction without turning, with whatever push already lies along it. */
+  protected correctDirectly(sim: Sim, needX: number, needY: number, hold: number | null): boolean {
+    const { ship } = this;
+    const push = this.directWay(sim, needX, needY);
+    // The change can swing while the correction is under way: once the push is too far across
+    // it, this is no longer the way to make it, and the caller turns instead.
+    if (push.ways.length === 0 || push.straight < STRAIGHT_PUSH) return false;
+    const ways = push.ways;
+    for (const way of ways) {
+      const size = way.sign * way.share;
+      if (way.control === "thrust") ship.controls.thrust = size;
+      else ship.controls.strafe = size;
+    }
     this.thrusting = false;
     this.correctingDirectly = true;
     this.turnTo(sim, hold ?? ship.angle);
@@ -1631,6 +1786,18 @@ interface ClickOrder {
 const TRIP_CEILING = 0.75;
 
 /**
+ * A click move's top speed when the pilot has picked one, in units a second. `trip` isn't in
+ * here: it's the trip's own rule, which is the default.
+ */
+const CLICK_SPEED_CAPS: Record<string, number> = { "400": 400, "200": 200, "100": 100, "50": 50 };
+
+/**
+ * How much of its top speed a click move holds to, when the pilot has picked one: a share, 0 to
+ * 1, of the speed limit. `limit` isn't in here: it's the whole limit.
+ */
+const CLICK_SPEED_SHARES: Record<string, number> = { limit: 1, "75": 0.75, "60": 0.6, "40": 0.4 };
+
+/**
  * Carries out the player's orders: fly to a spot (rotate, thrust, coast, rotate to stop,
  * thrust), leave it drifting at a drawn speed, stop, or hold a facing. Flight keys take over
  * while held, and the order picks up again from wherever the ship is once they're let go.
@@ -2098,17 +2265,10 @@ export class ClickPilot extends ShipPilot {
     this.trim(sim, needX * share, needY * share, order.face);
   }
 
-  /** About how long it takes to turn the nose around, from its rotation thrust and top spin. */
-  private flipSeconds(sim: Sim): number {
-    const accel = ((sim.tuning.rotationThrust * Math.PI) / 180) * sim.shipResponse(this.ship);
-    const peak = Math.sqrt(accel * Math.PI);
-    if (peak <= SPIN_LIMIT) return (2 * peak) / accel;
-    return Math.PI / SPIN_LIMIT + SPIN_LIMIT / accel;
-  }
-
   /**
    * Makes a small velocity change this tick at part throttle, so it gets just what it asks
-   * for. Side and reverse thrusters do it without turning; otherwise the nose turns to it.
+   * for. Thrusters pointing the right way do it without turning; otherwise the nose turns to
+   * it, and gives what it can along the way.
    */
   private trim(sim: Sim, needX: number, needY: number, hold: number | null): void {
     const { ship } = this;
@@ -2119,8 +2279,10 @@ export class ClickPilot extends ShipPilot {
     const sin = Math.sin(ship.angle);
     const forward = needX * cos + needY * sin;
     const side = -needX * sin + needY * cos;
-    const { parts } = ship;
-    if (parts.has("strafe") && (forward >= 0 || parts.has("reverse"))) {
+    const { push } = thrustOf(ship);
+    const strafes = !!push.thrusterStrafeRight || !!push.thrusterStrafeLeft;
+    const reverses = !!push.thrusterReverse;
+    if (strafes && (forward >= 0 || reverses)) {
       const full = forward >= 0 ? tuning.thrust : tuning.reverseThrust;
       ship.controls.thrust = throttle(forward, full * perTick);
       ship.controls.strafe = throttle(side, tuning.sideThrust * perTick);
@@ -2130,8 +2292,7 @@ export class ClickPilot extends ShipPilot {
     const needAngle = Math.atan2(needY, needX);
     const backward = needAngle + Math.PI;
     const useReverse =
-      parts.has("reverse") &&
-      Math.abs(wrapAngle(backward - ship.angle)) < Math.abs(wrapAngle(needAngle - ship.angle));
+      reverses && Math.abs(wrapAngle(backward - ship.angle)) < Math.abs(wrapAngle(needAngle - ship.angle));
     const burnAngle = useReverse ? backward : needAngle;
     this.turnTo(sim, burnAngle);
     const off = Math.abs(wrapAngle(burnAngle - ship.angle));
@@ -2147,11 +2308,26 @@ export class ClickPilot extends ShipPilot {
     // cap only keeps a crossing between stars sane.
     if (this.order?.follow) return sim.tuning.autopilotSpeed;
     // A click move's ceiling comes from the trip: full thrust to the halfway point and brake
-    // for the rest peaks at sqrt(accel * distance), and it stays at 75% of that.
+    // for the rest peaks at sqrt(accel * distance), and it stays at 75% of that. A top speed
+    // the pilot has picked holds it lower still.
     const accel = sim.tuning.thrust * sim.shipResponse(this.ship);
     const peak = Math.sqrt(accel * (this.order?.trip ?? 0));
     const scaled = peak * TRIP_CEILING;
-    return Math.min(sim.tuning.autopilotSpeed, scaled);
+    return Math.min(sim.tuning.autopilotSpeed, scaled, this.speedCap());
+  }
+
+  /** The top speed a click move holds to, from the pilot's pick: the trip's own rule unless they set one. */
+  private speedCap(): number {
+    return CLICK_SPEED_CAPS[pickOf(this.ship.tweaks, "clickMove", "topSpeed")] ?? Infinity;
+  }
+
+  /**
+   * How much of that top speed a click move holds to, from the pilot's pick. A flight stops
+   * burning once it's this close to its speed, so the pick is the speed it settles at: 60%
+   * unless the pilot asked for more or less.
+   */
+  protected override coastShare(_sim: Sim): number {
+    return CLICK_SPEED_SHARES[pickOf(this.ship.tweaks, "clickMove", "relativeSpeed")] ?? COAST_SHARE;
   }
 
   /**
@@ -2182,19 +2358,14 @@ export class ClickPilot extends ShipPilot {
   }
 
   /**
-   * A drawn facing, or else gets ready for the braking burn: nose against the motion,
-   * or along it with a reverse thruster.
+   * A drawn facing, or else gets ready for the braking burn: nose against the motion, or along
+   * it with the reverse to burn, whichever this hull can do sooner.
    */
-  protected override coastNose(vx: number, vy: number): number | null {
-    const { ship } = this;
+  protected override coastNose(sim: Sim, vx: number, vy: number): number | null {
     if (this.order && this.order.face !== null) return this.order.face;
     if (Math.hypot(vx, vy) < COAST_TURN_SPEED) return null;
     const braking = Math.atan2(-vy, -vx);
-    if (!ship.parts.has("reverse")) return braking;
-    const reversing = braking + Math.PI;
-    const shorter =
-      Math.abs(wrapAngle(reversing - ship.angle)) < Math.abs(wrapAngle(braking - ship.angle));
-    return shorter ? reversing : braking;
+    return this.fastestWay(sim, -vx, -vy) === "reverse" ? braking + Math.PI : braking;
   }
 }
 

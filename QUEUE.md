@@ -3,16 +3,17 @@
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
 ## Q-11 · Clouds, step 1: clouds you can see · build
-- state: in progress
+- state: queued
 - backlog: S-42
 - plan: docs/clouds-plan.md
 - added: 2026-11-24
 
 A new place kind: a turned ellipse with a ring and falloff, two looks (gas, dust) on a back or
-front layer. Visuals only, no effects, no AI. Stops for the user to fly through one.
+front layer. Visuals only, no effects, no AI. Stops for the user to fly through one. Step 1 is
+built (`cf39eea`): this waits on their try, so it isn't work for an agent.
 
 ## Q-29 · Click move: the faster way, thrust while turning, top speed · build
-- state: queued
+- state: in progress
 - backlog: S-59
 - plan: docs/click-move-thrust-plan.md
 - added: 2026-11-25

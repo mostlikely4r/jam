@@ -2621,6 +2621,106 @@ describe("click orders", () => {
     expect(Math.hypot(ship.vx, ship.vy)).toBeLessThan(1);
   }, 30000);
 
+  it("a strong reverse takes a short move backwards without turning round", () => {
+    const sim = alone();
+    const { ship } = sim;
+    sim.devSet(ship, "reverse", true);
+    park(ship, 40000, 40000, 0);
+    sim.step();
+    expect(sim.orderMove(39940, 40000)).toBe(true);
+    const { ended, nose } = fly(sim, 20);
+    expect(ended).toBeGreaterThan(0);
+    // It never turns round for it: a third of a turn is more than the reverse needs.
+    expect(nose).toBeLessThan(1);
+    expect(Math.hypot(ship.x - 39940, ship.y - 40000)).toBeLessThan(10);
+    expect(Math.hypot(ship.vx, ship.vy)).toBeLessThan(1);
+  }, 30000);
+
+  it("with nothing but the main, the same move backwards turns the nose round and burns instead", () => {
+    const sim = alone();
+    const { ship } = sim;
+    park(ship, 40000, 40000, 0);
+    sim.step();
+    expect(sim.orderMove(39940, 40000)).toBe(true);
+    const { ended, nose } = fly(sim, 20);
+    expect(ended).toBeGreaterThan(0);
+    // A half turn and more: the nose goes round to burn against the way it wants to go.
+    expect(nose).toBeGreaterThan(Math.PI);
+    expect(Math.hypot(ship.x - 39940, ship.y - 40000)).toBeLessThan(10);
+  }, 30000);
+
+  it("with side thrusters, a diagonal move slides while the nose comes round", () => {
+    const sim = alone();
+    const { ship } = sim;
+    sim.devSet(ship, "strafe", true);
+    park(ship, 40000, 40000, 0);
+    sim.step();
+    // Mostly ahead, a little to the side: the nose still has to come round to it.
+    expect(sim.orderMove(40400, 40150)).toBe(true);
+    let slid = 0;
+    let turned = 0;
+    for (let i = 0; i < Math.round(20 / TICK); i++) {
+      sim.step();
+      const turning = Math.abs(ship.spin) > 0.3;
+      if (!turning) continue;
+      turned++;
+      if (ship.firing.has("thrusterStrafeRight") || ship.firing.has("thrusterStrafeLeft")) slid++;
+    }
+    expect(turned).toBeGreaterThan(0);
+    expect(slid).toBeGreaterThan(0);
+  }, 30000);
+
+  /** The fastest the same long move goes with a given top speed and relative speed pick. */
+  function fastest(topSpeed: string, relative = "60"): number {
+    const sim = alone();
+    const { ship } = sim;
+    sim.devSet(ship, "clickMove", true);
+    park(ship, 40000, 40000, 0);
+    sim.step();
+    expect(sim.setTweak(ship, "clickMove", "topSpeed", topSpeed)).toBe(true);
+    expect(sim.setTweak(ship, "clickMove", "relativeSpeed", relative)).toBe(true);
+    // Far enough that the trip's own rule would coast well past any of the caps.
+    expect(sim.orderMoveStraight(80000, 40000)).toBe(true);
+    let fastest = 0;
+    for (let i = 0; i < Math.round(120 / TICK); i++) {
+      sim.step();
+      fastest = Math.max(fastest, Math.hypot(ship.vx, ship.vy));
+    }
+    return fastest;
+  }
+
+  it("a top speed of 100 holds a long click move under it, where the trip's own rule would run", () => {
+    expect(fastest("trip")).toBeGreaterThan(200);
+    const held = fastest("100");
+    expect(held).toBeLessThan(100);
+    expect(held).toBeGreaterThan(50);
+  }, 30000);
+
+  it("the relative speed limit sets how much of the top speed a move holds: 60% by default, the limit when asked", () => {
+    // The default is the 60% a flight always held to, so the two rates read as a share of the cap.
+    expect(fastest("100")).toBeCloseTo(60, -1);
+    expect(fastest("100", "75")).toBeCloseTo(75, -1);
+    expect(fastest("100", "40")).toBeCloseTo(40, -1);
+    // The whole limit: it stops burning within its tolerance of 100, so just under it.
+    const whole = fastest("100", "limit");
+    expect(whole).toBeGreaterThan(85);
+    expect(whole).toBeLessThan(100);
+  }, 30000);
+
+  it("a top speed of 50 cap that's over the trip's own rule changes nothing", () => {
+    const sim = alone();
+    const { ship } = sim;
+    sim.devSet(ship, "clickMove", true);
+    park(ship, 40000, 40000, 0);
+    sim.step();
+    expect(sim.setTweak(ship, "clickMove", "topSpeed", "50")).toBe(true);
+    // A short move peaks well under 50 at full thrust, so the pick only wastes no time.
+    expect(sim.orderMove(40060, 40000)).toBe(true);
+    const { ended } = fly(sim, 20);
+    expect(ended).toBeGreaterThan(0);
+    expect(Math.hypot(ship.x - 40060, ship.y - 40000)).toBeLessThan(SHIP_RADIUS);
+  }, 30000);
+
   describe("coming home by a click on the berth", () => {
     /** The floater at rest at the field's edge nearest the station, with a hold full of ore. */
     function edge(sim: Sim): void {

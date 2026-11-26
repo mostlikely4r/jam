@@ -7,7 +7,12 @@
       "description": "Stops your rotation when you let go",
       "price": 100,
       "tier": 0,
-      "icon": { "glyph": "gyro", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+      "icon": {
+        "glyph": "gyro",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      }
     },
     {
       "id": "retro",
@@ -16,7 +21,12 @@
       "description": "Cancels drift, using the thrusters you own (X)",
       "price": 300,
       "tier": 2,
-      "icon": { "glyph": "retro", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+      "icon": {
+        "glyph": "retro",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      }
     },
     {
       "id": "targeting",
@@ -25,17 +35,31 @@
       "description": "Left click picks one thing, drag a box picks several. Ctrl adds and removes. Right click a program in the ship screen (I) to change how it works",
       "price": 250,
       "tier": 0,
-      "icon": { "glyph": "crosshair", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" },
+      "icon": {
+        "glyph": "crosshair",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      },
       "tweaks": [
         {
           "id": "boxPicks",
           "name": "Box picks",
-          "default": "rocks",
           "options": [
-            { "id": "rocks", "name": "Rocks" },
-            { "id": "ships", "name": "Ships" },
-            { "id": "everything", "name": "Everything" }
-          ]
+            {
+              "id": "rocks",
+              "name": "Rocks"
+            },
+            {
+              "id": "ships",
+              "name": "Ships"
+            },
+            {
+              "id": "everything",
+              "name": "Everything"
+            }
+          ],
+          "default": "rocks"
         }
       ]
     },
@@ -46,28 +70,50 @@
       "description": "Shows how what you've picked moves against you. Needs Targeting loaded",
       "price": 150,
       "tier": 0,
-      "icon": { "glyph": "diamond", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" },
-      "needs": ["targeting"],
+      "icon": {
+        "glyph": "diamond",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      },
       "tweaks": [
         {
           "id": "show",
           "name": "Show",
-          "default": "main",
           "options": [
-            { "id": "main", "name": "Main target only" },
-            { "id": "all", "name": "All targets" },
-            { "id": "collide", "name": "Targets that will collide" }
-          ]
+            {
+              "id": "main",
+              "name": "Main target only"
+            },
+            {
+              "id": "all",
+              "name": "All targets"
+            },
+            {
+              "id": "collide",
+              "name": "Targets that will collide"
+            }
+          ],
+          "default": "main"
         },
         {
           "id": "relativeTo",
           "name": "Relative to",
-          "default": "ship",
           "options": [
-            { "id": "ship", "name": "Your ship" },
-            { "id": "main", "name": "The main target" }
-          ]
+            {
+              "id": "ship",
+              "name": "Your ship"
+            },
+            {
+              "id": "main",
+              "name": "The main target"
+            }
+          ],
+          "default": "ship"
         }
+      ],
+      "needs": [
+        "targeting"
       ]
     },
     {
@@ -77,8 +123,15 @@
       "description": "Turns the turret to the rock you've picked. Needs Targeting loaded",
       "price": 250,
       "tier": 0,
-      "icon": { "glyph": "turret", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" },
-      "needs": ["targeting"]
+      "icon": {
+        "glyph": "turret",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      },
+      "needs": [
+        "targeting"
+      ]
     },
     {
       "id": "autoMine",
@@ -87,28 +140,47 @@
       "description": "Fires a gun when it's lined up on a rock you've picked. Never at ships. Needs Targeting loaded",
       "price": 400,
       "tier": 1,
-      "icon": { "glyph": "gun", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" },
-      "needs": ["targeting"],
+      "icon": {
+        "glyph": "gun",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      },
       "tweaks": [
         {
           "id": "shootsAt",
           "name": "Shoots at",
-          "default": "any",
           "options": [
-            { "id": "primary", "name": "Primary only" },
-            { "id": "any", "name": "Any picked" }
-          ]
+            {
+              "id": "primary",
+              "name": "Primary only"
+            },
+            {
+              "id": "any",
+              "name": "Any picked"
+            }
+          ],
+          "default": "any"
         },
         {
           "id": "fires",
           "name": "Fires",
-          "each": "gun",
-          "default": "on",
           "options": [
-            { "id": "on", "name": "On" },
-            { "id": "off", "name": "Off" }
-          ]
+            {
+              "id": "on",
+              "name": "On"
+            },
+            {
+              "id": "off",
+              "name": "Off"
+            }
+          ],
+          "default": "on",
+          "each": "gun"
         }
+      ],
+      "needs": [
+        "targeting"
       ]
     },
     {
@@ -118,8 +190,15 @@
       "description": "Turns the nose to the rock you've picked while nothing else steers. Needs Targeting loaded",
       "price": 300,
       "tier": 1,
-      "icon": { "glyph": "turn", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" },
-      "needs": ["targeting"]
+      "icon": {
+        "glyph": "turn",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      },
+      "needs": [
+        "targeting"
+      ]
     },
     {
       "id": "autoMine2",
@@ -128,28 +207,48 @@
       "description": "As Auto-mine, and holds a shot that would miss a moving rock. Needs Targeting loaded",
       "price": 750,
       "tier": 2,
-      "icon": { "glyph": "gun", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0", "mark": "II" },
-      "needs": ["targeting"],
+      "icon": {
+        "glyph": "gun",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0",
+        "mark": "II"
+      },
       "tweaks": [
         {
           "id": "shootsAt",
           "name": "Shoots at",
-          "default": "any",
           "options": [
-            { "id": "primary", "name": "Primary only" },
-            { "id": "any", "name": "Any picked" }
-          ]
+            {
+              "id": "primary",
+              "name": "Primary only"
+            },
+            {
+              "id": "any",
+              "name": "Any picked"
+            }
+          ],
+          "default": "any"
         },
         {
           "id": "fires",
           "name": "Fires",
-          "each": "gun",
-          "default": "on",
           "options": [
-            { "id": "on", "name": "On" },
-            { "id": "off", "name": "Off" }
-          ]
+            {
+              "id": "on",
+              "name": "On"
+            },
+            {
+              "id": "off",
+              "name": "Off"
+            }
+          ],
+          "default": "on",
+          "each": "gun"
         }
+      ],
+      "needs": [
+        "targeting"
       ]
     },
     {
@@ -159,7 +258,12 @@
       "description": "Adds readouts to the arrows",
       "price": 50,
       "tier": 0,
-      "icon": { "glyph": "gauge", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+      "icon": {
+        "glyph": "gauge",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      }
     },
     {
       "id": "clickMove",
@@ -168,30 +272,62 @@
       "description": "Right click shifts you there, double click stops there. Drag to leave with a drift. Right click it in the ship screen (I) to set its top speed",
       "price": 400,
       "tier": 2,
-      "icon": { "glyph": "cursor", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" },
+      "icon": {
+        "glyph": "cursor",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      },
       "tweaks": [
         {
           "id": "topSpeed",
           "name": "Top speed",
-          "default": "trip",
           "options": [
-            { "id": "trip", "name": "Trip" },
-            { "id": "400", "name": "400" },
-            { "id": "200", "name": "200" },
-            { "id": "100", "name": "100" },
-            { "id": "50", "name": "50" }
-          ]
+            {
+              "id": "trip",
+              "name": "Trip"
+            },
+            {
+              "id": "400",
+              "name": "400"
+            },
+            {
+              "id": "200",
+              "name": "200"
+            },
+            {
+              "id": "100",
+              "name": "100"
+            },
+            {
+              "id": "50",
+              "name": "50"
+            }
+          ],
+          "default": "trip"
         },
         {
           "id": "relativeSpeed",
           "name": "Relative speed limit",
-          "default": "60",
           "options": [
-            { "id": "limit", "name": "The limit" },
-            { "id": "75", "name": "75%" },
-            { "id": "60", "name": "60%" },
-            { "id": "40", "name": "40%" }
-          ]
+            {
+              "id": "limit",
+              "name": "The limit"
+            },
+            {
+              "id": "75",
+              "name": "75%"
+            },
+            {
+              "id": "60",
+              "name": "60%"
+            },
+            {
+              "id": "40",
+              "name": "40%"
+            }
+          ],
+          "default": "60"
         }
       ]
     },
@@ -202,7 +338,12 @@
       "description": "Click to move steers around what's in the way",
       "price": 200,
       "tier": 2,
-      "icon": { "glyph": "route", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+      "icon": {
+        "glyph": "route",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      }
     },
     {
       "id": "clickTurn",
@@ -211,7 +352,12 @@
       "description": "Drag from your ship to set a facing to hold",
       "price": 150,
       "tier": 2,
-      "icon": { "glyph": "turnCursor", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+      "icon": {
+        "glyph": "turnCursor",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      }
     },
     {
       "id": "starmap",
@@ -220,7 +366,12 @@
       "description": "Map. Press C to open it",
       "price": 350,
       "tier": 2,
-      "icon": { "glyph": "chart", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+      "icon": {
+        "glyph": "chart",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      }
     },
     {
       "id": "towControl",
@@ -229,7 +380,12 @@
       "description": "With a rock in the clamp, flies it home gently: keeps it under the safe speed, gives it room, and hands it over at the refinery pad. Click a station to deliver",
       "price": 400,
       "tier": 1,
-      "icon": { "glyph": "tow", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+      "icon": {
+        "glyph": "tow",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      }
     },
     {
       "id": "autopilot",
@@ -238,7 +394,12 @@
       "description": "From the chart, sets a course and flies it: out, coast, brake, round bodies",
       "price": 800,
       "tier": 2,
-      "icon": { "glyph": "autopilot", "primary": "#2f6e74", "secondary": "#7fdfe6", "border": "#c4a4f0" }
+      "icon": {
+        "glyph": "autopilot",
+        "primary": "#2f6e74",
+        "secondary": "#7fdfe6",
+        "border": "#c4a4f0"
+      }
     }
   ]
 }

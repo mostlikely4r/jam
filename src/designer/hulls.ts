@@ -50,6 +50,7 @@ import {
   SHAPE_ROLE_NAMES,
   type ArtShape,
   type HullPoint,
+  type ShapeFade,
   type ShapeRole,
   MOUNT_TYPES,
   mountTakes,
@@ -80,8 +81,9 @@ import { PROGRAMS, PROGRAM_PARTS, programDef, programsFileNow, SHIPPED_PROGRAMS,
 import type { GlyphId } from "../glyphs";
 import { EVERY_GLYPH, glyphIcon, iconEl } from "../icons";
 import { DEFAULTS } from "../tuning";
-import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPartArt, drawTanks, drawTurret, METAL_HEX, RIM_HEX, tankBoxes } from "../shipArt";
+import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPartArt, drawTanks, drawTurret, GLASS_HEX, METAL_HEX, RIM_HEX, SHADE_HEX, tankBoxes } from "../shipArt";
 import { multiSelect, withoutPick, withPick } from "./multiselect";
+import { defaultShade, dragHandle, fadeStart, hitShape, insidePolygon, shapeGrips, type ShapeHandle } from "./shapes";
 import { UndoStack } from "./undo";
 import { shippedWorld } from "./shipped";
 import { walk } from "./world";
@@ -108,19 +110,17 @@ const PROGRAMS_DRAFT_KEY = "jam-programs-draft";
 const byName = (a: string, b: string) => a.localeCompare(b);
 /** Every hull the file has now, alphabetically by name: the order of the drop down lists. */
 const hullList = (): ShipModel[] => [...SHIP_MODELS].sort((a, b) => byName(hullName(a), hullName(b)));
-/** Whether a spot is inside a polygon, by counting the edges a ray to the right crosses. */
-function insidePolygon(points: HullPoint[], x: number, y: number): boolean {
-  let inside = false;
-  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
-    const [xi, yi] = points[i];
-    const [xj, yj] = points[j];
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
 
 /** What each kind of shape is called in the panel. */
-const SHAPE_KIND_NAMES: Record<ArtShape["kind"], string> = { polygon: "Polygon", circle: "Circle", rect: "Rect" };
+const SHAPE_KIND_NAMES: Record<ArtShape["kind"], string> = {
+  polygon: "Polygon",
+  circle: "Circle",
+  rect: "Rect",
+  ellipse: "Ellipse",
+  arc: "Arc",
+  ring: "Ring",
+  wedge: "Wedge",
+};
 const ROLE_NAMES: Record<ThrusterRole, string> = {
   thrusterMain: "Main (W)",
   thrusterReverse: "Reverse (S)",
@@ -250,7 +250,7 @@ export class HullDesigner {
   private showOn: ShipModel | null = null;
   /** The sections the user has opened: every section starts collapsed. */
   private opened = new Set<string>();
-  private drag: { kind: "move" | "turn"; moved: boolean } | { kind: "point" | "centre"; index: number; moved: boolean } | null = null;
+  private drag: { kind: "move" | "turn"; moved: boolean } | { kind: "point" | "centre"; index: number; moved: boolean } | { kind: "handle"; handle: ShapeHandle; moved: boolean } | null = null;
   private status = "";
   /** Screen pixels per world unit, and where the ship's middle is on screen. */
   private zoom = 10;
@@ -274,6 +274,8 @@ export class HullDesigner {
   private point: number | null = null;
   /** The point under the cursor, so it can light up before it is grabbed. */
   private hoverPoint: number | null = null;
+  /** The handle under the pointer, drawn hot as the hovered point is. */
+  private hoverHandle: ShapeHandle | null = null;
   /** Mirror drawing: a point's twin across the middle line moves with it. On until turned off. */
   private mirrored = true;
   /** A drag, a held wheel or a slider counts as one step: no snapshot until it settles. */
@@ -558,6 +560,31 @@ export class HullDesigner {
     const label = document.createElement("label");
     label.textContent = text;
     label.append(box);
+    return label;
+  }
+
+  /** A number field for the panel: whole steps by `step`, and `set` handed every value typed. */
+  private numberField(value: number, set: (value: number) => void, step = 0.05): HTMLInputElement {
+    const input = document.createElement("input");
+    input.type = "number";
+    input.step = String(step);
+    input.value = String(value);
+    input.addEventListener("change", () => {
+      const typed = Number(input.value);
+      if (Number.isFinite(typed)) set(typed);
+    });
+    return input;
+  }
+
+  /** A checkbox with its caption beside it, for the panel. */
+  private tick(text: string, on: boolean, set: (on: boolean) => void): HTMLLabelElement {
+    const label = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = on;
+    box.addEventListener("change", () => set(box.checked));
+    label.style.color = "#cfd8e6";
+    label.append(box, ` ${text}`);
     return label;
   }
 
@@ -1213,7 +1240,7 @@ export class HullDesigner {
     });
     const alphaWrap = document.createElement("span");
     alphaWrap.append(alpha, readout);
-    const colour = (key: "metal" | "rim", label: string, fallback: string) => {
+    const colour = (key: "metal" | "rim" | "shade" | "glass", label: string, fallback: string) => {
       const input = document.createElement("input");
       input.type = "color";
       input.value = art[key] ?? fallback;
@@ -1222,7 +1249,16 @@ export class HullDesigner {
     };
     const note = document.createElement("p");
     note.textContent = "Drawn this way in the blueprint and in the game, on top of the mount's own size and transparency. Only what differs is kept in src/hulls.json, and Back to coded stats resets it.";
-    return [scale("scaleX", "Width against the code's"), scale("scaleY", "Height against the code's"), this.labelled("Transparency", alphaWrap), colour("metal", "Metal", METAL_HEX), colour("rim", "Edge", RIM_HEX), note];
+    return [
+      scale("scaleX", "Width against the code's"),
+      scale("scaleY", "Height against the code's"),
+      this.labelled("Transparency", alphaWrap),
+      colour("metal", "Metal", METAL_HEX),
+      colour("rim", "Edge", RIM_HEX),
+      colour("shade", "Shade", SHADE_HEX),
+      colour("glass", "Glass", GLASS_HEX),
+      note,
+    ];
   }
 
   /**
@@ -2223,7 +2259,7 @@ export class HullDesigner {
   }
 
   /** Adds a shape to the picked hull or part, at the middle of the view, and picks it. */
-  private addShape(kind: "polygon" | "circle" | "rect"): void {
+  private addShape(kind: ArtShape["kind"]): void {
     const [fx, fy] = this.fromScreen(this.cx, this.cy);
     const x = clean(fx);
     const y = clean(fy);
@@ -2232,7 +2268,23 @@ export class HullDesigner {
         ? { kind, role: "shade", points: [[x + 0.3, y], [x, y - 0.3], [x - 0.3, y], [x, y + 0.3]] }
         : kind === "circle"
           ? { kind, role: "glass", x, y, r: 0.25 }
-          : { kind, role: "shade", x, y, w: 0.6, h: 0.4 };
+          : kind === "ellipse"
+            ? { kind, role: "glass", x, y, rx: 0.3, ry: 0.2 }
+            : kind === "ring"
+              ? { kind, role: "shade", x, y, r: 0.25, inner: 0.125 }
+              : kind === "arc" || kind === "wedge"
+                ? { kind, role: kind === "arc" ? "rim" : "shade", x, y, r: 0.25, from: -45, to: 45 }
+                : { kind, role: "shade", x, y, w: 0.6, h: 0.4 };
+    const list = this.shapeList();
+    list.push(shape);
+    this.selectShape(list.length - 1, false);
+    this.changed();
+  }
+
+  /** Adds the shading the defender, the drone and the pirate have: the outline's own, scaled and moved. */
+  private addDefaultShade(): void {
+    const shape = defaultShade(this.outline());
+    if (!shape) return;
     const list = this.shapeList();
     list.push(shape);
     this.selectShape(list.length - 1, false);
@@ -2341,8 +2393,14 @@ export class HullDesigner {
       this.button("Add a polygon", () => this.addShape("polygon")),
       this.button("Add a circle", () => this.addShape("circle")),
       this.button("Add a rect", () => this.addShape("rect")),
-      mirror,
+      this.button("Add an ellipse", () => this.addShape("ellipse")),
+      this.button("Add an arc", () => this.addShape("arc")),
+      this.button("Add a ring", () => this.addShape("ring")),
+      this.button("Add a wedge", () => this.addShape("wedge")),
     ];
+    // The shading the game's own hulls already have is a hull's, not a part's: a part has no outline.
+    if (!onParts && outline.length >= 3) out.push(this.button("Add default shade", () => this.addDefaultShade()));
+    out.push(mirror);
 
     const shape = this.pickedShape();
     if (shape) {
@@ -2359,17 +2417,11 @@ export class HullDesigner {
           ),
         ),
       );
-      const order = document.createElement("input");
-      order.type = "number";
-      order.step = "1";
-      order.value = String(shape.order ?? 0);
-      order.addEventListener("change", () => {
-        const value = Number(order.value);
-        if (!Number.isFinite(value) || value === 0) delete shape.order;
+      out.push(this.labelled("Draw order", this.numberField(shape.order ?? 0, (value) => {
+        if (value === 0) delete shape.order;
         else shape.order = Math.round(value);
         this.changed();
-      });
-      out.push(this.labelled("Draw order", order));
+      }, 1)));
       const alpha = document.createElement("input");
       alpha.type = "range";
       alpha.min = "0";
@@ -2383,19 +2435,82 @@ export class HullDesigner {
         this.changed(false);
       });
       out.push(this.labelled("Transparency", alpha));
-      if (!onParts) {
-        const clip = document.createElement("label");
-        const clipBox = document.createElement("input");
-        clipBox.type = "checkbox";
-        clipBox.checked = shape.clip === true;
-        clipBox.addEventListener("change", () => {
-          if (clipBox.checked) shape.clip = true;
-          else delete shape.clip;
+      if (!onParts) out.push(this.tick("Clipped to the outline", shape.clip === true, (on) => {
+        if (on) shape.clip = true;
+        else delete shape.clip;
+        this.changed();
+      }));
+      // What only some kinds have: a rect's corners, a polygon's open line, the width of a line.
+      if (shape.kind === "rect") {
+        out.push(this.labelled("Corner radius", this.numberField(shape.corner ?? 0, (value) => {
+          const most = Math.min(shape.w ?? 0, shape.h ?? 0) / 2;
+          if (value <= 0) delete shape.corner;
+          else shape.corner = clean(Math.min(value, most));
           this.changed();
-        });
-        clip.style.color = "#cfd8e6";
-        clip.append(clipBox, " Clipped to the outline");
-        out.push(clip);
+        })));
+      }
+      if (shape.kind === "polygon") {
+        out.push(this.tick("Open: a line through its points, not closed back", shape.open === true, (on) => {
+          if (on) shape.open = true;
+          else delete shape.open;
+          this.changed();
+        }));
+      }
+      const aLine = shape.role === "rim" || shape.kind === "arc" || (shape.kind === "polygon" && (shape.open === true || (shape.points?.length ?? 0) === 2));
+      if (aLine) {
+        out.push(this.labelled("Line width (0: the hull's own)", this.numberField(shape.width ?? 0, (value) => {
+          if (value <= 0) delete shape.width;
+          else shape.width = clean(value);
+          this.changed();
+        }, 0.5)));
+      }
+      if (onParts) {
+        out.push(this.tick("Only while working: gone once the part is damaged", shape.working === true, (on) => {
+          if (on) shape.working = true;
+          else delete shape.working;
+          this.changed();
+        }));
+      }
+      // The gradient: none, a line across the shape, or round from a middle outward.
+      out.push(
+        this.labelled(
+          "Gradient",
+          this.dropdown(
+            [
+              ["none", "None (one flat colour)"],
+              ["line", "Line: one end to the other"],
+              ["round", "Round: from a middle outward"],
+            ],
+            shape.fade?.type ?? "none",
+            (value) => {
+              const wanted = value as "none" | ShapeFade["type"];
+              if (wanted === "none") delete shape.fade;
+              else if (shape.fade?.type !== wanted) {
+                // A new gradient starts across the shape's own box, keeping the colour it faded to.
+                const to = shape.fade?.to;
+                shape.fade = to ? { ...fadeStart(shape, wanted), to } : fadeStart(shape, wanted);
+              }
+              this.changed();
+            },
+          ),
+        ),
+      );
+      if (shape.fade) {
+        out.push(
+          this.labelled(
+            "Fades to",
+            this.dropdown(
+              [["", "Clear"], ...SHAPE_ROLES.map((role): [string, string] => [role, SHAPE_ROLE_NAMES[role]])],
+              shape.fade.to ?? "",
+              (value) => {
+                if (!shape.fade) return;
+                if (value === "") delete shape.fade.to;
+                else shape.fade.to = value as ShapeRole;
+                this.changed();
+              },
+            ),
+          ),
+        );
       }
       out.push(this.button("Remove this shape", () => this.removeShape(), "danger"));
     }
@@ -2444,7 +2559,7 @@ export class HullDesigner {
    * then the segment middles of the picked one, then the shapes under the pointer, top one first.
    * The outline counts as the body underneath the rest, so clicking the bare hull picks it.
    */
-  private pickShape(sx: number, sy: number): { shape: number | "edge"; point?: number; add?: number } | null {
+  private pickShape(sx: number, sy: number): { shape: number | "edge"; point?: number; add?: number; handle?: ShapeHandle } | null {
     const reach = 9;
     let best: { shape: number | "edge"; point: number; distance: number } | null = null;
     const consider = (shape: number | "edge", points: HullPoint[]) => {
@@ -2463,6 +2578,14 @@ export class HullDesigner {
       const hit: { shape: number | "edge"; point: number } = best;
       return hit;
     }
+    // The picked shape's own handles: its middle, its sizes, its angles and its gradient's ends.
+    const shown = this.pickedShape();
+    if (shown && this.shape !== null && this.shape !== "edge") {
+      for (const grip of shapeGrips(shown)) {
+        const [px, py] = this.toScreen(grip.at[0], grip.at[1]);
+        if (Math.hypot(px - sx, py - sy) <= reach) return { shape: this.shape, handle: grip.handle };
+      }
+    }
     // A click on the middle of a segment of the picked shape puts a point there.
     const picked = this.pickedPoints();
     if (picked && picked.length >= 3 && this.shape !== null) {
@@ -2477,22 +2600,11 @@ export class HullDesigner {
     const shapes = this.shapes();
     for (let index = shapes.length - 1; index >= 0; index--) {
       const shape = shapes[index];
-      const hit = shape.kind === "polygon" ? !!shape.points && insidePolygon(shape.points, x, y) : this.insideShape(shape, x, y);
+      const hit = hitShape(shape, x, y);
       if (hit) return { shape: index };
     }
     if (outline.length >= 3 && insidePolygon(outline, x, y)) return { shape: "edge" };
     return null;
-  }
-
-  /** Whether a spot, in hull units, is inside a circle or a rect: a polygon is `insidePolygon`'s. */
-  private insideShape(shape: ArtShape, x: number, y: number): boolean {
-    if (shape.kind === "circle") return Math.hypot(x - (shape.x ?? 0), y - (shape.y ?? 0)) <= (shape.r ?? 0);
-    if (shape.kind !== "rect") return false;
-    // Turned the other way into the rect's own frame, then a box test.
-    const a = (-(shape.angle ?? 0) * Math.PI) / 180;
-    const dx = x - (shape.x ?? 0);
-    const dy = y - (shape.y ?? 0);
-    return Math.abs(dx * Math.cos(a) - dy * Math.sin(a)) <= (shape.w ?? 0) / 2 && Math.abs(dx * Math.sin(a) + dy * Math.cos(a)) <= (shape.h ?? 0) / 2;
   }
 
   /** The picked shape's points and segment middles, over everything, so they can be dragged. */
@@ -2500,16 +2612,54 @@ export class HullDesigner {
     const { ctx } = this;
     const shape = this.pickedShape();
     if (shape && shape.kind !== "polygon") {
-      // A circle or a rect has no points: a cross marks its middle, which drags it.
-      const [sx, sy] = this.toScreen(shape.x ?? 0, shape.y ?? 0);
-      ctx.strokeStyle = "rgba(255,212,121,0.9)";
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.moveTo(sx - 7, sy);
-      ctx.lineTo(sx + 7, sy);
-      ctx.moveTo(sx, sy - 7);
-      ctx.lineTo(sx, sy + 7);
-      ctx.stroke();
+      // Its own handles: a cross for the middle, rings for sizes and angles, diamonds for a gradient.
+      for (const grip of shapeGrips(shape)) {
+        const [sx, sy] = this.toScreen(grip.at[0], grip.at[1]);
+        const hot = grip.handle === this.hoverHandle;
+        const fade = grip.handle === "fadeFrom" || grip.handle === "fadeEnd" || grip.handle === "fadeMiddle" || grip.handle === "reach";
+        ctx.strokeStyle = hot ? "#ffd479" : fade ? "rgba(200,170,255,0.9)" : "rgba(255,212,121,0.9)";
+        ctx.fillStyle = hot ? "#ffd479" : "#0a1a2e";
+        ctx.lineWidth = 1.4;
+        if (fade) {
+          ctx.beginPath();
+          ctx.moveTo(sx, sy - 5);
+          ctx.lineTo(sx + 5, sy);
+          ctx.lineTo(sx, sy + 5);
+          ctx.lineTo(sx - 5, sy);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        } else if (grip.handle === "middle") {
+          ctx.beginPath();
+          ctx.moveTo(sx - 7, sy);
+          ctx.lineTo(sx + 7, sy);
+          ctx.moveTo(sx, sy - 7);
+          ctx.lineTo(sx, sy + 7);
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.arc(sx, sy, 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+      // A line fade shows the line it runs along, a round one the circle it reaches.
+      const fade = shape.fade;
+      ctx.setLineDash([4, 4]);
+      if (fade?.type === "line" && fade.from && fade.end) {
+        const [ax, ay] = this.toScreen(fade.from[0], fade.from[1]);
+        const [bx, by] = this.toScreen(fade.end[0], fade.end[1]);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.stroke();
+      } else if (fade?.type === "round" && fade.reach !== undefined) {
+        const [cx, cy] = this.toScreen(fade.x ?? 0, fade.y ?? 0);
+        ctx.beginPath();
+        ctx.arc(cx, cy, fade.reach * R * this.zoom, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
     }
     const points = this.pickedPoints();
     if (!points) return;
@@ -2560,13 +2710,19 @@ export class HullDesigner {
         if (grip?.point !== undefined) this.removeShapePoint(grip.shape, grip.point);
         return;
       }
-      // A point of a shape first: grabbing one is always what the click meant. Then a mount, then
-      // the middle of a segment (which adds one), then the shape itself.
+      // A point of a shape first: grabbing one is always what the click meant. Then a handle of the
+      // picked shape, a mount, the middle of a segment (which adds one), then the shape itself.
       if (grip?.point !== undefined) {
         this.selectShape(grip.shape, false);
         this.point = grip.point;
         this.gesturing = true;
         this.drag = { kind: "point", index: grip.point, moved: false };
+        this.rebuild();
+        return;
+      }
+      if (grip?.handle !== undefined) {
+        this.gesturing = true;
+        this.drag = { kind: "handle", handle: grip.handle, moved: false };
         this.rebuild();
         return;
       }
@@ -2611,7 +2767,19 @@ export class HullDesigner {
         const grip = this.pickShape(sx, sy);
         this.hover = hit?.id ?? null;
         this.hoverPoint = grip?.point ?? null;
-        this.canvas.style.cursor = grip?.point !== undefined ? "grab" : hit ? (hit.kind === "turn" ? "crosshair" : "move") : "default";
+        this.hoverHandle = grip?.handle ?? null;
+        this.canvas.style.cursor = grip?.point !== undefined || grip?.handle !== undefined ? "grab" : hit ? (hit.kind === "turn" ? "crosshair" : "move") : "default";
+        return;
+      }
+      // A handle of the picked shape: its middle, a size, an angle's end or its gradient's.
+      if (this.drag.kind === "handle") {
+        const shape = this.pickedShape();
+        if (shape) {
+          const [x, y] = this.fromScreen(sx, sy);
+          Object.assign(shape, dragHandle(shape, this.drag.handle, [clean(x), clean(y)], event.shiftKey ? 0.05 : 0));
+        }
+        this.drag.moved = true;
+        this.changed(false);
         return;
       }
       // A point of a shape, and the twin mirroring gives it, then a circle or a rect's middle.
@@ -2662,8 +2830,9 @@ export class HullDesigner {
         const shape = this.pickedShape();
         if (shape) {
           const way = event.deltaY > 0 ? 1 : -1;
+          const fine = event.shiftKey ? 0.01 : 0.05;
           if (shape.kind === "circle") {
-            shape.r = clean(Math.max(0.02, (shape.r ?? 0.2) + way * (event.shiftKey ? 0.01 : 0.05)));
+            shape.r = clean(Math.max(0.02, (shape.r ?? 0.2) + way * fine));
             this.changed(false);
             return;
           }
@@ -2672,6 +2841,29 @@ export class HullDesigner {
               shape.w = clean(Math.max(0.02, (shape.w ?? 0.2) + way * 0.05));
               shape.h = clean(Math.max(0.02, (shape.h ?? 0.2) + way * 0.05));
             } else shape.angle = clean(wrapDegrees((shape.angle ?? 0) + way * (event.shiftKey ? 1 : 15)));
+            this.changed(false);
+            return;
+          }
+          if (shape.kind === "ellipse") {
+            if (event.ctrlKey) {
+              const grow = (value: number) => clean(Math.max(0.02, value + way * fine));
+              shape.rx = grow(shape.rx ?? 0.2);
+              shape.ry = grow(shape.ry ?? 0.2);
+            } else shape.angle = clean(wrapDegrees((shape.angle ?? 0) + way * (event.shiftKey ? 1 : 15)));
+            this.changed(false);
+            return;
+          }
+          if (shape.kind === "ring") {
+            if (event.ctrlKey) shape.inner = clean(Math.max(0.01, Math.min((shape.r ?? 0.2) - 0.01, (shape.inner ?? 0.1) + way * 0.05)));
+            else {
+              shape.r = clean(Math.max(0.02, (shape.r ?? 0.2) + way * fine));
+              if ((shape.inner ?? 0) >= shape.r) shape.inner = clean(shape.r - 0.01);
+            }
+            this.changed(false);
+            return;
+          }
+          if (shape.kind === "arc" || shape.kind === "wedge") {
+            shape.r = clean(Math.max(0.02, (shape.r ?? 0.2) + way * fine));
             this.changed(false);
             return;
           }

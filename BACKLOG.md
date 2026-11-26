@@ -461,7 +461,7 @@ start menu cards draw every hull at a scale made for a racer-sized ship. Scale e
 hull's own outline (and its mounts). Maybe part of a later inventory rework.
 
 ## S-57 · Hull designer: ellipse and arc shapes, and a default decal
-- status: specced
+- status: built
 - plan: docs/hull-shapes-plan.md
 - area: Ships and gear
 - from: the user trying hull buying, 2026-11-25

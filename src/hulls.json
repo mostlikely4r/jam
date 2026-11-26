@@ -1733,6 +1733,258 @@
     },
     "mediumTank": {
       "scaleX": 3
+    },
+    "cockpitKite": {
+      "metal": "#2b4a74",
+      "glass": "#a0d7ff",
+      "shapes": [
+        {
+          "kind": "polygon",
+          "role": "body",
+          "points": [
+            [
+              0.25,
+              0
+            ],
+            [
+              -0.125,
+              -0.158333
+            ],
+            [
+              -0.241667,
+              0
+            ],
+            [
+              -0.125,
+              0.158333
+            ]
+          ]
+        },
+        {
+          "kind": "polygon",
+          "role": "glass",
+          "alpha": 0.7,
+          "points": [
+            [
+              0.125,
+              -0.033333
+            ],
+            [
+              -0.091667,
+              -0.108333
+            ],
+            [
+              -0.125,
+              -0.05
+            ]
+          ]
+        }
+      ]
+    },
+    "cockpitBar": {
+      "metal": "#2b4a74",
+      "glass": "#a0d7ff",
+      "shapes": [
+        {
+          "kind": "polygon",
+          "role": "body",
+          "points": [
+            [
+              0.091667,
+              -0.433333
+            ],
+            [
+              -0.091667,
+              -0.466667
+            ],
+            [
+              -0.091667,
+              0.466667
+            ],
+            [
+              0.091667,
+              0.433333
+            ]
+          ]
+        },
+        {
+          "kind": "rect",
+          "role": "glass",
+          "alpha": 0.7,
+          "x": -0.008333,
+          "y": -0.275,
+          "w": 0.066667,
+          "h": 0.25
+        }
+      ]
+    },
+    "cockpitDome": {
+      "metal": "#2b4a74",
+      "glass": "#a0d7ff",
+      "shapes": [
+        {
+          "kind": "ellipse",
+          "role": "body",
+          "x": 0,
+          "y": 0,
+          "rx": 0.2,
+          "ry": 0.15
+        },
+        {
+          "kind": "ellipse",
+          "role": "glass",
+          "alpha": 0.7,
+          "x": -0.041667,
+          "y": -0.05,
+          "rx": 0.075,
+          "ry": 0.0375,
+          "angle": -17.188734
+        }
+      ]
+    },
+    "cockpitVisor": {
+      "metal": "#2b4a74",
+      "glass": "#a0d7ff",
+      "shapes": [
+        {
+          "kind": "polygon",
+          "role": "body",
+          "points": [
+            [
+              0.216667,
+              -0.041667
+            ],
+            [
+              0.15,
+              -0.075
+            ],
+            [
+              -0.216667,
+              -0.075
+            ],
+            [
+              -0.216667,
+              0.075
+            ],
+            [
+              0.15,
+              0.075
+            ],
+            [
+              0.216667,
+              0.041667
+            ]
+          ]
+        },
+        {
+          "kind": "rect",
+          "role": "glass",
+          "alpha": 0.7,
+          "x": -0.041667,
+          "y": -0.0375,
+          "w": 0.216667,
+          "h": 0.025
+        }
+      ]
+    },
+    "tractor": {
+      "metal": "#467870",
+      "rim": "#96e6d2",
+      "glass": "#aaffe6",
+      "shapes": [
+        {
+          "kind": "circle",
+          "role": "body",
+          "x": 0,
+          "y": 0,
+          "r": 0.158333
+        },
+        {
+          "kind": "arc",
+          "role": "rim",
+          "x": -0.033333,
+          "y": 0,
+          "r": 0.158333,
+          "from": -63.025357,
+          "to": 63.025357,
+          "width": 0.6
+        },
+        {
+          "kind": "circle",
+          "role": "glass",
+          "alpha": 0.9,
+          "working": true,
+          "x": 0.033333,
+          "y": 0,
+          "r": 0.045833
+        }
+      ]
+    },
+    "tractorAll": {
+      "metal": "#467870",
+      "rim": "#96e6d2",
+      "glass": "#aaffe6",
+      "shapes": [
+        {
+          "kind": "circle",
+          "role": "body",
+          "x": 0,
+          "y": 0,
+          "r": 0.158333
+        },
+        {
+          "kind": "arc",
+          "role": "rim",
+          "x": -0.033333,
+          "y": 0,
+          "r": 0.158333,
+          "from": -63.025357,
+          "to": 63.025357,
+          "width": 0.6
+        },
+        {
+          "kind": "circle",
+          "role": "glass",
+          "alpha": 0.9,
+          "working": true,
+          "x": 0.033333,
+          "y": 0,
+          "r": 0.045833
+        }
+      ]
+    },
+    "clamp": {
+      "metal": "#467870",
+      "rim": "#96e6d2",
+      "glass": "#aaffe6",
+      "shapes": [
+        {
+          "kind": "circle",
+          "role": "body",
+          "x": 0,
+          "y": 0,
+          "r": 0.158333
+        },
+        {
+          "kind": "arc",
+          "role": "rim",
+          "x": -0.033333,
+          "y": 0,
+          "r": 0.158333,
+          "from": -63.025357,
+          "to": 63.025357,
+          "width": 0.6
+        },
+        {
+          "kind": "circle",
+          "role": "glass",
+          "alpha": 0.9,
+          "working": true,
+          "x": 0.033333,
+          "y": 0,
+          "r": 0.045833
+        }
+      ]
     }
   }
 }

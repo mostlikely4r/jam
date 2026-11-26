@@ -47,78 +47,198 @@ export function hullPalette(hull: Color): ShapePalette {
   return { body: hull, shade: mix(hull, [40, 50, 70], 0.22), rim: [240, 246, 255], glass: mix(hull, [110, 200, 255], 0.6) };
 }
 
-/** The colours a part draws its own shapes in: its metal, its edge colour, and shades of those. */
+/**
+ * The colours a part draws its own shapes in: its metal, its edge colour, and shades of those, or
+ * the shade and glass it names itself.
+ */
 export function partPalette(colours: PartColors = {}): ShapePalette {
   const metal = colours.metal ?? METAL;
   const rim = colours.rim ?? RIM;
-  return { body: metal, shade: mix(metal, [20, 24, 32], 0.4), rim, glass: mix(metal, [170, 255, 230], 0.5) };
+  return {
+    body: metal,
+    shade: colours.shade ?? mix(metal, [20, 24, 32], 0.4),
+    rim,
+    glass: colours.glass ?? mix(metal, [170, 255, 230], 0.5),
+  };
 }
 
 /** Draw order, lower first, as a mount's. */
 const byOrder = (a: ArtShape, b: ArtShape) => (a.order ?? 0) - (b.order ?? 0);
 
+/** A shape's angles, in degrees clockwise, as canvas radians. */
+const radians = (degrees: number) => (degrees * Math.PI) / 180;
+
 /**
- * One shape, in its role's colour: filled, or stroked along its points for the rim. `edge` is
- * what it clips against, if it asks to be clipped and there is one.
+ * The paint a shape draws with: a gradient from its role's colour to `to` or to clear where it has
+ * a fade, else its role's flat colour. `palette` is already worn where the shape is on a part.
+ */
+function paint(ctx: CanvasRenderingContext2D, shape: ArtShape, palette: ShapePalette): string | CanvasGradient {
+  const fade = shape.fade;
+  if (!fade) return rgb(palette[shape.role]);
+  let gradient: CanvasGradient;
+  if (fade.type === "line") {
+    const [fx, fy] = fade.from ?? [0, 0];
+    const [ex, ey] = fade.end ?? [1, 0];
+    gradient = ctx.createLinearGradient(fx * R, fy * R, ex * R, ey * R);
+  } else {
+    const x = (fade.x ?? 0) * R;
+    const y = (fade.y ?? 0) * R;
+    gradient = ctx.createRadialGradient(x, y, 0, x, y, (fade.reach ?? 1) * R);
+  }
+  gradient.addColorStop(0, rgb(palette[shape.role]));
+  gradient.addColorStop(1, fade.to ? rgb(palette[fade.to]) : rgba(palette[shape.role], 0));
+  return gradient;
+}
+
+/** A polygon's lines through its points, closed back to the first unless it's an open line. */
+function polygonPath(ctx: CanvasRenderingContext2D, points: HullPoint[], open: boolean): void {
+  ctx.beginPath();
+  points.forEach(([x, y], i) => (i ? ctx.lineTo(x * R, y * R) : ctx.moveTo(x * R, y * R)));
+  if (!open) ctx.closePath();
+}
+
+/** A ring's two circles, the hole taking the even-odd shape out of the middle. */
+function ringPath(ctx: CanvasRenderingContext2D, x: number, y: number, outer: number, inner: number): void {
+  ctx.beginPath();
+  ctx.arc(x * R, y * R, outer * R, 0, Math.PI * 2);
+  // Moved to the hole's edge, so no line joins the two circles.
+  ctx.moveTo(x * R + inner * R, y * R);
+  ctx.arc(x * R, y * R, inner * R, 0, Math.PI * 2);
+}
+
+/** A wedge: out from the middle along its start angle, round to its end, and back. */
+function wedgePath(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, from: number, to: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x * R, y * R);
+  ctx.arc(x * R, y * R, r * R, radians(from), radians(to));
+  ctx.closePath();
+}
+
+/** A rect in its own turned frame, its corners rounded where its `corner` says. */
+function rectPath(ctx: CanvasRenderingContext2D, shape: ArtShape): void {
+  const w = (shape.w ?? 0) * R;
+  const h = (shape.h ?? 0) * R;
+  ctx.beginPath();
+  if (shape.corner !== undefined) {
+    const corner = Math.min(shape.corner * R, Math.min(w, h) / 2);
+    ctx.roundRect(-w / 2, -h / 2, w, h, corner);
+  } else ctx.rect(-w / 2, -h / 2, w, h);
+}
+
+/**
+ * One shape, in its role's colour or its own gradient: filled, or stroked along its line for the
+ * rim, an arc, or an open polygon. `edge` is what it clips against, if it asks to be clipped and
+ * there is one.
  */
 export function drawShape(ctx: CanvasRenderingContext2D, shape: ArtShape, palette: ShapePalette, edge?: HullPoint[]): void {
-  const colour = palette[shape.role];
   ctx.save();
   if (shape.alpha !== undefined) ctx.globalAlpha *= shape.alpha;
   if (shape.clip && edge && edge.length >= 3) {
     path(ctx, edge.map(([x, y]): Point => [x * R, y * R]));
     ctx.clip();
   }
-  if (shape.role === "rim") {
-    ctx.strokeStyle = rgb(colour);
+  const colour = paint(ctx, shape, palette);
+  const x = (shape.x ?? 0) * R;
+  const y = (shape.y ?? 0) * R;
+  // A line through its points is stroked whatever its role: the rim's, an arc's, an open polygon's.
+  const line = shape.role === "rim" || shape.kind === "arc" || (shape.kind === "polygon" && (shape.open === true || (shape.points?.length ?? 0) === 2));
+  if (line) {
+    ctx.strokeStyle = colour;
     ctx.lineWidth = shape.width ?? EDGE_WIDTH;
-    if (shape.kind === "polygon" && shape.points) {
-      const points = shape.points.map(([x, y]): Point => [x * R, y * R]);
-      if (points.length === 2) {
+    switch (shape.kind) {
+      case "polygon":
+        if (shape.points) polygonPath(ctx, shape.points, shape.open === true || shape.points.length === 2);
+        ctx.stroke();
+        break;
+      case "circle":
         ctx.beginPath();
-        ctx.moveTo(points[0][0], points[0][1]);
-        ctx.lineTo(points[1][0], points[1][1]);
-      } else path(ctx, points);
-      ctx.stroke();
-    } else if (shape.kind === "circle" && shape.r !== undefined) {
-      ctx.beginPath();
-      ctx.arc((shape.x ?? 0) * R, (shape.y ?? 0) * R, shape.r * R, 0, Math.PI * 2);
-      ctx.stroke();
-    } else if (shape.kind === "rect") {
-      ctx.save();
-      ctx.translate((shape.x ?? 0) * R, (shape.y ?? 0) * R);
-      ctx.rotate(((shape.angle ?? 0) * Math.PI) / 180);
-      ctx.strokeRect((-(shape.w ?? 0) * R) / 2, (-(shape.h ?? 0) * R) / 2, (shape.w ?? 0) * R, (shape.h ?? 0) * R);
-      ctx.restore();
+        ctx.arc(x, y, (shape.r ?? 0) * R, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      case "ellipse":
+        ctx.beginPath();
+        ctx.ellipse(x, y, (shape.rx ?? 0) * R, (shape.ry ?? 0) * R, radians(shape.angle ?? 0), 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      case "arc":
+        ctx.beginPath();
+        ctx.arc(x, y, (shape.r ?? 0) * R, radians(shape.from ?? 0), radians(shape.to ?? 0));
+        ctx.stroke();
+        break;
+      case "ring":
+        // Both circles of it, the hole's and the outer one's.
+        for (const r of [shape.r ?? 0, shape.inner ?? 0]) {
+          ctx.beginPath();
+          ctx.arc(x, y, r * R, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        break;
+      case "wedge":
+        wedgePath(ctx, shape.x ?? 0, shape.y ?? 0, shape.r ?? 0, shape.from ?? 0, shape.to ?? 0);
+        ctx.stroke();
+        break;
+      case "rect":
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(radians(shape.angle ?? 0));
+        rectPath(ctx, shape);
+        ctx.stroke();
+        ctx.restore();
+        break;
     }
     ctx.restore();
     return;
   }
-  ctx.fillStyle = rgb(colour);
-  if (shape.kind === "polygon" && shape.points && shape.points.length >= 3) {
-    path(ctx, shape.points.map(([x, y]): Point => [x * R, y * R]));
-    ctx.fill();
-  } else if (shape.kind === "circle" && shape.r !== undefined) {
-    ctx.beginPath();
-    ctx.arc((shape.x ?? 0) * R, (shape.y ?? 0) * R, shape.r * R, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (shape.kind === "rect") {
-    ctx.save();
-    ctx.translate((shape.x ?? 0) * R, (shape.y ?? 0) * R);
-    ctx.rotate(((shape.angle ?? 0) * Math.PI) / 180);
-    ctx.fillRect((-(shape.w ?? 0) * R) / 2, (-(shape.h ?? 0) * R) / 2, (shape.w ?? 0) * R, (shape.h ?? 0) * R);
-    ctx.restore();
+  ctx.fillStyle = colour;
+  switch (shape.kind) {
+    case "polygon":
+      if (shape.points && shape.points.length >= 3) {
+        polygonPath(ctx, shape.points, false);
+        ctx.fill();
+      }
+      break;
+    case "circle":
+      ctx.beginPath();
+      ctx.arc(x, y, (shape.r ?? 0) * R, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case "ellipse":
+      ctx.beginPath();
+      ctx.ellipse(x, y, (shape.rx ?? 0) * R, (shape.ry ?? 0) * R, radians(shape.angle ?? 0), 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case "ring":
+      ringPath(ctx, shape.x ?? 0, shape.y ?? 0, shape.r ?? 0, shape.inner ?? 0);
+      ctx.fill("evenodd");
+      break;
+    case "wedge":
+      wedgePath(ctx, shape.x ?? 0, shape.y ?? 0, shape.r ?? 0, shape.from ?? 0, shape.to ?? 0);
+      ctx.fill();
+      break;
+    case "rect":
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(radians(shape.angle ?? 0));
+      rectPath(ctx, shape);
+      ctx.fill();
+      ctx.restore();
+      break;
+    case "arc":
+      // An arc is only ever a line: the branch above never falls through to here.
+      break;
   }
   ctx.restore();
 }
 
 /**
  * Shapes drawn as a hull draws them: the ones that aren't lit edges first, in order, then the
- * rim ones, which are lit edges and go over everything. `edge` is there so clipped shapes can clip.
+ * rim ones, which are lit edges and go over everything. `edge` is there so clipped shapes can clip;
+ * `wear` skips the shapes that only show while the part works.
  */
-export function drawShapes(ctx: CanvasRenderingContext2D, shapes: ArtShape[], palette: ShapePalette, edge?: HullPoint[]): void {
-  for (const shape of shapes.filter((each) => each.role !== "rim").sort(byOrder)) drawShape(ctx, shape, palette, edge);
-  for (const shape of shapes.filter((each) => each.role === "rim").sort(byOrder)) drawShape(ctx, shape, palette, edge);
+export function drawShapes(ctx: CanvasRenderingContext2D, shapes: ArtShape[], palette: ShapePalette, edge?: HullPoint[], wear = 0): void {
+  const shown = shapes.filter((each) => !(each.working === true && wear >= DAMAGED_AT));
+  for (const shape of shown.filter((each) => each.role !== "rim").sort(byOrder)) drawShape(ctx, shape, palette, edge);
+  for (const shape of shown.filter((each) => each.role === "rim").sort(byOrder)) drawShape(ctx, shape, palette, edge);
 }
 
 /** What the art needs to know about a ship. */
@@ -157,6 +277,13 @@ export function colorOf(css: string, fallback: Color = METAL): Color {
 }
 /** One colour part of the way to another, as the art blends its shades. */
 export const mix = (a: Color, b: Color, t: number): Color => [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * t)) as Color;
+
+/** A colour as `#rrggbb`, the way the file and the pickers write it. */
+const hex = (c: Color) => `#${c.map((each) => each.toString(16).padStart(2, "0")).join("")}`;
+
+/** The shade and glass a part's art starts from, mixed from its metal: the pickers show these. */
+export const SHADE_HEX = hex(partPalette().shade);
+export const GLASS_HEX = hex(partPalette().glass);
 const partColor = (wear: number, base: Color): Color => (wear >= 1 ? DEAD : wear >= DAMAGED_AT ? mix(base, HOT, 0.75) : base);
 
 function path(ctx: CanvasRenderingContext2D, points: Point[]): void {
@@ -183,10 +310,12 @@ function outsideParts(ship: ArtShip): { id: MountId; part: PartId; x: number; y:
   return out;
 }
 
-/** The colours a part draws in, where its own art changes them from the code's: the metal, and the edge. */
+/** The colours a part's own art names for itself: its metal, its edge, its shade and its glass. */
 export interface PartColors {
   metal?: Color;
   rim?: Color;
+  shade?: Color;
+  glass?: Color;
 }
 
 /**
@@ -243,22 +372,6 @@ export function drawPart(ctx: CanvasRenderingContext2D, kind: PartKind, wear: nu
       ctx.lineTo(6.6, 0);
       ctx.stroke();
     }
-  } else if (kind === "tractor") {
-    ctx.fillStyle = rgb(partColor(wear, colours.metal ?? [70, 120, 112]));
-    ctx.beginPath();
-    ctx.arc(0, 0, 1.9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = rgb(partColor(wear, colours.rim ?? [150, 230, 210]));
-    ctx.lineWidth = 0.6;
-    ctx.beginPath();
-    ctx.arc(-0.4, 0, 1.9, -1.1, 1.1);
-    ctx.stroke();
-    if (wear < DAMAGED_AT) {
-      ctx.fillStyle = "rgba(170,255,230,0.9)";
-      ctx.beginPath();
-      ctx.arc(0.4, 0, 0.55, 0, Math.PI * 2);
-      ctx.fill();
-    }
   } else if (kind === "computer" || kind === "section" || kind === "tank") {
     // Inside the hull: only the designer shows these, as an outline.
     ctx.strokeStyle = "rgba(200,215,240,0.7)";
@@ -278,7 +391,9 @@ function artColours(id: PartId): PartColors | undefined {
   const colours: PartColors = {};
   if (art?.metal) colours.metal = colorOf(art.metal, METAL);
   if (art?.rim) colours.rim = colorOf(art.rim, RIM);
-  return colours.metal || colours.rim ? colours : undefined;
+  if (art?.shade) colours.shade = colorOf(art.shade, METAL);
+  if (art?.glass) colours.glass = colorOf(art.glass, METAL);
+  return colours.metal || colours.rim || colours.shade || colours.glass ? colours : undefined;
 }
 
 /**
@@ -296,48 +411,19 @@ export function drawPartArt(ctx: CanvasRenderingContext2D, id: PartId, wear: num
   if (art?.shapes && art.shapes.length > 0) {
     const palette = partPalette(colours);
     const worn: ShapePalette = { body: partColor(wear, palette.body), shade: partColor(wear, palette.shade), rim: partColor(wear, palette.rim), glass: partColor(wear, palette.glass) };
-    drawShapes(ctx, art.shapes, worn);
+    drawShapes(ctx, art.shapes, worn, undefined, wear);
   } else drawPart(ctx, part.kind, wear, main, colours);
   ctx.restore();
 }
 
-/** A decal part drawn at the origin facing +x. Cockpit glass has art of its own; any other part shows as it would fitted. */
+/**
+ * A decal part drawn at the origin facing +x: its shapes in the file, drawn as any fitted part is,
+ * at no wear. Cockpit glass and every other decal come through here.
+ */
 export function drawDecal(ctx: CanvasRenderingContext2D, id: PartId): void {
-  const glass = "#2b4a74";
-  const glint = "rgba(160,215,255,0.7)";
   ctx.lineJoin = "round";
-  if (id === "cockpitKite") {
-    ctx.fillStyle = glass;
-    path(ctx, [[3, 0], [-1.5, -1.9], [-2.9, 0], [-1.5, 1.9]]);
-    ctx.fill();
-    ctx.fillStyle = glint;
-    path(ctx, [[1.5, -0.4], [-1.1, -1.3], [-1.5, -0.6]]);
-    ctx.fill();
-  } else if (id === "cockpitBar") {
-    ctx.fillStyle = glass;
-    path(ctx, [[1.1, -5.2], [-1.1, -5.6], [-1.1, 5.6], [1.1, 5.2]]);
-    ctx.fill();
-    ctx.fillStyle = glint;
-    ctx.fillRect(-0.5, -4.8, 0.8, 3);
-  } else if (id === "cockpitDome") {
-    ctx.fillStyle = glass;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 2.4, 1.8, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = glint;
-    ctx.beginPath();
-    ctx.ellipse(-0.5, -0.6, 0.9, 0.45, -0.3, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (id === "cockpitVisor") {
-    ctx.fillStyle = glass;
-    path(ctx, [[2.6, -0.5], [1.8, -0.9], [-2.6, -0.9], [-2.6, 0.9], [1.8, 0.9], [2.6, 0.5]]);
-    ctx.fill();
-    ctx.fillStyle = glint;
-    ctx.fillRect(-1.8, -0.6, 2.6, 0.3);
-  } else {
-    const part = partOf(id);
-    drawPartArt(ctx, id, 0, part.engine !== undefined);
-  }
+  const part = partOf(id);
+  drawPartArt(ctx, id, 0, part.engine !== undefined);
 }
 
 /**

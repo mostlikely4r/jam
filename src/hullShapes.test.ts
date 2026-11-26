@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   addPoint,
   copyHull,
+  DAMAGED_AT,
   dragPoint,
   HULL_EDGE,
   HULL_SHAPES,
@@ -21,14 +22,17 @@ import {
   onGrid,
   PART_ART,
   removePoint,
+  resetPartArt,
+  SHIPPED_SHIPS,
   shipFileNow,
   twinOf,
   useShipFile,
   type ArtShape,
   type Hull,
+  type ShapeFade,
 } from "./fitting";
-import { SHIP_MODELS } from "./parts";
-import { drawHull, drawPartArt } from "./shipArt";
+import { SHIP_MODELS, type PartId } from "./parts";
+import { drawDecal, drawHull, drawPartArt, drawShape, mix, partPalette, type ShapePalette } from "./shipArt";
 
 /** A hull radius, in the world units the old `src/shipArt.ts` drew in. */
 const R = 12;
@@ -352,15 +356,491 @@ describe("a part drawn with shapes of its own", () => {
   it("keeps a part's shapes in the ship file", () => {
     withFile(
       () => {
-        PART_ART.tractor = { shapes: bell };
+        PART_ART.gun1 = { shapes: bell };
       },
       () => {
         const file = shipFileNow();
-        expect(file.partArt?.tractor?.shapes).toEqual(bell);
+        expect(file.partArt?.gun1?.shapes).toEqual(bell);
         useShipFile(file);
-        expect(PART_ART.tractor?.shapes).toEqual(bell);
+        expect(PART_ART.gun1?.shapes).toEqual(bell);
       },
     );
-    expect(PART_ART.tractor).toBeUndefined();
+    // A part the file draws nothing for keeps the code's own art once the file is read back.
+    expect(PART_ART.gun1).toBeUndefined();
+  });
+});
+
+/** What one painting call drew: the path, and the colour (with its alpha) it was painted in. */
+interface Painted {
+  kind: "fill" | "stroke";
+  path: (string | number)[][];
+  colour: [number, number, number, number];
+  /** A fill's rule, where one was given. */
+  rule?: string;
+  /** A stroke's width. */
+  width?: number;
+}
+
+/**
+ * A canvas that remembers what was painted rather than drawing it: each path as it ends up in the
+ * ship's own frame, so a turned rect and a plain one compare, and each colour as four numbers.
+ */
+function painter(): { ctx: CanvasRenderingContext2D; painted: Painted[]; stops: (string | number)[][] } {
+  const painted: Painted[] = [];
+  const stops: (string | number)[][] = [];
+  let path: (string | number)[][] = [];
+  let fillStyle = "#000000";
+  let strokeStyle = "#000000";
+  let lineWidth = 1;
+  let alpha = 1;
+  type Frame = { fillStyle: string; strokeStyle: string; lineWidth: number; alpha: number; m: number[] };
+  const stack: Frame[] = [];
+  // a, b, c, d, e, f: x becomes a·x + c·y + e, y becomes b·x + d·y + f.
+  let m = [1, 0, 0, 1, 0, 0];
+  const at = (x: number, y: number): [number, number] => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+  const turned = Math.atan2(m[1], m[0]);
+  const corners = (x: number, y: number, w: number, h: number) => {
+    const points = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]].map(([px, py]) => at(px, py));
+    path = [["M", ...points[0]], ["L", ...points[1]], ["L", ...points[2]], ["L", ...points[3]], ["Z"]];
+  };
+  const colour = (css: string, a: number): [number, number, number, number] => {
+    const hex = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(css.trim());
+    if (hex) return [parseInt(hex[1], 16), parseInt(hex[2], 16), parseInt(hex[3], 16), a];
+    const parts = /^rgba?\(([^)]+)\)$/.exec(css.trim());
+    if (!parts) return [0, 0, 0, a];
+    const numbers = parts[1].split(",").map((each) => Number(each.trim()));
+    return [numbers[0], numbers[1], numbers[2], (numbers[3] ?? 1) * a];
+  };
+  const paint = (kind: "fill" | "stroke", rule?: string) => {
+    painted.push({
+      kind,
+      path: [...path],
+      colour: colour(kind === "fill" ? fillStyle : strokeStyle, alpha),
+      ...(rule ? { rule } : {}),
+      ...(kind === "stroke" ? { width: lineWidth } : {}),
+    });
+  };
+  const gradient = () =>
+    ({
+      addColorStop: (offset: number, css: string) => void stops.push([offset, css]),
+    }) as unknown as CanvasGradient;
+  const ctx = new Proxy({} as CanvasRenderingContext2D, {
+    get: (_target, name: string) => {
+      switch (name) {
+        case "globalAlpha":
+          return alpha;
+        case "save":
+          return () => stack.push({ fillStyle, strokeStyle, lineWidth, alpha, m });
+        case "restore":
+          return () => {
+            const frame = stack.pop();
+            if (!frame) return;
+            fillStyle = frame.fillStyle;
+            strokeStyle = frame.strokeStyle;
+            lineWidth = frame.lineWidth;
+            alpha = frame.alpha;
+            m = frame.m;
+          };
+        case "translate":
+          return (x: number, y: number) => {
+            m = [m[0], m[1], m[2], m[3], m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+          };
+        case "rotate":
+          return (a: number) => {
+            const cos = Math.cos(a);
+            const sin = Math.sin(a);
+            m = [m[0] * cos + m[2] * sin, m[1] * cos + m[3] * sin, -m[0] * sin + m[2] * cos, -m[1] * sin + m[3] * cos, m[4], m[5]];
+          };
+        case "scale":
+          return (sx: number, sy: number) => {
+            m = [m[0] * sx, m[1] * sx, m[2] * sy, m[3] * sy, m[4], m[5]];
+          };
+        case "beginPath":
+          return () => {
+            path = [];
+          };
+        case "moveTo":
+          return (x: number, y: number) => {
+            path.push(["M", ...at(x, y)]);
+          };
+        case "lineTo":
+          return (x: number, y: number) => {
+            path.push(["L", ...at(x, y)]);
+          };
+        case "closePath":
+          return () => {
+            path.push(["Z"]);
+          };
+        case "arc":
+          return (x: number, y: number, r: number, from: number, to: number) => {
+            path.push(["A", ...at(x, y), r, from + turned, to + turned]);
+          };
+        case "ellipse":
+          return (x: number, y: number, rx: number, ry: number, rotation: number) => {
+            path.push(["E", ...at(x, y), rx, ry, rotation + turned]);
+          };
+        case "rect":
+          return (x: number, y: number, w: number, h: number) => corners(x, y, w, h);
+        case "roundRect":
+          return (x: number, y: number, w: number, h: number, corner: number) => {
+            corners(x, y, w, h);
+            path.push(["C", corner]);
+          };
+        case "fillRect":
+          return (x: number, y: number, w: number, h: number) => {
+            corners(x, y, w, h);
+            paint("fill");
+          };
+        case "strokeRect":
+          return (x: number, y: number, w: number, h: number) => {
+            corners(x, y, w, h);
+            paint("stroke");
+          };
+        case "fill":
+          return (rule?: string) => paint("fill", rule);
+        case "stroke":
+          return () => paint("stroke");
+        case "createLinearGradient":
+        case "createRadialGradient":
+          return gradient;
+        default:
+          return () => {};
+      }
+    },
+    set: (_target, name: string, value) => {
+      if (name === "fillStyle") fillStyle = String(value);
+      else if (name === "strokeStyle") strokeStyle = String(value);
+      else if (name === "lineWidth") lineWidth = Number(value);
+      else if (name === "globalAlpha") alpha = Number(value);
+      return true;
+    },
+  });
+  return { ctx, painted, stops };
+}
+
+/** Whether two recorded values are the same to a tolerance, numbers included. */
+function alike(a: unknown, b: unknown, tolerance = 1e-4): boolean {
+  if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) <= tolerance;
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((each, i) => alike(each, b[i], tolerance));
+  if (a && b && typeof a === "object" && typeof b === "object") {
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every((key) => alike((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key], tolerance));
+  }
+  return a === b;
+}
+
+/** The paints of one kind, in the order they were made: the rim always goes over everything. */
+const ofKind = (painted: Painted[], kind: "fill" | "stroke") => painted.filter((each) => each.kind === kind);
+
+/** The colours the code's own art draws a part in. */
+const plainPalette = (): ShapePalette => ({ body: [111, 122, 140], shade: [75, 83, 97], rim: [190, 200, 216], glass: [141, 189, 185] });
+
+describe("the shape kinds the editor adds", () => {
+  /** What one shape paints, in a part's colours. */
+  const draw = (shape: ArtShape) => {
+    const canvas = painter();
+    drawShape(canvas.ctx, shape, partPalette());
+    return canvas;
+  };
+
+  it("draws an ellipse, turned and filled", () => {
+    const { painted } = draw({ kind: "ellipse", role: "glass", x: 0.5, y: 0.1, rx: 0.2, ry: 0.1, angle: 30 });
+    expect(painted).toHaveLength(1);
+    expect(painted[0].kind).toBe("fill");
+    // Its middle is ×12, as every hull unit is; its turn is the file's degrees in radians.
+    expect(painted[0].path[0][0]).toBe("E");
+    expect(alike(painted[0].path[0].slice(1, 5), [6, 1.2, 2.4, 1.2])).toBe(true);
+    expect(painted[0].path[0][5]).toBeCloseTo(Math.PI / 6, 6);
+  });
+
+  it("draws an arc as a line, whatever its role, with its own width", () => {
+    const { painted } = draw({ kind: "arc", role: "glass", x: 0, y: 0, r: 0.2, from: -45, to: 45, width: 0.6 });
+    expect(painted).toHaveLength(1);
+    const stroke = painted[0];
+    expect(stroke.kind).toBe("stroke");
+    expect(stroke.width).toBe(0.6);
+    expect(stroke.path[0][0]).toBe("A");
+    expect(stroke.path[0][3]).toBeCloseTo(2.4, 6);
+    expect(stroke.path[0][4]).toBeCloseTo(-Math.PI / 4, 6);
+    expect(stroke.path[0][5]).toBeCloseTo(Math.PI / 4, 6);
+  });
+
+  it("draws a ring with its hole taken out, and both its circles for a rim", () => {
+    const filled = draw({ kind: "ring", role: "body", x: 0, y: 0, r: 0.3, inner: 0.1 });
+    expect(filled.painted).toHaveLength(1);
+    expect(filled.painted[0].rule).toBe("evenodd");
+    // The outer circle, then the hole, with no line joining them.
+    expect(filled.painted[0].path.map(([name]) => name)).toEqual(["A", "M", "A"]);
+    expect(filled.painted[0].path[0][3]).toBeCloseTo(3.6, 6);
+    expect(filled.painted[0].path[2][3]).toBeCloseTo(1.2, 6);
+    const rimmed = draw({ kind: "ring", role: "rim", x: 0, y: 0, r: 0.3, inner: 0.1 });
+    expect(rimmed.painted).toHaveLength(2);
+    expect(rimmed.painted.every((each) => each.kind === "stroke")).toBe(true);
+  });
+
+  it("draws a wedge out from its middle, both of its straight sides", () => {
+    const { painted } = draw({ kind: "wedge", role: "shade", x: 0.1, y: 0, r: 0.4, from: -30, to: 30 });
+    expect(painted).toHaveLength(1);
+    expect(painted[0].path.map(([name]) => name)).toEqual(["M", "A", "Z"]);
+    expect(painted[0].path[0].slice(1)).toEqual(expect.arrayContaining([]));
+    expect(alike(painted[0].path[0].slice(1), [1.2, 0])).toBe(true);
+    expect(painted[0].path[2]).toEqual(["Z"]);
+  });
+
+  it("draws a rounded rect in its own turned frame, and a square one the same way", () => {
+    const round = draw({ kind: "rect", role: "shade", x: 0, y: 0, w: 0.4, h: 0.2, corner: 0.05 });
+    expect(round.painted).toHaveLength(1);
+    expect(round.painted[0].path.at(-1)![0]).toBe("C");
+    expect(Number(round.painted[0].path.at(-1)![1])).toBeCloseTo(0.6, 6);
+    const square = draw({ kind: "rect", role: "shade", x: 0, y: 0, w: 0.4, h: 0.2 });
+    expect(square.painted[0].path.some(([name]) => name === "C")).toBe(false);
+    // A rect 60° round puts its corners where the turn does: the near corner moves from (2.4, 1.2)
+    // to the side it turns to.
+    const turned = draw({ kind: "rect", role: "shade", x: 0, y: 0, w: 0.4, h: 0.2, angle: 60 });
+    const corner = turned.painted[0].path[0];
+    expect(Number(corner[1])).toBeCloseTo(-2.4 * Math.cos(Math.PI / 3) + 1.2 * Math.sin(Math.PI / 3), 6);
+  });
+
+  it("draws an open line through its points, and closes the same polygon without `open`", () => {
+    const line = draw({ kind: "polygon", role: "shade", points: [[0, -0.2], [0.4, 0], [0, 0.2]], open: true, width: 0.3 });
+    expect(line.painted).toHaveLength(1);
+    expect(line.painted[0].kind).toBe("stroke");
+    expect(line.painted[0].path.some(([name]) => name === "Z")).toBe(false);
+    expect(line.painted[0].width).toBe(0.3);
+    const filled = draw({ kind: "polygon", role: "shade", points: [[0, -0.2], [0.4, 0], [0, 0.2]] });
+    expect(filled.painted[0].kind).toBe("fill");
+    expect(filled.painted[0].path.some(([name]) => name === "Z")).toBe(true);
+  });
+
+  it("paints in the gradient's own two colours, and fades to clear where it has no `to`", () => {
+    const toGlass: ArtShape = { kind: "circle", role: "body", x: 0, y: 0, r: 0.3, fade: { type: "line", to: "glass", from: [-0.3, 0], end: [0.3, 0] } };
+    const fading = painter();
+    drawShape(fading.ctx, toGlass, partPalette());
+    expect(fading.stops).toEqual([
+      [0, "rgb(111,122,140)"],
+      [1, "rgb(141,189,185)"],
+    ]);
+    const clear: ArtShape = { kind: "circle", role: "body", x: 0, y: 0, r: 0.3, fade: { type: "round", x: 0.1, y: 0, reach: 0.3 } };
+    const round = painter();
+    drawShape(round.ctx, clear, plainPalette());
+    expect(round.stops.map(([, css]) => css)).toEqual(["rgb(111,122,140)", "rgba(111,122,140,0)"]);
+  });
+});
+
+describe("reading the shapes the new kinds are stored as", () => {
+  it("drops each one that can't draw, and keeps the ones that can", () => {
+    const file = shipFileNow();
+    try {
+      file.hulls.racer.shapes = [
+        { kind: "ellipse", role: "glass", x: 0, y: 0, rx: 0.3 } as ArtShape,
+        { kind: "ellipse", role: "glass", x: 0, y: 0, rx: 0.3, ry: 0.2 },
+        { kind: "arc", role: "rim", x: 0, y: 0, r: 0.3, from: 30, to: 30 } as ArtShape,
+        { kind: "arc", role: "rim", x: 0, y: 0, r: 0.3, from: 0, to: 90, width: 0.5 },
+        { kind: "ring", role: "shade", x: 0, y: 0, r: 0.3, inner: 0.3 } as ArtShape,
+        { kind: "ring", role: "shade", x: 0, y: 0, r: 0.3, inner: 0.1 },
+        { kind: "wedge", role: "shade", x: 0, y: 0, from: 0, to: 90 } as ArtShape,
+        { kind: "polygon", role: "shade", open: true, points: [[0, 0]] } as ArtShape,
+        { kind: "polygon", role: "shade", open: true, points: [[0, 0], [0.2, 0.2]], width: 0.4 },
+        // A corner past half the shorter side comes back at half of it.
+        { kind: "rect", role: "shade", x: 0, y: 0, w: 0.4, h: 0.2, corner: 0.9 },
+        // A fade nobody can draw leaves the shape flat, but keeps the shape. The last one lies about
+        // its role on purpose, the way a hand-edited file could.
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, fade: { type: "line", from: [0, 0] } } as ArtShape,
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, fade: { type: "round", x: 0, y: 0, reach: 0, to: "glass" } } as ArtShape,
+        {
+          kind: "circle",
+          role: "body",
+          x: 0,
+          y: 0,
+          r: 0.2,
+          fade: { type: "round", x: 0, y: 0, reach: 0.2, to: "nonsense" } as unknown as ShapeFade,
+        } as ArtShape,
+      ];
+      useShipFile(file);
+      expect(hullShapes("racer").map((shape) => shape.kind)).toEqual(["ellipse", "arc", "ring", "polygon", "rect", "circle", "circle", "circle"]);
+      expect(hullShapes("racer")[4].corner).toBeCloseTo(0.1, 6);
+      expect(hullShapes("racer")[3].open).toBe(true);
+      expect(hullShapes("racer")[3].width).toBeCloseTo(0.4, 6);
+      // Each of the last three keeps its reach and loses the gradient it can't draw.
+      for (const shape of hullShapes("racer").slice(5)) expect(shape.fade).toBeUndefined();
+    } finally {
+      useShipFile(file);
+    }
+  });
+
+  it("keeps every new field through a save and a read", () => {
+    const shapes: ArtShape[] = [
+      { kind: "ellipse", role: "glass", x: 0.1, y: 0, rx: 0.3, ry: 0.2, angle: 30 },
+      { kind: "arc", role: "rim", x: 0, y: 0, r: 0.3, from: -45, to: 45, width: 0.5 },
+      { kind: "ring", role: "shade", x: 0, y: 0, r: 0.3, inner: 0.1 },
+      { kind: "wedge", role: "glass", x: 0, y: 0, r: 0.4, from: 0, to: 90, alpha: 0.5, order: 2 },
+      { kind: "rect", role: "shade", x: 0, y: 0, w: 0.4, h: 0.2, corner: 0.05 },
+      { kind: "polygon", role: "glass", points: [[0, 0], [0.3, 0]], open: true, width: 0.4 },
+      { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, fade: { type: "line", to: "rim", from: [-0.2, 0], end: [0.2, 0] } },
+      { kind: "circle", role: "body", x: 0.1, y: 0, r: 0.2, working: true, fade: { type: "round", x: 0.1, y: 0, reach: 0.2 } },
+    ];
+    withFile(
+      () => HULL_SHAPES.racer.splice(0, HULL_SHAPES.racer.length, ...shapes),
+      () => {
+        const file = shipFileNow();
+        useShipFile(file);
+        expect(hullShapes("racer")).toEqual(shapes);
+        expect(shipFileNow()).toEqual(file);
+      },
+    );
+  });
+
+  it("draws a shape only while its part works, and always on a hull, which has no wear", () => {
+    const glow: ArtShape = { kind: "circle", role: "glass", x: 0.1, y: 0, r: 0.05, working: true };
+    withFile(
+      () => {
+        PART_ART.gun1 = { shapes: [{ kind: "circle", role: "body", x: 0, y: 0, r: 0.1 }, glow] };
+      },
+      () => {
+        const whole = painter();
+        drawPartArt(whole.ctx, "gun1", 0);
+        expect(ofKind(whole.painted, "fill")).toHaveLength(2);
+        const damaged = painter();
+        drawPartArt(damaged.ctx, "gun1", DAMAGED_AT);
+        // The body is still there, scorched; the glow has gone out.
+        expect(ofKind(damaged.painted, "fill")).toHaveLength(1);
+      },
+    );
+    const hull = painter();
+    drawShape(hull.ctx, glow, partPalette(), undefined);
+    expect(ofKind(hull.painted, "fill")).toHaveLength(1);
+  });
+
+  it("keeps a part's own shade and glass, and mixes the code's without them", () => {
+    expect(partPalette({ shade: [1, 2, 3], glass: [4, 5, 6] })).toMatchObject({ shade: [1, 2, 3], glass: [4, 5, 6] });
+    expect(partPalette({ metal: [111, 122, 140] })).toMatchObject({ shade: [75, 83, 97], glass: [141, 189, 185] });
+    withFile(
+      () => {
+        PART_ART.gun1 = { shade: "#010203", glass: "#040506" };
+      },
+      () => {
+        useShipFile(shipFileNow());
+        expect(PART_ART.gun1).toMatchObject({ shade: "#010203", glass: "#040506" });
+      },
+    );
+  });
+});
+
+/**
+ * How the code drew each cockpit and the tractor, kept as the record the file's own art has to
+ * match: the same paths, in the same colours, at rest and damaged.
+ */
+function codedArt(ctx: CanvasRenderingContext2D, id: PartId, wear = 0): void {
+  const glass = "#2b4a74";
+  const glint = "rgba(160,215,255,0.7)";
+  const hot: [number, number, number] = [255, 138, 58];
+  const dead: [number, number, number] = [46, 42, 40];
+  const worn = (base: [number, number, number]) => (wear >= 1 ? dead : wear >= DAMAGED_AT ? mix(base, hot, 0.75) : base);
+  const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
+  const path = (points: [number, number][]) => {
+    ctx.beginPath();
+    points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+  };
+  ctx.lineJoin = "round";
+  if (id === "cockpitKite") {
+    ctx.fillStyle = glass;
+    path([[3, 0], [-1.5, -1.9], [-2.9, 0], [-1.5, 1.9]]);
+    ctx.fill();
+    ctx.fillStyle = glint;
+    path([[1.5, -0.4], [-1.1, -1.3], [-1.5, -0.6]]);
+    ctx.fill();
+  } else if (id === "cockpitBar") {
+    ctx.fillStyle = glass;
+    path([[1.1, -5.2], [-1.1, -5.6], [-1.1, 5.6], [1.1, 5.2]]);
+    ctx.fill();
+    ctx.fillStyle = glint;
+    ctx.fillRect(-0.5, -4.8, 0.8, 3);
+  } else if (id === "cockpitDome") {
+    ctx.fillStyle = glass;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 2.4, 1.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = glint;
+    ctx.beginPath();
+    ctx.ellipse(-0.5, -0.6, 0.9, 0.45, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (id === "cockpitVisor") {
+    ctx.fillStyle = glass;
+    path([[2.6, -0.5], [1.8, -0.9], [-2.6, -0.9], [-2.6, 0.9], [1.8, 0.9], [2.6, 0.5]]);
+    ctx.fill();
+    ctx.fillStyle = glint;
+    ctx.fillRect(-1.8, -0.6, 2.6, 0.3);
+  } else {
+    ctx.fillStyle = rgb(worn([70, 120, 112]));
+    ctx.beginPath();
+    ctx.arc(0, 0, 1.9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = rgb(worn([150, 230, 210]));
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.arc(-0.4, 0, 1.9, -1.1, 1.1);
+    ctx.stroke();
+    if (wear < DAMAGED_AT) {
+      ctx.fillStyle = "rgba(170,255,230,0.9)";
+      ctx.beginPath();
+      ctx.arc(0.4, 0, 0.55, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+describe("the art the file now draws for the cockpits and the tractor", () => {
+  const cockpits: PartId[] = ["cockpitKite", "cockpitBar", "cockpitDome", "cockpitVisor"];
+
+  it("draws the cockpit glass and its glint as the code did", () => {
+    for (const id of cockpits) {
+      const was = painter();
+      codedArt(was.ctx, id);
+      const now = painter();
+      drawDecal(now.ctx, id);
+      expect(alike(now.painted, was.painted)).toBe(true);
+    }
+  });
+
+  it("draws the tractor as the code did, at rest and damaged", () => {
+    for (const wear of [0, DAMAGED_AT, 1]) {
+      const was = painter();
+      codedArt(was.ctx, "tractor", wear);
+      const now = painter();
+      drawPartArt(now.ctx, "tractor", wear);
+      // The rim always draws over everything, so the fills keep their own order and so do the
+      // strokes: the glow sits inside the arc's circle, so which of them goes first isn't seen.
+      expect(alike(ofKind(now.painted, "fill"), ofKind(was.painted, "fill"))).toBe(true);
+      expect(alike(ofKind(now.painted, "stroke"), ofKind(was.painted, "stroke"))).toBe(true);
+    }
+  });
+
+  it("draws the clamp and the all-round tractor the same way, as they shared one drawing", () => {
+    for (const id of ["tractorAll", "clamp"] as PartId[]) {
+      const now = painter();
+      drawPartArt(now.ctx, id, 0);
+      const was = painter();
+      codedArt(was.ctx, "tractor", 0);
+      expect(alike(ofKind(now.painted, "fill"), ofKind(was.painted, "fill"))).toBe(true);
+      expect(alike(ofKind(now.painted, "stroke"), ofKind(was.painted, "stroke"))).toBe(true);
+    }
+  });
+
+  it("puts a part back to the shipped drawing when its art is reset", () => {
+    withFile(
+      () => {
+        PART_ART.tractor = { metal: "#000000" };
+        PART_ART.gun1 = { metal: "#000000" };
+      },
+      () => {
+        resetPartArt("tractor");
+        // The shipped file's shapes come back, not nothing: the code's tractor drawing is gone.
+        expect(PART_ART.tractor).toEqual(SHIPPED_SHIPS.partArt?.tractor);
+        // A part the file draws nothing for goes back to the code's art.
+        resetPartArt("gun1");
+        expect(PART_ART.gun1).toBeUndefined();
+      },
+    );
   });
 });

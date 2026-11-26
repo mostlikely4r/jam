@@ -2,17 +2,6 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-36 · Hull designer shapes: new kinds, gradients, default shade, code art to the file · build
-- state: queued
-- who: cheap
-- backlog: S-57
-- plan: docs/hull-shapes-plan.md
-- added: 2026-11-26
-
-One build, no stop: the shape kinds and fade, the editor's handles, part colours, then the cockpit
-and tractor art moved into the file with a looks-the-same test.
-cheap: precise plan, and the old drawing kept as a test fixture catches any drift.
-
 ## Q-30 · Nothing vanishes in view · build
 - state: queued
 - who: strong
@@ -166,6 +155,18 @@ moves over, the old bay to the locker; ore nearest the entry sells first.
 cheap: the spec is settled in S-44.
 
 ## Done
+
+## Q-36 · Hull designer shapes: new kinds, gradients, default shade, code art to the file · build
+- state: done
+- done: 2026-11-26
+- who: cheap
+- backlog: S-57
+- plan: docs/hull-shapes-plan.md
+- added: 2026-11-26
+
+One build, no stop: the shape kinds and fade, the editor's handles, part colours, then the cockpit
+and tractor art moved into the file with a looks-the-same test.
+cheap: precise plan, and the old drawing kept as a test fixture catches any drift.
 
 ## Q-24 · Hull designer: ellipse and arc shapes, a default decal · spec
 - state: done

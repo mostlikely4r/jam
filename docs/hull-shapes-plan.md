@@ -1,6 +1,6 @@
 # Hull shapes plan
 
-Written 2026-11-26, from Q-24 / S-57. Nothing here is built yet.
+Written 2026-11-26, from Q-24 / S-57. Built 2026-11-26 (Q-36).
 
 ## Why
 
@@ -106,7 +106,8 @@ calls `drawPartArt` for anything else. Once the branches are gone, every decal g
 
 ## What to build
 
-1. **The shape kinds and the fade, drawn and read.** In `src/fitting.ts`, `ArtShape.kind` gains
+1. **The shape kinds and the fade, drawn and read.** *built*
+   In `src/fitting.ts`, `ArtShape.kind` gains
    `ellipse`, `arc`, `ring` and `wedge`. It also gains the fields above (`rx`, `ry`, `from`, `to`,
    `inner`, `corner`, `open`, `fade`, `working`), each with a doc comment in the file's style.
    `readShape` reads them with the same care it takes now, dropping a shape that can't draw:
@@ -123,7 +124,8 @@ calls `drawPartArt` for anything else. Once the branches are gone, every decal g
    like everything else. A rounded rect uses `ctx.roundRect` in the rect's turned frame.
    `drawShapes` and `drawPartArt` pass the wear through, so `working` shapes can be skipped and
    the fade's `to` worn.
-2. **The editor.** In `src/designer/hulls.ts`:
+2. **The editor.** *built*
+   In `src/designer/hulls.ts`:
    - Add buttons for the four new kinds, and **Add default shade** on the Hulls page only.
      New shapes appear at the view's middle and are picked, as `addShape` does now (sizes: radius
      0.25, ellipse 0.3 × 0.2, ring hole half the radius, arc and wedge from −45° to 45°).
@@ -143,9 +145,11 @@ calls `drawPartArt` for anything else. Once the branches are gone, every decal g
      of half the box's diagonal.
    - A "Only while working" checkbox, on the Parts page only.
    - `SHAPE_KIND_NAMES` names the new kinds, so the shape list reads "3. Ellipse, glass".
-3. **Part colours.** `PartArt.shade` and `PartArt.glass`, read in `cleanPartArt`, used by
+3. **Part colours.** *built*
+   `PartArt.shade` and `PartArt.glass`, read in `cleanPartArt`, used by
    `partPalette`, and set from two more colour pickers on the Parts page beside metal and rim.
-4. **Move the code art.** Write the shapes and colours for the four cockpits and the three tractor
+4. **Move the code art.** *built*
+   Write the shapes and colours for the four cockpits and the three tractor
    parts into `partArt` in `src/hulls.json`, by hand or by a one-off script, converted from the
    code. Then:
    - remove the cockpit branches from `drawDecal` and the tractor branch from `drawPart`;
@@ -197,6 +201,34 @@ Nothing unbuilt. It builds on the hull shape editor (Q-17, built 2026-11-24), pa
 `partArt` (Q-26, built 2026-11-25) and the decal mounts. All three are in the code: `ArtShape`
 and `readShape` in `src/fitting.ts`, `drawShape` and `drawDecal` in `src/shipArt.ts`, and
 `addShape` and `shapesEditor` in `src/designer/hulls.ts`.
+
+## Built, with what changed from the plan
+
+The four steps are in, with these differences:
+
+- **The new art's numbers round to six decimals**, as every other number in `src/hulls.json` does
+  and as the plan's own conversion example shows. **How we'll know** asks for 1e-6 after the ×12,
+  which six decimals can't give (a tenth of a hull unit is 8.3e-7, so six is the finest the file
+  can hold): the looks-the-same test compares to 1e-4 instead, which six decimals leave room for.
+- **The tractor's fills and strokes are compared apart.** The plan has the new art draw rim shapes
+  over everything, a house rule, so the tractor's glow draws before its arc rather than after. It
+  can't be seen: the glow (0.55 wide, at x 0.4) sits inside the arc's circle (r 1.9 about x −0.4).
+  The cockpits have no rim shape, so their whole sequence still matches, call for call.
+- **The editor's own rules moved to `src/designer/shapes.ts`**, plain functions beside
+  `multiselect.ts` and `undo.ts`: the default shade, the shading's start, the handles and where a
+  click lands, so each tests without a page. `hulls.ts` keeps the drawing and the panel.
+- **No turn knob for an ellipse.** The plan gives the rect one; the ellipse turns on the wheel like
+  the rect does (Shift: 1°), which is what the page already teaches.
+- The arc and the wedge are the same shape code with one difference: an arc is always a line, so
+  its own width is read, and a wedge is filled, so it has none.
+
+The suite passes (984 tests) and the build is clean; the only `npm test` complaint is vitest's own
+`onTaskUpdate` worker timeout, with every test green, which the two plans before this one saw too.
+
+Review raised two findings in the new hit test, both fixed: a click in a ring's hole now goes
+through to whatever is under the ring, as nothing is drawn there, and an open line is picked along
+the line it draws rather than inside the area it would enclose. The reviewer couldn't run the fast
+suite in its own sandbox (PowerShell refused `npm.ps1`), so the suite above is the only run.
 
 ## Not in this build
 

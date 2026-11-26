@@ -108,9 +108,11 @@ export interface PartArt {
   scaleY?: number;
   /** A transparency multiplier, 0 to 1. */
   alpha?: number;
-  /** The metal it's made of, and the colour of its edge, as `#rrggbb`. */
+  /** The metal it's made of, the colour of its edge, its shade and its glass, as `#rrggbb`. */
   metal?: string;
   rim?: string;
+  shade?: string;
+  glass?: string;
   /** Shapes of its own, drawn at its own origin facing the nose, instead of the code's drawing. */
   shapes?: ArtShape[];
 }
@@ -151,12 +153,35 @@ export const SHAPE_ROLE_NAMES: Record<ShapeRole, string> = {
   glass: "Glass and glow",
 };
 
+/** The kinds of shape a hull or a part can be drawn with. */
+export const SHAPE_KINDS = ["polygon", "circle", "rect", "ellipse", "arc", "ring", "wedge"] as const;
+export type ShapeKind = (typeof SHAPE_KINDS)[number];
+
+/**
+ * A shape's gradient: its own role's colour at one end, `to` or clear at the other. A line fade
+ * runs between two points; a round one from a middle outward. Points are in the shape's own units.
+ */
+export interface ShapeFade {
+  /** Straight across, or from a middle outward. */
+  type: "line" | "round";
+  /** The role it fades to. Without one it fades to clear. */
+  to?: ShapeRole;
+  /** A line fade's two ends: the full colour at `from`, `to` at `end`. They also give its direction. */
+  from?: HullPoint;
+  end?: HullPoint;
+  /** A round fade's middle, which can sit off the shape's centre, so a dome's highlight leans one way. */
+  x?: number;
+  y?: number;
+  /** The reach where a round fade has got to `to`. */
+  reach?: number;
+}
+
 /**
  * A shape drawn on a hull or a part: shading, a panel, a decal or a lit edge. A hull's are in hull
  * radii, the units mounts use; a part's are in the same units, a twelfth of one.
  */
 export interface ArtShape {
-  kind: "polygon" | "circle" | "rect";
+  kind: ShapeKind;
   /** Which of the ship's colours it takes. */
   role: ShapeRole;
   /** Draw order: lower draws first, and 0 is the hull level. */
@@ -167,17 +192,33 @@ export interface ArtShape {
   clip?: boolean;
   /** A polygon's points. A rim shape is stroked through them, open with two points, else closed. */
   points?: HullPoint[];
-  /** A circle's or a rect's middle. */
+  /** A circle's, a rect's, an ellipse's or an arc's middle. */
   x?: number;
   y?: number;
-  /** A circle's reach. */
+  /** A circle's reach: also a ring's outer edge and an arc's or a wedge's radius. */
   r?: number;
-  /** A rect's size. */
+  /** An ellipse's two radii. */
+  rx?: number;
+  ry?: number;
+  /** A rect's size, in the frame its `angle` turns. */
   w?: number;
   h?: number;
-  /** A rect's turn, degrees clockwise. */
+  /** A rect's corner radius, up to half its shorter side. Left out, the corners are square. */
+  corner?: number;
+  /** A rect's or an ellipse's turn, degrees clockwise. */
   angle?: number;
-  /** A rim shape's line width. Without one, the hull edge's own. */
+  /** An arc's or a wedge's start and end, degrees clockwise from +x. */
+  from?: number;
+  to?: number;
+  /** A ring's hole radius: more than 0 and less than `r`. */
+  inner?: number;
+  /** A polygon drawn as a line through its points, not closed back to the first. Any role. */
+  open?: boolean;
+  /** A gradient from its own role's colour. Without one the shape is one flat colour. */
+  fade?: ShapeFade;
+  /** Drawn only while the part it's on works: under `DAMAGED_AT` of wear. A hull has no wear. */
+  working?: boolean;
+  /** A line's width: a rim shape's, an arc's or an open line's. Without one, the hull edge's own. */
   width?: number;
 }
 
@@ -393,9 +434,14 @@ function partStatsNow(): NonNullable<ShipFile["partStats"]> {
  */
 export const PART_ART: Partial<Record<PartId, PartArt>> = {};
 
-/** Puts a part's art back as the code draws it. */
+/**
+ * Puts a part's art back as the game ships it: the shapes of the file's own drawing where it has
+ * one (the cockpits, the tractor), and nothing, so the code's drawing returns, where it hasn't.
+ */
 export function resetPartArt(id: PartId): void {
-  delete PART_ART[id];
+  const shipped = SHIPPED_SHIPS.partArt?.[id];
+  if (shipped) PART_ART[id] = cleanPartArt(shipped);
+  else delete PART_ART[id];
 }
 
 /** The part of an art someone set that says something, with anything invalid or at the default left out. */
@@ -411,8 +457,12 @@ function cleanPartArt(art: PartArt): PartArt {
   if (typeof art.alpha === "number" && Number.isFinite(art.alpha) && art.alpha >= 0 && art.alpha < 1) clean.alpha = art.alpha;
   const metal = colour(art.metal);
   const rim = colour(art.rim);
+  const shade = colour(art.shade);
+  const glass = colour(art.glass);
   if (metal) clean.metal = metal;
   if (rim) clean.rim = rim;
+  if (shade) clean.shade = shade;
+  if (glass) clean.glass = glass;
   const shapes = readShapes(art.shapes);
   if (shapes.length > 0) clean.shapes = shapes;
   return clean;
@@ -529,31 +579,39 @@ function readPoints(raw: unknown): HullPoint[] {
 
 /**
  * One shape read from a file, with anything invalid or missing dropped: a polygon needs three
- * points (two for a rim line), a circle a reach, a rect a size.
+ * points (two for a rim line or an open one), a circle a reach, a rect a size, an ellipse both
+ * radii, an arc or a wedge a radius and two different angles, a ring a hole inside its reach.
  */
 function readShape(raw: Partial<ArtShape>): ArtShape | null {
   if (!raw || typeof raw !== "object") return null;
   const kind = raw.kind;
-  if (kind !== "polygon" && kind !== "circle" && kind !== "rect") return null;
+  if (!SHAPE_KINDS.includes(kind as ShapeKind)) return null;
   const role = (SHAPE_ROLES as readonly string[]).includes(raw.role as string) ? (raw.role as ShapeRole) : "body";
-  const shape: ArtShape = { kind, role };
+  const shape: ArtShape = { kind: kind as ShapeKind, role };
   // A reach, a size or a line's width: a number, and more than nothing.
   const size = (value: unknown, min: number): number | undefined =>
     typeof value === "number" && Number.isFinite(value) && value >= min ? value : undefined;
+  const number = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
   if (typeof raw.order === "number" && Number.isFinite(raw.order) && raw.order !== 0) shape.order = raw.order;
   if (typeof raw.alpha === "number" && Number.isFinite(raw.alpha) && raw.alpha >= 0 && raw.alpha < 1) shape.alpha = raw.alpha;
   if (raw.clip === true) shape.clip = true;
+  const fade = readFade(raw.fade);
+  if (fade) shape.fade = fade;
+  if (raw.working === true) shape.working = true;
   if (kind === "polygon") {
     const points = readPoints(raw.points);
-    const fewest = role === "rim" ? 2 : 3;
+    const open = raw.open === true;
+    // A rim line needs only two points, and so does an open one; anything filled needs three.
+    const fewest = open || role === "rim" ? 2 : 3;
     if (points.length < fewest) return null;
     shape.points = points;
+    if (open) shape.open = true;
     const width = size(raw.width, 0.05);
-    if (role === "rim" && width !== undefined) shape.width = width;
+    if ((role === "rim" || open) && width !== undefined) shape.width = width;
     return shape;
   }
-  const x = typeof raw.x === "number" && Number.isFinite(raw.x) ? raw.x : undefined;
-  const y = typeof raw.y === "number" && Number.isFinite(raw.y) ? raw.y : undefined;
+  const x = number(raw.x);
+  const y = number(raw.y);
   if (x === undefined || y === undefined) return null;
   shape.x = x;
   shape.y = y;
@@ -563,13 +621,77 @@ function readShape(raw: Partial<ArtShape>): ArtShape | null {
     shape.r = r;
     return shape;
   }
+  if (kind === "ellipse") {
+    const rx = size(raw.rx, 0.01);
+    const ry = size(raw.ry, 0.01);
+    if (rx === undefined || ry === undefined) return null;
+    shape.rx = rx;
+    shape.ry = ry;
+    if (number(raw.angle) !== undefined && raw.angle !== 0) shape.angle = raw.angle;
+    return shape;
+  }
+  if (kind === "ring") {
+    const r = size(raw.r, 0.01);
+    const inner = size(raw.inner, 0.01);
+    if (r === undefined || inner === undefined || inner <= 0 || inner >= r) return null;
+    shape.r = r;
+    shape.inner = inner;
+    return shape;
+  }
+  if (kind === "arc" || kind === "wedge") {
+    const r = size(raw.r, 0.01);
+    const from = number(raw.from);
+    const to = number(raw.to);
+    if (r === undefined || from === undefined || to === undefined || from === to) return null;
+    shape.r = r;
+    shape.from = from;
+    shape.to = to;
+    // An arc is a line, so it can have a width of its own. A wedge is a slice, filled.
+    const width = size(raw.width, 0.05);
+    if (kind === "arc" && width !== undefined) shape.width = width;
+    return shape;
+  }
   const w = size(raw.w, 0.01);
   const h = size(raw.h, 0.01);
   if (w === undefined || h === undefined) return null;
   shape.w = w;
   shape.h = h;
-  if (typeof raw.angle === "number" && Number.isFinite(raw.angle) && raw.angle !== 0) shape.angle = raw.angle;
+  if (number(raw.angle) !== undefined && raw.angle !== 0) shape.angle = raw.angle;
+  const corner = size(raw.corner, 0.01);
+  if (corner !== undefined) shape.corner = Math.min(corner, Math.min(w, h) / 2);
   return shape;
+}
+
+/**
+ * A shape's gradient read from a file, or none where it can't work: a type nobody knows, points
+ * it hasn't got, a reach of nothing, or a `to` that isn't a role. The shape is then flat.
+ */
+function readFade(raw: unknown): ShapeFade | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const fade = raw as Partial<ShapeFade>;
+  if (fade.type !== "line" && fade.type !== "round") return undefined;
+  let to: ShapeRole | undefined;
+  if (fade.to !== undefined) {
+    if (!(SHAPE_ROLES as readonly string[]).includes(fade.to as string)) return undefined;
+    to = fade.to as ShapeRole;
+  }
+  const point = (value: unknown): HullPoint | undefined => {
+    if (!Array.isArray(value) || value.length !== 2) return undefined;
+    const [x, y] = value as unknown[];
+    return typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y) ? [x, y] : undefined;
+  };
+  if (fade.type === "line") {
+    const from = point(fade.from);
+    const end = point(fade.end);
+    if (!from || !end) return undefined;
+    return { type: "line", ...(to ? { to } : {}), from, end };
+  }
+  const value = (each: unknown): number | undefined => (typeof each === "number" && Number.isFinite(each) ? each : undefined);
+  const x = value(fade.x);
+  const y = value(fade.y);
+  const reach = value(fade.reach);
+  if (x === undefined || y === undefined || reach === undefined || reach <= 0) return undefined;
+  return { type: "round", ...(to ? { to } : {}), x, y, reach };
 }
 
 /** The shapes a hull or a part is drawn with, read from a file. */

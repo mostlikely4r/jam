@@ -178,9 +178,10 @@ describe("a hull's name", () => {
     const file = shipFileNow();
     file.hullInfo!.floater.name = "Kite";
     useShipFile(file);
-    copyHull("floater", "floaterCopy");
-    expect(SHIP_MODELS).toContain("floaterCopy");
-    expect(HULL_MOUNTS.floaterCopy.length).toBeGreaterThan(0);
-    expect(hullName("floaterCopy")).toBe("Floater Copy");
+    // A name of its own for the scratch copy, so it can't collide with a hull the file ships.
+    copyHull("floater", "floaterCopy2");
+    expect(SHIP_MODELS).toContain("floaterCopy2");
+    expect(HULL_MOUNTS.floaterCopy2.length).toBeGreaterThan(0);
+    expect(hullName("floaterCopy2")).toBe("Floater Copy2");
   });
 });

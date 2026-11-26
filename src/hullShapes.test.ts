@@ -85,9 +85,12 @@ const radii = (points: [number, number][]): [number, number][] =>
   points.map(([x, y]): [number, number] => [Math.round((x / R) * 1e4) / 1e4, Math.round((y / R) * 1e4) / 1e4]);
 
 describe("today's hulls, read from the file", () => {
-  it("has the same five outlines as the code drew", () => {
-    expect([...SHIP_MODELS].sort()).toEqual(["defender", "drone", "floater", "pirate", "racer"]);
-    for (const model of SHIP_MODELS) {
+  /** The hulls that predate the file: the only ones with a drawing in the code to match. */
+  const drawnBefore = (): string[] => SHIP_MODELS.filter((model) => model in OLD_HULL);
+
+  it("has the same outlines as the code drew, hull for hull", () => {
+    expect([...SHIP_MODELS].sort()).toEqual(["defender", "drone", "floater", "floaterCopy", "pirate", "racer"]);
+    for (const model of drawnBefore()) {
       expect(hullEdge(model)).toHaveLength(OLD_HULL[model].length);
       radii(OLD_HULL[model]).forEach(([x, y], i) => {
         expect(hullEdge(model)[i][0]).toBeCloseTo(x, 4);
@@ -97,7 +100,7 @@ describe("today's hulls, read from the file", () => {
   });
 
   it("shades each hull exactly as the belly did", () => {
-    for (const model of SHIP_MODELS) {
+    for (const model of drawnBefore()) {
       const shade = hullShapes(model).find((shape) => shape.role === "shade");
       expect(shade?.kind).toBe("polygon");
       expect(shade?.clip).toBe(true);

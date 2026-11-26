@@ -45,6 +45,15 @@
     "smallBay": [
       "cargo bay"
     ],
+    "smallTank": [
+      "fuel tank"
+    ],
+    "mediumTank": [
+      "fuel tank"
+    ],
+    "largeTank": [
+      "fuel tank"
+    ],
     "flightComputer": [
       "computer"
     ],
@@ -77,15 +86,6 @@
     ],
     "cockpitVisor": [
       "cockpit"
-    ],
-    "smallTank": [
-      "fuel tank"
-    ],
-    "mediumTank": [
-      "fuel tank"
-    ],
-    "largeTank": [
-      "fuel tank"
     ]
   },
   "decalParts": [
@@ -353,7 +353,6 @@
         {
           "kind": "polygon",
           "role": "rim",
-          "width": 1.4,
           "points": [
             [
               1,
@@ -363,7 +362,8 @@
               1,
               0.7
             ]
-          ]
+          ],
+          "width": 1.4
         }
       ],
       "mounts": [
@@ -1267,6 +1267,342 @@
           "decal": true
         }
       ]
+    },
+    "floaterCopy": {
+      "edge": [
+        [
+          1.4,
+          -0.35
+        ],
+        [
+          1.967,
+          -0.532
+        ],
+        [
+          1.967,
+          -1.017
+        ],
+        [
+          0.1,
+          -1.55
+        ],
+        [
+          -1.95,
+          -1.3
+        ],
+        [
+          -1.95,
+          -0.75
+        ],
+        [
+          -1.49,
+          -0.367
+        ],
+        [
+          -1.49,
+          0.367
+        ],
+        [
+          -1.95,
+          0.75
+        ],
+        [
+          -1.95,
+          1.3
+        ],
+        [
+          0.1,
+          1.55
+        ],
+        [
+          1.967,
+          1.017
+        ],
+        [
+          1.967,
+          0.532
+        ],
+        [
+          1.4,
+          0.35
+        ]
+      ],
+      "shapes": [
+        {
+          "kind": "polygon",
+          "role": "shade",
+          "clip": true,
+          "points": [
+            [
+              1.4,
+              -0.4
+            ],
+            [
+              -0.05,
+              -0.3
+            ],
+            [
+              -1.5,
+              -0.4
+            ],
+            [
+              -1.5,
+              0.4
+            ],
+            [
+              -0.05,
+              0.3
+            ],
+            [
+              1.4,
+              0.4
+            ]
+          ]
+        }
+      ],
+      "mounts": [
+        {
+          "id": "thrusterMain",
+          "name": "Main thruster",
+          "types": [
+            "small engine"
+          ],
+          "x": -2,
+          "y": -1,
+          "angle": 180,
+          "scale": 1.1,
+          "role": "thrusterMain",
+          "default": "floaterMain",
+          "order": -1
+        },
+        {
+          "id": "thrusterRotateLeft",
+          "name": "Turn left",
+          "types": [
+            "turn thruster"
+          ],
+          "x": 0.95,
+          "y": 1.15,
+          "angle": 75,
+          "scale": 1,
+          "role": "thrusterRotateLeft",
+          "default": "turnThrusters",
+          "alpha": 0.5
+        },
+        {
+          "id": "thrusterRotateRight",
+          "name": "Turn right",
+          "types": [
+            "turn thruster"
+          ],
+          "x": 0.95,
+          "y": -1.15,
+          "angle": -75,
+          "scale": 1,
+          "role": "thrusterRotateRight",
+          "default": "turnThrusters",
+          "alpha": 0.5
+        },
+        {
+          "id": "thrusterReverse",
+          "name": "Reverse",
+          "types": [
+            "reverse thruster"
+          ],
+          "x": 1.85,
+          "y": -0.75,
+          "angle": 0,
+          "scale": 1,
+          "role": "thrusterReverse",
+          "default": "reverse"
+        },
+        {
+          "id": "thrusterStrafeLeft",
+          "name": "Strafe left",
+          "types": [
+            "strafe thruster"
+          ],
+          "x": 0.05,
+          "y": 1.4,
+          "angle": 90,
+          "scale": 1,
+          "role": "thrusterStrafeLeft",
+          "alpha": 0.5,
+          "default": "strafe"
+        },
+        {
+          "id": "thrusterStrafeRight",
+          "name": "Strafe right",
+          "types": [
+            "strafe thruster"
+          ],
+          "x": 0.05,
+          "y": -1.4,
+          "angle": -90,
+          "scale": 1,
+          "role": "thrusterStrafeRight",
+          "alpha": 0.5,
+          "default": "strafe"
+        },
+        {
+          "id": "gun",
+          "name": "Gun",
+          "types": [
+            "gun",
+            "turret"
+          ],
+          "x": 1.2,
+          "y": -0.75,
+          "angle": 0,
+          "scale": 0.5,
+          "default": "turret",
+          "alpha": 0.5,
+          "order": 2
+        },
+        {
+          "id": "tractor",
+          "name": "Tractor",
+          "types": [
+            "tractor"
+          ],
+          "x": 0.55,
+          "y": 0,
+          "angle": 0,
+          "scale": 1,
+          "default": "tractorAll"
+        },
+        {
+          "id": "computer",
+          "name": "Computer",
+          "types": [
+            "computer"
+          ],
+          "x": 0.78,
+          "y": 0.58,
+          "angle": 0,
+          "scale": 0.6,
+          "default": "navComputer"
+        },
+        {
+          "id": "section",
+          "name": "Cargo bay",
+          "types": [
+            "cargo bay"
+          ],
+          "x": -0.65,
+          "y": 0,
+          "angle": 0,
+          "scale": 1.9,
+          "default": "largeBay",
+          "alpha": 0.3
+        },
+        {
+          "id": "tankLeft",
+          "name": "Left tank",
+          "types": [
+            "fuel tank"
+          ],
+          "x": -0.85,
+          "y": -0.6,
+          "angle": 0,
+          "scale": 1.3,
+          "default": "smallTank",
+          "alpha": 0.45
+        },
+        {
+          "id": "cockpit",
+          "name": "Cockpit",
+          "types": [
+            "wide cockpit"
+          ],
+          "x": 0.52,
+          "y": -0.83,
+          "angle": 0,
+          "scale": 1,
+          "decal": true
+        },
+        {
+          "id": "mount1",
+          "name": "Main thruster (mirrored)",
+          "types": [
+            "small engine"
+          ],
+          "x": -2,
+          "y": 1,
+          "angle": 180,
+          "scale": 1.1,
+          "role": "thrusterMain",
+          "default": "floaterMain",
+          "order": -1
+        },
+        {
+          "id": "mount2",
+          "name": "Gun (mirrored)",
+          "types": [
+            "gun",
+            "turret"
+          ],
+          "x": 1.25,
+          "y": 0.8,
+          "angle": 0,
+          "scale": 0.5,
+          "default": "turret",
+          "alpha": 0.5,
+          "order": 2
+        },
+        {
+          "id": "mount3",
+          "name": "Left tank (mirrored)",
+          "types": [
+            "fuel tank"
+          ],
+          "x": -0.85,
+          "y": 0.6,
+          "angle": 0,
+          "scale": 1.3,
+          "default": "smallTank",
+          "alpha": 0.45
+        },
+        {
+          "id": "mount4",
+          "name": "Reverse (mirrored)",
+          "types": [
+            "reverse thruster"
+          ],
+          "x": 1.85,
+          "y": 0.75,
+          "angle": 0,
+          "scale": 1,
+          "role": "thrusterReverse",
+          "default": "reverse"
+        },
+        {
+          "id": "mount5",
+          "name": "Back Gun",
+          "types": [
+            "turret",
+            "gun"
+          ],
+          "x": -0.95,
+          "y": -1.1,
+          "angle": 0,
+          "scale": 0.5,
+          "default": "turret"
+        },
+        {
+          "id": "mount6",
+          "name": "Back Gun (mirrored)",
+          "types": [
+            "turret",
+            "gun"
+          ],
+          "x": -0.95,
+          "y": 1.1,
+          "angle": 0,
+          "scale": 0.5,
+          "default": "turret"
+        }
+      ]
     }
   },
   "hullInfo": {
@@ -1346,8 +1682,57 @@
       "usedBy": [
         "pirate"
       ]
+    },
+    "floaterCopy": {
+      "programs": [
+        "clickMove",
+        "autoMine2",
+        "targeting",
+        "turretTracking"
+      ],
+      "loadouts": [
+        {
+          "name": "mining",
+          "core": [
+            "clickMove",
+            "clickTurn"
+          ],
+          "comfort": [
+            "spinStabilizer",
+            "meters",
+            "targeting",
+            "relativeLines"
+          ]
+        },
+        {
+          "name": "long trip",
+          "core": [
+            "clickMove",
+            "autopilot"
+          ],
+          "comfort": [
+            "retro",
+            "starmap"
+          ]
+        }
+      ],
+      "usedBy": [],
+      "name": "Miner Mk3",
+      "price": 10000,
+      "weight": 10,
+      "hull": 300
     }
   },
   "partStats": {},
-  "partArt": {}
+  "partArt": {
+    "largeTank": {
+      "scaleX": 3
+    },
+    "smallTank": {
+      "scaleX": 3
+    },
+    "mediumTank": {
+      "scaleX": 3
+    }
+  }
 }

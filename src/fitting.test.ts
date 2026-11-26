@@ -613,8 +613,8 @@ describe("hulls, defaults and decals", () => {
     }
   }
 
-  it("has a defender, a drone and a pirate hull beside the racer and the floater", () => {
-    expect([...SHIP_MODELS].sort()).toEqual(["defender", "drone", "floater", "pirate", "racer"]);
+  it("lists every hull the file ships, and each one can fly", () => {
+    expect([...SHIP_MODELS].sort()).toEqual(["defender", "drone", "floater", "floaterCopy", "pirate", "racer"]);
     for (const model of SHIP_MODELS) {
       expect(HULL_MOUNTS[model].length).toBeGreaterThan(6);
       expect(newFitting(model).fit.thrusterMain).toBeDefined();
@@ -920,20 +920,27 @@ describe("mounts as they draw in game", () => {
 
   it("a tank and a bay take their own part's art: its stretch and its fade", () => {
     const ship = { ...newFitting("racer"), model: "racer" as const };
-    const tank = tankBoxes(ship, 1)[0];
     const bay = bayBox(ship);
     expect(bay.part).not.toBeNull();
+    const plain: PartArt = { scaleX: 1, scaleY: 1, alpha: 1 };
     const tall: PartArt = { scaleX: 2, scaleY: 3, alpha: 0.5 };
-    withArt("smallTank", tall, () =>
-      withArt(bay.part!, tall, () => {
-        const wider = tankBoxes(ship, 1)[0];
-        expect(wider.w / tank.w).toBeCloseTo(2, 5);
-        expect(wider.h / tank.h).toBeCloseTo(3, 5);
-        expect(wider.alpha).toBeCloseTo(tank.alpha * 0.5, 5);
-        const bigger = bayBox(ship);
-        expect(bigger.w / bay.w).toBeCloseTo(2, 5);
-        expect(bigger.h / bay.h).toBeCloseTo(3, 5);
-        expect(bigger.alpha).toBeCloseTo(bay.alpha * 0.5, 5);
+    // Measured from art that draws plainly, so whatever art the file gives these parts sets no ratio.
+    withArt("smallTank", plain, () =>
+      withArt(bay.part!, plain, () => {
+        const tank = tankBoxes(ship, 1)[0];
+        const bayPlain = bayBox(ship);
+        withArt("smallTank", tall, () =>
+          withArt(bay.part!, tall, () => {
+            const wider = tankBoxes(ship, 1)[0];
+            expect(wider.w / tank.w).toBeCloseTo(2, 5);
+            expect(wider.h / tank.h).toBeCloseTo(3, 5);
+            expect(wider.alpha).toBeCloseTo(tank.alpha * 0.5, 5);
+            const bigger = bayBox(ship);
+            expect(bigger.w / bayPlain.w).toBeCloseTo(2, 5);
+            expect(bigger.h / bayPlain.h).toBeCloseTo(3, 5);
+            expect(bigger.alpha).toBeCloseTo(bayPlain.alpha * 0.5, 5);
+          }),
+        );
       }),
     );
   });
@@ -1021,6 +1028,8 @@ describe("the stats of hulls and parts", () => {
   });
 
   it("a part's art carries in the ship file, and the code's drawing stands until it differs", () => {
+    // Whatever art the file ships with is the baseline: only the parts this test touches change.
+    const shipped = JSON.parse(JSON.stringify(shipFileNow().partArt ?? {})) as Record<string, PartArt>;
     withFile(
       () => {
         PART_ART.bay = { scaleX: 1.5, scaleY: 0.8, alpha: 0.6, metal: "#ff0000", rim: "#00ff00" };
@@ -1038,7 +1047,7 @@ describe("the stats of hulls and parts", () => {
         expect(PART_ART.smallBay).toBeUndefined();
         resetPartArt("bay");
         expect(PART_ART.bay).toBeUndefined();
-        expect(shipFileNow().partArt).toEqual({});
+        expect(shipFileNow().partArt ?? {}).toEqual(shipped);
       },
     );
   });

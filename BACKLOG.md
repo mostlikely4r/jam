@@ -507,6 +507,8 @@ Bigger hulls don't fit their pictures: the ship screen's blueprint, the shop's h
 start menu cards draw every hull at a scale made for a racer-sized ship. Scale each picture to the
 hull's own outline (and its mounts). Maybe part of a later inventory rework.
 
+Queued as Q-45 (2026-11-26).
+
 ## S-57 · Hull designer: ellipse and arc shapes, and a default decal
 - status: built
 - plan: docs/hull-shapes-plan.md
@@ -660,6 +662,8 @@ by play. `Nod` in `src/sway.ts` is the place: `kind` grows a value and `swayAt` 
 and both the gallery preview and the `sway` block in `src/voices.json` pick it up with no other
 change.
 
+Groomed 2026-11-26: wait for the face cast (Q-39), which changes how faces are rolled, and fold it in there.
+
 ## S-71 · Live elements on hulls and parts
 - status: built
 - plan: docs/live-shapes-plan.md
@@ -690,6 +694,8 @@ docking light that only blinks on approach. Builds on S-71's first slice
 change and glow use, so no new drawing is needed. The user chose looks first, so this waits until
 that slice has been played.
 
+Queued as Q-46 (2026-11-26).
+
 ## S-73 · Spinning shapes
 - status: idea
 - area: Ships and gear
@@ -698,6 +704,8 @@ that slice has been played.
 A shape that turns on its own, such as a dish or a gyro ring, with a speed and a pivot. Another
 option on any shape, like S-71's colour change and glow, using the same art clock and per-ship
 phase (`docs/live-shapes-plan.md`).
+
+Queued as Q-46 (2026-11-26).
 
 ## S-74 · Star glint and particles from shapes
 - status: parked

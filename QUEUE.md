@@ -207,6 +207,29 @@ Minor. Show the player's credits and the fuel level (amount and capacity) in the
 in the same style as its other numbers.
 cheap: a small UI addition with a clear outcome.
 
+## Q-45 · Hull pictures sized to the hull · build
+- state: queued
+- who: cheap
+- backlog: S-56
+- added: 2026-11-26
+
+Bigger hulls don't fit their pictures. Scale the ship screen's blueprint, the shop's hull icon and
+the start menu cards to each hull's own outline (and its mounts) instead of a racer-sized scale.
+cheap: small and visible, with a clear outcome.
+
+## Q-46 · Live shapes, slice 2: state lights and spinning shapes · spec
+- state: queued
+- who: pair
+- backlog: S-72, S-73
+- plan: docs/live-shapes-plan.md
+- added: 2026-11-26
+
+Slice 1 (Q-38) is played and passed. Spec the next slice: lights driven by the ship's state
+(throttle, turning, firing, low fuel, damage, a docking light on approach), using the same "how lit"
+amount as colour change and glow; and shapes that spin with a speed and pivot on the same art clock
+and per-ship phase.
+pair: design choices on which states and how they show.
+
 ## Done
 
 ## Q-31 · Auto targeting · build

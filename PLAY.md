@@ -21,7 +21,8 @@ only).
 - added: 2026-11-26
 
 Buy Targeting, Auto-mine and Auto targeting (or give them from the tab menu's Parts group). Stop in
-a field, right click Auto targeting in the ship screen (I) and set Max range to 600. Don't click
+a field, right click Auto targeting in the ship screen (I) and set Max range to 300: a turret
+reaches about 400, so 300 is the mining setting (600 or more is for the hull's own gun). Don't click
 anything: the nearest rock gets a box and the guns start; when it's mined out, the next one does.
 Then right click Targeting and try Next main target: pick three rocks, mine the main one out, and
 see which takes its place under Nearest, Most in front and Collision.

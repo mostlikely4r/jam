@@ -65,8 +65,9 @@ away. Does the hold fill, and does it pick sensibly?
 - `npm test` and `npm run build`.
 - **Try it:** buy Targeting, Auto-mine and Auto targeting (or give them from the tab menu's
   Parts group once the dev tools plan is in). Stop in a field, right click Auto targeting in the
-  ship screen (I) and set Max range to 600. Don't click anything: the nearest rock gets a box and
-  the guns start; when it's mined out, the next one does.
+  ship screen (I) and set Max range to 300: a turret reaches about 400, so 300 is the mining
+  setting, and 600 or more is for the hull's own gun. Don't click anything: the nearest rock gets
+  a box and the guns start; when it's mined out, the next one does.
 
 ## Needs first
 
@@ -90,6 +91,12 @@ Targeting, its tweaks and Auto-mine are built. Nothing else.
 - **The program** is `autoTarget` in `src/programs.json`: 500 credits, tier 1, needs Targeting.
   Its step, `Sim.autoTarget`, keeps a per-ship wait outside the save (as gun cooldowns are) and
   searches once a second on a ship in flight with nothing picked.
+
+The **empty-queue gate** stands only until Q-42 (*decided* 2026-11-26, queued): floating slowly,
+stale picks stayed behind the ship and nothing fresh ever came, since anything picked froze the
+search. The gate becomes the program's own Max range — pick again while nothing picked is inside
+it, adding at the tail and never touching the head — which keeps the program blind to what reads
+the queue: guns now, a tractor or a scan later.
 
 What landed differently from the proposal:
 

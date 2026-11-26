@@ -30,6 +30,16 @@ If the project has a `QUEUE.md` (format: `~/Desktop/vibeview/FORMAT.md`):
 - When the plan is saved, move that entry to the top of `## Done` (`state: done`,
   `done: <YYYY-MM-DD>`), and add a `build` entry for the same work at the top of the queue, with
   `plan:` set to the plan path (and `backlog:` if it has an item).
+- If the plan has a step that says "stop here for the user to try", queue **one build entry per
+  slice** instead: the steps up to and including each stop are one slice, and the rest is the
+  last. Each entry has the same `plan:`, a title that names its steps ("Clouds, steps 1–2"), and
+  every slice after the first gets `after:` on the slice before it, so it waits until that one is
+  built and played.
+- Give each build entry a tier, `who:` (`cheap` for DeepSeek, `strong` for Opus alone; the tiers
+  are in `FORMAT.md`), with the reason in one line of the entry's notes ("cheap: well specified,
+  the tests cover it" / "strong: touches the save format").
+- If this work builds on another spec's build that isn't done or played yet, give the first
+  slice `after:` on that build entry too.
 - Give the backlog item `status: specced` and `plan: <path>`.
 
 Save the plan, and commit it if `AGENTS.md` says the agent commits, with the queue and backlog

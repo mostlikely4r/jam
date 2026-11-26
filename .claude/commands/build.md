@@ -12,18 +12,25 @@ commit rule; read it first.
 - Check the plan's **Needs first**. If something there isn't built, stop and say so.
 - If the plan has *built* marks already, this is a continuation: read the marks and
   `git status`, and pick up where it stopped.
-- If the project has a `QUEUE.md` (format: `~/Desktop/vibeview/FORMAT.md`), set the queue entry for
-  this plan (its `plan:` is this path, or it is the `build` entry for the same backlog item) to
-  `state: in progress`. If there is none, don't add one. A backlog item at `specced` becomes
-  `building`.
+- If the project has a `QUEUE.md` (format: `~/Desktop/vibeview/FORMAT.md`), find the queue entry
+  for this plan (its `plan:` is this path, or it is the `build` entry for the same backlog item).
+  If the plan is queued as several slices (one entry per slice, each with this `plan:`), it is
+  the first one not done; build only that slice's steps. Before you change it, check whether it
+  waits (its `after:` isn't done, or has an open play item:
+  `node ~/Desktop/vibeview/scripts/check.ts --ready QUEUE.md`); if it does, say what it waits on
+  and ask before going ahead. Then set it to `state: in progress`. If there is no entry, don't
+  add one. A backlog item at `specced` becomes `building`.
 
 ## While building
 
 - The plan is the brief. Where it is unclear or wrong once you're in the code, ask instead of
   guessing, unless the answer is small and obvious.
 - Mark each step *built* in the plan as you finish it, so a cut-off thread can carry on.
-- If the plan says to stop for the user to try something, stop there: tell them how to try it
-  and wait.
+- If the plan says to stop for the user to try something, that is the end of this build: finish
+  it (full check, review, commit) and hand the trying over as a play item (see **Done**). Don't
+  wait for the user in this thread, unless the next step of this same build can't go on without
+  their answer. A test an agent can do (probes, a scripted run) is part of the checks, not a play
+  item.
 - Use the quick check while working. Run the full check once at the end, and again after review
   fixes, not after every edit.
 - Anything else that takes more than a couple of minutes (measurements, soaks, long runs) runs in
@@ -53,10 +60,16 @@ rounds is the limit.
   this build**. Don't delete it.
 - Queue and backlog, if the project has them: move the queue entry to the top of `## Done`
   (`state: done`, `done: <YYYY-MM-DD>`), and set the backlog item to `status: built` (`building`
-  if this was one slice of more). If the plan stopped for the user to try, the entry stays
-  `in progress` until they have.
+  if this was one slice of more).
+- If the plan stopped for the user to try, or you judge the build wants a human look before what
+  builds on it goes ahead, the entry is still marked done. Add an item to the project's `PLAY.md`
+  (create it with the preamble in `FORMAT.md` if there is none): the next free `P-` id, a short
+  title for what to look at, `from:` the queue entry, `plan:`, `added:` today, and the plan's
+  **Try it** line as its text. Entries with `after:` on this one wait until the user passes it.
+  Never pass a play item yourself.
 - Follow the commit rule in `AGENTS.md`. Where the agent commits, the code, the plan update and
-  the queue and backlog changes go in one commit. Where the user owns commits, leave it
+  the queue, backlog and play changes go in one commit. Where the user owns commits, leave it
   uncommitted and list the files.
 - Reply with: what was built, the review (raised, fixed, dismissed and why), anything still
-  running in the background, and the plan's **Try it** line.
+  running in the background, and the plan's **Try it** line (with the play item's id, if you
+  added one).

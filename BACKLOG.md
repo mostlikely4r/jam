@@ -614,7 +614,8 @@ and both the gallery preview and the `sway` block in `src/voices.json` pick it u
 change.
 
 ## S-71 · Live elements on hulls and parts
-- status: idea
+- status: specced
+- plan: docs/live-shapes-plan.md
 - area: Ships and gear
 - from: the Q-24 spec talk, 2026-11-26
 
@@ -626,3 +627,7 @@ behaviour is a field on a shape. It serves the reveal: a faint blinking light on
 only notice on your tenth flight. Its own spec session (the user's call). Particles emitted from
 shapes are parked here too: they cost more (emitters per ship, many ships on screen). The shape
 kinds it builds on are in `docs/hull-shapes-plan.md`.
+
+First slice specced 2026-11-26 (`docs/live-shapes-plan.md`): colour change (snap or fade) and
+glow as options on any shape, each ship on its own timing, tools only. State lights, spin, the
+glint and particles stay here.

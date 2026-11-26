@@ -12,14 +12,6 @@ A new place kind: a turned ellipse with a ring and falloff, two looks (gas, dust
 front layer. Visuals only, no effects, no AI. Stops for the user to fly through one. Step 1 is
 built (`cf39eea`): this waits on their try, so it isn't work for an agent.
 
-## Q-29 · Click move: the faster way, thrust while turning, top speed · build
-- state: in progress
-- backlog: S-59
-- plan: docs/click-move-thrust-plan.md
-- added: 2026-11-25
-
-Step 1 (the top speed tweak) stops for the user to try; step 3 stops again.
-
 ## Q-30 · Nothing vanishes in view · build
 - state: queued
 - backlog: S-64
@@ -161,6 +153,15 @@ From the user trying hull buying. Two new shape kinds with their own handles, pl
 default decal" button. Settle how each is drawn, edited and saved, then plan it.
 
 ## Done
+
+## Q-29 · Click move: the faster way, thrust while turning, top speed · build
+- state: done
+- backlog: S-59
+- plan: docs/click-move-thrust-plan.md
+- added: 2026-11-25
+- done: 2026-11-26
+
+Step 1 (the top speed tweak) stops for the user to try; step 3 stops again.
 
 ## Q-28 · Dev tools: tab menu programs, hull switch, fit anywhere, hull names · build
 - state: done

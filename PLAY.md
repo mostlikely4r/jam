@@ -1,0 +1,16 @@
+# Play
+
+<!-- vibeview play v1. Things to try when you next play or use the project: one item per build
+that wants a human look. Format: see vibeview/FORMAT.md -->
+
+## P-1 · Click move: thrust while turning, top speed
+- from: Q-29
+- plan: docs/click-move-thrust-plan.md
+- added: 2026-11-26
+
+Buy reverse and strafe for the floater, set Click to move's top speed to 200 (right click the
+program in the ship screen, I), then right click a spot behind and to the side. The ship should
+start moving at once, sliding while it turns, and not pass 200. Also: does the slower cap make
+click moves feel calmer?
+
+## Passed

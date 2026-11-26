@@ -2,6 +2,18 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-38 · Live shapes: colour change and glow · build
+- state: queued
+- who: cheap
+- backlog: S-71
+- plan: docs/live-shapes-plan.md
+- after: Q-36
+- added: 2026-11-26
+
+One build, no stop: blink and glow on any shape, a phase per ship, the glow's cost measured, then
+the designer's fields. Tools only: no lights put on any hull.
+cheap: precise plan on top of the shape code Q-36 built; the tests pin the timing rules.
+
 ## Q-30 · Nothing vanishes in view · build
 - state: queued
 - who: strong
@@ -162,18 +174,6 @@ cheap: the spec is settled in S-44.
 - backlog: S-71
 - plan: docs/live-shapes-plan.md
 - added: 2026-11-26
-
-## Q-38 · Live shapes: colour change and glow · build
-- state: queued
-- who: cheap
-- backlog: S-71
-- plan: docs/live-shapes-plan.md
-- after: Q-36
-- added: 2026-11-26
-
-One build, no stop: blink and glow on any shape, a phase per ship, the glow's cost measured, then
-the designer's fields. Tools only: no lights put on any hull.
-cheap: precise plan on top of the shape code Q-36 built; the tests pin the timing rules.
 
 ## Q-36 · Hull designer shapes: new kinds, gradients, default shade, code art to the file · build
 - state: done

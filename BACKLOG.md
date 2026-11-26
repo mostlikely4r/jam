@@ -14,10 +14,12 @@ Revisits (see `docs/vision.md`) send their leftovers here, as `parked` items.
 Click to turn is built (right click cancels and turns, left click moves). Still open: making it mutually exclusive with click to move on a shared toggle key, needing the spin stabilizer first, and a way to set "face here on arrival".
 
 ## S-2 · Retro as a spin stabilizer upgrade
-- status: parked
+- status: dropped
 - area: Movement and aiming
 
 Retro as an upgrade of the spin stabilizer, or mutually exclusive with it. Retro already includes spin assist in the code.
+
+Dropped 2026-11-26: Retro and Spin stabilizer are separate programs now.
 
 ## S-3 · Turret that aims at the mouse
 - status: built
@@ -32,16 +34,22 @@ Turret, user's spec 2026-11-05: aims at the mouse, turns at its own speed relati
 Turrets, earlier: the user says they will exist, just not yet. They rotate fast, so larger slower ships only turn for long distances, and they're a must for combat. They could auto-track the current target (needs target or multi-target selection) or follow the mouse while keys or clicks turn the ship. Built: with the Auto targeting program they track the target (S-63); without it they follow the mouse (S-3). Turrets in combat belong to the hunt work.
 
 ## S-5 · Click to move relative to an object
-- status: parked
+- status: dropped
 - area: Movement and aiming
 
 Click to move relative to a clicked object, so it follows a moving rock.
 
-## S-6 · Thrust ramp, front thruster, backward guns, waypoints
+Merged into S-10 (keep at range, orbit) 2026-11-26.
+
+## S-6 · Waypoint queues
 - status: parked
 - area: Movement and aiming
 
-Thrust ramp, front-only thruster, backward-shooting guns, gentler retro, waypoints and queues.
+Waypoints and queues: line up several moves or orders and the ship flies them in turn.
+
+Was "Thrust ramp, front thruster, backward guns, waypoints". Groomed 2026-11-26: the thrust ramp is
+built (the Shift throttle), front-only thrusters and backward guns can be made in the hull designer,
+the Route planner steers around obstacles; only waypoint queues stay.
 
 ## S-7 · Max speed for click to move
 - status: built
@@ -56,7 +64,7 @@ Max speed for click to move, tweakable in an equipment screen. Delivered by S-59
 Radar pulse, raised 2026-11-06: briefly shows relative-motion lines on all nearby rocks, then fades. The same system could ping rich or specific ores. Possible tradeoff: a pulse could give you away to pirates.
 
 ## S-9 · Honest stop: throttle, then fuel
-- status: parked
+- status: built
 - area: Movement and aiming
 
 Raised 2026-11-10, after the exact stop shipped: the stop's final settle is a cheat (it eases onto the spot and zeroes speed with no thrust), and the user notices it. The cascade they see: thruster output that scales over time (maybe a shift modifier for fine thrust), the AI using that precise output, the AI needing it (docking), fuel being consumed, then lots of balancing and an open "where does fuel come from". Fuel links to "Fuel and cargo tradeoffs" under Ships and gear. Decided the same day: the cheat bothered the user because nothing visible stopped the ship, not because stopping was free, so only step 1 (a throttle, inspired by KSP) goes ahead. Built 2026-11-10: a Shift throttle and real trim burns. The user approved the base ship's slow settle, with its small turns and a little drift before the final stop. Lesson: the user spots movement that has no visible cause, so honest physics wins over smooth fakes. Fuel is later, not now. The user's reason for it someday: a good coast should be worth something. It punishes the player, who corrects far more than the AI does, but it rewards learning.
@@ -66,6 +74,8 @@ Raised 2026-11-10, after the exact stop shipped: the stop's final settle is a ch
 - area: Movement and aiming
 
 From the mouse thread, 2026-11-06: right click read from what's under it (RTS style), shift kept for queueing, EVE-style commands relative to an object (keep at range, orbit).
+
+Includes S-5 (merged 2026-11-26): click to move relative to a clicked object, so the ship follows a moving rock.
 
 ## S-11 · Inventory and fitting screen
 - status: built
@@ -104,6 +114,8 @@ Tractor beam is nearly overpowered: balance its range and cost later, not now.
 
 Raised 2026-11-21: a recovery system for a broken module you can't pay to repair. A broken gun or thruster early really kills a run; today the only way out is to wreck yourself and go into debt. Found by the no-player bot (`docs/go-home-broken-plan.md`).
 
+Related (2026-11-26): damage levels (S-50, Q-20) and in-flight repair (S-52) come close, but neither helps a pilot with no credits.
+
 ## S-16 · Two more fields
 - status: dropped
 - area: World
@@ -134,10 +146,12 @@ nomadic fields are built; buffer zone, drone tiny deliveries and the money sink 
 call and are dropped; only ship collisions stays.
 
 ## S-20 · Drone score handling
-- status: parked
+- status: dropped
 - area: World
 
 Different handling of drone scores later. Fine as a challenge for now.
+
+Dropped 2026-11-26: too vague to act on.
 
 ## S-21 · Travel to a small moon with gravity
 - status: built
@@ -170,22 +184,28 @@ Raised 2026-11-05: ships thank you over chatter when they pick up ore you broke 
 Built since: traffic thanks you over chatter for ore it picks up.
 
 ## S-25 · Unlock tiers
-- status: parked
+- status: built
 - area: World
 
 Unlock tiers, agreed in outline 2026-11-05, not built: the shop opens as haulers buy ore over the game. From the start gun 2 and spin stabilizer; about 100 ore: reverse, strafe, turret; about 300: retro, click parts, drones, and the tractor (the user moved it there as borderline overpowered). The user is sleeping on how the new ship gets a better start without the tractor.
 
+Built (groomed 2026-11-26), in another form: stations have unlocked and wanted module lists and buy a wanted blueprint with their credits, which players can pay toward. Hulls and programs are not in it yet: that is S-65 (Q-32). Includes S-27.
+
 ## S-26 · Traffic buying and using a turret
-- status: parked
+- status: dropped
 - area: World
 
 Raised 2026-11-05: traffic buying and using a turret.
 
+Merged into S-49 (AI ships on real hulls) 2026-11-26, as a later step.
+
 ## S-27 · Station shop unlocks as haulers buy ore
-- status: parked
+- status: dropped
 - area: World
 
 Raised 2026-11-05, left as my call: the station unlocks what its shop can sell as haulers buy its ore, turning the ore pile into progress. Matches "station components that visibly unlock things" in the direction doc.
+
+Merged into S-25 2026-11-26.
 
 ## S-28 · Automatic ship and upgrade runs
 - status: parked
@@ -193,23 +213,29 @@ Raised 2026-11-05, left as my call: the station unlocks what its shop can sell a
 
 Automatic runs over ship and upgrade combinations that report income, damage and so on. Limited by run time and by what the pilot knows how to use.
 
+Builds on the no-player bot (`docs/no-player-runs-plan.md`, `npm run run`), which plays one track today (2026-11-26).
+
 ## S-29 · 100-drone swarm test
-- status: parked
+- status: dropped
 - area: Testing
 
 100-drone swarm test.
+
+Dropped 2026-11-26: the profile scripts cover performance.
 
 ## S-30 · Far off: name, worm, pirates and more
 - status: parked
 - area: Far off
 
-**Far off:** name, worm, pirates, bosses, frequencies, carriers, modules, remote control, planets, phone peeking.
+**Far off:** worm, pirates, bosses, frequencies, carriers, modules, remote control, phone peeking. (Groomed 2026-11-26: name (JAM) and planets are done.)
 
 ## S-31 · Object loading, unloading and persistence
 - status: parked
 - area: Far off
 
 Object loading, unloading and persistence (raised 2026-11-07). For now, loose ore is simply deleted once it's far from every POI and every ship. The user's rule: removing things is fine when no one will ever see them or know where they could have been. Hauler removal is fine for now.
+
+See also S-64, Nothing vanishes in view (Q-30).
 
 ## S-32 · Inventory key
 - status: dropped
@@ -229,11 +255,24 @@ Raised 2026-11-10: mobile and touch support. Today only the start menu works on 
 
 Epic: a ring of rocks low over the moon, inside its pull. Not just richer ore: different materials and "something you can't just find so easy". The user called it "a nice epic". Not now.
 
-## S-35 · Goods flow brainstorm
+## S-35 · Goods flow: what's left
 - status: parked
 - area: Raised 2026-11-11
 
-Brainstorm wanted: how goods flow through the system, and which objects belong in the node map (stations and body bases of different types and functions so far). The user feels something is missing there. It leads to logistics.
+What is left of the goods flow brainstorm (raised 2026-11-11, held 2026-11-12). Its three dreams:
+visible production (ore smelted into panels you can see, bases molded piece by piece), the shop
+treasure hunt (a distant shop sells an item cheap, word travels with ships and goes stale), and other
+races that trade differently.
+
+Built since: the shopping trip test (all-round tractor only at Planet base, news boards, radio word;
+passed), blueprints per base (unlocked and wanted), the generic item system with recipes, the
+refinery and clamp tow. Specced: price by place (S-55, Q-23).
+
+Still open:
+- per-item stock and shop markdowns, so bargains appear and last hours;
+- blueprints as counted things that change hands, can be looted or truly lost;
+- visible production beyond the refinery (S-53 is one piece);
+- races that make and trade different things.
 
 ## S-36 · Rocks colliding in the live field
 - status: parked
@@ -385,6 +424,8 @@ old one is traded in at full price, your parts move over where they fit, the res
 One kind of ship; AI-only hulls and parts; general loadouts; templates as a role plus a weighted
 hull pool; spawn points with faction and home lock; station rebuild entries paid by the owner
 first; minimal and complex cargo; today's AI moved onto templates.
+
+Later step (from S-26, 2026-11-26): traffic buys a turret and uses it.
 
 ## S-50 · Damage levels: damaged, broken, destroyed
 - status: specced

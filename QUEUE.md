@@ -2,84 +2,81 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-11 · Clouds, step 1: clouds you can see · build
-- state: queued
-- backlog: S-42
-- plan: docs/clouds-plan.md
-- added: 2026-11-24
-
-A new place kind: a turned ellipse with a ring and falloff, two looks (gas, dust) on a back or
-front layer. Visuals only, no effects, no AI. Stops for the user to fly through one. Step 1 is
-built (`cf39eea`): this waits on their try, so it isn't work for an agent.
-
 ## Q-30 · Nothing vanishes in view · build
 - state: queued
+- who: strong
 - backlog: S-64
 - plan: docs/in-view-plan.md
 - added: 2026-11-25
 
 Rests on a guess about where it was seen: step 1 (the camera as the viewer) stops for the user
 to try.
+strong: rests on a guess about where things are seen, so the ground is unclear.
 
 ## Q-31 · Auto targeting · build
 - state: queued
+- who: cheap
 - backlog: S-63
 - plan: docs/auto-targeting-plan.md
 - added: 2026-11-25
 
 Step 2 stops for the user to try idle mining with it.
+cheap: precise plan on top of targeting that is already built.
 
 ## Q-32 · Blueprints for programs and hulls · build
 - state: queued
+- who: strong
 - backlog: S-65
 - plan: docs/blueprints-plan.md
 - added: 2026-11-25
 
 Hulls first, then programs; stops after hulls for the user to fund one. Bumps `SAVE_VERSION`.
+strong: changes the save format (bumps SAVE_VERSION).
 
 ## Q-19 · AI hulls: templates and spawn points · build
 - state: queued
+- who: strong
 - backlog: S-49
 - plan: docs/ai-hulls-plan.md
 - added: 2026-11-24
 
 Step 1 (templates and a spawn point) stops for the user to try. Waits on Q-17.
+strong: wide: templates, spawning, and part ids moving from code to data.
 
 ## Q-20 · Damage levels · build
 - state: queued
+- who: cheap
 - backlog: S-50
 - plan: docs/damage-levels-plan.md
 - added: 2026-11-24
 
 Stands alone. Step 1 (thresholds, looks, weaker thruster) stops for the user to try.
+cheap: stands alone and the plan is precise.
 
 ## Q-12 · Clouds, step 2: dampening, nanites and the arc · build
 - state: queued
+- who: cheap
 - backlog: S-42
 - plan: docs/clouds-plan.md
 - added: 2026-11-24
 
 The effect machinery, a gap that turns with the cloud, dampening as the penalty and nanites as the
 gift. Ships fly straight through. Waits on the user flying step 1 (Q-11).
-
-## Q-6 · Route: the ring round the station, then look ahead · build
-- state: queued
-- plan: docs/look-ahead-plan.md
-- added: 2026-11-23
-
-Two separate numbers in `ShipPilot.routeAround`, both measured by `npm run dockchase`. Ring first.
-Nothing built yet.
+cheap: precise plan; step 1 is played.
 
 ## Q-7 · Fuel step 3: the supply chain · build
 - state: queued
+- who: strong
 - backlog: S-13
 - plan: docs/fuel-plan.md
 - added: 2026-11-23
 
 Haulers bring fuel from a body; the station gets a fuel stock, prices and markups. Waits for 2b.
+strong: the supply chain touches haulers, station stock and prices.
 
 ## Q-8 · Faces: the combining pool · spec
 - state: queued
+- who: pair
 - backlog: S-39
 - added: 2026-11-23
 
@@ -88,9 +85,11 @@ and the good ones kept, and so aliens are extra shapes in a pool rather than new
 vocabulary and the renderer are built (`src/faces.ts`, `src/voices.json`); what's missing is the
 pool and the selection. Write the plan first; the gallery can then show combinations instead of one
 hand-written face per voice.
+pair: still a spec.
 
 ## Q-9 · Faces: settle the shapes · other
 - state: queued
+- who: pair
 - backlog: S-40
 - plan: docs/chatter-faces-plan.md
 - added: 2026-11-23
@@ -98,9 +97,11 @@ hand-written face per voice.
 Little to build: the dev page already puts the open calls side by side. Ask for the letters (brows,
 scar, lean, plain traffic, station), put the picks into `src/voices.json`, delete the options block,
 and check the faces again at 26px in the radio log. Waits on the user's word, not on Q-8.
+pair: needs the user's picks.
 
 ## Q-10 · Faces: familiarity · build
 - state: queued
+- who: strong
 - backlog: S-41
 - plan: docs/chatter-faces-plan.md
 - added: 2026-11-23
@@ -108,18 +109,22 @@ and check the faces again at 26px in the radio log. Waits on the user's word, no
 Step 2 of the plan: meetings, the stranger to regular to friend levels, saved with the game, and the
 two tweaks. Regular and friend lines go into the two packs in `src/voices.json`. Bump
 `SAVE_VERSION`.
+strong: changes the save format (bumps SAVE_VERSION).
 
 ## Q-23 · Pricing: one price function, then the new rules · build
 - state: queued
+- who: strong
 - backlog: S-55
 - plan: docs/pricing-plan.md
 - added: 2026-11-25
 
 Step 1 moves every price into `price()` with no change in play and stops for a check; step 2
 brings the 60% buy share, frame-plus-parts hulls and the contracts, then stops for the user to try.
+strong: moves every price into one function.
 
 ## Q-13 · Small fixes: fitting by mounts, news links, traffic beams, tank art · build
 - state: queued
+- who: cheap
 - backlog: S-45
 - added: 2026-11-24
 
@@ -127,32 +132,59 @@ Four independent fixes; the decided spec is the S-45 text in BACKLOG.md. The fir
 (I-7), was built 2026-11-25 with the hull buying fixes; the tank art one is settled too, by S-60
 (Q-26): a width of 2 on each tank's part page in the designer. News links and traffic beams are
 left.
+cheap: the spec is settled in S-45.
 
 ## Q-14 · Face target faces any target, main or closest · build
 - state: queued
+- who: cheap
 - backlog: S-43
 - added: 2026-11-24
 
 The decided spec is the S-43 text in BACKLOG.md: any target, a main/closest tweak (main by
 default), no target no effect.
+cheap: the spec is settled in S-43.
 
 ## Q-15 · Cargo bays: buying swaps the smallest, unloading starts at the top · build
 - state: queued
+- who: cheap
 - backlog: S-44
 - added: 2026-11-24
 
 The decided spec is the S-44 text in BACKLOG.md: a bigger bay bought replaces the smallest, cargo
 moves over, the old bay to the locker; ore nearest the entry sells first.
+cheap: the spec is settled in S-44.
 
 ## Q-24 · Hull designer: ellipse and arc shapes, a default decal · spec
 - state: queued
+- who: pair
 - backlog: S-57
 - added: 2026-11-25
 
 From the user trying hull buying. Two new shape kinds with their own handles, plus an "add
 default decal" button. Settle how each is drawn, edited and saved, then plan it.
+pair: still a spec.
 
 ## Done
+
+## Q-11 · Clouds, step 1: clouds you can see · build
+- state: done
+- done: 2026-11-26
+- backlog: S-42
+- plan: docs/clouds-plan.md
+- added: 2026-11-24
+
+A new place kind: a turned ellipse with a ring and falloff, two looks (gas, dust) on a back or
+front layer. Visuals only, no effects, no AI. Stops for the user to fly through one. Step 1 is
+built (`cf39eea`): this waits on their try, so it isn't work for an agent.
+
+## Q-6 · Route: the ring round the station, then look ahead · build
+- state: done
+- done: 2026-11-26
+- plan: docs/look-ahead-plan.md
+- added: 2026-11-23
+
+Two separate numbers in `ShipPilot.routeAround`, both measured by `npm run dockchase`. Ring first.
+Nothing built yet.
 
 ## Q-29 · Click move: the faster way, thrust while turning, top speed · build
 - state: done

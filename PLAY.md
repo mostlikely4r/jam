@@ -3,22 +3,13 @@
 <!-- vibeview play v1. Things to try when you next play or use the project: one item per build
 that wants a human look. Format: see vibeview/FORMAT.md -->
 
-## P-3 · Lights in the designer: blink, glow, and out of step
-- from: Q-38
-- plan: docs/live-shapes-plan.md
-- added: 2026-11-26
-
-`npm run dev`, open the designer (`?dev`), Hulls page, pick your racer. Add a small circle near a
-wingtip, set Colour change to snap, flash colour bright red, rest colour dark red, on 0.15, off 1.2,
-glow 0.08: it blinks in the preview. Add a second on the other wingtip in green with offset 0.6: they
-take turns. Set one to fade: it breathes. Save, fly, and look at traffic on the same hull: their
-lights blink out of step with yours. Then drop the lights again if you don't want them yet (tools
-only).
+## Passed
 
 ## P-4 · Auto targeting: pick and mine without clicking
 - from: Q-31
 - plan: docs/auto-targeting-plan.md
 - added: 2026-11-26
+- passed: 2026-11-26
 
 Buy Targeting, Auto-mine and Auto targeting (or give them from the tab menu's Parts group). Stop in
 a field, right click Auto targeting in the ship screen (I) and set Max range to 300: a turret
@@ -27,7 +18,21 @@ anything: the nearest rock gets a box and the guns start; when it's mined out, t
 Then right click Targeting and try Next main target: pick three rocks, mine the main one out, and
 see which takes its place under Nearest, Most in front and Collision.
 
-## Passed
+
+## P-3 · Lights in the designer: blink, glow, and out of step
+- from: Q-38
+- plan: docs/live-shapes-plan.md
+- added: 2026-11-26
+- passed: 2026-11-26
+
+`npm run dev`, open the designer (`?dev`), Hulls page, pick your racer. Add a small circle near a
+wingtip, set Colour change to snap, flash colour bright red, rest colour dark red, on 0.15, off 1.2,
+glow 0.08: it blinks in the preview. Add a second on the other wingtip in green with offset 0.6: they
+take turns. Set one to fade: it breathes. Save, fly, and look at traffic on the same hull: their
+lights blink out of step with yours. Then drop the lights again if you don't want them yet (tools
+only).
+
+
 
 ## P-2 · Hull shapes: the new kinds, the default shade, the cockpits as shapes
 - from: Q-36

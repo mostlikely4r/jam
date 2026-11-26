@@ -185,6 +185,28 @@ The decided spec is the S-44 text in BACKLOG.md: a bigger bay bought replaces th
 moves over, the old bay to the locker; ore nearest the entry sells first.
 cheap: the spec is settled in S-44.
 
+## Q-43 · Designer defaults reach the ship: turret guns and default programs · build
+- state: queued
+- who: cheap
+- backlog: S-75
+- added: 2026-11-26
+
+Minor. Let a turret mount take a gun as its default part in the hull designer, and load the hull's
+Default programs into the computer (as far as it has slots) when the hull is bought at a station or
+switched to from the tab menu. Find where a new hull's default parts are fitted and do the programs
+the same way, in both paths; a test for each path.
+cheap: two small fixes with a clear outcome.
+
+## Q-44 · Credits and fuel level in the ship screen · build
+- state: queued
+- who: cheap
+- backlog: S-76
+- added: 2026-11-26
+
+Minor. Show the player's credits and the fuel level (amount and capacity) in the ship screen (I),
+in the same style as its other numbers.
+cheap: a small UI addition with a clear outcome.
+
 ## Done
 
 ## Q-31 · Auto targeting · build

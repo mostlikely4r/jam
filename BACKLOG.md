@@ -20,16 +20,16 @@ Click to turn is built (right click cancels and turns, left click moves). Still 
 Retro as an upgrade of the spin stabilizer, or mutually exclusive with it. Retro already includes spin assist in the code.
 
 ## S-3 · Turret that aims at the mouse
-- status: parked
+- status: built
 - area: Movement and aiming
 
-Turret, user's spec 2026-11-05: aims at the mouse, turns at its own speed relative to the ship (faster than turning the ship, slower if the ship turns the other way). Unsure which gun goes in it, given gun 2's ore effect, or whether it's a new hull that starts with one.
+Turret, user's spec 2026-11-05: aims at the mouse, turns at its own speed relative to the ship (faster than turning the ship, slower if the ship turns the other way). Unsure which gun goes in it, given gun 2's ore effect, or whether it's a new hull that starts with one. Built: turrets aim at the mouse (confirmed 2026-11-26).
 
 ## S-4 · Turrets for combat and tracking
-- status: parked
+- status: built
 - area: Movement and aiming
 
-Turrets, earlier: the user says they will exist, just not yet. They rotate fast, so larger slower ships only turn for long distances, and they're a must for combat. They could auto-track the current target (needs target or multi-target selection) or follow the mouse while keys or clicks turn the ship.
+Turrets, earlier: the user says they will exist, just not yet. They rotate fast, so larger slower ships only turn for long distances, and they're a must for combat. They could auto-track the current target (needs target or multi-target selection) or follow the mouse while keys or clicks turn the ship. Built: with the Auto targeting program they track the target (S-63); without it they follow the mouse (S-3). Turrets in combat belong to the hunt work.
 
 ## S-5 · Click to move relative to an object
 - status: parked
@@ -44,10 +44,10 @@ Click to move relative to a clicked object, so it follows a moving rock.
 Thrust ramp, front-only thruster, backward-shooting guns, gentler retro, waypoints and queues.
 
 ## S-7 · Max speed for click to move
-- status: parked
+- status: built
 - area: Movement and aiming
 
-Max speed for click to move, tweakable in an equipment screen.
+Max speed for click to move, tweakable in an equipment screen. Delivered by S-59 (the top speed tweak).
 
 ## S-8 · Radar pulse
 - status: parked
@@ -105,10 +105,10 @@ Tractor beam is nearly overpowered: balance its range and cost later, not now.
 Raised 2026-11-21: a recovery system for a broken module you can't pay to repair. A broken gun or thruster early really kills a run; today the only way out is to wreck yourself and go into debt. Found by the no-player bot (`docs/go-home-broken-plan.md`).
 
 ## S-16 · Two more fields
-- status: parked
+- status: dropped
 - area: World
 
-Two more fields of different size, rotation and orbit center, so a crowded field means flying to another. Same arc as pirates: first avoid and hide, later fight or ignore.
+Two more fields of different size, rotation and orbit center, so a crowded field means flying to another. Same arc as pirates: first avoid and hide, later fight or ignore. Dropped 2026-11-26: overtaken by the filled system's 183 fields.
 
 ## S-17 · Moving rocks for quick ships, slow for floaters
 - status: parked
@@ -122,11 +122,16 @@ Moving rocks suit the quick ship and slow ones suit the floater, so ships pick d
 
 Rocks and breaking get their own pass, including a gun that changes how rocks break.
 
-## S-19 · Buffer zone, nomadic fields, collisions, money sink
+## S-19 · Ship collisions
 - status: parked
 - area: World
 
-Buffer zone, nomadic fields, ship collisions, drone tiny-delivery behaviour, a money sink for thin fields.
+Ships colliding with each other. Maybe later.
+
+Was "Buffer zone, nomadic fields, collisions, money sink" (buffer zone, nomadic fields, ship
+collisions, drone tiny-delivery behaviour, a money sink for thin fields). Groomed 2026-11-26:
+nomadic fields are built; buffer zone, drone tiny deliveries and the money sink were too vague to
+call and are dropped; only ship collisions stays.
 
 ## S-20 · Drone score handling
 - status: parked
@@ -135,10 +140,10 @@ Buffer zone, nomadic fields, ship collisions, drone tiny-delivery behaviour, a m
 Different handling of drone scores later. Fine as a challenge for now.
 
 ## S-21 · Travel to a small moon with gravity
-- status: parked
+- status: built
 - area: World
 
-Raised 2026-11-05: travel to a different place, such as a small moon with gravity as a hazard and rocks in orbit. Some gear is only sold in certain places, known through a remote inventory search; the trip itself is safe, and the point is what you see on the way.
+Raised 2026-11-05: travel to a different place, such as a small moon with gravity as a hazard and rocks in orbit. Some gear is only sold in certain places, known through a remote inventory search; the trip itself is safe, and the point is what you see on the way. Built (groomed 2026-11-26): moons, travel, gravity and local gear exist, or can be designed in the system designer.
 
 ## S-22 · Chatter
 - status: built
@@ -207,10 +212,10 @@ Automatic runs over ship and upgrade combinations that report income, damage and
 Object loading, unloading and persistence (raised 2026-11-07). For now, loose ore is simply deleted once it's far from every POI and every ship. The user's rule: removing things is fine when no one will ever see them or know where they could have been. Hauler removal is fine for now.
 
 ## S-32 · Inventory key
-- status: parked
+- status: dropped
 - area: Far off
 
-Raised 2026-11-10: an inventory key showing the ship's stuff (cargo, credits, parts) as bars and numbers. Later; for now the screen stays clean.
+Raised 2026-11-10: an inventory key showing the ship's stuff (cargo, credits, parts) as bars and numbers. Later; for now the screen stays clean. Dropped 2026-11-26: the ship screen (I) shows parts and cargo, and the ship art shows cargo and fuel in flight; credits and fuel in the ship screen are S-76.
 
 ## S-33 · Mobile and touch support
 - status: parked
@@ -515,7 +520,7 @@ Three small fixes to the dock shop and ship screen. Selling modules back already
 station's parts, so I-10's second half needs no change.
 
 ## S-62 · Dev tools: programs and hull switch in the tab menu, fit anywhere, hull names
-- status: building
+- status: built
 - area: Testing
 - effort: S
 - plan: docs/dev-tools-plan.md
@@ -660,3 +665,34 @@ phase (`docs/live-shapes-plan.md`).
 
 Two later ideas from S-71. A glint on a shape lit by the star as the ship turns. Particles emitted
 from shapes, which cost more: an emitter per ship, with many ships on screen.
+
+## S-75 · Designer defaults reach the ship: turret guns and default programs
+- status: idea
+- area: Ships and gear
+- effort: S
+- from: grooming, 2026-11-26
+
+Two gaps between the hull designer and the game, both minor. The designer can't set a gun as a
+turret mount's default part, so a hull can't come with a gunned turret. And the hull's Default
+programs don't reach the ship: neither buying the hull at a station nor switching to it from the tab
+menu loads them.
+
+## S-76 · Credits and fuel level in the ship screen
+- status: idea
+- area: Ships and gear
+- effort: S
+- from: grooming, 2026-11-26 (S-32)
+
+The ship screen (I) shows parts and cargo but not your credits or how much fuel is in the tanks.
+Add both. Minor. In flight the ship art already shows cargo and fuel, which is enough there.
+
+## S-77 · Road to a fun system designed by AI or procedure
+- status: idea
+- area: World
+- from: grooming, 2026-11-26
+
+People keep saying AI can't design a game that is fun. The user wants to test that: have an AI (or
+a procedure) design a system that is fun to play, then play it. The road starts with a proper
+session (pair) that sets up how a system gets designed this way, what "fun" is measured against
+(the experience targets in `docs/vision.md`) and a first system to try. Builds on the system
+designer and the layout recipes (`npm run layout`).

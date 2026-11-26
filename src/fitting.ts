@@ -177,6 +177,25 @@ export interface ShapeFade {
 }
 
 /**
+ * How a shape changes colour on its own: it flashes `colour` for `on` seconds, rests `off` seconds,
+ * and starts again, which is all a nav light is. A shape without one is drawn in its role's colour.
+ */
+export interface ShapeBlink {
+  /** The flash colour, as `#rrggbb`. */
+  colour: string;
+  /** The rest colour, as `#rrggbb`. Left out, the shape rests in its role's colour. */
+  rest?: string;
+  /** Seconds the flash lasts: more than 0. */
+  on: number;
+  /** Seconds at rest between flashes: 0 or more. */
+  off: number;
+  /** Seconds the shape's cycle is shifted by, so two lights on one ship can take turns. */
+  offset?: number;
+  /** A pulse: the flash swells up and back down. Left out, the flash snaps on and off. */
+  fade?: boolean;
+}
+
+/**
  * A shape drawn on a hull or a part: shading, a panel, a decal or a lit edge. A hull's are in hull
  * radii, the units mounts use; a part's are in the same units, a twelfth of one.
  */
@@ -218,6 +237,10 @@ export interface ArtShape {
   fade?: ShapeFade;
   /** Drawn only while the part it's on works: under `DAMAGED_AT` of wear. A hull has no wear. */
   working?: boolean;
+  /** The colour change it blinks or pulses to. Without one it keeps its role's colour. */
+  blink?: ShapeBlink;
+  /** A halo round it, in the shape's own units: more than 0. Tied to the flash where there is one. */
+  glow?: number;
   /** A line's width: a rim shape's, an arc's or an open line's. Without one, the hull edge's own. */
   width?: number;
 }
@@ -598,6 +621,10 @@ function readShape(raw: Partial<ArtShape>): ArtShape | null {
   const fade = readFade(raw.fade);
   if (fade) shape.fade = fade;
   if (raw.working === true) shape.working = true;
+  const blink = readBlink(raw.blink);
+  if (blink) shape.blink = blink;
+  const glow = number(raw.glow);
+  if (glow !== undefined && glow > 0) shape.glow = glow;
   if (kind === "polygon") {
     const points = readPoints(raw.points);
     const open = raw.open === true;
@@ -661,6 +688,37 @@ function readShape(raw: Partial<ArtShape>): ArtShape | null {
   if (corner !== undefined) shape.corner = Math.min(corner, Math.min(w, h) / 2);
   return shape;
 }
+
+/** A `#rrggbb` colour as the file writes one, or undefined for anything else. */
+function cssColour(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const colour = value.trim();
+  return /^#[0-9a-f]{6}$/i.test(colour) ? colour.toLowerCase() : undefined;
+}
+
+/**
+ * A shape's colour change read from a file, or none where it can't work, so the shape stays still:
+ * it needs a flash colour and a flash longer than nothing, and a rest between flashes of 0 or more.
+ * A rest colour it can't read is left out, so the shape rests in its role's colour; so is an offset.
+ */
+function readBlink(raw: unknown): ShapeBlink | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const blink = raw as Partial<ShapeBlink>;
+  const colour = cssColour(blink.colour);
+  const on = finiteOrUndefined(blink.on);
+  const off = finiteOrUndefined(blink.off);
+  if (colour === undefined || on === undefined || on <= 0 || off === undefined || off < 0) return undefined;
+  const read: ShapeBlink = { colour, on, off };
+  const rest = cssColour(blink.rest);
+  if (rest !== undefined) read.rest = rest;
+  const offset = finiteOrUndefined(blink.offset);
+  if (offset !== undefined && offset !== 0) read.offset = offset;
+  if (blink.fade === true) read.fade = true;
+  return read;
+}
+
+/** A number from a file, or undefined for anything that isn't one. */
+const finiteOrUndefined = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
 
 /**
  * A shape's gradient read from a file, or none where it can't work: a type nobody knows, points

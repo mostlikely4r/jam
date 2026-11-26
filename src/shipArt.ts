@@ -4,7 +4,7 @@
  * dish), each drawn where its mount sits, turned the way it faces and at its size; what's inside
  * the hull (computer, bay) doesn't show. Damaged parts are handed back so the caller can spark them.
  */
-import { DAMAGED_AT, decalOf, facing, hullEdge, hullMounts, hullShapes, isTurretGun, PART_ART, type ArtShape, type HullPoint, type Module, type Mount, type MountId } from "./fitting";
+import { DAMAGED_AT, decalOf, facing, hullEdge, hullMounts, hullShapes, isTurretGun, PART_ART, type ArtShape, type HullPoint, type Module, type Mount, type MountId, type ShapeBlink } from "./fitting";
 import { partOf, type PartId, type PartKind, type ShipModel } from "./parts";
 import type { Box } from "./grid";
 
@@ -33,6 +33,11 @@ export interface ShapePalette {
   shade: Color;
   rim: Color;
   glass: Color;
+  /**
+   * How a colour a shape names itself is worn, on a part that takes damage: its blink's rest and
+   * flash colours dim with the roles they sit beside. Hulls have none.
+   */
+  worn?: (colour: Color) => Color;
 }
 
 /** The lit edge's own weight, and how transparent it is.	*/
@@ -69,12 +74,14 @@ const byOrder = (a: ArtShape, b: ArtShape) => (a.order ?? 0) - (b.order ?? 0);
 const radians = (degrees: number) => (degrees * Math.PI) / 180;
 
 /**
- * The paint a shape draws with: a gradient from its role's colour to `to` or to clear where it has
- * a fade, else its role's flat colour. `palette` is already worn where the shape is on a part.
+ * The paint a shape draws with: a gradient from its colour to `to` or to clear where it has a fade,
+ * else its flat colour. `palette` is already worn where the shape is on a part, and `lit` is how
+ * lit its colour change is: 1 at the flash, 0 at rest.
  */
-function paint(ctx: CanvasRenderingContext2D, shape: ArtShape, palette: ShapePalette): string | CanvasGradient {
+function paint(ctx: CanvasRenderingContext2D, shape: ArtShape, palette: ShapePalette, lit: number): string | CanvasGradient {
   const fade = shape.fade;
-  if (!fade) return rgb(palette[shape.role]);
+  const colour = shapeColour(shape, palette, lit);
+  if (!fade) return rgb(colour);
   let gradient: CanvasGradient;
   if (fade.type === "line") {
     const [fx, fy] = fade.from ?? [0, 0];
@@ -85,9 +92,79 @@ function paint(ctx: CanvasRenderingContext2D, shape: ArtShape, palette: ShapePal
     const y = (fade.y ?? 0) * R;
     gradient = ctx.createRadialGradient(x, y, 0, x, y, (fade.reach ?? 1) * R);
   }
-  gradient.addColorStop(0, rgb(palette[shape.role]));
+  gradient.addColorStop(0, rgb(colour));
   gradient.addColorStop(1, fade.to ? rgb(palette[fade.to]) : rgba(palette[shape.role], 0));
   return gradient;
+}
+
+/**
+ * A colour a shape names itself, as `#rrggbb`, worn as the roles are: a light on a damaged part dims
+ * with it. `fallback` stands in for a colour the file has lost.
+ */
+function wornColour(palette: ShapePalette, colour: string, fallback: Color): Color {
+  const named = colorOf(colour, fallback);
+  return palette.worn?.(named) ?? named;
+}
+
+/**
+ * The colour a shape draws in: its role's, or, where it changes colour, its rest colour carried
+ * toward its flash colour by how lit it is. A shape's own colours are worn as the roles are.
+ */
+function shapeColour(shape: ArtShape, palette: ShapePalette, lit: number): Color {
+  const role = palette[shape.role];
+  const blink = shape.blink;
+  if (!blink) return role;
+  // Without a rest colour of its own, the shape rests in the role's, which is already worn.
+  const rest = blink.rest ? wornColour(palette, blink.rest, role) : role;
+  return mix(rest, wornColour(palette, blink.colour, role), lit);
+}
+
+/**
+ * How long into its cycle the art is drawn: seconds, or null for still art. Still art draws every
+ * blinking shape at its rest colour with no glow of its own, which is what the icons, the menu's
+ * ship cards and the ship screen's blueprint want. A steady glow still draws.
+ */
+let artTime: number | null = null;
+
+/** Sets the art's clock, in seconds, or `null` to draw still art. */
+export function setArtTime(seconds: number | null): void {
+  artTime = seconds;
+}
+
+/**
+ * How lit a shape's colour change is at `seconds`: 1 is the flash colour, 0 the rest colour. A snap
+ * is full for `on` seconds and dark for `off`; a fade rises to full at half of `on` and back. With
+ * `off` 0 a fade breathes with no flat part. The offset shifts the cycle, so lights can take turns.
+ */
+export function litAmount(blink: ShapeBlink, seconds: number): number {
+  const cycle = blink.on + blink.off;
+  // Wrapped into its cycle, taking a clock that runs before the shape started as the same cycle.
+  let at = (seconds + (blink.offset ?? 0)) % cycle;
+  if (at < 0) at += cycle;
+  if (at >= blink.on) return 0;
+  return blink.fade === true ? Math.sin((Math.PI * at) / blink.on) : 1;
+}
+
+/**
+ * The scale the ship is being drawn at: a glow blurs in canvas pixels, so its size takes this.
+ * One where the context can't say, as a test's own canvas can't.
+ */
+function artScale(ctx: CanvasRenderingContext2D): number {
+  const t = typeof ctx.getTransform === "function" ? ctx.getTransform() : undefined;
+  return t && Number.isFinite(t.a) && t.a > 0 ? Math.hypot(t.a, t.b) : 1;
+}
+
+/**
+ * The halo round a shape: how far it blurs, in canvas pixels, and its colour. Null when the shape
+ * has no glow, or blinks and is at rest. A shape with no colour change glows steadily in its own
+ * colour; one that blinks glows in its flash colour, and its halo swells and shrinks with it.
+ */
+function halo(shape: ArtShape, palette: ShapePalette, lit: number, scale: number): { blur: number; colour: string } | null {
+  const glow = shape.glow;
+  if (glow === undefined || glow <= 0) return null;
+  if (!shape.blink) return { blur: glow * R * scale, colour: rgb(shapeColour(shape, palette, 0)) };
+  if (lit <= 0) return null;
+  return { blur: glow * R * scale * lit, colour: rgba(wornColour(palette, shape.blink.colour, palette[shape.role]), lit) };
 }
 
 /** A polygon's lines through its points, closed back to the first unless it's an open line. */
@@ -137,7 +214,15 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: ArtShape, palett
     path(ctx, edge.map(([x, y]): Point => [x * R, y * R]));
     ctx.clip();
   }
-  const colour = paint(ctx, shape, palette);
+  // How lit its colour change is right now: still art rests every blinking shape, so drawings that
+  // know nothing about time keep looking as they did.
+  const lit = shape.blink && artTime !== null ? litAmount(shape.blink, artTime) : 0;
+  const colour = paint(ctx, shape, palette, lit);
+  const glow = shape.glow === undefined ? null : halo(shape, palette, lit, artScale(ctx));
+  if (glow) {
+    ctx.shadowBlur = glow.blur;
+    ctx.shadowColor = glow.colour;
+  }
   const x = (shape.x ?? 0) * R;
   const y = (shape.y ?? 0) * R;
   // A line through its points is stroked whatever its role: the rim's, an arc's, an open polygon's.
@@ -410,7 +495,14 @@ export function drawPartArt(ctx: CanvasRenderingContext2D, id: PartId, wear: num
   // A part with shapes of its own drawn in the file uses those, worn and scorched as the code's art is.
   if (art?.shapes && art.shapes.length > 0) {
     const palette = partPalette(colours);
-    const worn: ShapePalette = { body: partColor(wear, palette.body), shade: partColor(wear, palette.shade), rim: partColor(wear, palette.rim), glass: partColor(wear, palette.glass) };
+    const worn: ShapePalette = {
+      body: partColor(wear, palette.body),
+      shade: partColor(wear, palette.shade),
+      rim: partColor(wear, palette.rim),
+      glass: partColor(wear, palette.glass),
+      // A light's own colours dim with the part they sit on, as the roles do.
+      worn: (colour: Color) => partColor(wear, colour),
+    };
     drawShapes(ctx, art.shapes, worn, undefined, wear);
   } else drawPart(ctx, part.kind, wear, main, colours);
   ctx.restore();

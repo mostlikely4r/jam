@@ -1,6 +1,7 @@
 # Live shapes plan
 
-Written 2026-11-26, from S-71 (live elements on hulls and parts), first slice. Nothing built yet.
+Written 2026-11-26, from S-71 (live elements on hulls and parts), first slice. Built 2026-11-26
+(Q-38).
 
 ## Why
 
@@ -117,6 +118,8 @@ fields.
 
 ## What to build
 
+All four steps are built; see **Built, with what changed** below.
+
 1. **The data.** In `src/fitting.ts`, `ArtShape` gains `blink` (an object: `colour`, `rest`, `on`,
    `off`, `offset`, `fade`) and `glow`, each with a doc comment in the file's style. `readShape`
    reads them with its usual care:
@@ -182,6 +185,59 @@ These are one build with no stop.
 Nothing unbuilt. It builds on the shape kinds and gradients of Q-36 (built 2026-11-26, `9330bd2`):
 `ArtShape`, `readShape` and `shipFileNow` in `src/fitting.ts`, `paint`, `drawShape` and
 `drawShapes` in `src/shipArt.ts`, and the shape panel and `src/designer/shapes.ts` in the designer.
+
+## Built, with what changed from the plan
+
+The four steps are in. The data and the drawing are as the plan has them: `ShapeBlink`, `glow` and
+their reading in `src/fitting.ts`; `setArtTime`, `litAmount`, the mixed colours and the halo in
+`src/shipArt.ts`; the per-ship phase and the clock in `src/render.ts`'s `drawShip`; and the editor's
+blocks, Still toggle and list mark in `src/designer/hulls.ts`. These differ:
+
+- **The halo's size includes how lit the shape is.** The plan gives a blinking shape's halo "none at
+  rest, full at the flash, and with fade it swells and shrinks with the colour": its blur is
+  `glow × R × scale × lit`, so a pulse's halo breathes with it. A steady glow's is the full size.
+  The colour's alpha is the lit amount, as the plan says.
+- **The blur takes the scale the ship is drawn at**, read from the canvas's own transform (its `a`
+  and `b`, the scale and any turn), since `shadowBlur` is in pixels and not in the ship's units. A
+  context that can't say — a test's own canvas — counts as 1.
+- **A part wears a light's colours through the same `partColor`.** `ShapePalette` gained an optional
+  `worn`, which `drawPartArt` fills in with `partColor(wear, …)`: the rest and flash colours take the
+  wear a scorched part takes, and the role colours are still worked out before it, so nothing wears
+  twice.
+- **The colour change and the glow are read apart.** The plan drops a whole `blink` when its `off`
+  "is negative or not a number", which a file without `off` is too; a shape keeps its `glow` when its
+  `blink` is dropped, since the two are options of their own. Colours are kept lower-cased, and an
+  offset of 0 is left out like the file's other differences.
+- **The editor's rules are `blinkStart`, `blinkOf` and `restFor` in `src/designer/shapes.ts`**, beside
+  the handles and the shading's start. `blinkOf` is the one that says what a usable colour change is
+  (a flash longer than nothing, a rest of 0 or more); the panel never lets a typed number make one.
+- **Still is its own toggle in the view bar**, not one of the layer eyes: the layers say what to hide,
+  and Still says how to draw. Hidden layers and Still are both view state, never saved.
+
+**Step 3, the glow's cost.** Measured in the dev page with the drawing code itself: 60 racers at the
+screen size traffic is drawn at (12 px a hull radius, spread over 1280×720), four lights each, 300
+frames a pass, the shapes patched into `HULL_SHAPES.racer` in memory and put back afterwards.
+
+| 240 lights a frame | ms a frame |
+| --- | --- |
+| no glow | 2.39 – 2.61 |
+| glow 0.08, steady | 2.76 |
+| glow 0.25, steady | 2.69 |
+
+A whole view of glowing ships costs under half a millisecond, inside the same noise as two runs of
+the same drawing, so nothing was skipped: glow draws on every ship, however small. Blinking (the
+clock moving) measured 2.69 – 3.11 ms with and without the glow, which is the same picture.
+
+**How we'll know** is tested in `src/hullShapes.test.ts` (the timing rules, the reading, the round
+trip, the halo, the gradient's first stop, a part's wear, the offsets, and every hull and part in the
+file drawing the same with the clock set as still) and in `src/designer/shapes.test.ts` (the
+panel's rules). One thing is covered by construction rather than by a test: the renderer's `WeakMap`
+of phases needs the game's own canvas, so its effect is tested as two clocks half a cycle apart —
+the same light in two colours at one moment — not by drawing two ships.
+
+The review raised one finding, fixed: a damaged part's light was worn in its fill but its halo
+wasn't, so a dimmed shape still glowed bright. The halo now takes the same `partColor` wear, with a
+test for it.
 
 ## Not doing
 

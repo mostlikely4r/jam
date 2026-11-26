@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { hullEdge, hullShapes, type ArtShape } from "../fitting";
-import { defaultShade, dragHandle, fadeStart, hitShape, shapeBounds, shapeGrips } from "./shapes";
+import { blinkOf, blinkStart, defaultShade, dragHandle, fadeStart, hitShape, restFor, shapeBounds, shapeGrips } from "./shapes";
 
 /** The shading the defender, the drone and the pirate already carry in the ship file. */
 describe("the default shade", () => {
@@ -155,5 +155,26 @@ describe("where a click lands on a shape", () => {
     const corner: ArtShape = { kind: "rect", role: "shade", x: 0, y: 0, w: 0.4, h: 0.2, corner: 0.05 };
     expect(hitShape(corner, 0.1, 0)).toBe(true);
     expect(hitShape(corner, 0.1, 0.2)).toBe(false);
+  });
+});
+
+describe("a shape's colour change", () => {
+  it("starts as a nav light, and gives a lens colour of its own by keeping the flash dark", () => {
+    expect(blinkStart()).toEqual({ colour: "#ff6a5c", on: 0.15, off: 1.2 });
+    expect(restFor("#ff0000")).toBe("#590000");
+    // Anything that isn't a colour gets a dark red, so the field is never left with nothing.
+    expect(restFor("red")).toBe("#3a1a1a");
+  });
+
+  it("reads a light back from the panel's fields, and refuses one that never comes on", () => {
+    const fields = { colour: "#FF0000", rest: "#330000", on: 0.15, off: 1.2, offset: 0, fade: false };
+    expect(blinkOf(fields)).toEqual({ colour: "#ff0000", rest: "#330000", on: 0.15, off: 1.2 });
+    // The role colour and no offset are left out, as the file keeps only what differs.
+    expect(blinkOf({ ...fields, rest: null })).toEqual({ colour: "#ff0000", on: 0.15, off: 1.2 });
+    expect(blinkOf({ ...fields, fade: true, offset: 0.6 })).toEqual({ colour: "#ff0000", rest: "#330000", on: 0.15, off: 1.2, offset: 0.6, fade: true });
+    // Rounding, as the panel's other numbers are.
+    expect(blinkOf({ ...fields, on: 0.12345 })?.on).toBe(0.123);
+    expect(blinkOf({ ...fields, on: 0 })).toBeUndefined();
+    expect(blinkOf({ ...fields, off: -1 })).toBeUndefined();
   });
 });

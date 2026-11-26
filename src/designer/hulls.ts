@@ -81,9 +81,9 @@ import { PROGRAMS, PROGRAM_PARTS, programDef, programsFileNow, SHIPPED_PROGRAMS,
 import type { GlyphId } from "../glyphs";
 import { EVERY_GLYPH, glyphIcon, iconEl } from "../icons";
 import { DEFAULTS } from "../tuning";
-import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPartArt, drawTanks, drawTurret, GLASS_HEX, METAL_HEX, RIM_HEX, SHADE_HEX, tankBoxes } from "../shipArt";
+import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPartArt, drawTanks, drawTurret, GLASS_HEX, METAL_HEX, RIM_HEX, setArtTime, SHADE_HEX, tankBoxes } from "../shipArt";
 import { multiSelect, withoutPick, withPick } from "./multiselect";
-import { defaultShade, dragHandle, fadeStart, hitShape, insidePolygon, shapeGrips, type ShapeHandle } from "./shapes";
+import { blinkOf, blinkStart, defaultShade, dragHandle, fadeStart, hitShape, insidePolygon, restFor, shapeGrips, type BlinkFields, type ShapeHandle } from "./shapes";
 import { UndoStack } from "./undo";
 import { shippedWorld } from "./shipped";
 import { walk } from "./world";
@@ -261,6 +261,8 @@ export class HullDesigner {
   private pan = { x: 0, y: 0 };
   /** The layers the user hid on the blueprint: view state too, kept across rebuilds. */
   private readonly hidden = new Set<Layer>();
+  /** Draws every light at rest, for placing one without it flashing under the cursor. View state too. */
+  private still = false;
   /** Where the cursor last was on the canvas, for a turret's gun to follow. */
   private at: [number, number] | null = null;
   /** Ctrl-Z's snapshots, one stack for the three pages. */
@@ -497,16 +499,29 @@ export class HullDesigner {
     fit.dataset.fit = "1";
     fit.title = "Back to the whole ship in view";
     this.viewbar.append(fit);
+    const still = this.button("", () => {
+      this.still = !this.still;
+      this.refreshViewbar();
+    });
+    still.dataset.still = "1";
+    still.title = "Draw every light at rest, to place one without it flashing under the cursor";
+    this.viewbar.append(still);
     this.refreshViewbar();
   }
 
   private refreshViewbar(): void {
     for (const button of this.viewbar.querySelectorAll("button")) {
-      if (button.dataset.fit) continue;
+      // The fit button and Still aren't layers: they say their own state below.
+      if (button.dataset.fit || button.dataset.still) continue;
       const layer = button.dataset.layer as Layer;
       const on = this.shown(layer);
       button.textContent = `${on ? "\u25c9" : "\u25cb"} ${LAYERS.find(([each]) => each === layer)![1]}`;
       button.className = on ? "on" : "";
+    }
+    const still = this.viewbar.querySelector("button[data-still]");
+    if (still) {
+      still.textContent = `${this.still ? "\u25c9" : "\u25cb"} Still`;
+      still.className = this.still ? "on" : "";
     }
   }
 
@@ -2367,7 +2382,9 @@ export class HullDesigner {
     const outline = this.outline();
     if (outline.length > 0) list.append(this.button(`Outline (${outline.length} points)`, () => this.selectShape("edge"), this.shape === "edge" ? "on" : ""));
     for (const [index, shape] of this.shapes().entries()) {
-      const label = `${index + 1}. ${SHAPE_KIND_NAMES[shape.kind]}, ${shape.role}`;
+      // A shape that changes colour or glows is marked, so what moves reads off the list.
+      const mark = shape.blink || shape.glow !== undefined ? " \u2726" : "";
+      const label = `${index + 1}. ${SHAPE_KIND_NAMES[shape.kind]}, ${shape.role}${mark}`;
       list.append(this.button(label, () => this.selectShape(index), this.shape === index ? "on" : ""));
     }
     if (list.childElementCount === 0) {
@@ -2510,6 +2527,85 @@ export class HullDesigner {
               },
             ),
           ),
+        );
+      }
+      // Glow: a halo round the shape, steady where it doesn't change colour, and tied to the flash
+      // where it does. 0 is no glow.
+      out.push(
+        this.labelled(
+          "Glow (0: none)",
+          this.numberField(
+            shape.glow ?? 0,
+            (value) => {
+              if (value > 0) shape.glow = clean(value);
+              else delete shape.glow;
+              this.changed();
+            },
+            0.01,
+          ),
+        ),
+      );
+      // The colour change: none, a blink that snaps on and off, or a pulse that fades up and back.
+      out.push(
+        this.labelled(
+          "Colour change",
+          this.dropdown(
+            [
+              ["none", "None (drawn in its role's colour)"],
+              ["snap", "Snap on and off (a blink)"],
+              ["fade", "Fade up and back (a pulse)"],
+            ],
+            shape.blink ? (shape.blink.fade === true ? "fade" : "snap") : "none",
+            (value) => {
+              const wanted = value as "none" | "snap" | "fade";
+              if (wanted === "none") delete shape.blink;
+              else {
+                // Kept as it was where the shape already changes colour: turning snap to fade, or
+                // back, keeps its colours and times. A new one starts as a nav light.
+                const blink = shape.blink ? { ...shape.blink } : blinkStart();
+                if (wanted === "fade") blink.fade = true;
+                else delete blink.fade;
+                shape.blink = blink;
+              }
+              this.changed();
+            },
+          ),
+        ),
+      );
+      if (shape.blink) {
+        // The fields as the light has them now, so a change to one goes back through the same rule.
+        const fields = (): BlinkFields => {
+          const now = shape.blink!;
+          return { colour: now.colour, rest: now.rest ?? null, on: now.on, off: now.off, offset: now.offset ?? 0, fade: now.fade === true };
+        };
+        const put = (change: Partial<BlinkFields>, rebuild = true) => {
+          const next = blinkOf({ ...fields(), ...change });
+          // A flash of nothing never comes on, so a light whose fields can't work keeps the ones it has.
+          if (next) shape.blink = next;
+          this.changed(rebuild);
+        };
+        const flash = document.createElement("input");
+        flash.type = "color";
+        flash.value = shape.blink.colour;
+        flash.addEventListener("input", () => put({ colour: flash.value }, false));
+        out.push(this.labelled("Flash colour", flash));
+        const roleRest = shape.blink.rest === undefined;
+        out.push(
+          this.tick("Rest in the role colour", roleRest, (on) => put({ rest: on ? null : restFor(shape.blink!.colour) })),
+        );
+        const rest = document.createElement("input");
+        rest.type = "color";
+        rest.value = shape.blink.rest ?? restFor(shape.blink.colour);
+        rest.disabled = roleRest;
+        rest.addEventListener("input", () => put({ rest: rest.value }, false));
+        out.push(this.labelled("Rest colour", rest));
+        out.push(
+          this.labelled(
+            "On (seconds)",
+            this.numberField(shape.blink.on, (value) => put({ on: Math.max(0.05, value) }), 0.1),
+          ),
+          this.labelled("Off (seconds)", this.numberField(shape.blink.off, (value) => put({ off: Math.max(0, value) }), 0.1)),
+          this.labelled("Offset (seconds)", this.numberField(shape.blink.offset ?? 0, (value) => put({ offset: value }), 0.1)),
         );
       }
       out.push(this.button("Remove this shape", () => this.removeShape(), "danger"));
@@ -3023,6 +3119,9 @@ export class HullDesigner {
       return;
     }
 
+    // The art's clock: shapes blink on the blueprint as they will in the game, unless Still is on.
+    setArtTime(this.still ? null : performance.now() / 1000);
+
     // The parts page with no hull to show: just the selected part, drawn as in game.
     if (this.alone()) {
       const part = partOf(this.part);
@@ -3036,6 +3135,7 @@ export class HullDesigner {
       ctx.fillStyle = "#7f8ba0";
       ctx.font = "12px system-ui, sans-serif";
       ctx.fillText(`${part.label}${isDecal(part.id) ? ", a decal" : ""}: drawn as in game, facing the nose`, 14, height - 14);
+      setArtTime(null);
       return;
     }
 
@@ -3150,6 +3250,7 @@ export class HullDesigner {
     ctx.font = "12px system-ui, sans-serif";
     const square = this.alone() ? "a twentieth" : "a quarter";
     ctx.fillText(`${hullName(model)}: nose to the right, one square ${square} of the ship's radius`, 14, height - 14);
+    setArtTime(null);
   }
 
   /**

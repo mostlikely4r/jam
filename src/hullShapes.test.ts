@@ -29,10 +29,11 @@ import {
   useShipFile,
   type ArtShape,
   type Hull,
+  type ShapeBlink,
   type ShapeFade,
 } from "./fitting";
 import { SHIP_MODELS, type PartId } from "./parts";
-import { drawDecal, drawHull, drawPartArt, drawShape, mix, partPalette, type ShapePalette } from "./shipArt";
+import { drawDecal, drawHull, drawPartArt, drawShape, litAmount, mix, partPalette, setArtTime, type ShapePalette } from "./shipArt";
 
 /** A hull radius, in the world units the old `src/shipArt.ts` drew in. */
 const R = 12;
@@ -379,6 +380,8 @@ interface Painted {
   rule?: string;
   /** A stroke's width. */
   width?: number;
+  /** The halo it cast, where it cast one: how far it blurred, and in what colour. */
+  glow?: { blur: number; colour: [number, number, number, number] };
 }
 
 /**
@@ -393,7 +396,9 @@ function painter(): { ctx: CanvasRenderingContext2D; painted: Painted[]; stops: 
   let strokeStyle = "#000000";
   let lineWidth = 1;
   let alpha = 1;
-  type Frame = { fillStyle: string; strokeStyle: string; lineWidth: number; alpha: number; m: number[] };
+  let shadowBlur = 0;
+  let shadowColor = "#000000";
+  type Frame = { fillStyle: string; strokeStyle: string; lineWidth: number; alpha: number; shadowBlur: number; shadowColor: string; m: number[] };
   const stack: Frame[] = [];
   // a, b, c, d, e, f: x becomes a·x + c·y + e, y becomes b·x + d·y + f.
   let m = [1, 0, 0, 1, 0, 0];
@@ -418,6 +423,7 @@ function painter(): { ctx: CanvasRenderingContext2D; painted: Painted[]; stops: 
       colour: colour(kind === "fill" ? fillStyle : strokeStyle, alpha),
       ...(rule ? { rule } : {}),
       ...(kind === "stroke" ? { width: lineWidth } : {}),
+      ...(shadowBlur > 0 ? { glow: { blur: shadowBlur, colour: colour(shadowColor, 1) } } : {}),
     });
   };
   const gradient = () =>
@@ -430,7 +436,7 @@ function painter(): { ctx: CanvasRenderingContext2D; painted: Painted[]; stops: 
         case "globalAlpha":
           return alpha;
         case "save":
-          return () => stack.push({ fillStyle, strokeStyle, lineWidth, alpha, m });
+          return () => stack.push({ fillStyle, strokeStyle, lineWidth, alpha, shadowBlur, shadowColor, m });
         case "restore":
           return () => {
             const frame = stack.pop();
@@ -439,6 +445,8 @@ function painter(): { ctx: CanvasRenderingContext2D; painted: Painted[]; stops: 
             strokeStyle = frame.strokeStyle;
             lineWidth = frame.lineWidth;
             alpha = frame.alpha;
+            shadowBlur = frame.shadowBlur;
+            shadowColor = frame.shadowColor;
             m = frame.m;
           };
         case "translate":
@@ -512,6 +520,8 @@ function painter(): { ctx: CanvasRenderingContext2D; painted: Painted[]; stops: 
       else if (name === "strokeStyle") strokeStyle = String(value);
       else if (name === "lineWidth") lineWidth = Number(value);
       else if (name === "globalAlpha") alpha = Number(value);
+      else if (name === "shadowBlur") shadowBlur = Number(value);
+      else if (name === "shadowColor") shadowColor = String(value);
       return true;
     },
   });
@@ -842,5 +852,192 @@ describe("the art the file now draws for the cockpits and the tractor", () => {
         expect(PART_ART.gun1).toBeUndefined();
       },
     );
+  });
+});
+
+describe("live shapes: a colour change and a glow", () => {
+  /** A nav light: a small circle on the nose, flashing red from a dark lens. */
+  const light = (over: Partial<ArtShape> = {}): ArtShape => ({
+    kind: "circle",
+    role: "body",
+    x: 0.1,
+    y: 0,
+    r: 0.05,
+    blink: { colour: "#ff0000", rest: "#330000", on: 0.2, off: 0.8 },
+    ...over,
+  });
+  /** The colour a drawing's one fill came out, as red, green, blue and alpha. */
+  const filled = (canvas: { painted: Painted[] }) => canvas.painted[0].colour;
+  /** One shape drawn in a part's colours, with the art's clock at `at` seconds or still at null. */
+  const drawn = (shape: ArtShape, at: number | null, palette: ShapePalette = partPalette()) => {
+    setArtTime(at);
+    try {
+      const canvas = painter();
+      drawShape(canvas.ctx, shape, palette);
+      return canvas;
+    } finally {
+      setArtTime(null);
+    }
+  };
+
+  it("blinks and fades by the clock, and takes its offset", () => {
+    const snap: ShapeBlink = { colour: "#ff0000", on: 0.2, off: 0.8 };
+    expect([0, 0.1, 0.2, 0.5, 0.99, 1].map((at) => litAmount(snap, at))).toEqual([1, 1, 0, 0, 0, 1]);
+    // An offset shifts the whole cycle, so a second light takes its turn.
+    expect(litAmount({ ...snap, offset: 0.3 }, 0)).toBe(0);
+    expect(litAmount({ ...snap, offset: 0.3 }, 0.7)).toBe(1);
+    const fade: ShapeBlink = { colour: "#ff0000", on: 0.4, off: 0.6, fade: true };
+    expect(litAmount(fade, 0)).toBe(0);
+    expect(litAmount(fade, 0.2)).toBeCloseTo(1, 6);
+    expect(litAmount(fade, 0.4)).toBe(0);
+    expect(litAmount(fade, 0.7)).toBe(0);
+    // With no rest between, it breathes without a pause.
+    const breathing: ShapeBlink = { colour: "#ff0000", on: 0.4, off: 0, fade: true };
+    expect(litAmount(breathing, 0)).toBe(0);
+    expect(litAmount(breathing, 0.2)).toBeCloseTo(1, 6);
+    expect(litAmount(breathing, 0.4)).toBe(0);
+  });
+
+  it("draws a light at rest in its lens colour, and at its flash in the flash colour", () => {
+    expect(filled(drawn(light(), null))).toEqual([51, 0, 0, 1]);
+    expect(filled(drawn(light(), 0))).toEqual([255, 0, 0, 1]);
+    // A light with no lens colour of its own rests in its role's colour.
+    const bare = light({ blink: { colour: "#ff0000", on: 0.2, off: 0.8 } });
+    expect(filled(drawn(bare, 0.5))).toEqual([111, 122, 140, 1]);
+  });
+
+  it("casts a halo round a steady glow, and ties a light's halo to its flash", () => {
+    const steady = drawn({ kind: "circle", role: "glass", x: 0, y: 0, r: 0.05, glow: 0.08 }, null);
+    expect(steady.painted[0].glow).toEqual({ blur: 0.08 * R, colour: [141, 189, 185, 1] });
+    const flashing = drawn(light({ glow: 0.08 }), 0);
+    expect(flashing.painted[0].glow).toEqual({ blur: 0.08 * R, colour: [255, 0, 0, 1] });
+    // At rest there's no halo at all, and none on a shape that never asked for one.
+    expect(drawn(light({ glow: 0.08 }), null).painted[0].glow).toBeUndefined();
+    expect(drawn(light(), 0).painted[0].glow).toBeUndefined();
+  });
+
+  it("starts a fading shape's gradient in the colour its light is now", () => {
+    const shape = light({ fade: { type: "line", to: "glass", from: [-0.05, 0], end: [0.05, 0] } });
+    expect(drawn(shape, null).stops).toEqual([
+      [0, "rgb(51,0,0)"],
+      [1, "rgb(141,189,185)"],
+    ]);
+    expect(drawn(shape, 0).stops[0]).toEqual([0, "rgb(255,0,0)"]);
+  });
+
+  it("wears a light's own colours as it wears the roles, and puts a working one out", () => {
+    withFile(
+      () => {
+        PART_ART.gun1 = { shapes: [light({ glow: 0.08 }), light({ working: true })] };
+      },
+      () => {
+        const whole = painter();
+        setArtTime(0);
+        drawPartArt(whole.ctx, "gun1", 0);
+        setArtTime(null);
+        expect(whole.painted.map((each) => each.colour)).toEqual([
+          [255, 0, 0, 1],
+          [255, 0, 0, 1],
+        ]);
+        const damaged = painter();
+        setArtTime(0);
+        drawPartArt(damaged.ctx, "gun1", DAMAGED_AT);
+        setArtTime(null);
+        // The light dims to the part's hot colour, and the one that only works while it does is gone.
+        expect(damaged.painted).toHaveLength(1);
+        const scorched = mix([255, 0, 0], [255, 138, 58], 0.75);
+        expect(damaged.painted[0].colour).toEqual([...scorched, 1]);
+        // Its halo is worn the same way: a damaged part's light doesn't glow brighter than it looks.
+        expect(damaged.painted[0].glow).toEqual({ blur: 0.08 * R, colour: [...scorched, 1] });
+      },
+    );
+  });
+
+  it("gives each ship its own time, and two lights on one ship their turns", () => {
+    // The renderer adds a phase of its own to each ship's clock, so the same light at two phases is
+    // two colours at one moment: that's what makes a field twinkle.
+    const shape = light();
+    expect(filled(drawn(shape, 0.05))).toEqual([255, 0, 0, 1]);
+    expect(filled(drawn(shape, 0.05 + 0.5))).toEqual([51, 0, 0, 1]);
+    // And an offset puts the light on the other wingtip out of step with this one.
+    const twin = light({ blink: { colour: "#00ff00", rest: "#003300", on: 0.2, off: 0.8, offset: 0.5 } });
+    expect(filled(drawn(shape, 0.1))).toEqual([255, 0, 0, 1]);
+    expect(filled(drawn(twin, 0.1))).toEqual([0, 51, 0, 1]);
+  });
+
+  it("reads a colour change and a glow, and drops the ones that can't draw", () => {
+    const file = shipFileNow();
+    try {
+      file.hulls.racer.shapes = [
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, blink: { colour: "#FF0000", on: 0.2, off: 0.8 } },
+        // A flash of nothing leaves it still; the glow it also asked for stands on its own.
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, blink: { colour: "#ff0000", on: 0, off: 0.8 }, glow: 0.2 },
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, blink: { colour: "red", on: 0.2, off: 0.8 } },
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, blink: { colour: "#ff0000", on: 0.2, off: -1 } },
+        // A rest colour it can't read is left out, so it rests in its role's colour.
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, blink: { colour: "#ff0000", on: 0.2, off: 0.8, rest: "nope", offset: 2, fade: true } },
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, glow: 0.1 },
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, glow: -2 },
+      ] as unknown as ArtShape[];
+      useShipFile(file);
+      const shapes = hullShapes("racer");
+      expect(shapes[0].blink).toEqual({ colour: "#ff0000", on: 0.2, off: 0.8 });
+      expect(shapes[1].blink).toBeUndefined();
+      expect(shapes[1].glow).toBeCloseTo(0.2, 6);
+      expect(shapes.slice(2, 4).map((shape) => shape.blink)).toEqual([undefined, undefined]);
+      expect(shapes[4].blink).toEqual({ colour: "#ff0000", on: 0.2, off: 0.8, offset: 2, fade: true });
+      expect(shapes[5].glow).toBeCloseTo(0.1, 6);
+      expect(shapes[6].glow).toBeUndefined();
+    } finally {
+      useShipFile(file);
+    }
+  });
+
+  it("keeps a light's fields through a save and a read", () => {
+    const shapes: ArtShape[] = [
+      {
+        kind: "circle",
+        role: "glass",
+        x: 0.1,
+        y: 0,
+        r: 0.05,
+        glow: 0.08,
+        blink: { colour: "#ff0000", rest: "#330000", on: 0.15, off: 1.2, offset: 0.6, fade: true },
+      },
+      { kind: "circle", role: "body", x: -0.1, y: 0, r: 0.05, blink: { colour: "#00ff00", on: 0.2, off: 0 } },
+      { kind: "rect", role: "shade", x: 0, y: 0, w: 0.2, h: 0.1, glow: 1.5 },
+    ];
+    withFile(
+      () => HULL_SHAPES.racer.splice(0, HULL_SHAPES.racer.length, ...shapes),
+      () => {
+        const file = shipFileNow();
+        useShipFile(file);
+        expect(hullShapes("racer")).toEqual(shapes);
+        expect(shipFileNow()).toEqual(file);
+      },
+    );
+  });
+
+  it("draws every hull and part in the file the same with the art's clock set as still", () => {
+    for (const model of SHIP_MODELS) {
+      const still = painter();
+      setArtTime(null);
+      drawHull(still.ctx, model, [120, 150, 190]);
+      const moving = painter();
+      setArtTime(1.7);
+      drawHull(moving.ctx, model, [120, 150, 190]);
+      setArtTime(null);
+      expect(moving.painted).toEqual(still.painted);
+    }
+    for (const id of Object.keys(PART_ART) as PartId[]) {
+      const still = painter();
+      setArtTime(null);
+      drawPartArt(still.ctx, id, 0);
+      const moving = painter();
+      setArtTime(1.7);
+      drawPartArt(moving.ctx, id, 0);
+      setArtTime(null);
+      expect(moving.painted).toEqual(still.painted);
+    }
   });
 });

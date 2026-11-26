@@ -7,7 +7,7 @@ import { isOreItem } from "./items";
 import { pickOf } from "./programs";
 import { relativeLine, willCollide, type Motion } from "./relative";
 import { cloudAt, cloudPuffs, cloudStops, strengthAt, type CloudPuff } from "./clouds";
-import { bayBox, colorOf, drawTurret, drawVectorShip, hullTint, mix } from "./shipArt";
+import { bayBox, colorOf, drawTurret, drawVectorShip, hullTint, mix, setArtTime } from "./shipArt";
 import { canvasTip } from "./tooltip";
 import {
   BLACK_MARKET_LENGTH,
@@ -187,6 +187,12 @@ export class Renderer {
   private pings: { speaker: Ship | null; x: number; y: number; mayday: boolean; age: number; bend: number }[] = [];
   /** Where the player last saw each pirate, in the axes of what it was near. */
   private ghosts = new WeakMap<Ship, { poi: Poi; x: number; y: number; seenAt: number }>();
+  /**
+   * How far each ship's own lights are into their cycle: made up the first time it's drawn, so ships
+   * of one hull blink out of step, and kept as long as the ship lives. Never saved: a loaded game
+   * simply gets new ones, which nobody can tell apart.
+   */
+  private phases = new WeakMap<Ship, number>();
   private stars: Star[] = [];
   private motes: Mote[] = [];
   /** Where the marks on a body's ground are, as shares of its radius. */
@@ -1631,6 +1637,7 @@ export class Renderer {
 
     // Worn by share of its own hull, so a 300-point hull starts at its own colour, not past blue.
     const tint = hullTint([red, green, blue], ship.hull, hullMax(ship.model));
+    setArtTime(performance.now() / 1000 + this.phaseOf(ship));
     const broken = drawVectorShip(ctx, ship, tint, this.tankFill(ship));
     for (const [bx, by] of broken) this.drawSparks(bx, by);
     this.drawCargo(ship);
@@ -1659,7 +1666,18 @@ export class Renderer {
       });
     }
     ctx.restore();
+    setArtTime(null);
     this.drawStanding(ship, x, y);
+  }
+
+  /** The phase a ship's lights blink to: made up on first sight, and kept for as long as it lives. */
+  private phaseOf(ship: Ship): number {
+    let phase = this.phases.get(ship);
+    if (phase === undefined) {
+      phase = Math.random() * 60;
+      this.phases.set(ship, phase);
+    }
+    return phase;
   }
 
   /**

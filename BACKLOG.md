@@ -614,7 +614,7 @@ and both the gallery preview and the `sway` block in `src/voices.json` pick it u
 change.
 
 ## S-71 · Live elements on hulls and parts
-- status: specced
+- status: built
 - plan: docs/live-shapes-plan.md
 - area: Ships and gear
 - from: the Q-24 spec talk, 2026-11-26

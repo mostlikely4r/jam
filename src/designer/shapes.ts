@@ -4,7 +4,7 @@
  * click lands on it. Plain functions, so they test on their own, as `multiselect.ts` and
  * `undo.ts` do; `hulls.ts` draws the page around them.
  */
-import { onGrid, type ArtShape, type HullPoint, type ShapeFade } from "../fitting";
+import { onGrid, type ArtShape, type HullPoint, type ShapeBlink, type ShapeFade } from "../fitting";
 
 /** A handle a shape is dragged by: its middle, one of its sizes, an angle's end, or its fade's. */
 export type ShapeHandle = "middle" | "rx" | "ry" | "outer" | "inner" | "radius" | "from" | "to" | "reach" | "fadeMiddle" | "fadeFrom" | "fadeEnd";
@@ -98,6 +98,54 @@ export function fadeStart(shape: ArtShape, type: ShapeFade["type"]): ShapeFade {
   const middleY = tidy((y0 + y1) / 2);
   if (type === "line") return { type, from: [tidy(x0), middleY], end: [tidy(x1), middleY] };
   return { type, x: tidy((x0 + x1) / 2), y: middleY, reach: tidy(Math.hypot(x1 - x0, y1 - y0) / 2) };
+}
+
+/** The flash colour a light starts with: a hot red, which is what a nav light mostly is. */
+export const BLINK_FLASH = "#ff6a5c";
+
+/**
+ * The colour change a shape starts with when one is turned on: a hot red flashing on for a sixth of
+ * a second and off for one and a fifth, resting in its role's colour until it's given one of its own.
+ */
+export function blinkStart(): ShapeBlink {
+  return { colour: BLINK_FLASH, on: 0.15, off: 1.2 };
+}
+
+/** What the colour change block's fields say, to be read back into a shape's `blink`. */
+export interface BlinkFields {
+  /** The flash colour, `#rrggbb`. */
+  colour: string;
+  /** The rest colour, or null while the shape rests in its role's colour. */
+  rest: string | null;
+  on: number;
+  off: number;
+  offset: number;
+  fade: boolean;
+}
+
+/**
+ * The colour change a shape's fields make, or undefined where they can't work: it takes a flash
+ * longer than nothing, since a shape that never comes on never changes colour, and a rest that is
+ * nothing or more. Times are rounded as the panel's other numbers are.
+ */
+export function blinkOf(fields: BlinkFields): ShapeBlink | undefined {
+  if (!(fields.on > 0) || !(fields.off >= 0)) return undefined;
+  const blink: ShapeBlink = { colour: fields.colour.toLowerCase(), on: tidy(fields.on), off: tidy(fields.off) };
+  if (fields.rest) blink.rest = fields.rest.toLowerCase();
+  if (fields.offset !== 0) blink.offset = tidy(fields.offset);
+  if (fields.fade) blink.fade = true;
+  return blink;
+}
+
+/**
+ * The rest colour a light starts with when it's given one of its own: its flash colour, kept dark,
+ * so the lens reads as unlit rather than as another colour. A nav light's dark red lens.
+ */
+export function restFor(colour: string): string {
+  const hex = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(colour.trim());
+  if (!hex) return "#3a1a1a";
+  const dim = hex.slice(1).map((part) => Math.round(parseInt(part, 16) * 0.35).toString(16).padStart(2, "0"));
+  return `#${dim.join("")}`;
 }
 
 /** The handles a shape is dragged by. A polygon has none: its points are their own. */

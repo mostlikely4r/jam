@@ -772,15 +772,17 @@ are holes: they take and give anything at a fixed price. First goods: ore → pa
 parts → guns or thrusters. Spec B1 (Q-48); reshapes Q-7 and Q-32.
 
 ## S-80 · Ammo for gun 1
-- status: idea
+- status: specced
 - area: Ships and gear
 - effort: M
-- plan: docs/roadmap.md
+- plan: docs/ammo-plan.md
 - from: the roadmap talk, 2026-11-27
 
 *Decided:* a consumable so goods keep flowing, and the answer to "what is my gun shooting". Gun 1
 uses ammo; one gun stays ammo-free so idle mining can't run dry. Fuel's twin: a part consumes an
 item from where the ship stores it. Later ammo types carry damage types for the hunt. Spec B2 (Q-50).
+Specced 2026-11-27 in `docs/ammo-plan.md`: boxes with rounds in the cargo bay, an empty Gun 1 stops,
+and the ammo-free gun is the laser, bought later, not needed for idle mining. Builds Q-54, Q-55.
 
 ## S-81 · Trade lanes, prices from stock, and watching the flow
 - status: idea
@@ -833,3 +835,13 @@ and going stale. Pushes idle mining to 4 and gives the shopping journey its want
 
 Lanes are authored first. Later a god transport AI draws them before or during the game, and later
 still bases choose their own factories by what pays (see S-37, expansion as a sim).
+
+## S-86 · Where the pirate base gets its ammo
+- status: parked
+- area: World
+- plan: docs/ammo-plan.md
+- from: the ammo talk, 2026-11-27
+
+Spec B2 tops the pirate base's ammo up from nothing, as its fuel is today. Its real supply could be
+raiding haulers or the black market, as part of the living economy (pirates, defenders, traffic
+and money as one loop).

@@ -2,6 +2,31 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-54 · Ammo, steps 1–4: measure, the box, Gun 1 consumes, the bay's settings and the factory · build
+- state: queued
+- who: strong
+- after: Q-53
+- backlog: S-80
+- plan: docs/ammo-plan.md
+- added: 2026-11-27
+
+Slice 1: a probe sets rounds per box, ammo boxes with charges in the bay, Gun 1 draws a round a
+shot and stops when dry (click, "Out of ammo", grey icon), Sell ore and Keep ammo boxes on the
+bay, the dock restocks, the ammo factory on Planet base and Ringside. Stops for the user to try.
+strong: touches firing for every pilot, the dock services and the save format.
+
+## Q-55 · Ammo, steps 5–6: no ammo at the dock, and out of view · build
+- state: queued
+- who: strong
+- after: Q-54
+- backlog: S-80
+- plan: docs/ammo-plan.md
+- added: 2026-11-27
+
+Slice 2: a miner that gets no ammo takes another job, else moves home for good, else waits;
+drones and defenders wait. Trip records are charged rounds and restock at their dock visit.
+strong: changes traffic's decisions and the out-of-view records.
+
 ## Q-51 · Station frames: place and body, capabilities as parts, owners, construction · build
 - state: queued
 - who: strong
@@ -39,17 +64,6 @@ strong: sits on spec A's parts, changes buying and the save format.
 Slice 2: blueprints as items, the moon port hole, the hub removed with the stand-in hauler route to
 the nearest ore factory, blocks as items. Watch starving on the dev cards; don't fix it.
 strong: removes the hub and rewires haulers, blueprints and the save format.
-
-## Q-50 · Materials flow, spec B2: ammo · spec
-- state: queued
-- who: pair
-- backlog: S-80
-- added: 2026-11-27
-
-Roadmap step 5: the ammo item, gun 1 naming its ammo, where the ship keeps it, running out. The
-consuming half generalises fuel ("a part consumes an item from where its entity stores it") and
-doesn't touch stations, so it can be specced before spec A; only making ammo needs B1 (Q-48).
-pair: the ammo rules are design calls.
 
 ## Q-40 · Face cast: first interviews · other
 - state: queued
@@ -298,6 +312,19 @@ and per-ship phase.
 pair: design choices on which states and how they show.
 
 ## Done
+
+## Q-50 · Materials flow, spec B2: ammo · spec
+- state: done
+- who: pair
+- backlog: S-80
+- plan: docs/ammo-plan.md
+- added: 2026-11-27
+- done: 2026-11-27
+
+Roadmap step 5: the ammo item, gun 1 naming its ammo, where the ship keeps it, running out. The
+consuming half generalises fuel ("a part consumes an item from where its entity stores it") and
+doesn't touch stations, so it can be specced before spec A; only making ammo needs B1 (Q-48).
+pair: the ammo rules are design calls.
 
 ## Q-48 · Materials flow, spec B1: recipes, factories and holes · spec
 - state: done

@@ -685,7 +685,8 @@ glow as options on any shape, each ship on its own timing, tools only. The rest 
 state lights to S-72, spin to S-73, the glint and particles to S-74.
 
 ## S-72 · Lights that follow the ship's state
-- status: idea
+- status: specced
+- plan: docs/live-shapes-plan.md
 - area: Ships and gear
 - from: the S-71 spec talk, 2026-11-26
 
@@ -695,10 +696,11 @@ docking light that only blinks on approach. Builds on S-71's first slice
 change and glow use, so no new drawing is needed. The user chose looks first, so this waits until
 that slice has been played.
 
-Queued as Q-46 (2026-11-26).
+Queued as Q-46 (2026-11-26); specced 2026-11-27 as slice 2 of `docs/live-shapes-plan.md`, built by Q-59.
 
 ## S-73 · Spinning shapes
-- status: idea
+- status: specced
+- plan: docs/live-shapes-plan.md
 - area: Ships and gear
 - from: the S-71 spec talk, 2026-11-26
 
@@ -706,7 +708,7 @@ A shape that turns on its own, such as a dish or a gyro ring, with a speed and a
 option on any shape, like S-71's colour change and glow, using the same art clock and per-ship
 phase (`docs/live-shapes-plan.md`).
 
-Queued as Q-46 (2026-11-26).
+Queued as Q-46 (2026-11-26); specced 2026-11-27 as slice 2 of `docs/live-shapes-plan.md`, built by Q-59.
 
 ## S-74 · Star glint and particles from shapes
 - status: parked

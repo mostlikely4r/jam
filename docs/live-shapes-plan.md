@@ -1,7 +1,8 @@
 # Live shapes plan
 
 Written 2026-11-26, from S-71 (live elements on hulls and parts), first slice. Built 2026-11-26
-(Q-38).
+(Q-38). The second slice, state lights and spin (S-72, S-73), was written 2026-11-27 and is under
+**Slice 2** at the end; nothing of it is built yet.
 
 ## Why
 
@@ -254,3 +255,316 @@ The rest of S-71, each for later:
 - **A glint lit by the star** as the ship turns (S-74).
 - **Particles** from shapes (S-74).
 - **Lights on today's ships**: tools only (*decided*); the user adds them.
+
+---
+
+# Slice 2: state lights and spinning shapes
+
+Written 2026-11-27, from S-72 (lights that follow the ship's state) and S-73 (spinning shapes),
+after slice 1 was played and passed (P-3, 2026-11-26).
+
+## Why
+
+Slice 1 gave every shape a colour change and a glow on a clock: a nav light blinks whatever the
+ship does. The user's next picture is lights and moving parts that *say* something: an engine
+stripe that brightens with the throttle, a beacon that blinks as a ship comes in to dock, a lamp on
+the tank when fuel runs low, a muzzle light on each shot, a radar dish that sweeps on approach. It
+serves the same two pillars as slice 1: alive without you (a field of ships whose lights tell you
+what each is doing) and the reveal (a light you only notice the first time your tank runs low).
+
+Stations come next. The station frames plan (`docs/station-frames-plan.md`, Q-51) makes a station a
+frame drawn in the hull designer from the same shapes, so its lights go through the same art
+(*decided*: the user, "stations will soon use the same system").
+
+Nothing here rests on a guess about play: it's designer tooling again, and the user draws the
+lights. So there is no stop for the user to try in the middle; the build is one piece.
+
+## The picture
+
+The user's calls are marked *decided*. The rest is my proposal.
+
+**Four states, of three kinds** (*decided*: the list and the kinds)
+
+| State | Kind | On a hull shape it reads | On a part's shape it reads |
+| --- | --- | --- | --- |
+| Throttle | amount, 0 to 1 | the main thruster (`thrusterMain`) | that thruster's own firing |
+| Approach | switch | a dock near and closing | the same, the ship's |
+| Running low | switch | the ship's whole stock of the named item | the same, the ship's whole stock |
+| Firing | event | any gun's shot | that gun's own shot |
+
+- **An amount** lights the shape as much as the state is.
+- **A switch** turns the shape's own blink on: it blinks on its slice 1 timing while the state is
+  true, and rests otherwise.
+- **An event** starts one flash.
+
+**On a part, a light reads that part; on the hull, the whole ship** (*decided*). A light drawn on a
+thruster follows that thruster; a muzzle light on a gun flashes when that gun fires, so a ship with
+two guns flashes at the right two moments. A hull's "engines on" stripe reads the main thruster
+without knowing which part is which. Running low is the one exception (*decided*): the stock is
+shared, so a lamp on each of two tanks reads the ship's whole fuel and they blink together.
+
+**Running low is one generic state** (*decided*: "generic running low is perfect"). The shape
+names an item and the share of a full stock that counts as low. Fuel works in this build. Ammo
+lights up once Q-54 gives the gun something to consume, with no ammo code here: the ammo build
+only fills in its share (a line is added to `docs/ammo-plan.md`). A later consumable, such as power
+(S-83), gets its light the same way.
+
+- The share is **how full, 0 to 1**, of what the ship can hold of that item. For fuel that is
+  `ship.fuel / tankCapacity(ship)` (`src/fitting.ts`), the number the tank art already draws
+  (`Renderer.tankFill` in `src/render.ts`). (mine)
+- **Low** means the share is at or below the shape's line. Left out, the line is 0.25, the share
+  at which the tank art already turns red (`drawTanks` in `src/shipArt.ts`). (mine)
+- **Empty counts as low** (mine): a share of 0 is lit, so a dry tank keeps blinking.
+- A ship that can't hold the item at all (no tanks, or fuel off, which is when `tankFill` returns
+  null) **has no share**, and the light rests. (mine)
+
+**Approach is a relation between a ship and a dock** (*decided*: from where the ship is and how it
+moves, not from what its pilot means to do; and both sides can show it)
+
+- **On a ship:** lit when a dock is within the shape's range and the ship is closing on it.
+- **On a station:** lit when any ship is within range of its dock and closing. Stations aren't
+  drawn from shapes yet; see **Stations** below.
+
+The rule (mine):
+
+- A **dock** is any entry of `Sim.docks` (`src/sim.ts`, "every station with a dock"), at its dock
+  point, `Sim.dockPoint(false, station)`. When Q-51 lands, docks are what has a dock part; the rule
+  asks the same question.
+- **Closing** means the ship's velocity relative to the dock point has a part toward the dock point
+  of more than a small minimum, 2 world units a second (a constant, `APPROACH_MIN_CLOSING`), so a
+  ship holding still beside a dock or sitting in it doesn't light up. The dock point's own velocity
+  comes from `dockPoint(false, …)` and `dockPoint(true, …)` over the tick, since stations orbit
+  and turn.
+- The state is the **distance to the nearest dock the ship is closing on** (infinite when none is),
+  so each shape compares it with its own range: a long-range beacon and a short landing light can
+  sit on one ship.
+- **Range**, per shape, in world units. Left out, 600: the dock point is 300 out from the station's
+  centre (`DOCK_OFFSET`), so this lights up about a station's width out. (mine)
+- A ship passing close and slowing also counts. That reads as "looking for a berth", which is fine.
+- **No flicker:** once lit, the state holds for half a second after it stops being true. (mine)
+
+**Firing is an event** (mine, on the user's list)
+
+The sim keeps no record of a shot today; cooldowns count down, and a cooldown doesn't say a shot
+happened. So `Ship` gains `shotAgo: Map<MountId, number>`: seconds since each gun mount last fired,
+set to 0 in `fireGun` (`src/sim.ts`) and counted up where `gunCooldowns` count down. Not saved: a
+loaded game has no recent shots. A hull shape reads the smallest of them (any gun); a gun's shape
+reads its own mount's, which for a turret's gun is the turret's gun mount (`turretGunId`).
+
+**How each kind uses slice 1's fields** (mine)
+
+The state picks what drives a shape's colour change. Everything from slice 1 (rest and flash
+colours, glow, wear, `working`, still art) applies unchanged.
+
+- **Clock** (no drive, as today): `litAmount(blink, seconds)`.
+- **Amount** (throttle): lit is the amount, 0 to 1. `on`, `off`, `offset` and `fade` are ignored.
+- **Switch** (approach, running low): `litAmount(blink, seconds)` while the state is true, 0
+  otherwise.
+- **Event** (firing): with `t` the seconds since the shot, lit is 1 while `t < on` with snap, and
+  `1 − t / on` with fade, so a faded flash dies away instead of cutting off; 0 after. `off` and
+  `offset` are ignored.
+
+Glow follows the lit amount as it does now, so an engine stripe's halo grows with the throttle.
+
+**Spin** (*decided*: a speed and a pivot, steady or driven by a state)
+
+Any shape can carry `spin`:
+
+- `spin.speed`: degrees a second, negative for the other way, not 0.
+- `spin.x`, `spin.y`: the pivot, in the shape's own units. Left out, the shape's own centre: its
+  `x`, `y` for the kinds that have them, the middle of its points' bounds for a polygon. (mine)
+- `spin.drive`: left out, it turns steadily. With a drive (*decided*: "driven too"):
+  - **Amount** (throttle) scales the speed: a turbine that winds up.
+  - **Switch** (approach, running low): full speed while true, stopped otherwise: a dish that
+    sweeps on approach.
+  - **Events don't drive spin** (*decided*); a spin with a firing drive loses the drive when read.
+  - A driven spin **eases** toward its target speed over about a second, up and down, so it never
+    snaps. (*decided*: easing; one second is mine)
+
+A steady spin's angle is `speed × clock`, on the ship's own phase like the blink, so two ships'
+dishes don't turn in step. A driven one has to remember its angle and its current speed between
+frames: the renderer keeps that per ship, beside its `WeakMap` of phases, keyed by the shape and
+the mount it sits on. Not saved. (mine)
+
+Still art (the clock at `null`: icons, menu cards, the ship screen's blueprint) draws every spinning
+shape at angle 0, as drawn in the designer.
+
+**The snapshot: what's happening, handed to the art** (mine)
+
+The art can't read a `Ship`: a station will draw through it too (*decided*). So each entity hands
+the drawing a small snapshot, set the way slice 1 sets the clock:
+
+```ts
+/** What's happening to the thing being drawn, for shapes driven by a state. */
+interface ArtState {
+  /** Each thruster's firing, 0 to 1, by its role. Missing is 0. */
+  thrust: Partial<Record<ThrusterRole, number>>;
+  /** Distance to the nearest dock it's closing on (a station: to the nearest ship closing on its dock). Infinity for none. */
+  approach: number;
+  /** How full it is of each item it consumes, 0 to 1. An item it can't hold is missing. */
+  supply: Partial<Record<ItemId, number>>;
+  /** Seconds since each gun mount last fired. Missing means never (or not since loading). */
+  shotAgo: Partial<Record<MountId, number>>;
+}
+```
+
+- `src/shipArt.ts` gets `setArtState(state | null)` beside `setArtTime`, and a module-level
+  **current mount**: `drawFitted` sets it to the part's mount for the length of the part's drawing,
+  and `drawTurret` to the turret's gun mount (`turretGunId`) while it draws the gun. With no current
+  mount, a shape is the hull's (or a decal's) and reads the whole ship. A thruster part's mount
+  reads `thrust[mount.role]`; a gun part's mount reads `shotAgo[mount.id]`.
+- **Null state** (static pictures, and the designer with no preview state) means nothing is
+  happening: throttle 0, no approach, nothing low, no shots. Clock-driven blinks still blink when
+  the clock is set, as today.
+- The ship's snapshot is built by one function, `shipArtState(sim, ship)`, in a new
+  `src/artState.ts` with the pure rules (closing, low, the event's lit, the spin's easing) beside
+  it, so they can be tested without a canvas. `Renderer.drawShip` calls it and sets the state next
+  to the clock, and `null` after. The approach's half-second hold is kept per ship in the renderer.
+- Throttle reads `ship.firing` (already 0 to 1 per thruster, what the flames draw).
+
+**The data** (mine)
+
+`ShapeBlink` gains `drive`, and the new `ShapeSpin` has one too, of one shape:
+
+```ts
+type ShapeDrive =
+  | { state: "throttle" }
+  | { state: "approach"; range?: number }        // world units, default 600
+  | { state: "low"; item: ItemId; share?: number } // 0 to 1, default 0.25
+  | { state: "fired" };                           // colour change only
+```
+
+The blink and the spin each take their own drive, so a dish can sweep on approach while a lamp on it
+reads low fuel.
+
+**Stations** (*decided*: the same system; mine, how)
+
+Whichever of this build and Q-51 lands second makes the station's snapshot: `approach` is the
+distance to the nearest ship closing on its dock, by the same rule; its supply is its stock's share
+once its storage is a part. Lines saying so go into both plans: this one, and a note under **Not in
+this build** in `docs/station-frames-plan.md`.
+
+**The designer** (mine)
+
+- In the Colour change block, a **Driven by** choice at the top: Clock, Throttle, Approach, Running
+  low, Firing. Approach shows a Range field; Running low shows an item picker (items from
+  `src/items.json`) and a Low at % field. The timing fields grey out where the drive ignores them.
+- A **Spin** block beside it: a speed field (degrees a second), a Driven by choice (none, Throttle,
+  Approach, Running low), and a pivot handle on the canvas, dragged like the shape handles, with a
+  "Centre" button that clears it back to the shape's own centre.
+- A **State** row in the view bar, next to Still, so a driven light can be seen while drawing it: a
+  throttle slider, an Approach toggle, a Low toggle (every item at 0.1) and a Fire button (every
+  gun mount fires, `shotAgo` 0). The preview builds its snapshot from these. Still wins over them.
+  View state only, never saved.
+- The shape list's mark: ✦ as now for blink or glow, and ⟳ for a spinning shape.
+
+**Tools only** (*decided*)
+
+This build adds the states, spin and the editor. It puts no light and no spin on any hull or part:
+the user draws them. `src/hulls.json` changes only in that the build must read and write the new
+fields.
+
+## What to build
+
+1. **The data.** In `src/fitting.ts`: `ShapeDrive`, `ShapeBlink.drive`, `ShapeSpin` and
+   `ArtShape.spin`, with doc comments in the file's style. `readShape` reads them with its usual
+   care:
+   - a drive with an unknown `state` is dropped: the blink keeps its clock, the spin turns steadily;
+   - `range` that isn't a number above 0 is dropped (the default applies); `share` outside 0 to 1
+     is dropped; a `low` drive without an `item` string is dropped;
+   - a `fired` drive on a spin is dropped;
+   - a spin whose `speed` isn't a number other than 0 is dropped whole; a bad pivot coordinate is
+     dropped (the centre applies).
+
+   `shipFileNow` writes them back, defaults left out, and the round trip through `useShipFile` keeps
+   them.
+2. **The record of shots.** `Ship.shotAgo` in `src/sim.ts`: made empty with every ship, set to 0
+   for the mount in `fireGun`, counted up by `dt` beside `gunCooldowns`. Not saved, not loaded.
+3. **The snapshot and its rules.** `src/artState.ts`: `ArtState`; `shipArtState(sim, ship)`
+   (throttle from `firing`, approach from `Sim.docks` and `dockPoint`, supply from fuel and
+   `tankCapacity`, `shotAgo` copied); and the pure rules, exported for tests: `closingDistance`
+   (ship, dock now and a tick ago, the tick's length), `isLow(share, line)`, `firedLit(blink, t)`
+   and `easeSpeed(current, target, dt)`.
+4. **The drawing.** In `src/shipArt.ts`: `setArtState`, the current mount set by `drawFitted` and
+   `drawTurret`, the lit amount by drive as above, and spin: the shape drawn turned about its pivot
+   by its angle (`translate` to the pivot, `rotate`, `translate` back, inside `drawShape`'s own
+   `save`/`restore`). A steady spin's angle comes from the clock; a driven one's from the
+   renderer's memory, handed in with the state (`ArtState` may carry a `spins` store the drawing
+   reads and updates; the designer's preview keeps its own). In `src/render.ts`, `drawShip` sets
+   the state with the clock, keeps the approach hold and the spin memory per ship, and clears both
+   after.
+5. **The editor.** In `src/designer/hulls.ts`: Driven by, the Spin block and its pivot handle, the
+   State row and the list mark, as above. Edits go through undo like every other field. Pure panel
+   rules (reading the fields back into a drive or a spin) go in `src/designer/shapes.ts`, beside
+   `blinkOf`.
+6. **The cross notes.** A line in `docs/ammo-plan.md` saying the ammo build fills `supply` for its
+   item so running-low lights work (added with this plan); a line in
+   `docs/station-frames-plan.md` saying a station's snapshot (approach from its dock's side, its
+   stock's supply) is filled by whichever of Q-51 and this build lands second (added with this
+   plan). The build checks both are still true and updates them if not.
+
+These are one build with no stop.
+
+## How we'll know
+
+- **Unit tests**, in `src/hullShapes.test.ts` with its `recorder()` canvas, and a new
+  `src/artState.test.ts`:
+  - `readShape` drops each bad case in step 1, keeps the good ones, and they survive a
+    `shipFileNow` / `useShipFile` round trip;
+  - each drive's lit amount: throttle at 0, 0.5 and 1; a switch blinks on its timing while true and
+    rests while false; a fired snap is 1 until `on` and 0 after; a fired fade falls from 1 to 0
+    over `on`;
+  - `closingDistance`: a ship flying at a dock in range gives its distance; flying away, sitting
+    still beside it, or sitting in it gives infinity; a dock that moves toward a still ship counts
+    as closing; the nearest of two closing docks wins;
+  - `isLow`: at and under the line is low, above isn't, 0 is low, a missing share isn't;
+  - `shipArtState` on a sim ship: fuel's share is `fuel / tankCapacity`; a ship with no tank has no
+    fuel share; a shot sets its mount's `shotAgo` to 0 and a tick counts it up;
+  - a part reads its own mount: a light on a strafe thruster follows `thrust.thrusterStrafeLeft`,
+    not the main thruster's; a light on one of two guns flashes only on its own mount's shot; the
+    same light on the hull follows the main thruster and any gun;
+  - a running-low lamp on each of two tanks reads the same ship share;
+  - spin: a steady shape at clock `t` is turned `speed × t` about its pivot (the recorder sees the
+    `rotate`); still art turns nothing; `easeSpeed` reaches its target in about a second and never
+    overshoots; a switch-driven spin eases down when the switch goes off;
+  - the approach hold keeps the state lit for half a second after it stops being true.
+- **No change for today's art**: every hull and part in `src/hulls.json` draws the same calls with
+  the state null and with a busy state set (full throttle, approach, every item low, every gun just
+  fired), since none has a drive or a spin.
+- `npm test` and `npm run build` pass.
+- **Try it:** `npm run dev`, open the designer (`?dev`), Hulls page, pick your racer. Add a thin
+  rect along the back, Colour change driven by Throttle, flash colour orange, glow 0.1: move the
+  State row's throttle slider and it brightens. Add a small circle on the nose driven by Approach,
+  snap, on 0.2, off 0.4: toggle Approach and it blinks. On the Parts page, add a circle on the tank's
+  art driven by Running low, item fuel; on gun 1's art, one driven by Firing, on 0.15, fade: press
+  Fire and it flashes and dies away. Add a small rect, Spin 90, driven by Approach: it winds up when
+  Approach is on and winds down when it's off. Save and fly: burn and watch the stripe, fly at the
+  station and see the nose blink, mine with auto-mine and see each gun flash on its own shot, burn
+  the tank under a quarter and see the lamp. Then drop what you don't want (tools only).
+
+## Needs first
+
+- Slice 1 (Q-38): `ShapeBlink`, `glow`, `setArtTime`, `litAmount`, the phases in `drawShip` and the
+  designer's Colour change block, Still toggle and `blinkOf`. Built 2026-11-26 and passed (P-3).
+- Thrusters' firing (`Ship.firing`), `tankCapacity`, `Sim.docks`, `dockPoint`, `fireGun`,
+  `gunCooldowns` and `turretGunId`: all built (checked 2026-11-27).
+- Nothing unbuilt. Ammo's light waits on Q-54 and the station's on Q-51, but this build needs
+  neither.
+
+## Not in this build
+
+- **More states:** turning, damage, target lock, docked, cargo full. The four here set the shape of
+  the feature (*decided*: one or two of each kind first); more go in as rows of the same table.
+- **Station snapshots:** whichever of this build and Q-51 lands second (see Stations).
+- **Ammo's share:** filled in by the ammo build (Q-54).
+- **Events driving spin** (*decided*: not done).
+- **Lights on today's ships and stations:** tools only (*decided*); the user draws them.
+- A star glint and particles: still S-74.
+
+## Not doing
+
+- **Approach from what the pilot means to do.** It's read from where the ship is and how it moves
+  (*decided*), so the player, traffic and haulers all light up the same way without each pilot
+  having to report a goal.
+- **Separate fuel and ammo lights.** One running-low state that names its item (*decided*).
+- **The art reading a `Ship`.** It reads the snapshot, so stations can use the same shapes.

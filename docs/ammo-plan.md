@@ -261,6 +261,11 @@ move to Ringside one by one, saying so on the radio, and the Station's card coun
   general, and the thrusters move onto it when fuel step 3 (Q-7) is rewritten, if that helps.
 - **Player-owned stations** whose traffic leaves when they run dry: the picture this points at,
   not built here.
+- **The running-low light for ammo** (live shapes, slice 2, `docs/live-shapes-plan.md`): a shape
+  can blink while the ship runs low on a named item. If that slice is built first, this build adds
+  one line: `shipArtState` (`src/artState.ts`) fills `supply` for the ammo item with the rounds
+  held as a share of what the ship's bay keeps (0 to 1). No other ammo code is needed for the
+  light.
 
 ## Not doing
 

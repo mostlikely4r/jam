@@ -2,6 +2,20 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-59 · Live shapes, slice 2: state lights and spinning shapes · build
+- state: queued
+- who: strong
+- backlog: S-72, S-73
+- plan: docs/live-shapes-plan.md
+- added: 2026-11-27
+
+The plan's second slice: shapes driven by the ship's state (throttle, approach, running low on a
+named item, firing), a part's light reading its own mount, spin with a pivot that is steady or
+driven and eases, an ArtState snapshot so stations can use it later, and the designer's Driven by,
+Spin and State controls. Tools only: no lights on any hull.
+strong: touches the sim (a shot record), the renderer and the art's drawing contract, with
+state kept across frames.
+
 ## Q-57 · Lanes and prices, steps 1–3: prices from stock, lanes, lane haulers · build
 - state: queued
 - who: strong
@@ -325,20 +339,21 @@ Bigger hulls don't fit their pictures. Scale the ship screen's blueprint, the sh
 the start menu cards to each hull's own outline (and its mounts) instead of a racer-sized scale.
 cheap: small and visible, with a clear outcome.
 
+## Done
+
 ## Q-46 · Live shapes, slice 2: state lights and spinning shapes · spec
-- state: queued
+- state: done
 - who: pair
 - backlog: S-72, S-73
 - plan: docs/live-shapes-plan.md
 - added: 2026-11-26
+- done: 2026-11-27
 
 Slice 1 (Q-38) is played and passed. Spec the next slice: lights driven by the ship's state
 (throttle, turning, firing, low fuel, damage, a docking light on approach), using the same "how lit"
 amount as colour change and glow; and shapes that spin with a speed and pivot on the same art clock
 and per-ship phase.
 pair: design choices on which states and how they show.
-
-## Done
 
 ## Q-49 · Materials flow, spec C: lanes, prices and watching · spec
 - state: done

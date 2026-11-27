@@ -258,6 +258,11 @@ designer, pick the station node: it shows its frame, and the shop lists sit on i
 - Station parts on ships (a dock or shop on a moving ship): the model allows it, nobody needs it
   yet.
 - Redrawing the three frames: the user's, in the designer, once this is built.
+- **State lights on stations** (live shapes, slice 2, `docs/live-shapes-plan.md`): shapes can be
+  driven by an `ArtState` snapshot (approach, running low and more). A station's snapshot — its
+  `approach` as the distance to the nearest ship closing on its dock, by that plan's rule — is
+  made by whichever of this build and that one lands second. Until then a station draws with the
+  state null, so its lights rest or follow their clock.
 
 ## Not doing
 

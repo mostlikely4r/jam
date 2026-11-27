@@ -2,16 +2,18 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-47 · Materials flow, spec A: framework and station frames · spec
+## Q-51 · Station frames: place and body, capabilities as parts, owners, construction · build
 - state: queued
-- who: pair
+- who: strong
 - backlog: S-78
+- plan: docs/station-frames-plan.md
 - added: 2026-11-27
 
-Roadmap steps 1–2 (`docs/roadmap.md`, `docs/framework.md`): a station as a frame in the hull
-designer (who, where, mounts), today's base rebuilt as one that plays the same, then dock, counted
-storage and a trade point as parts, pulled by the second station. Write it to `docs/station-frames-plan.md`.
-pair: framework calls are the user's.
+All four steps, each playing the same and committed on its own: the station, pirate base and
+deposit as frames (converted exactly, looks-the-same test), every capability a part, owner and
+account, then the deposit's construction made generic. Bumps `SAVE_VERSION` to 12. No stop; the
+Try it is one look at the end.
+strong: wide refactor of the sim's station code and the save format.
 
 ## Q-48 · Materials flow, spec B1: recipes, factories and holes · spec
 - state: queued
@@ -284,6 +286,13 @@ and per-ship phase.
 pair: design choices on which states and how they show.
 
 ## Done
+
+## Q-47 · Materials flow, spec A: framework and station frames · spec
+- state: done
+- done: 2026-11-27
+- backlog: S-78
+- plan: docs/station-frames-plan.md
+- added: 2026-11-27
 
 ## Q-31 · Auto targeting · build
 - state: done

@@ -747,10 +747,10 @@ session (pair) that sets up how a system gets designed this way, what "fun" is m
 designer and the layout recipes (`npm run layout`).
 
 ## S-78 · Station frames: a station is a hull, its behaviour parts
-- status: idea
+- status: specced
 - area: World
 - effort: L
-- plan: docs/roadmap.md
+- plan: docs/station-frames-plan.md
 - from: the roadmap talk, 2026-11-27
 
 A station's core is who (name, owner, account), where (an anchor) and a frame with mounts, drawn in

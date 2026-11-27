@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { hullEdge, hullShapes, type ArtShape } from "../fitting";
-import { blinkOf, blinkStart, defaultShade, dragHandle, fadeStart, hitShape, restFor, shapeBounds, shapeGrips } from "./shapes";
+import { blinkOf, blinkStart, defaultShade, dragHandle, driveFields, driveOf, fadeStart, hitShape, PREVIEW_LOW, previewState, restFor, shapeBounds, shapeGrips, spinOf } from "./shapes";
 
 /** The shading the defender, the drone and the pirate already carry in the ship file. */
 describe("the default shade", () => {
@@ -176,5 +176,63 @@ describe("a shape's colour change", () => {
     expect(blinkOf({ ...fields, on: 0.12345 })?.on).toBe(0.123);
     expect(blinkOf({ ...fields, on: 0 })).toBeUndefined();
     expect(blinkOf({ ...fields, off: -1 })).toBeUndefined();
+  });
+});
+
+describe("the Driven by and Spin blocks", () => {
+  it("reads a drive back from its fields, leaving defaults out", () => {
+    const fields = driveFields(undefined);
+    expect(fields.state).toBe("clock");
+    expect(driveOf(fields)).toBeUndefined();
+    expect(driveOf({ ...fields, state: "throttle" })).toEqual({ state: "throttle" });
+    expect(driveOf({ ...fields, state: "approach" })).toEqual({ state: "approach" });
+    expect(driveOf({ ...fields, state: "approach", range: 250 })).toEqual({ state: "approach", range: 250 });
+    // A range of nothing can't work: the default stands.
+    expect(driveOf({ ...fields, state: "approach", range: 0 })).toEqual({ state: "approach" });
+    expect(driveOf({ ...fields, state: "low" })).toEqual({ state: "low", item: "fuel" });
+    expect(driveOf({ ...fields, state: "low", item: "ammo", share: 0.4 })).toEqual({ state: "low", item: "ammo", share: 0.4 });
+    expect(driveOf({ ...fields, state: "low", item: "" })).toBeUndefined();
+    // And the fields a drive shows are the ones it makes again.
+    for (const drive of [{ state: "approach", range: 250 }, { state: "low", item: "ammo", share: 0.4 }, { state: "fired" }] as const) {
+      expect(driveOf(driveFields(drive))).toEqual(drive);
+    }
+  });
+
+  it("keeps a light's drive through its other fields", () => {
+    const blink = blinkOf({ colour: "#ff0000", rest: null, on: 0.2, off: 0.4, offset: 0, fade: false, drive: { state: "approach" } });
+    expect(blink?.drive).toEqual({ state: "approach" });
+    expect(blinkOf({ colour: "#ff0000", rest: null, on: 0.2, off: 0.4, offset: 0, fade: false, drive: null })?.drive).toBeUndefined();
+  });
+
+  it("makes a spin from a speed, a pivot and a drive, and none from a speed of nothing", () => {
+    expect(spinOf({ speed: 0, pivot: null, drive: undefined })).toBeUndefined();
+    expect(spinOf({ speed: 90, pivot: null, drive: undefined })).toEqual({ speed: 90 });
+    expect(spinOf({ speed: -30, pivot: [0.1, 0.2], drive: { state: "throttle" } })).toEqual({ speed: -30, x: 0.1, y: 0.2, drive: { state: "throttle" } });
+    // A shot can't drive a spin.
+    expect(spinOf({ speed: 30, pivot: null, drive: { state: "fired" } })).toEqual({ speed: 30 });
+  });
+
+  it("gives a spinning shape a pivot handle, a polygon too, and drags it", () => {
+    const rect: ArtShape = { kind: "rect", role: "body", x: 0.2, y: 0.1, w: 0.2, h: 0.1, spin: { speed: 90 } };
+    expect(shapeGrips(rect).find((grip) => grip.handle === "pivot")?.at).toEqual([0.2, 0.1]);
+    const triangle: ArtShape = { kind: "polygon", role: "shade", points: [[0, 0], [0.4, 0], [0, 0.2]], spin: { speed: 90 } };
+    expect(shapeGrips(triangle)).toEqual([{ handle: "pivot", at: [0.2, 0.1] }]);
+    expect(shapeGrips({ ...triangle, spin: undefined })).toEqual([]);
+    const moved = dragHandle(rect, "pivot", [0.5, -0.25]);
+    expect(moved.spin).toEqual({ speed: 90, x: 0.5, y: -0.25 });
+    expect(rect.spin).toEqual({ speed: 90 });
+  });
+
+  it("builds the preview's snapshot from the State row", () => {
+    const quiet = previewState({ throttle: 0, approach: false, low: false, sinceFire: null }, ["fuel", "ore"], ["gun"]);
+    expect(quiet.approach).toBe(Infinity);
+    expect(quiet.supply).toEqual({ fuel: 1, ore: 1 });
+    expect(quiet.shotAgo).toEqual({});
+    expect(quiet.thrust.thrusterMain).toBe(0);
+    const busy = previewState({ throttle: 0.6, approach: true, low: true, sinceFire: 0.05 }, ["fuel"], ["gunLeft", "gunRight"]);
+    expect(busy.approach).toBe(0);
+    expect(busy.supply).toEqual({ fuel: PREVIEW_LOW });
+    expect(busy.shotAgo).toEqual({ gunLeft: 0.05, gunRight: 0.05 });
+    expect(busy.thrust.thrusterStrafeLeft).toBe(0.6);
   });
 });

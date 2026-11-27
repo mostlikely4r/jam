@@ -7,7 +7,8 @@ import { isOreItem } from "./items";
 import { pickOf } from "./programs";
 import { relativeLine, willCollide, type Motion } from "./relative";
 import { cloudAt, cloudPuffs, cloudStops, strengthAt, type CloudPuff } from "./clouds";
-import { bayBox, colorOf, drawTurret, drawVectorShip, hullTint, mix, setArtTime } from "./shipArt";
+import { bayBox, colorOf, drawTurret, drawVectorShip, hullTint, mix, setArtState, setArtTime } from "./shipArt";
+import { holdApproach, shipArtState, SpinMemory, type ArtState, type HeldApproach } from "./artState";
 import { canvasTip } from "./tooltip";
 import {
   BLACK_MARKET_LENGTH,
@@ -193,6 +194,11 @@ export class Renderer {
    * simply gets new ones, which nobody can tell apart.
    */
   private phases = new WeakMap<Ship, number>();
+  /**
+   * What each ship's state-driven shapes remember between frames: the approach it last showed and
+   * until when it holds, and where its driven spins have got to. Never saved, as the phases aren't.
+   */
+  private artMemory = new WeakMap<Ship, { approach?: HeldApproach; spins: SpinMemory }>();
   private stars: Star[] = [];
   private motes: Mote[] = [];
   /** Where the marks on a body's ground are, as shares of its radius. */
@@ -1637,7 +1643,9 @@ export class Renderer {
 
     // Worn by share of its own hull, so a 300-point hull starts at its own colour, not past blue.
     const tint = hullTint([red, green, blue], ship.hull, hullMax(ship.model));
-    setArtTime(performance.now() / 1000 + this.phaseOf(ship));
+    const now = performance.now() / 1000;
+    setArtTime(now + this.phaseOf(ship));
+    setArtState(this.artStateOf(ship, now));
     const broken = drawVectorShip(ctx, ship, tint, this.tankFill(ship));
     for (const [bx, by] of broken) this.drawSparks(bx, by);
     this.drawCargo(ship);
@@ -1662,12 +1670,32 @@ export class Renderer {
         alpha: base.alpha,
         part: turret.part,
         gun: gun ?? null,
+        gunMount: slot,
         colours: { metal, rim: mix(metal, [255, 255, 255], 0.35) },
       });
     }
     ctx.restore();
     setArtTime(null);
+    setArtState(null);
     this.drawStanding(ship, x, y);
+  }
+
+  /**
+   * What's happening to a ship, for its state-driven shapes: its own snapshot, with the approach held
+   * a moment after it stops, and the spins' memory kept with the ship.
+   */
+  private artStateOf(ship: Ship, now: number): ArtState | null {
+    if (!this.sim) return null;
+    let memory = this.artMemory.get(ship);
+    if (!memory) {
+      memory = { spins: new SpinMemory() };
+      this.artMemory.set(ship, memory);
+    }
+    const state = shipArtState(this.sim, ship);
+    memory.approach = holdApproach(state.approach, memory.approach, now);
+    state.approach = memory.approach.distance;
+    state.spins = memory.spins;
+    return state;
   }
 
   /** The phase a ship's lights blink to: made up on first sight, and kept for as long as it lives. */

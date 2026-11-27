@@ -2,7 +2,7 @@
 
 Written 2026-11-26, from S-71 (live elements on hulls and parts), first slice. Built 2026-11-26
 (Q-38). The second slice, state lights and spin (S-72, S-73), was written 2026-11-27 and is under
-**Slice 2** at the end; nothing of it is built yet.
+**Slice 2** at the end; built 2026-11-27 (Q-59).
 
 ## Why
 
@@ -466,6 +466,8 @@ fields.
 
 ## What to build
 
+All six steps are built (2026-11-27); see **Built, with what changed** below.
+
 1. **The data.** In `src/fitting.ts`: `ShapeDrive`, `ShapeBlink.drive`, `ShapeSpin` and
    `ArtShape.spin`, with doc comments in the file's style. `readShape` reads them with its usual
    care:
@@ -550,6 +552,54 @@ These are one build with no stop.
   `gunCooldowns` and `turretGunId`: all built (checked 2026-11-27).
 - Nothing unbuilt. Ammo's light waits on Q-54 and the station's on Q-51, but this build needs
   neither.
+
+## Built, with what changed from the plan
+
+The six steps are in: `ShapeDrive`, `ShapeSpin`, their reading and `spinPivot` in `src/fitting.ts`;
+`Ship.shotAgo` in `src/sim.ts`; `ArtState`, `shipArtState` and the rules in `src/artState.ts`; the
+lit amount by drive, spin, `setArtState` and the current mount in `src/shipArt.ts`; the per-ship
+memory in `src/render.ts`'s `drawShip`; and the Driven by and Spin blocks, the pivot handle, the
+State row and the ⟳ mark in `src/designer/hulls.ts`, with their rules (`driveFields`, `driveOf`,
+`spinOf`, `previewState`) in `src/designer/shapes.ts`. These differ:
+
+- **A tank's own shapes now draw.** The plan's running-low lamp sits on a tank's art, but the game
+  drew a tank only as its box (`drawTanks`), never through its art, so the lamp would never have
+  shown. `drawTanks` now draws a tank part's own shapes over its box, on its mount as any part's
+  are. No tank has shapes yet, so nothing drawn today changes.
+- **A part without a state of its own reads the ship's.** A throttle light on a part that isn't a
+  thruster reads the main thruster, and a shot light on one that isn't a gun reads any gun, as the
+  hull's do. The current mount carries the thruster's role and whether a gun is on it.
+- **Half a pivot is no pivot.** A spin with only one of `x` and `y` it can read keeps neither, so the
+  shape's centre applies; a pivot is a point.
+- **Items are ids.** The game's item list is data (`src/items.json`), so `supply` and a low drive's
+  `item` are item id strings, not a type of their own.
+- **The easing takes the spin's own speed.** `easeSpeed(current, target, dt, full)` moves at `full`
+  over `SPIN_EASE` (a second), straight, so it lands on the target and never past it. The memory is
+  a `SpinMemory` per ship, keyed by the shape and the mount; a spin seen for the first time starts
+  at its target's speed, and a ship gone from view a while picks up where it was (a frame's step is
+  capped at a quarter second).
+- **The hold is by the clock.** `holdApproach` keeps the last distance until half a second after it
+  went, with the time it was last true; the renderer keeps it per ship beside the spins.
+- **The State row fills every thruster and mount.** The throttle slider sets every thruster, so a
+  light on a strafe thruster shows in the preview too; Low off reads every item full; Fire makes
+  every mount of the hull shown (and each turret's gun) fire at once. The designer's preview parts
+  set their mount as the game's do (`setArtMount`), and a turret's gun gets its own (`gunMount`).
+- **The shot record clears** when a ship is rebuilt or changes hull, beside its cooldowns.
+- **Test hygiene.** The reading tests in `src/hullShapes.test.ts` (slice 1's among them) put back the
+  ship file they had changed, not the one from before, so their shapes leaked into later tests; they
+  now put back the one from before.
+- **The cross notes** said "whichever lands second". This one landed first, so the ammo plan's note
+  now says the slice is built, and the station frames plan's says Q-51 makes the station's
+  snapshot, with how.
+
+**How we'll know** is tested in `src/artState.test.ts` (closing, low, the shot's flash, the easing,
+the memory, the hold, and `shipArtState` on a sim ship: fuel's share, no tank, fuel off, firing, a
+shot counted up and forgotten on loading, a dock closed on), `src/hullShapes.test.ts` (reading and
+the round trip, each drive's lit amount, a part's own mount for thrusters and guns, the tank lamps,
+spin by the clock and driven, still art, and every hull and part in the file drawing the same with
+nothing and everything happening) and `src/designer/shapes.test.ts` (the panel's rules). The
+designer was tried in the browser: the State row, Driven by with its item and line, the Spin block
+and the ⟳ mark show, and a spin driven by Approach turns with it on and eases to a stop with it off.
 
 ## Not in this build
 

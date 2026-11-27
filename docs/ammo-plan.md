@@ -262,10 +262,10 @@ move to Ringside one by one, saying so on the radio, and the Station's card coun
 - **Player-owned stations** whose traffic leaves when they run dry: the picture this points at,
   not built here.
 - **The running-low light for ammo** (live shapes, slice 2, `docs/live-shapes-plan.md`): a shape
-  can blink while the ship runs low on a named item. If that slice is built first, this build adds
-  one line: `shipArtState` (`src/artState.ts`) fills `supply` for the ammo item with the rounds
-  held as a share of what the ship's bay keeps (0 to 1). No other ammo code is needed for the
-  light.
+  can blink while the ship runs low on a named item. That slice is built (Q-59, 2026-11-27), so
+  this build adds one line: `shipArtState` (`src/artState.ts`) fills `supply` for the ammo item
+  with the rounds held as a share of what the ship's bay keeps (0 to 1), beside fuel's. No other
+  ammo code is needed for the light.
 
 ## Not doing
 

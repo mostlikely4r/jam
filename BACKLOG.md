@@ -685,7 +685,7 @@ glow as options on any shape, each ship on its own timing, tools only. The rest 
 state lights to S-72, spin to S-73, the glint and particles to S-74.
 
 ## S-72 · Lights that follow the ship's state
-- status: specced
+- status: built
 - plan: docs/live-shapes-plan.md
 - area: Ships and gear
 - from: the S-71 spec talk, 2026-11-26
@@ -699,7 +699,7 @@ that slice has been played.
 Queued as Q-46 (2026-11-26); specced 2026-11-27 as slice 2 of `docs/live-shapes-plan.md`, built by Q-59.
 
 ## S-73 · Spinning shapes
-- status: specced
+- status: built
 - plan: docs/live-shapes-plan.md
 - area: Ships and gear
 - from: the S-71 spec talk, 2026-11-26

@@ -2,20 +2,6 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-59 · Live shapes, slice 2: state lights and spinning shapes · build
-- state: queued
-- who: strong
-- backlog: S-72, S-73
-- plan: docs/live-shapes-plan.md
-- added: 2026-11-27
-
-The plan's second slice: shapes driven by the ship's state (throttle, approach, running low on a
-named item, firing), a part's light reading its own mount, spin with a pivot that is steady or
-driven and eases, an ArtState snapshot so stations can use it later, and the designer's Driven by,
-Spin and State controls. Tools only: no lights on any hull.
-strong: touches the sim (a shot record), the renderer and the art's drawing contract, with
-state kept across frames.
-
 ## Q-57 · Lanes and prices, steps 1–3: prices from stock, lanes, lane haulers · build
 - state: queued
 - who: strong
@@ -340,6 +326,21 @@ the start menu cards to each hull's own outline (and its mounts) instead of a ra
 cheap: small and visible, with a clear outcome.
 
 ## Done
+
+## Q-59 · Live shapes, slice 2: state lights and spinning shapes · build
+- state: done
+- who: strong
+- backlog: S-72, S-73
+- plan: docs/live-shapes-plan.md
+- added: 2026-11-27
+- done: 2026-11-27
+
+The plan's second slice: shapes driven by the ship's state (throttle, approach, running low on a
+named item, firing), a part's light reading its own mount, spin with a pivot that is steady or
+driven and eases, an ArtState snapshot so stations can use it later, and the designer's Driven by,
+Spin and State controls. Tools only: no lights on any hull.
+strong: touches the sim (a shot record), the renderer and the art's drawing contract, with
+state kept across frames.
 
 ## Q-46 · Live shapes, slice 2: state lights and spinning shapes · spec
 - state: done

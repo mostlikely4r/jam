@@ -3,6 +3,21 @@
 <!-- vibeview play v1. Things to try when you next play or use the project: one item per build
 that wants a human look. Format: see vibeview/FORMAT.md -->
 
+## P-5 · State lights and spin: throttle, approach, running low, firing
+- from: Q-59
+- plan: docs/live-shapes-plan.md
+- added: 2026-11-27
+
+`npm run dev`, open the designer (`?dev`), Hulls page, pick your racer. Add a thin rect along the
+back, Colour change driven by Throttle, flash colour orange, glow 0.1: move the State row's throttle
+slider and it brightens. Add a small circle on the nose driven by Approach, snap, on 0.2, off 0.4:
+toggle Approach and it blinks. On the Parts page, add a circle on the tank's art driven by Running
+low, item fuel; on gun 1's art, one driven by Firing, on 0.15, fade: press Fire and it flashes and
+dies away. Add a small rect, Spin 90, driven by Approach: it winds up when Approach is on and winds
+down when it's off. Save and fly: burn and watch the stripe, fly at the station and see the nose
+blink, mine with auto-mine and see each gun flash on its own shot, burn the tank under a quarter and
+see the lamp (fuel on). Then drop what you don't want (tools only).
+
 ## Passed
 
 ## P-4 · Auto targeting: pick and mine without clicking

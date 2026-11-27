@@ -4,8 +4,9 @@
  * dish), each drawn where its mount sits, turned the way it faces and at its size; what's inside
  * the hull (computer, bay) doesn't show. Damaged parts are handed back so the caller can spark them.
  */
-import { DAMAGED_AT, decalOf, facing, hullEdge, hullMounts, hullShapes, isTurretGun, PART_ART, type ArtShape, type HullPoint, type Module, type Mount, type MountId, type ShapeBlink } from "./fitting";
-import { partOf, type PartId, type PartKind, type ShipModel } from "./parts";
+import { firedLit, isLow, quietState, type ArtState } from "./artState";
+import { APPROACH_RANGE, DAMAGED_AT, decalOf, facing, hullEdge, hullMounts, hullShapes, isTurretGun, LOW_SHARE, PART_ART, spinPivot, type ArtShape, type HullPoint, type Module, type Mount, type MountId, type ShapeBlink, type ShapeDrive } from "./fitting";
+import { partOf, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "./parts";
 import type { Box } from "./grid";
 
 const R = 12;
@@ -146,6 +147,95 @@ export function litAmount(blink: ShapeBlink, seconds: number): number {
 }
 
 /**
+ * What's happening to the thing being drawn, for shapes driven by a state, or null for nothing at
+ * all: no throttle, no approach, nothing low, no shots. Set beside the clock, the same way.
+ */
+let artState: ArtState | null = null;
+/** Nothing happening, for a drawing that sets no state. */
+const QUIET = quietState();
+
+/** Sets what's happening to the thing being drawn, or `null` for nothing. */
+export function setArtState(state: ArtState | null): void {
+  artState = state;
+}
+
+/**
+ * The mount the part being drawn sits on: a light on a part reads that part's own state, its
+ * thruster's firing or its gun's shot. Null while the hull or a decal draws, which read the whole ship.
+ */
+export interface ArtMount {
+  id: MountId;
+  /** The thruster it is, where the mount is one. */
+  role?: ThrusterRole;
+  /** Whether a gun is what's drawn on it, so a shot light reads its own mount's shots. */
+  gun: boolean;
+}
+let artMount: ArtMount | null = null;
+
+/** Sets the mount the part being drawn sits on, or `null` for the hull's own shapes. Returns the one it replaces. */
+export function setArtMount(mount: ArtMount | null): ArtMount | null {
+  const was = artMount;
+  artMount = mount;
+  return was;
+}
+
+/** The throttle a shape reads: its own thruster's on a thruster's mount, else the main thruster's. */
+function throttleNow(state: ArtState): number {
+  const level = state.thrust[artMount?.role ?? "thrusterMain"] ?? 0;
+  return Math.max(0, Math.min(1, level));
+}
+
+/** Seconds since the shot a shape reads: its own gun's on a gun's mount, else any gun's latest. */
+function shotNow(state: ArtState): number | undefined {
+  if (artMount?.gun) return state.shotAgo[artMount.id];
+  let latest: number | undefined;
+  for (const ago of Object.values(state.shotAgo)) if (ago !== undefined && (latest === undefined || ago < latest)) latest = ago;
+  return latest;
+}
+
+/** Whether a switch is on: a dock near and closing within the shape's range, or its item low. */
+function switchOn(drive: ShapeDrive, state: ArtState): boolean {
+  if (drive.state === "approach") return state.approach <= (drive.range ?? APPROACH_RANGE);
+  if (drive.state === "low") return isLow(state.supply[drive.item], drive.share ?? LOW_SHARE);
+  return false;
+}
+
+/**
+ * How lit a shape's colour change is now: on the clock, or as its drive says. An amount lights it as
+ * much as it is; a switch lets it blink on its timing while on; a shot flashes it once. Still art
+ * rests every one of them.
+ */
+function litNow(blink: ShapeBlink): number {
+  if (artTime === null) return 0;
+  const drive = blink.drive;
+  if (!drive) return litAmount(blink, artTime);
+  const state = artState ?? QUIET;
+  switch (drive.state) {
+    case "throttle":
+      return throttleNow(state);
+    case "fired":
+      return firedLit(blink, shotNow(state));
+    default:
+      return switchOn(drive, state) ? litAmount(blink, artTime) : 0;
+  }
+}
+
+/**
+ * How far a spinning shape is turned now, degrees clockwise: a steady spin by the clock, a driven one
+ * by where the state's memory has it. Still art, and a driven spin with no memory, turn nothing.
+ */
+function spinNow(shape: ArtShape): number {
+  const spin = shape.spin;
+  if (!spin || artTime === null) return 0;
+  const drive = spin.drive;
+  if (!drive) return (spin.speed * artTime) % 360;
+  const state = artState ?? QUIET;
+  if (!state.spins) return 0;
+  const share = drive.state === "throttle" ? throttleNow(state) : switchOn(drive, state) ? 1 : 0;
+  return state.spins.angle(shape, spin, artMount?.id ?? "", spin.speed * share, artTime);
+}
+
+/**
  * The scale the ship is being drawn at: a glow blurs in canvas pixels, so its size takes this.
  * One where the context can't say, as a test's own canvas can't.
  */
@@ -214,9 +304,17 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: ArtShape, palett
     path(ctx, edge.map(([x, y]): Point => [x * R, y * R]));
     ctx.clip();
   }
+  // Turned about its pivot where it spins, after the clip, which stays the hull's.
+  const turn = shape.spin ? spinNow(shape) : 0;
+  if (turn !== 0) {
+    const [px, py] = spinPivot(shape);
+    ctx.translate(px * R, py * R);
+    ctx.rotate(radians(turn));
+    ctx.translate(-px * R, -py * R);
+  }
   // How lit its colour change is right now: still art rests every blinking shape, so drawings that
   // know nothing about time keep looking as they did.
-  const lit = shape.blink && artTime !== null ? litAmount(shape.blink, artTime) : 0;
+  const lit = shape.blink ? litNow(shape.blink) : 0;
   const colour = paint(ctx, shape, palette, lit);
   const glow = shape.glow === undefined ? null : halo(shape, palette, lit, artScale(ctx));
   if (glow) {
@@ -382,15 +480,15 @@ function path(ctx: CanvasRenderingContext2D, points: Point[]): void {
  * `drawTurret`. `main` is a mount whose role is the main thruster, whatever its id, so a mirrored
  * or renamed main mount draws the big engine bell too.
  */
-function outsideParts(ship: ArtShip): { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number; main: boolean }[] {
-  const out: { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number; main: boolean }[] = [];
+function outsideParts(ship: ArtShip): { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number; main: boolean; role?: ThrusterRole }[] {
+  const out: { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; order: number; main: boolean; role?: ThrusterRole }[] = [];
   for (const mount of hullMounts(ship.model)) {
     const module = ship.fit[mount.id];
     if (!module) continue;
     const kind = partOf(module.part).kind;
     if (kind === "computer" || kind === "section" || kind === "tank" || kind === "turret" || isTurretGun(mount.id)) continue;
     // Destroyed, a bay carries nothing any more: see `bayBox`.
-    out.push({ id: mount.id, part: module.part, x: mount.x * R, y: mount.y * R, angle: facing(mount), scale: mount.scale, kind, wear: module.wear, alpha: mount.alpha ?? 1, order: mount.order ?? 0, main: mount.role === "thrusterMain" });
+    out.push({ id: mount.id, part: module.part, x: mount.x * R, y: mount.y * R, angle: facing(mount), scale: mount.scale, kind, wear: module.wear, alpha: mount.alpha ?? 1, order: mount.order ?? 0, main: mount.role === "thrusterMain", role: mount.role });
   }
   return out;
 }
@@ -553,6 +651,8 @@ export interface TurretArt {
   alpha?: number;
   /** The gun fitted on it, if one is, and how worn. */
   gun: Module | null;
+  /** The gun's own mount (`turretGunId`), so a light on the gun flashes on that gun's shots. */
+  gunMount?: MountId;
   /** The turret's own part, whose art stretches and fades its base; without it the base draws as the code has it. */
   part?: PartId;
   /** The turret's own colours, where it's damaged or tinted; the code's metal and rim otherwise. */
@@ -584,7 +684,9 @@ export function drawTurret(ctx: CanvasRenderingContext2D, art: TurretArt): void 
   if (art.gun) {
     ctx.rotate(art.angle);
     ctx.scale(art.scale * TURRET_GUN, art.scale * TURRET_GUN);
+    const was = setArtMount(art.gunMount ? { id: art.gunMount, gun: true } : null);
     drawPartArt(ctx, art.gun.part, art.gun.wear);
+    setArtMount(was);
   }
   ctx.restore();
 }
@@ -680,6 +782,13 @@ export interface TankBox extends Box {
   alpha: number;
   /** The tank's own colours, where its art names any. */
   colours?: PartColors;
+  /** The tank part and its mount, so shapes drawn on its own art (a running-low lamp) draw over the box. */
+  part?: PartId;
+  mount?: MountId;
+  /** Its mount's size and transparency, which its own art's shapes take as any part's do. */
+  scale?: number;
+  mountAlpha?: number;
+  wear?: number;
 }
 
 /**
@@ -706,6 +815,11 @@ export function tankBoxes(ship: ArtShip, fill: number): TankBox[] {
       fill: Math.max(0, Math.min(1, fill)),
       alpha: (mount.alpha ?? 1) * (art?.alpha ?? 1),
       colours: artColours(module.part),
+      part: module.part,
+      mount: mount.id,
+      scale: mount.scale,
+      mountAlpha: mount.alpha ?? 1,
+      wear: module.wear,
     });
   }
   return boxes;
@@ -734,6 +848,20 @@ export function drawTanks(ctx: CanvasRenderingContext2D, boxes: TankBox[]): void
     ctx.lineWidth = 0.45;
     ctx.strokeRect(-box.w / 2, -box.h / 2, box.w, box.h);
     ctx.restore();
+    // Shapes drawn on the tank's own art go over its box, on its mount as any part's do: a lamp
+    // that reads the ship's fuel. A tank without shapes of its own draws only the box.
+    const shapes = box.part ? PART_ART[box.part]?.shapes : undefined;
+    if (box.part && shapes && shapes.length > 0) {
+      ctx.save();
+      if ((box.mountAlpha ?? 1) < 1) ctx.globalAlpha = box.mountAlpha!;
+      ctx.translate(box.x, box.y);
+      ctx.rotate(box.angle);
+      ctx.scale(box.scale ?? 1, box.scale ?? 1);
+      const was = setArtMount(box.mount ? { id: box.mount, gun: false } : null);
+      drawPartArt(ctx, box.part, box.wear ?? 0);
+      setArtMount(was);
+      ctx.restore();
+    }
   }
 }
 
@@ -771,13 +899,16 @@ export function drawVectorShip(ctx: CanvasRenderingContext2D, ship: ArtShip, hul
 }
 
 /** One fitted module at its mount, with its transparency, and where it sits if it's broken. */
-function drawFitted(ctx: CanvasRenderingContext2D, part: { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; main: boolean }): Point | null {
+function drawFitted(ctx: CanvasRenderingContext2D, part: { id: MountId; part: PartId; x: number; y: number; angle: number; scale: number; kind: PartKind; wear: number; alpha: number; main: boolean; role?: ThrusterRole }): Point | null {
   ctx.save();
   ctx.translate(part.x, part.y);
   ctx.rotate(part.angle);
   ctx.scale(part.scale, part.scale);
   if (part.alpha < 1) ctx.globalAlpha = part.alpha;
+  // Its lights read its own mount: its thruster's firing, its gun's shots.
+  const was = setArtMount({ id: part.id, role: part.role, gun: part.kind === "gun" });
   drawPartArt(ctx, part.part, part.wear, part.main);
+  setArtMount(was);
   ctx.restore();
   if (part.wear < DAMAGED_AT) return null;
   const x = part.x;

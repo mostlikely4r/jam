@@ -50,6 +50,7 @@ import {
   SHAPE_ROLE_NAMES,
   type ArtShape,
   type HullPoint,
+  type ShapeDrive,
   type ShapeFade,
   type ShapeRole,
   MOUNT_TYPES,
@@ -64,6 +65,7 @@ import {
   SHIPPED_SHIPS,
   shipFileNow,
   THRUSTER_ROLES,
+  turretGunId,
   useShipFile,
   type HullUse,
   type HullInfo,
@@ -81,9 +83,10 @@ import { PROGRAMS, PROGRAM_PARTS, programDef, programsFileNow, SHIPPED_PROGRAMS,
 import type { GlyphId } from "../glyphs";
 import { EVERY_GLYPH, glyphIcon, iconEl } from "../icons";
 import { DEFAULTS } from "../tuning";
-import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPartArt, drawTanks, drawTurret, GLASS_HEX, METAL_HEX, RIM_HEX, setArtTime, SHADE_HEX, tankBoxes } from "../shipArt";
+import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPartArt, drawTanks, drawTurret, GLASS_HEX, METAL_HEX, RIM_HEX, setArtMount, setArtState, setArtTime, SHADE_HEX, tankBoxes } from "../shipArt";
+import { SpinMemory, type ArtState } from "../artState";
 import { multiSelect, withoutPick, withPick } from "./multiselect";
-import { blinkOf, blinkStart, defaultShade, dragHandle, fadeStart, hitShape, insidePolygon, restFor, shapeGrips, type BlinkFields, type ShapeHandle } from "./shapes";
+import { blinkOf, blinkStart, defaultShade, dragHandle, driveFields, driveOf, fadeStart, hitShape, insidePolygon, previewState, restFor, shapeGrips, spinOf, type BlinkFields, type DriveChoice, type ShapeHandle } from "./shapes";
 import { UndoStack } from "./undo";
 import { shippedWorld } from "./shipped";
 import { walk } from "./world";
@@ -207,6 +210,8 @@ const STYLE = `
 #hulls .viewbar button { margin: 0; padding: 2px 7px; font-size: 11px; background: rgba(11, 15, 24, 0.85); border-color: #33405a; }
 #hulls .viewbar button:not(.on) { color: #6a7486; }
 #hulls .viewbar button.on { border-color: #8fb4ff; }
+#hulls .viewbar .state { margin-top: 6px; font-size: 11px; color: #9aa6ba; display: flex; align-items: center; gap: 4px; }
+#hulls .viewbar .state input { width: 90px; margin: 0; }
 `;
 
 const round = (value: number, step: number) => Math.round(value / step) * step;
@@ -263,6 +268,13 @@ export class HullDesigner {
   private readonly hidden = new Set<Layer>();
   /** Draws every light at rest, for placing one without it flashing under the cursor. View state too. */
   private still = false;
+  /**
+   * The State row: what the preview pretends is happening to the ship, so a light driven by a state
+   * can be seen while it's drawn. `firedAt` is when Fire was last pressed, in seconds. View state too.
+   */
+  private readonly stateRow = { throttle: 0, approach: false, low: false, firedAt: null as number | null };
+  /** Where the preview's driven spins have got to, as the renderer keeps them for each ship. */
+  private readonly previewSpins = new SpinMemory();
   /** Where the cursor last was on the canvas, for a turret's gun to follow. */
   private at: [number, number] | null = null;
   /** Ctrl-Z's snapshots, one stack for the three pages. */
@@ -506,13 +518,65 @@ export class HullDesigner {
     still.dataset.still = "1";
     still.title = "Draw every light at rest, to place one without it flashing under the cursor";
     this.viewbar.append(still);
+    // The State row: what's happening to the ship, for lights and spins driven by a state.
+    const throttle = document.createElement("input");
+    throttle.type = "range";
+    throttle.min = "0";
+    throttle.max = "1";
+    throttle.step = "0.05";
+    throttle.value = String(this.stateRow.throttle);
+    throttle.title = "Every thruster's firing, for shapes driven by the throttle";
+    throttle.addEventListener("input", () => (this.stateRow.throttle = Number(throttle.value)));
+    const row = document.createElement("label");
+    row.className = "state";
+    row.append("Throttle", throttle);
+    this.viewbar.append(row);
+    for (const [key, title] of [
+      ["approach", "A dock near and closing, for shapes driven by an approach"],
+      ["low", "Every item at a tenth of full, for shapes driven by running low"],
+    ] as const) {
+      const toggle = this.button("", () => {
+        this.stateRow[key] = !this.stateRow[key];
+        this.refreshViewbar();
+      });
+      toggle.dataset.state = key;
+      toggle.title = title;
+      this.viewbar.append(toggle);
+    }
+    const fire = this.button("Fire", () => (this.stateRow.firedAt = performance.now() / 1000));
+    fire.dataset.fire = "1";
+    fire.title = "Every gun fires once, for shapes driven by firing";
+    this.viewbar.append(fire);
     this.refreshViewbar();
+  }
+
+  /**
+   * What the preview draws a state-driven shape with: the State row, as a snapshot, over the mounts
+   * of the hull shown and the items there are. Null with Still on: still wins.
+   */
+  private previewArtState(model: ShipModel): ArtState | null {
+    if (this.still) return null;
+    const mounts = (model === this.model ? this.mounts() : HULL_MOUNTS[model] ?? []).flatMap((mount) => [mount.id, turretGunId(mount.id)]);
+    const now = performance.now() / 1000;
+    const state = previewState(
+      { ...this.stateRow, sinceFire: this.stateRow.firedAt === null ? null : now - this.stateRow.firedAt },
+      ITEMS.map((item) => item.id),
+      mounts,
+    );
+    state.spins = this.previewSpins;
+    return state;
   }
 
   private refreshViewbar(): void {
     for (const button of this.viewbar.querySelectorAll("button")) {
-      // The fit button and Still aren't layers: they say their own state below.
-      if (button.dataset.fit || button.dataset.still) continue;
+      // The fit button, Still and the State row aren't layers: they say their own state below.
+      if (button.dataset.fit || button.dataset.still || button.dataset.fire) continue;
+      if (button.dataset.state) {
+        const key = button.dataset.state as "approach" | "low";
+        button.textContent = `${this.stateRow[key] ? "◉" : "○"} ${key === "approach" ? "Approach" : "Low"}`;
+        button.className = this.stateRow[key] ? "on" : "";
+        continue;
+      }
       const layer = button.dataset.layer as Layer;
       const on = this.shown(layer);
       button.textContent = `${on ? "\u25c9" : "\u25cb"} ${LAYERS.find(([each]) => each === layer)![1]}`;
@@ -601,6 +665,29 @@ export class HullDesigner {
     label.style.color = "#cfd8e6";
     label.append(box, ` ${text}`);
     return label;
+  }
+
+  /**
+   * A Driven by choice and the fields its state takes: an approach's range, a running-low's item and
+   * line. `choices` are the drives on offer, `set` handed the drive they make (undefined: the clock).
+   */
+  private driveControls(choices: [DriveChoice, string][], drive: ShapeDrive | undefined, set: (drive: ShapeDrive | undefined) => void): HTMLElement[] {
+    const fields = driveFields(drive);
+    const put = (change: Partial<typeof fields>) => set(driveOf({ ...fields, ...change }));
+    const out: HTMLElement[] = [this.labelled("Driven by", this.dropdown(choices, fields.state, (value) => put({ state: value as DriveChoice })))];
+    if (fields.state === "approach") {
+      out.push(this.labelled("Range (world units from the dock)", this.numberField(fields.range, (value) => put({ range: value }), 50)));
+    }
+    if (fields.state === "low") {
+      const items: [string, string][] = ITEMS.map((item) => [item.id, item.name]);
+      // An item the file names that the item list has lost still shows, so it isn't changed by looking.
+      if (!items.some(([id]) => id === fields.item)) items.push([fields.item, fields.item]);
+      out.push(
+        this.labelled("Item", this.dropdown(items, fields.item, (value) => put({ item: value }))),
+        this.labelled("Low at (% of full)", this.numberField(Math.round(fields.share * 100), (value) => put({ share: Math.max(0, Math.min(100, value)) / 100 }), 5)),
+      );
+    }
+    return out;
   }
 
   /**
@@ -2382,8 +2469,9 @@ export class HullDesigner {
     const outline = this.outline();
     if (outline.length > 0) list.append(this.button(`Outline (${outline.length} points)`, () => this.selectShape("edge"), this.shape === "edge" ? "on" : ""));
     for (const [index, shape] of this.shapes().entries()) {
-      // A shape that changes colour or glows is marked, so what moves reads off the list.
-      const mark = shape.blink || shape.glow !== undefined ? " \u2726" : "";
+      // A shape that changes colour or glows is marked, so what moves reads off the list, and so is
+      // one that spins.
+      const mark = `${shape.blink || shape.glow !== undefined ? " \u2726" : ""}${shape.spin ? " \u27f3" : ""}`;
       const label = `${index + 1}. ${SHAPE_KIND_NAMES[shape.kind]}, ${shape.role}${mark}`;
       list.append(this.button(label, () => this.selectShape(index), this.shape === index ? "on" : ""));
     }
@@ -2576,7 +2664,7 @@ export class HullDesigner {
         // The fields as the light has them now, so a change to one goes back through the same rule.
         const fields = (): BlinkFields => {
           const now = shape.blink!;
-          return { colour: now.colour, rest: now.rest ?? null, on: now.on, off: now.off, offset: now.offset ?? 0, fade: now.fade === true };
+          return { colour: now.colour, rest: now.rest ?? null, on: now.on, off: now.off, offset: now.offset ?? 0, fade: now.fade === true, drive: now.drive ?? null };
         };
         const put = (change: Partial<BlinkFields>, rebuild = true) => {
           const next = blinkOf({ ...fields(), ...change });
@@ -2584,6 +2672,21 @@ export class HullDesigner {
           if (next) shape.blink = next;
           this.changed(rebuild);
         };
+        // What drives it: the clock, as slice one had it, or one of the ship's states.
+        const driven = shape.blink.drive?.state ?? "clock";
+        out.push(
+          ...this.driveControls(
+            [
+              ["clock", "Clock (blinks on its timing)"],
+              ["throttle", "Throttle (lit as much as it fires)"],
+              ["approach", "Approach (blinks near a dock)"],
+              ["low", "Running low (blinks when low)"],
+              ["fired", "Firing (one flash a shot)"],
+            ],
+            shape.blink.drive,
+            (drive) => put({ drive: drive ?? null }),
+          ),
+        );
         const flash = document.createElement("input");
         flash.type = "color";
         flash.value = shape.blink.colour;
@@ -2599,14 +2702,50 @@ export class HullDesigner {
         rest.disabled = roleRest;
         rest.addEventListener("input", () => put({ rest: rest.value }, false));
         out.push(this.labelled("Rest colour", rest));
+        // The timing the drive ignores is greyed out: a throttle lights by its amount, a shot by its age.
+        const on = this.numberField(shape.blink.on, (value) => put({ on: Math.max(0.05, value) }), 0.1);
+        const off = this.numberField(shape.blink.off, (value) => put({ off: Math.max(0, value) }), 0.1);
+        const offset = this.numberField(shape.blink.offset ?? 0, (value) => put({ offset: value }), 0.1);
+        on.disabled = driven === "throttle";
+        off.disabled = driven === "throttle" || driven === "fired";
+        offset.disabled = driven === "throttle" || driven === "fired";
         out.push(
-          this.labelled(
-            "On (seconds)",
-            this.numberField(shape.blink.on, (value) => put({ on: Math.max(0.05, value) }), 0.1),
-          ),
-          this.labelled("Off (seconds)", this.numberField(shape.blink.off, (value) => put({ off: Math.max(0, value) }), 0.1)),
-          this.labelled("Offset (seconds)", this.numberField(shape.blink.offset ?? 0, (value) => put({ offset: value }), 0.1)),
+          this.labelled(driven === "fired" ? "On (seconds the flash lasts)" : "On (seconds)", on),
+          this.labelled("Off (seconds)", off),
+          this.labelled("Offset (seconds)", offset),
         );
+      }
+      // Spin: turning on its own about a pivot, steadily or as a state drives it. 0 is no spin.
+      const putSpin = (change: { speed?: number; pivot?: HullPoint | null; drive?: ShapeDrive }) => {
+        const now = shape.spin;
+        const pivot = now?.x !== undefined && now.y !== undefined ? ([now.x, now.y] as HullPoint) : null;
+        const next = spinOf({
+          speed: change.speed ?? now?.speed ?? 0,
+          pivot: "pivot" in change ? (change.pivot ?? null) : pivot,
+          drive: "drive" in change ? change.drive : now?.drive,
+        });
+        if (next) shape.spin = next;
+        else delete shape.spin;
+        this.changed();
+      };
+      out.push(this.labelled("Spin (degrees a second, 0: none)", this.numberField(shape.spin?.speed ?? 0, (value) => putSpin({ speed: value }), 5)));
+      if (shape.spin) {
+        out.push(
+          ...this.driveControls(
+            [
+              ["clock", "Nothing (turns steadily)"],
+              ["throttle", "Throttle (winds up with it)"],
+              ["approach", "Approach (turns near a dock)"],
+              ["low", "Running low (turns when low)"],
+            ],
+            shape.spin.drive,
+            (drive) => putSpin({ drive }),
+          ),
+        );
+        const centre = this.button("Pivot: back to the centre", () => putSpin({ pivot: null }));
+        centre.title = "Drag the pivot's handle on the canvas to move it; this puts it back on the shape's own centre";
+        centre.disabled = shape.spin.x === undefined;
+        out.push(centre);
       }
       out.push(this.button("Remove this shape", () => this.removeShape(), "danger"));
     }
@@ -2707,16 +2846,25 @@ export class HullDesigner {
   private drawShapeHandles(): void {
     const { ctx } = this;
     const shape = this.pickedShape();
-    if (shape && shape.kind !== "polygon") {
-      // Its own handles: a cross for the middle, rings for sizes and angles, diamonds for a gradient.
+    if (shape) {
+      // Its own handles: a cross for the middle, rings for sizes and angles, diamonds for a gradient,
+      // and a ringed cross for a spin's pivot, which a polygon has too.
       for (const grip of shapeGrips(shape)) {
         const [sx, sy] = this.toScreen(grip.at[0], grip.at[1]);
         const hot = grip.handle === this.hoverHandle;
         const fade = grip.handle === "fadeFrom" || grip.handle === "fadeEnd" || grip.handle === "fadeMiddle" || grip.handle === "reach";
-        ctx.strokeStyle = hot ? "#ffd479" : fade ? "rgba(200,170,255,0.9)" : "rgba(255,212,121,0.9)";
+        ctx.strokeStyle = hot ? "#ffd479" : fade ? "rgba(200,170,255,0.9)" : grip.handle === "pivot" ? "rgba(120,220,255,0.95)" : "rgba(255,212,121,0.9)";
         ctx.fillStyle = hot ? "#ffd479" : "#0a1a2e";
         ctx.lineWidth = 1.4;
-        if (fade) {
+        if (grip.handle === "pivot") {
+          ctx.beginPath();
+          ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+          ctx.moveTo(sx - 9, sy);
+          ctx.lineTo(sx + 9, sy);
+          ctx.moveTo(sx, sy - 9);
+          ctx.lineTo(sx, sy + 9);
+          ctx.stroke();
+        } else if (fade) {
           ctx.beginPath();
           ctx.moveTo(sx, sy - 5);
           ctx.lineTo(sx + 5, sy);
@@ -2739,8 +2887,9 @@ export class HullDesigner {
           ctx.stroke();
         }
       }
-      // A line fade shows the line it runs along, a round one the circle it reaches.
-      const fade = shape.fade;
+      // A line fade shows the line it runs along, a round one the circle it reaches. A polygon's
+      // gradient has no handles, so no guide either.
+      const fade = shape.kind === "polygon" ? undefined : shape.fade;
       ctx.setLineDash([4, 4]);
       if (fade?.type === "line" && fade.from && fade.end) {
         const [ax, ay] = this.toScreen(fade.from[0], fade.from[1]);
@@ -3121,6 +3270,8 @@ export class HullDesigner {
 
     // The art's clock: shapes blink on the blueprint as they will in the game, unless Still is on.
     setArtTime(this.still ? null : performance.now() / 1000);
+    // And what's happening to the ship, from the State row, for the shapes a state drives.
+    setArtState(this.previewArtState(this.page === "parts" && this.showOn !== null ? this.showOn : this.model));
 
     // The parts page with no hull to show: just the selected part, drawn as in game.
     if (this.alone()) {
@@ -3136,6 +3287,7 @@ export class HullDesigner {
       ctx.font = "12px system-ui, sans-serif";
       ctx.fillText(`${part.label}${isDecal(part.id) ? ", a decal" : ""}: drawn as in game, facing the nose`, 14, height - 14);
       setArtTime(null);
+      setArtState(null);
       return;
     }
 
@@ -3251,6 +3403,7 @@ export class HullDesigner {
     const square = this.alone() ? "a twentieth" : "a quarter";
     ctx.fillText(`${hullName(model)}: nose to the right, one square ${square} of the ship's radius`, 14, height - 14);
     setArtTime(null);
+    setArtState(null);
   }
 
   /**
@@ -3288,6 +3441,7 @@ export class HullDesigner {
         alpha: mount.alpha,
         part: id,
         gun: gun ? { part: gun.id, wear: 0 } : null,
+        gunMount: turretGunId(mount.id),
       });
       return;
     }
@@ -3296,7 +3450,10 @@ export class HullDesigner {
     ctx.rotate(facing(mount));
     ctx.scale(mount.scale, mount.scale);
     if ((mount.alpha ?? 1) < 1) ctx.globalAlpha = mount.alpha!;
+    // Its lights read its own mount, as in game: its thruster's firing, its gun's shots.
+    const was = setArtMount({ id: mount.id, role: mount.role, gun: part.kind === "gun" });
     drawPartArt(ctx, id, 0, part.engine !== undefined);
+    setArtMount(was);
     ctx.restore();
   }
 

@@ -193,6 +193,46 @@ export interface ShapeBlink {
   offset?: number;
   /** A pulse: the flash swells up and back down. Left out, the flash snaps on and off. */
   fade?: boolean;
+  /** What drives it, where something other than the clock does. Left out, it blinks on its timing. */
+  drive?: ShapeDrive;
+}
+
+/** How near a dock an approach light lights up, in world units, where its shape gives no range. */
+export const APPROACH_RANGE = 600;
+/** How full of an item counts as running low, 0 to 1, where its shape gives no line: the tank art's red. */
+export const LOW_SHARE = 0.25;
+
+/**
+ * What drives a shape's colour change or its spin, instead of the clock: an amount (the throttle),
+ * a switch (approaching a dock, running low on an item), or an event (a shot). On a part the state
+ * is that part's own where it has one, its thruster's firing or its gun's shot; on a hull, the
+ * whole ship's.
+ */
+export type ShapeDrive =
+  /** The main thruster's firing on a hull, or the part's own thruster's: an amount, 0 to 1. */
+  | { state: "throttle" }
+  /** On while a dock is within `range` (world units, left out `APPROACH_RANGE`) and the ship is closing on it. */
+  | { state: "approach"; range?: number }
+  /** On while the ship holds `share` or less (0 to 1, left out `LOW_SHARE`) of what it can of `item`. */
+  | { state: "low"; item: string; share?: number }
+  /** One flash on each shot: the part's own gun's, or any gun's on a hull. A colour change only. */
+  | { state: "fired" };
+
+/** The states a drive can name, in the order the designer lists them. */
+export const DRIVE_STATES = ["throttle", "approach", "low", "fired"] as const;
+
+/**
+ * A shape turning on its own about a pivot: a dish or a gyro ring. Steady at `speed`, or driven by
+ * a state, easing toward the speed that state asks for.
+ */
+export interface ShapeSpin {
+  /** Degrees a second, clockwise; negative turns the other way. Never 0. */
+  speed: number;
+  /** The pivot, in the shape's own units. Left out, the shape's own centre. */
+  x?: number;
+  y?: number;
+  /** What drives it: the throttle scales its speed, a switch runs it at full or stops it. Never a shot. */
+  drive?: Exclude<ShapeDrive, { state: "fired" }>;
 }
 
 /**
@@ -241,8 +281,26 @@ export interface ArtShape {
   blink?: ShapeBlink;
   /** A halo round it, in the shape's own units: more than 0. Tied to the flash where there is one. */
   glow?: number;
+  /** Turning on its own about a pivot. Without one it holds still. */
+  spin?: ShapeSpin;
   /** A line's width: a rim shape's, an arc's or an open line's. Without one, the hull edge's own. */
   width?: number;
+}
+
+/**
+ * Where a spinning shape turns about, in its own units: its spin's pivot where it has one, else its
+ * own centre, which is its middle for the kinds that have one and the middle of a polygon's points.
+ */
+export function spinPivot(shape: ArtShape): HullPoint {
+  if (shape.spin?.x !== undefined && shape.spin.y !== undefined) return [shape.spin.x, shape.spin.y];
+  if (shape.kind === "polygon") {
+    const points = shape.points ?? [];
+    if (points.length === 0) return [0, 0];
+    const xs = points.map(([x]) => x);
+    const ys = points.map(([, y]) => y);
+    return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+  }
+  return [shape.x ?? 0, shape.y ?? 0];
 }
 
 /** One hull as the ship file keeps it. */
@@ -625,6 +683,8 @@ function readShape(raw: Partial<ArtShape>): ArtShape | null {
   if (blink) shape.blink = blink;
   const glow = number(raw.glow);
   if (glow !== undefined && glow > 0) shape.glow = glow;
+  const spin = readSpin(raw.spin);
+  if (spin) shape.spin = spin;
   if (kind === "polygon") {
     const points = readPoints(raw.points);
     const open = raw.open === true;
@@ -714,6 +774,57 @@ function readBlink(raw: unknown): ShapeBlink | undefined {
   const offset = finiteOrUndefined(blink.offset);
   if (offset !== undefined && offset !== 0) read.offset = offset;
   if (blink.fade === true) read.fade = true;
+  const drive = readDrive(blink.drive);
+  if (drive) read.drive = drive;
+  return read;
+}
+
+/**
+ * What drives a shape, read from a file, or none where it can't work, so the shape keeps its clock:
+ * a state nobody knows, or a running-low with no item to watch. A range of nothing or less and a
+ * line outside 0 to 1 are left out, so the defaults apply.
+ */
+function readDrive(raw: unknown): ShapeDrive | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const drive = raw as { state?: unknown; range?: unknown; item?: unknown; share?: unknown };
+  switch (drive.state) {
+    case "throttle":
+    case "fired":
+      return { state: drive.state };
+    case "approach": {
+      const range = finiteOrUndefined(drive.range);
+      return range !== undefined && range > 0 ? { state: "approach", range } : { state: "approach" };
+    }
+    case "low": {
+      if (typeof drive.item !== "string" || drive.item.trim() === "") return undefined;
+      const share = finiteOrUndefined(drive.share);
+      return share !== undefined && share >= 0 && share <= 1 ? { state: "low", item: drive.item, share } : { state: "low", item: drive.item };
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * A shape's spin read from a file, or none where it can't turn: a speed that isn't a number other
+ * than 0. A pivot coordinate it can't read is left out, so the shape's centre applies, and a shot
+ * can't drive a spin, so that drive is left out and it turns steadily.
+ */
+function readSpin(raw: unknown): ShapeSpin | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const spin = raw as Partial<ShapeSpin>;
+  const speed = finiteOrUndefined(spin.speed);
+  if (speed === undefined || speed === 0) return undefined;
+  const read: ShapeSpin = { speed };
+  const x = finiteOrUndefined(spin.x);
+  const y = finiteOrUndefined(spin.y);
+  // A pivot is a point: half of one is no pivot at all.
+  if (x !== undefined && y !== undefined) {
+    read.x = x;
+    read.y = y;
+  }
+  const drive = readDrive(spin.drive);
+  if (drive && drive.state !== "fired") read.drive = drive;
   return read;
 }
 

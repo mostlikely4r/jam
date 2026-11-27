@@ -261,8 +261,10 @@ designer, pick the station node: it shows its frame, and the shop lists sit on i
 - **State lights on stations** (live shapes, slice 2, `docs/live-shapes-plan.md`): shapes can be
   driven by an `ArtState` snapshot (approach, running low and more). A station's snapshot — its
   `approach` as the distance to the nearest ship closing on its dock, by that plan's rule — is
-  made by whichever of this build and that one lands second. Until then a station draws with the
-  state null, so its lights rest or follow their clock.
+  made by this build, since that slice landed first (Q-59, 2026-11-27): call `closingDistance`
+  (`src/artState.ts`) for each ship against the station's own dock and keep the nearest; set the
+  station's snapshot with `setArtState` around its drawing, as `Renderer.drawShip` does. Until
+  then a station draws with the state null, so its lights rest or follow their clock.
 
 ## Not doing
 

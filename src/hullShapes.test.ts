@@ -33,7 +33,8 @@ import {
   type ShapeFade,
 } from "./fitting";
 import { SHIP_MODELS, type PartId } from "./parts";
-import { drawDecal, drawHull, drawPartArt, drawShape, litAmount, mix, partPalette, setArtTime, type ShapePalette } from "./shipArt";
+import { drawDecal, drawHull, drawPartArt, drawShape, drawTanks, drawVectorShip, litAmount, mix, partPalette, setArtState, setArtTime, tankBoxes, type ShapePalette } from "./shipArt";
+import { quietState, SpinMemory, type ArtState } from "./artState";
 
 /** A hull radius, in the world units the old `src/shipArt.ts` drew in. */
 const R = 12;
@@ -303,6 +304,7 @@ describe("shapes in the ship file", () => {
   });
 
   it("drops a shape that says nothing, and keeps a hull's own outline if the file's is broken", () => {
+    const was = shipFileNow();
     const file = shipFileNow();
     try {
       const racer = file.hulls.racer as Hull;
@@ -320,7 +322,7 @@ describe("shapes in the ship file", () => {
       // A polygon needs three points, a circle a reach; a role nobody knows is the body.
       expect(hullShapes("racer")).toEqual([{ kind: "circle", role: "body", x: 0, y: 0, r: 0.2 }]);
     } finally {
-      useShipFile(file);
+      useShipFile(was);
     }
   });
 });
@@ -639,6 +641,7 @@ describe("the shape kinds the editor adds", () => {
 
 describe("reading the shapes the new kinds are stored as", () => {
   it("drops each one that can't draw, and keeps the ones that can", () => {
+    const was = shipFileNow();
     const file = shipFileNow();
     try {
       file.hulls.racer.shapes = [
@@ -674,7 +677,7 @@ describe("reading the shapes the new kinds are stored as", () => {
       // Each of the last three keeps its reach and loses the gradient it can't draw.
       for (const shape of hullShapes("racer").slice(5)) expect(shape.fade).toBeUndefined();
     } finally {
-      useShipFile(file);
+      useShipFile(was);
     }
   });
 
@@ -966,6 +969,7 @@ describe("live shapes: a colour change and a glow", () => {
   });
 
   it("reads a colour change and a glow, and drops the ones that can't draw", () => {
+    const was = shipFileNow();
     const file = shipFileNow();
     try {
       file.hulls.racer.shapes = [
@@ -989,7 +993,7 @@ describe("live shapes: a colour change and a glow", () => {
       expect(shapes[5].glow).toBeCloseTo(0.1, 6);
       expect(shapes[6].glow).toBeUndefined();
     } finally {
-      useShipFile(file);
+      useShipFile(was);
     }
   });
 
@@ -1038,6 +1042,298 @@ describe("live shapes: a colour change and a glow", () => {
       drawPartArt(moving.ctx, id, 0);
       setArtTime(null);
       expect(moving.painted).toEqual(still.painted);
+    }
+  });
+});
+
+describe("live shapes, slice 2: lights a state drives, and spin", () => {
+  /** A light's two colours, chosen so nothing else on a ship is painted in either. */
+  const DARK: [number, number, number, number] = [1, 2, 3, 1];
+  const LIT: [number, number, number, number] = [253, 254, 255, 1];
+  const light = (blink: Partial<ShapeBlink> = {}, over: Partial<ArtShape> = {}): ArtShape => ({
+    kind: "circle",
+    role: "body",
+    x: 0,
+    y: 0,
+    r: 0.05,
+    blink: { colour: "#fdfeff", rest: "#010203", on: 0.2, off: 0.8, ...blink },
+    ...over,
+  });
+  /** A snapshot with something happening, over a quiet one. */
+  const state = (over: Partial<ArtState> = {}): ArtState => ({ ...quietState(), ...over });
+  /** Runs a drawing with the art's clock and state set, and puts both back after. */
+  const at = <T,>(time: number | null, now: ArtState | null, draw: () => T): T => {
+    setArtTime(time);
+    setArtState(now);
+    try {
+      return draw();
+    } finally {
+      setArtTime(null);
+      setArtState(null);
+    }
+  };
+  /** One shape's colour drawn at `time` with `now` happening. */
+  const colourOf = (shape: ArtShape, time: number | null, now: ArtState | null) =>
+    at(time, now, () => {
+      const canvas = painter();
+      drawShape(canvas.ctx, shape, partPalette());
+      return canvas.painted[0].colour;
+    });
+  /** The lights in a drawing, by whether each came out lit: how many of each, whatever its mount fades it by. */
+  const lights = (canvas: { painted: Painted[] }) => ({
+    lit: canvas.painted.filter((each) => each.colour.slice(0, 3).join() === LIT.slice(0, 3).join()).length,
+    dark: canvas.painted.filter((each) => each.colour.slice(0, 3).join() === DARK.slice(0, 3).join()).length,
+  });
+  /** Where a drawing's first shape was centred, rounded. */
+  const centreOf = (canvas: { painted: Painted[] }): [number, number] => {
+    const arc = canvas.painted[0].path[0];
+    return [Math.round(Number(arc[1]) * 1e6) / 1e6 + 0, Math.round(Number(arc[2]) * 1e6) / 1e6 + 0];
+  };
+
+  it("reads drives and spins, and drops the ones that can't work", () => {
+    const was = shipFileNow();
+    const file = shipFileNow();
+    try {
+      const blink = { colour: "#ff0000", on: 0.2, off: 0.8 };
+      file.hulls.racer.shapes = [
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, blink: { ...blink, drive: { state: "throttle" } } },
+        // A state nobody knows: the light keeps its clock.
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, blink: { ...blink, drive: { state: "docked" } } },
+        // A range of nothing and a line past full are left out, so the defaults apply.
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, blink: { ...blink, drive: { state: "approach", range: -5 } } },
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, blink: { ...blink, drive: { state: "low", item: "fuel", share: 1.5 } } },
+        // Running low on nothing: no drive.
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, blink: { ...blink, drive: { state: "low" } } },
+        { kind: "circle", role: "body", x: 0, y: 0, r: 0.2, blink: { ...blink, drive: { state: "approach", range: 900 } } },
+        // A spin of nothing doesn't spin; a shot can't drive one; half a pivot is none.
+        { kind: "rect", role: "body", x: 0, y: 0, w: 0.2, h: 0.1, spin: { speed: 0 } },
+        { kind: "rect", role: "body", x: 0, y: 0, w: 0.2, h: 0.1, spin: { speed: 90, drive: { state: "fired" }, x: 0.1 } },
+        { kind: "rect", role: "body", x: 0, y: 0, w: 0.2, h: 0.1, spin: { speed: "fast" } },
+        { kind: "rect", role: "body", x: 0, y: 0, w: 0.2, h: 0.1, spin: { speed: -45, x: 0.1, y: 0.2, drive: { state: "low", item: "fuel", share: 0.5 } } },
+      ] as unknown as ArtShape[];
+      useShipFile(file);
+      const shapes = hullShapes("racer");
+      expect(shapes.slice(0, 6).map((shape) => shape.blink?.drive)).toEqual([
+        { state: "throttle" },
+        undefined,
+        { state: "approach" },
+        { state: "low", item: "fuel" },
+        undefined,
+        { state: "approach", range: 900 },
+      ]);
+      expect(shapes[1].blink).toEqual(blink);
+      expect(shapes.slice(6).map((shape) => shape.spin)).toEqual([
+        undefined,
+        { speed: 90 },
+        undefined,
+        { speed: -45, x: 0.1, y: 0.2, drive: { state: "low", item: "fuel", share: 0.5 } },
+      ]);
+    } finally {
+      useShipFile(was);
+    }
+  });
+
+  it("keeps drives and spins through a save and a read, defaults left out", () => {
+    const shapes: ArtShape[] = [
+      light({ drive: { state: "approach", range: 300 } }),
+      light({ drive: { state: "fired" }, fade: true }),
+      light({ drive: { state: "low", item: "fuel" } }, { spin: { speed: 30 } }),
+      { kind: "polygon", role: "shade", points: [[0, 0], [0.2, 0], [0, 0.2]], spin: { speed: 120, x: 0.05, y: 0.05, drive: { state: "throttle" } } },
+    ];
+    withFile(
+      () => HULL_SHAPES.racer.splice(0, HULL_SHAPES.racer.length, ...shapes),
+      () => {
+        const file = shipFileNow();
+        useShipFile(file);
+        expect(hullShapes("racer")).toEqual(shapes);
+        expect(shipFileNow()).toEqual(file);
+      },
+    );
+  });
+
+  it("lights by the throttle as much as it fires, and ignores the clock", () => {
+    const shape = light({ drive: { state: "throttle" } });
+    expect(colourOf(shape, 0.5, state({ thrust: { thrusterMain: 0 } }))).toEqual(DARK);
+    expect(colourOf(shape, 0.5, state({ thrust: { thrusterMain: 0.5 } }))).toEqual([...mix([1, 2, 3], [253, 254, 255], 0.5), 1]);
+    expect(colourOf(shape, 0.5, state({ thrust: { thrusterMain: 1 } }))).toEqual(LIT);
+    // Still art rests it, whatever is happening; with no state nothing is.
+    expect(colourOf(shape, null, state({ thrust: { thrusterMain: 1 } }))).toEqual(DARK);
+    expect(colourOf(shape, 0, null)).toEqual(DARK);
+  });
+
+  it("blinks a switch on its timing while it's on, and rests it while it's off", () => {
+    const approach = light({ drive: { state: "approach", range: 300 } });
+    expect(colourOf(approach, 0.1, state({ approach: 250 }))).toEqual(LIT);
+    expect(colourOf(approach, 0.5, state({ approach: 250 }))).toEqual(DARK);
+    expect(colourOf(approach, 0.1, state({ approach: 350 }))).toEqual(DARK);
+    // Without a range of its own it reaches the default's distance.
+    expect(colourOf(light({ drive: { state: "approach" } }), 0.1, state({ approach: 550 }))).toEqual(LIT);
+    const low = light({ drive: { state: "low", item: "fuel" } });
+    expect(colourOf(low, 0.1, state({ supply: { fuel: 0.2 } }))).toEqual(LIT);
+    expect(colourOf(low, 0.5, state({ supply: { fuel: 0.2 } }))).toEqual(DARK);
+    expect(colourOf(low, 0.1, state({ supply: { fuel: 0.3 } }))).toEqual(DARK);
+    expect(colourOf(low, 0.1, state({ supply: { fuel: 0 } }))).toEqual(LIT);
+    // A ship that can't hold the item has no share of it, and no light.
+    expect(colourOf(low, 0.1, state())).toEqual(DARK);
+  });
+
+  it("flashes once on a shot, snapping off or dying away", () => {
+    const snap = light({ drive: { state: "fired" }, on: 0.2 });
+    expect(colourOf(snap, 7, state({ shotAgo: { gun: 0.1 } }))).toEqual(LIT);
+    expect(colourOf(snap, 7, state({ shotAgo: { gun: 0.3 } }))).toEqual(DARK);
+    expect(colourOf(snap, 7, state())).toEqual(DARK);
+    const fade = light({ drive: { state: "fired" }, on: 0.2, fade: true });
+    expect(colourOf(fade, 7, state({ shotAgo: { gun: 0 } }))).toEqual(LIT);
+    expect(colourOf(fade, 7, state({ shotAgo: { gun: 0.1 } }))).toEqual([...mix([1, 2, 3], [253, 254, 255], 0.5), 1]);
+    expect(colourOf(fade, 7, state({ shotAgo: { gun: 0.2 } }))).toEqual(DARK);
+  });
+
+  it("reads a part's own mount: a strafe thruster its own firing, and the hull the main thruster", () => {
+    const throttle = light({ drive: { state: "throttle" } });
+    withFile(
+      () => {
+        PART_ART.turnThrusters = { ...PART_ART.turnThrusters, shapes: [throttle] };
+      },
+      () => {
+        const ship = { model: "racer" as const, ...newFitting("racer") };
+        ship.fit.thrusterStrafeLeft = { part: "turnThrusters", wear: 0 };
+        const drawn = (now: ArtState) =>
+          at(0, now, () => {
+            const canvas = painter();
+            drawVectorShip(canvas.ctx, ship, [120, 150, 190]);
+            return lights(canvas);
+          });
+        // Three turn-thruster parts fitted: the strafe one lights alone, and only for its own role.
+        expect(drawn(state({ thrust: { thrusterStrafeLeft: 1 } }))).toEqual({ lit: 1, dark: 2 });
+        expect(drawn(state({ thrust: { thrusterMain: 1 } }))).toEqual({ lit: 0, dark: 3 });
+        expect(drawn(state({ thrust: { thrusterRotateLeft: 1, thrusterRotateRight: 1 } }))).toEqual({ lit: 2, dark: 1 });
+      },
+    );
+    withFile(
+      () => HULL_SHAPES.racer.push(throttle),
+      () => {
+        const drawn = (now: ArtState) =>
+          at(0, now, () => {
+            const canvas = painter();
+            drawHull(canvas.ctx, "racer", [120, 150, 190]);
+            return lights(canvas);
+          });
+        expect(drawn(state({ thrust: { thrusterMain: 1 } }))).toEqual({ lit: 1, dark: 0 });
+        expect(drawn(state({ thrust: { thrusterStrafeLeft: 1 } }))).toEqual({ lit: 0, dark: 1 });
+      },
+    );
+  });
+
+  it("flashes a muzzle light only on its own gun's shot, and a hull's on any gun's", () => {
+    const muzzle = light({ drive: { state: "fired" } });
+    withFile(
+      () => {
+        PART_ART.gun1 = { ...PART_ART.gun1, shapes: [muzzle] };
+        HULL_SHAPES.defender.push(muzzle);
+      },
+      () => {
+        const ship = { model: "defender" as const, ...newFitting("defender") };
+        const drawn = (now: ArtState) =>
+          at(0, now, () => {
+            const canvas = painter();
+            drawVectorShip(canvas.ctx, ship, [120, 150, 190]);
+            return lights(canvas);
+          });
+        // Two guns and the hull's own: the left gun and the hull flash; the right gun waits.
+        expect(drawn(state({ shotAgo: { gunLeft: 0 } }))).toEqual({ lit: 2, dark: 1 });
+        expect(drawn(state({ shotAgo: { gunLeft: 0, gunRight: 0.05 } }))).toEqual({ lit: 3, dark: 0 });
+        expect(drawn(state())).toEqual({ lit: 0, dark: 3 });
+      },
+    );
+  });
+
+  it("draws a running-low lamp on each tank, both reading the ship's one share", () => {
+    const lamp = light({ drive: { state: "low", item: "fuel" } });
+    withFile(
+      () => {
+        PART_ART.smallTank = { ...PART_ART.smallTank, shapes: [lamp] };
+      },
+      () => {
+        const ship = { model: "racer" as const, ...newFitting("racer") };
+        const drawn = (now: ArtState) =>
+          at(0.1, now, () => {
+            const canvas = painter();
+            drawTanks(canvas.ctx, tankBoxes(ship, now.supply.fuel ?? 0));
+            return lights(canvas);
+          });
+        expect(drawn(state({ supply: { fuel: 0.1 } }))).toEqual({ lit: 2, dark: 0 });
+        expect(drawn(state({ supply: { fuel: 0.9 } }))).toEqual({ lit: 0, dark: 2 });
+      },
+    );
+  });
+
+  it("turns a spinning shape about its pivot by the clock, and holds still art at 0", () => {
+    // A dot half a hull radius out along +x, turning about the middle a quarter turn a second.
+    const dot: ArtShape = { kind: "circle", role: "body", x: 0.5, y: 0, r: 0.05, spin: { speed: 90, x: 0, y: 0 } };
+    const centre = (shape: ArtShape, time: number | null) =>
+      at(time, null, () => {
+        const canvas = painter();
+        drawShape(canvas.ctx, shape, partPalette());
+        return centreOf(canvas);
+      });
+    expect(centre(dot, null)).toEqual([0.5 * R, 0]);
+    // Clockwise, as the file's angles go: +x turns toward +y.
+    expect(centre(dot, 1)).toEqual([0, 0.5 * R]);
+    expect(centre(dot, 2)).toEqual([-0.5 * R, 0]);
+    // Without a pivot of its own it turns about its own centre, and so stays put.
+    expect(centre({ ...dot, spin: { speed: 90 } }, 1)).toEqual([0.5 * R, 0]);
+  });
+
+  it("winds a driven spin up while its switch is on and down when it goes off", () => {
+    const dot: ArtShape = { kind: "circle", role: "body", x: 0.5, y: 0, r: 0.05, spin: { speed: 90, x: 0, y: 0, drive: { state: "approach" } } };
+    const spins = new SpinMemory();
+    const angle = (time: number, on: boolean, memory: SpinMemory | null = spins) =>
+      at(time, state({ approach: on ? 0 : Infinity, ...(memory ? { spins: memory } : {}) }), () => {
+        const canvas = painter();
+        drawShape(canvas.ctx, dot, partPalette());
+        const [x, y] = centreOf(canvas);
+        return (Math.atan2(y, x) * 180) / Math.PI;
+      });
+    // Off from the start, it never turns.
+    expect(angle(0, false)).toBeCloseTo(0, 6);
+    expect(angle(0.2, false)).toBeCloseTo(0, 6);
+    // On: it winds up, turning further each step.
+    const up = [0.4, 0.6, 0.8].map((time) => angle(time, true));
+    expect(up[2] - up[1]).toBeGreaterThan(up[1] - up[0]);
+    // Off again: it slows rather than stopping dead.
+    const a = angle(1.0, false);
+    const b = angle(1.2, false);
+    expect(b).toBeGreaterThan(a);
+    // And with no memory to keep, a driven spin holds still.
+    expect(angle(3, true, null)).toBeCloseTo(0, 6);
+  });
+
+  it("draws every hull and part in the file the same with nothing happening and everything happening", () => {
+    const busy = (): ArtState => ({
+      thrust: { thrusterMain: 1, thrusterReverse: 1, thrusterStrafeLeft: 1, thrusterStrafeRight: 1, thrusterRotateLeft: 1, thrusterRotateRight: 1 },
+      approach: 0,
+      supply: { fuel: 0, ore: 0, oreB: 0 },
+      shotAgo: { gun: 0, gunLeft: 0, gunRight: 0 },
+      spins: new SpinMemory(),
+    });
+    for (const model of SHIP_MODELS) {
+      const ship = { model, ...newFitting(model) };
+      const drawn = (now: ArtState | null) =>
+        at(1.7, now, () => {
+          const canvas = painter();
+          drawVectorShip(canvas.ctx, ship, [120, 150, 190], 0.1);
+          return canvas.painted;
+        });
+      expect(drawn(busy())).toEqual(drawn(null));
+    }
+    for (const id of Object.keys(PART_ART) as PartId[]) {
+      const drawn = (now: ArtState | null) =>
+        at(1.7, now, () => {
+          const canvas = painter();
+          drawPartArt(canvas.ctx, id, 0);
+          return canvas.painted;
+        });
+      expect(drawn(busy())).toEqual(drawn(null));
     }
   });
 });

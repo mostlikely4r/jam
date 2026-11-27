@@ -4,10 +4,11 @@
  * click lands on it. Plain functions, so they test on their own, as `multiselect.ts` and
  * `undo.ts` do; `hulls.ts` draws the page around them.
  */
-import { onGrid, type ArtShape, type HullPoint, type ShapeBlink, type ShapeFade } from "../fitting";
+import type { ArtState } from "../artState";
+import { APPROACH_RANGE, LOW_SHARE, onGrid, spinPivot, THRUSTER_ROLES, type ArtShape, type HullPoint, type MountId, type ShapeBlink, type ShapeDrive, type ShapeFade, type ShapeSpin } from "../fitting";
 
-/** A handle a shape is dragged by: its middle, one of its sizes, an angle's end, or its fade's. */
-export type ShapeHandle = "middle" | "rx" | "ry" | "outer" | "inner" | "radius" | "from" | "to" | "reach" | "fadeMiddle" | "fadeFrom" | "fadeEnd";
+/** A handle a shape is dragged by: its middle, one of its sizes, an angle's end, its fade's, or its spin's pivot. */
+export type ShapeHandle = "middle" | "rx" | "ry" | "outer" | "inner" | "radius" | "from" | "to" | "reach" | "fadeMiddle" | "fadeFrom" | "fadeEnd" | "pivot";
 
 /** One handle on a shape, and where it sits in the shape's own units. */
 export interface ShapeGrip {
@@ -121,6 +122,109 @@ export interface BlinkFields {
   off: number;
   offset: number;
   fade: boolean;
+  /** What drives it, or null for the clock. */
+  drive?: ShapeDrive | null;
+}
+
+/** What drives a shape, as the Driven by choice names it: the clock, or one of the states. */
+export type DriveChoice = "clock" | ShapeDrive["state"];
+
+/** What a Driven by block's fields say, to be read back into a drive. */
+export interface DriveFields {
+  state: DriveChoice;
+  /** An approach's range, world units. */
+  range: number;
+  /** The item a running-low watches. */
+  item: string;
+  /** How full counts as low, 0 to 1. */
+  share: number;
+}
+
+/** A drive's fields as the panel shows them, the defaults filled in where the drive leaves them out. */
+export function driveFields(drive: ShapeDrive | undefined): DriveFields {
+  return {
+    state: drive?.state ?? "clock",
+    range: drive?.state === "approach" ? (drive.range ?? APPROACH_RANGE) : APPROACH_RANGE,
+    item: drive?.state === "low" ? drive.item : "fuel",
+    share: drive?.state === "low" ? (drive.share ?? LOW_SHARE) : LOW_SHARE,
+  };
+}
+
+/**
+ * The drive a Driven by block's fields make, or undefined for the clock. A range or a line at its
+ * default is left out, as the file leaves defaults out; one that can't work (a range of nothing, a
+ * line outside 0 to 1) is too, so the default applies. A running-low with no item has nothing to watch.
+ */
+export function driveOf(fields: DriveFields): ShapeDrive | undefined {
+  switch (fields.state) {
+    case "throttle":
+    case "fired":
+      return { state: fields.state };
+    case "approach":
+      return fields.range > 0 && fields.range !== APPROACH_RANGE ? { state: "approach", range: tidy(fields.range) } : { state: "approach" };
+    case "low": {
+      if (fields.item.trim() === "") return undefined;
+      const share = tidy(fields.share);
+      return share >= 0 && share <= 1 && share !== LOW_SHARE ? { state: "low", item: fields.item, share } : { state: "low", item: fields.item };
+    }
+    default:
+      return undefined;
+  }
+}
+
+/** What a Spin block's fields say, to be read back into a shape's `spin`. */
+export interface SpinFields {
+  /** Degrees a second; 0 is no spin. */
+  speed: number;
+  /** The pivot, or null for the shape's own centre. */
+  pivot: HullPoint | null;
+  drive: ShapeDrive | undefined;
+}
+
+/**
+ * The spin a Spin block's fields make, or undefined for a speed of nothing: a shape that never turns
+ * doesn't spin. A shot can't drive a spin, so that drive is left out and it turns steadily.
+ */
+export function spinOf(fields: SpinFields): ShapeSpin | undefined {
+  if (!Number.isFinite(fields.speed) || fields.speed === 0) return undefined;
+  const spin: ShapeSpin = { speed: tidy(fields.speed) };
+  if (spin.speed === 0) return undefined;
+  if (fields.pivot) {
+    spin.x = tidy(fields.pivot[0]);
+    spin.y = tidy(fields.pivot[1]);
+  }
+  if (fields.drive && fields.drive.state !== "fired") spin.drive = fields.drive;
+  return spin;
+}
+
+/** The State row's settings: what the preview pretends is happening to the ship it draws. */
+export interface PreviewFields {
+  /** Every thruster's firing, 0 to 1. */
+  throttle: number;
+  /** A dock right there and closing. */
+  approach: boolean;
+  /** Every item at a tenth of full. */
+  low: boolean;
+  /** Seconds since Fire was pressed, or null for no shot yet. */
+  sinceFire: number | null;
+}
+
+/** How full every item reads while the State row's Low is on. */
+export const PREVIEW_LOW = 0.1;
+
+/**
+ * The snapshot the designer's preview draws with: every thruster at the throttle, a dock right there
+ * while Approach is on, every item low or full by Low, and every gun mount's shot as old as the last
+ * press of Fire. `items` and `mounts` are what there is to fill.
+ */
+export function previewState(fields: PreviewFields, items: string[], mounts: MountId[]): ArtState {
+  const thrust: ArtState["thrust"] = {};
+  for (const role of THRUSTER_ROLES) thrust[role] = Math.max(0, Math.min(1, fields.throttle));
+  const supply: ArtState["supply"] = {};
+  for (const item of items) supply[item] = fields.low ? PREVIEW_LOW : 1;
+  const shotAgo: ArtState["shotAgo"] = {};
+  if (fields.sinceFire !== null) for (const mount of mounts) shotAgo[mount] = fields.sinceFire;
+  return { thrust, approach: fields.approach ? 0 : Infinity, supply, shotAgo };
 }
 
 /**
@@ -134,6 +238,7 @@ export function blinkOf(fields: BlinkFields): ShapeBlink | undefined {
   if (fields.rest) blink.rest = fields.rest.toLowerCase();
   if (fields.offset !== 0) blink.offset = tidy(fields.offset);
   if (fields.fade) blink.fade = true;
+  if (fields.drive) blink.drive = fields.drive;
   return blink;
 }
 
@@ -148,9 +253,18 @@ export function restFor(colour: string): string {
   return `#${dim.join("")}`;
 }
 
-/** The handles a shape is dragged by. A polygon has none: its points are their own. */
+/**
+ * The handles a shape is dragged by. A polygon has none of its own, since its points are their own,
+ * and any shape that spins has its pivot.
+ */
 export function shapeGrips(shape: ArtShape): ShapeGrip[] {
-  if (shape.kind === "polygon") return [];
+  const pivot: ShapeGrip[] = shape.spin ? [{ handle: "pivot", at: spinPivot(shape) }] : [];
+  if (shape.kind === "polygon") return pivot;
+  return [...shapeOwnGrips(shape), ...pivot];
+}
+
+/** A shape's own handles: its middle, its sizes and angles, and its gradient's. */
+function shapeOwnGrips(shape: ArtShape): ShapeGrip[] {
   const x = shape.x ?? 0;
   const y = shape.y ?? 0;
   const grips: ShapeGrip[] = [{ handle: "middle", at: [x, y] }];
@@ -246,6 +360,9 @@ export function dragHandle(shape: ArtShape, handle: ShapeHandle, at: HullPoint, 
       break;
     case "fadeEnd":
       if (fade?.type === "line") next.fade = { ...fade, end: [sx, sy] };
+      break;
+    case "pivot":
+      if (next.spin) next.spin = { ...next.spin, x: sx, y: sy };
       break;
   }
   return next;

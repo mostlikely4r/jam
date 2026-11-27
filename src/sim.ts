@@ -212,6 +212,11 @@ export interface Ship extends Body, Fitting {
   cooldown: number;
   /** Seconds until each gun mount may fire on its own, as auto-mine fires them. Not saved. */
   gunCooldowns: Map<MountId, number>;
+  /**
+   * Seconds since each gun mount last fired, for lights that flash on a shot. A mount that hasn't
+   * fired isn't in it. Not saved: a loaded game has no recent shots.
+   */
+  shotAgo: Map<MountId, number>;
   /** Which way each turret points, relative to the nose, by its gun mount. None without a turret. */
   turretAngles: Partial<Record<MountId, number>>;
   prevTurretAngles: Partial<Record<MountId, number>>;
@@ -1467,8 +1472,9 @@ export class Sim {
       for (const [key, value] of Object.entries(template)) {
         if (!(key in ship)) Object.assign(ship, { [key]: value instanceof Set || value instanceof Map ? new (value.constructor as typeof Set)() : value });
       }
-      // Targets aren't saved: a loaded game starts with none.
+      // Targets aren't saved: a loaded game starts with none. Nor are its recent shots.
       ship.targets = [];
+      ship.shotAgo = new Map();
       // And a saved ship without picks gets its own, not the one shared by every ship.
       ship.tweaks = copyPicks(ship.tweaks);
       // A save from before the tanks were modules kept only the total: share it over them.
@@ -2992,6 +2998,7 @@ export class Sim {
       hull: hullMax(model),
       cooldown: 0,
       gunCooldowns: new Map(),
+      shotAgo: new Map(),
       turretAngles: {},
       prevTurretAngles: {},
       aim: null,
@@ -3032,6 +3039,7 @@ export class Sim {
     ship.hull = hullMax(ship.model);
     ship.cooldown = 0;
     ship.gunCooldowns.clear();
+    ship.shotAgo.clear();
     ship.hold = [];
     ship.unloadTimer = 0;
     ship.firing.clear();
@@ -4640,6 +4648,7 @@ export class Sim {
     trimPrograms(ship);
     ship.hull = hullMax(model);
     ship.gunCooldowns.clear();
+    ship.shotAgo.clear();
     ship.turretAngles = {};
     ship.prevTurretAngles = {};
     // What no tank holds any more leaves the world, so the ledger still adds up.
@@ -7644,6 +7653,7 @@ export class Sim {
     }
     ship.cooldown = Math.max(0, ship.cooldown - dt);
     for (const [mount, left] of ship.gunCooldowns) ship.gunCooldowns.set(mount, Math.max(0, left - dt));
+    for (const [mount, ago] of ship.shotAgo) ship.shotAgo.set(mount, ago + dt);
     this.turnTurret(ship, dt);
   }
 
@@ -8901,6 +8911,7 @@ export class Sim {
       from: ship,
     });
     this.events.push({ type: "shot", x: line.x, y: line.y });
+    ship.shotAgo.set(mount.id, 0);
     return 1 / (precise ? tuning.gun2ShotsPerSecond : tuning.shotsPerSecond);
   }
 

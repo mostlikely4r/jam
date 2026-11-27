@@ -3,6 +3,7 @@ import { homeFields, homeSim, homeStations } from "./home";
 import { DronePilot, pickTurnAway, TURN_AWAYS, type TurnAway } from "./pilot";
 import { type FieldSpec, type Poi, type Ship, Sim, type StationSpec, TICK } from "./sim";
 import { DEFAULTS } from "./tuning";
+import { partOn, placeParts } from "./frameParts";
 
 // Long runs never give the worker a turn of the event loop otherwise (see pilot.test.ts).
 afterEach(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
@@ -57,7 +58,7 @@ function world(tuning: Partial<typeof WORLD> = {}): Sim {
     orbits: orbit(APART + 0.05),
     carryFull: 2000,
     carryNone: 6000,
-    storage: 100000,
+    parts: placeParts({ storage: 100000 }),
   };
   sim.applyLayout(homeFields(sim, second), homeStations(sim, spec));
   return sim;
@@ -174,7 +175,7 @@ describe("traffic turned away at a full store", () => {
     expect(sim.oreIn(pilot.ship)).toBe(4);
     expect(pilot.task).toBe("unloading");
     // Once there's room, it sells as ever.
-    sim.bases[0].spec.storage = 1000;
+    partOn(sim.bases[0].body.parts, "storage")!.data.cells = 1000;
     run(sim, 10);
     expect(sim.oreIn(pilot.ship)).toBe(0);
   }, 30000);
@@ -211,7 +212,7 @@ describe("traffic turned away at a full store", () => {
 
   it("won't try a station that turned this load away again", () => {
     const sim = world();
-    sim.bases[1].spec.storage = 0;
+    partOn(sim.bases[1].body.parts, "storage")!.data.cells = 0;
     const pilot = turnedAway(sim, 4);
     fixRoll(sim, pilot, "station");
     run(sim, sim.tuning.turnAwaySeconds + 1);

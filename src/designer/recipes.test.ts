@@ -4,6 +4,7 @@ import { stationsFor } from "./link";
 import { RECIPES } from "./recipes";
 import { shippedWorld } from "./shipped";
 import { walk, type WorldNode } from "./world";
+import { partOn, resolveParts } from "../frameParts";
 
 describe("layout recipes", () => {
   it("far-base adds one field round the planet and a base round it, holding the all-round tractor, however often it runs", () => {
@@ -17,10 +18,11 @@ describe("layout recipes", () => {
     expect(fields).toHaveLength(1);
     expect(fields[0].parent?.kind).toBe("planet");
     const spec = stationsFor(world).find((station) => station.name === "Planet base")!;
-    expect(spec.unlocked).toEqual(moduleIds());
+    const parts = resolveParts(spec.frame!, spec.parts);
+    expect(partOn(parts, "shop")?.data.unlocked).toEqual(moduleIds());
     // It wants every module but the all-round tractor, like every station.
-    expect(spec.wanted).toEqual(moduleIds().filter((id) => id !== "tractorAll"));
-    expect(spec.shipyard).toBe(true);
+    expect(partOn(parts, "shop")?.data.wanted).toEqual(moduleIds().filter((id) => id !== "tractorAll"));
+    expect(partOn(parts, "shipyard")).toBeDefined();
     expect(lines.some((line) => line.includes("Racer"))).toBe(true);
   });
 });

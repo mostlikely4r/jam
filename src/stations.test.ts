@@ -4,6 +4,16 @@ import { DEFAULTS } from "./tuning";
 import { moduleIds } from "./items";
 import { roundTrip } from "./save";
 import { type FieldSpec, MAX_HULL, type Poi, type Ship, Sim, type StationSpec, TICK } from "./sim";
+import { placeParts } from "./frameParts";
+
+type Loose = Parameters<typeof placeParts>[0];
+/** A spec with a station's settings named one by one, as they were before they were parts on its frame. */
+function withParts(spec: Partial<StationSpec> & Loose): Partial<StationSpec> {
+  const { shipyard, storage, unlocked, wanted, programs, hulls, items, projects, radio, guards, ...rest } = spec;
+  const parts = placeParts({ shipyard, storage, unlocked, wanted, programs, hulls, items, projects, radio, guards });
+  return { ...rest, parts: { ...parts, ...rest.parts } };
+}
+
 
 // Written for wrecks that happen at once, with a bare hull straight away: critical, the pod
 // and the choice at the yard have their own tests in fitting.test.ts.
@@ -37,7 +47,7 @@ const FAR = 2.4;
 const ALL_BUT_360 = moduleIds().filter((id) => id !== "tractorAll");
 
 /** A second field far round the first one's orbit, and a second base just past it. */
-function world(tuning: Partial<typeof WORLD> = {}, outpost: Partial<StationSpec> = {}): { sim: Sim; outpost: Poi } {
+function world(tuning: Partial<typeof WORLD> = {}, outpost: Partial<StationSpec> & Loose = {}): { sim: Sim; outpost: Poi } {
   const sim = homeSim(1, { ...WORLD, ...tuning });
   const home = Math.atan2(sim.field.y, sim.field.x) - (2 * Math.PI * sim.now) / 10800;
   const orbit = (apart: number) => [{ radius: 60000, period: 10800, phase: home + apart, sign: 1 as const }];
@@ -60,9 +70,7 @@ function world(tuning: Partial<typeof WORLD> = {}, outpost: Partial<StationSpec>
     orbits: orbit(FAR + 0.12),
     carryFull: 2000,
     carryNone: 6000,
-    shipyard: true,
-    unlocked: ALL_BUT_360,
-    ...outpost,
+    ...withParts({ shipyard: true, unlocked: ALL_BUT_360, ...outpost }),
   };
   sim.applyLayout(homeFields(sim, second), homeStations(sim, spec));
   return { sim, outpost: sim.bases[1].body };

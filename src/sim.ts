@@ -6,6 +6,7 @@ import { computerSize, DAMAGED_AT, facing, fitPart, hullInfo, hullMax, hullMount
 import { ClickPilot, DronePilot, FacePilot, FighterPilot, LOW_HULL, type TurnAway } from "./pilot";
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
+import { frameMountSpot, partOn, partSpot, resolveParts, tradeNames, type FramePart, type FramePartData, type FramePartKind, type PartOverrides } from "./frameParts";
 import { closestApproach as closestMeeting, type Motion } from "./relative";
 import { orbitState } from "./kepler";
 import { autoPlace, canPlace, cellsOf, floatsAfterRemoval, footprint, reachable, reachableCells, sticks, usedCells, type GridSpec, type Placed } from "./grid";
@@ -71,16 +72,15 @@ const DISTRESS_SECONDS = 10;
 export const PIRATE_BASE_RADIUS = 200;
 /** How fast a wreck's cargo drifts away. */
 const WRECK_ORE_SPEED = 15;
-/** The dock box sits directly beside the solid box. */
-export const DOCK_OFFSET = STATION_HALF * 2;
-/** Where a station's refinery pad sits, on its own axis away from the dock. */
-export const REFINERY_OFFSET = -DOCK_OFFSET;
+/**
+ * How near a hand-over counts: a rock to the refinery's pad, a block to its site. The length of a
+ * station's dock, as it was when the dock's place was a number rather than a mount.
+ */
+export const HAND_OVER_REACH = 300;
 /** A construction block's reach: a square crate as big across as a tier-1 rock, and as heavy and tough. */
 export const BLOCK_RADIUS = 34;
-/** Where a station's block pad sits, in its own axes: on the dock side, clear of the dock's own line. */
-const BLOCK_PAD = { x: DOCK_OFFSET, y: DOCK_OFFSET };
 /** How near the pad a ship with a job takes its block: the pad's whole working area, dock side and all. */
-const BLOCK_PAD_REACH = DOCK_OFFSET * 1.2;
+const BLOCK_PAD_REACH = HAND_OVER_REACH * 1.2;
 /** The most a project's site catch steers a block in at, and how near counts as arrived (as the refinery's). */
 const SITE_LANDING = 40;
 /** Far enough from the station's center to clear both boxes at any rotation. */
@@ -98,9 +98,6 @@ const PART_A = "partA" as PartId;
 const FUEL = "fuel" as PartId;
 /** A program's blueprint, as a share of what the program sells for. */
 const BLUEPRINT_SHARE = 0.75;
-/** The station and dock together, along the station's own x axis. */
-const STATION_SHAPE_CENTER = DOCK_OFFSET / 2;
-const STATION_SHAPE_HALF = STATION_HALF + DOCK_OFFSET / 2;
 /** Before a full station's name in its tooltip: the store has no room for your ore. */
 const FULL_CROSS = "\u2715";
 const STILL = { vx: 0, vy: 0 };
@@ -436,8 +433,6 @@ export interface BlackMarket {
 
 export const BLACK_MARKET_LENGTH = 220;
 export const BLACK_MARKET_WIDTH = 70;
-/** Where it berths, beyond the base's edge on the far side from the station. */
-const BLACK_MARKET_BERTH = PIRATE_BASE_RADIUS + BLACK_MARKET_WIDTH;
 /** It comes in from this far out and is gone again beyond it. */
 const BLACK_MARKET_APPROACH = 6000;
 const BLACK_MARKET_SPEED = 300;
@@ -450,8 +445,6 @@ const PIRATE_PARTS: PartId[] = ["spinStabilizer", "reverse", "strafe", "retro"];
 
 export const HAULER_LENGTH = 300;
 export const HAULER_WIDTH = 100;
-/** Beside the station, on the side away from the dock, its long side along the station's. */
-const HAULER_BERTH_X = -(STATION_HALF + 40 + HAULER_WIDTH / 2);
 /** It starts this far out, on the side of the station away from the field. */
 const HAULER_APPROACH = 9000;
 /** The braking it plans for on the way in, and the most it can push in any direction. */
@@ -508,6 +501,8 @@ export interface Deposit {
   ore: Map<PartId, number>;
   /** Put there by the testing switch, so it goes when the switch does. */
   fromSwitch: boolean;
+  /** What is fitted to its frame (`DEPOSIT_FRAME`): storage, a trade point, a turret battery. */
+  parts: FramePart[];
   /** Parts still to come before it opens, and the parts already built into it. */
   partsLeft: number;
   partsUsed: number;
@@ -596,6 +591,65 @@ export interface FrameBody extends Poi {
   place: Place;
   /** How far it stands from its place, in the world's frame. Zero: nothing can push a station yet. */
   offset: { x: number; y: number };
+  /** What is fitted to its frame's mounts here: what it can do. */
+  parts: FramePart[];
+}
+
+/** A spot on a body's frame, `local` in world units from its middle, turned with it: now, or a tick ago. */
+export function onBody(body: Poi, local: { x: number; y: number }, previous = false): { x: number; y: number } {
+  const rotation = previous ? body.prevRotation : body.rotation;
+  const x = previous ? body.px : body.x;
+  const y = previous ? body.py : body.y;
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
+  return { x: x + cos * local.x - sin * local.y, y: y + sin * local.x + cos * local.y };
+}
+
+/** A dock as `dockOf` gives it. */
+type DockSpot = { x: number; y: number; shape: "box" | "ring"; size: number };
+/**
+ * What `dockOf` and `padOf` worked out, by the parts they were worked out for: docking asks every
+ * tick, and a body's parts are a new list whenever its frame or place changes.
+ */
+const DOCKS = new WeakMap<readonly FramePart[], DockSpot | null>();
+const PADS = new WeakMap<readonly FramePart[], Map<string, { x: number; y: number } | null>>();
+
+/** A body's dock on its frame: where it sits from the middle, its shape and its size. Null for anything without one. */
+export function dockOf(poi: Poi): DockSpot | null {
+  if (!("parts" in poi)) return null;
+  const body = poi as FrameBody;
+  const known = DOCKS.get(body.parts);
+  if (known !== undefined) return known;
+  const dock = partOn(body.parts, "dock");
+  const spot = dock ? { ...partSpot(body.frame, dock), ...dock.data } : null;
+  DOCKS.set(body.parts, spot);
+  return spot;
+}
+
+/** Where a pad or berth sits on a body's frame, from its middle: the first mount of that type. Null without one. */
+export function padOf(poi: Poi, type: "refinery pad" | "block pad" | "berth"): { x: number; y: number } | null {
+  if (!("parts" in poi)) return null;
+  const body = poi as FrameBody;
+  let pads = PADS.get(body.parts);
+  if (!pads) PADS.set(body.parts, (pads = new Map()));
+  if (!pads.has(type)) pads.set(type, frameMountSpot(body.frame, type));
+  return pads.get(type)!;
+}
+
+/** What fits a frame, by kind: whether something has a part. */
+export function hasPart(holder: { parts: readonly FramePart[] }, kind: FramePartKind): boolean {
+  return partOn(holder.parts, kind) !== undefined;
+}
+
+/** Whether something's trade point buys, or sells, an item: by its id or its type. Nothing without a trade point. */
+export function trades(holder: { parts: readonly FramePart[] }, way: "buys" | "sells", item: string): boolean {
+  const trade = partOn(holder.parts, "trade");
+  return !!trade && tradeNames(trade.data[way], item);
+}
+
+/** A station's shop lists, or empty ones when it has no shop: it sells nothing, not even programs. */
+export function shopData(holder: { parts: readonly FramePart[] }): FramePartData["shop"] {
+  return partOn(holder.parts, "shop")?.data ?? { unlocked: [], wanted: [], programs: [], hulls: [], items: [] };
 }
 
 /** The frames a station, the pirate base and a field deposit are drawn from when their spec names none. */
@@ -677,28 +731,14 @@ export interface StationSpec {
   rings?: OrbitRing[];
   carryFull: number;
   carryNone: number;
-  /** Whether it rebuilds wrecks. Without one, the tuning's `stationShipyard`. */
-  shipyard?: boolean;
   /** The field it sits by, by id: its haulers come and go on the far side from it, and its traffic works it. Without one, the nearest. */
   field?: string;
-  /** Whether it builds projects: a deposit by its field, and turrets for itself and for the deposit. */
-  projects?: boolean;
-  /** Whether its news (new blueprints, projects built) goes out on the radio. */
-  radio?: boolean;
-  /** Its own turrets, once built: how many, the arc they stand in (degrees), and how far out. Without, the tuning's `stationGuard*`. */
-  guards?: { count: number; arc: number; distance: number };
-  /** The modules it starts able to sell. Without one it sells no module at all. */
-  unlocked?: PartId[];
-  /** The modules it would buy the blueprint for, when it can afford them. */
-  wanted?: PartId[];
-  /** The programs it sells. Without one, every program; a program blueprint it buys is sold as well. */
-  programs?: PartId[];
-  /** The hulls it sells, by name. Without one it sells no hull. */
-  hulls?: ShipModel[];
-  /** Cells of storage: the player's lockers and its store of whole modules come out of it. Without one, the tuning's `stationStorage`. */
-  storage?: number;
-  /** Items in its store when the game starts. These come from nowhere: the plan's listed holes (docs/item-system-plan.md). */
-  items?: { item: string; n: number }[];
+  /**
+   * What this place has on its frame's mounts that differs from the frame's own, by mount id
+   * (`src/frameParts.ts`): the shop's lists and starting items, its storage, its turrets, whether it
+   * has a shipyard, builds projects or is on the radio. Without any, the frame's parts as they come.
+   */
+  parts?: PartOverrides;
 }
 
 /** The player's locker at a base: a grid as wide as the tuning says, with as many rows as are rented. */
@@ -1554,6 +1594,8 @@ export class Sim {
       "shots", "ores", "loot", "down", "stats", "randomState", "lookState", "seed",
     ] as const;
     for (const key of plain) if (key in data) Object.assign(this, { [key]: data[key] });
+    // A deposit's parts are its frame's, as the hull file has them now, not as they were saved.
+    for (const deposit of this.deposits) deposit.parts = resolveParts(DEPOSIT_FRAME);
     this.blocks = data.blocks ?? [];
     const bases: BaseState[] = data.bases;
     this.savedBases = new Map(bases.map((state) => [state.id, state]));
@@ -1762,9 +1804,12 @@ export class Sim {
   /** A base as it starts out: the starter base's money and store, and its first hauler on the way. */
   private makeBase(id: string, spec: StationSpec, body: FrameBody): Base {
     const { tuning } = this;
+    // Its parts are its place's from the start: the shop's lists decide what it starts with.
+    body.parts = resolveParts(spec.frame ?? body.frame, spec.parts);
+    const shop = shopData(body);
     // The items a station starts with come from nowhere: a listed hole in the item ledger.
     const stock = new Map(
-      (spec.items ?? []).filter((each) => each.n > 0 && itemDef(each.item) !== undefined).map((each) => [each.item as PartId, Math.floor(each.n)]),
+      shop.items.filter((each) => each.n > 0 && itemDef(each.item) !== undefined).map((each) => [each.item as PartId, Math.floor(each.n)]),
     );
     // And its parts A, which every service and every module's recipe uses.
     if (tuning.stationStartParts > 0) this.addTo(stock, PART_A, tuning.stationStartParts);
@@ -1779,8 +1824,8 @@ export class Sim {
       hauler: null,
       haulerTimer: tuning.haulerFirst,
       lostTraffic: [],
-      blueprints: new Set<BlueprintId>(spec.unlocked ?? []),
-      wanted: new Set(spec.wanted ?? []),
+      blueprints: new Set<BlueprintId>(shop.unlocked),
+      wanted: new Set(shop.wanted),
       blueprintPaid: new Map(),
       blueprintsOrdered: new Set(),
       board: [],
@@ -1892,7 +1937,7 @@ export class Sim {
    * Puts a body's place where its orbits say now, and the body at its offset from it. The carrying
    * is the body's: it carries from where it actually is, so a pushed station takes its field along.
    */
-  private fitBody(body: FrameBody, spec: { frame?: ShipModel; orbits: Orbit[]; rings?: OrbitRing[]; carryFull: number; carryNone: number }): void {
+  private fitBody(body: FrameBody, spec: { frame?: ShipModel; parts?: PartOverrides; orbits: Orbit[]; rings?: OrbitRing[]; carryFull: number; carryNone: number }): void {
     const { place, offset } = body;
     const at = orbitsAt(spec.orbits, this.clock);
     place.orbits = spec.orbits;
@@ -1900,6 +1945,7 @@ export class Sim {
     place.x = place.px = at.x;
     place.y = place.py = at.y;
     body.frame = spec.frame ?? body.frame;
+    body.parts = resolveParts(body.frame, spec.parts);
     body.orbits = spec.orbits;
     body.rings = spec.rings;
     body.carry = { full: spec.carryFull, none: Math.max(spec.carryFull, spec.carryNone) };
@@ -2070,7 +2116,7 @@ export class Sim {
   /** A body at the middle, turned to `rotation`, on a place at the middle, until its spec puts them where they go. */
   private makeBody(name: FrameBody["name"], frame: ShipModel, reach: number, rotation: number): FrameBody {
     const place: Place = { x: 0, y: 0, px: 0, py: 0, orbits: [] };
-    return { ...this.makePoi(name, reach, rotation), name, frame, place, offset: { x: 0, y: 0 } };
+    return { ...this.makePoi(name, reach, rotation), name, frame, place, offset: { x: 0, y: 0 }, parts: resolveParts(frame) };
   }
 
   /** A place at the middle, turned to `rotation`, until its spec puts it where it goes. */
@@ -2129,7 +2175,11 @@ export class Sim {
   isHome(ship: Ship): boolean {
     const base = this.pirateBase;
     if (ship.faction === "pirate" && base) {
-      return Math.hypot(ship.x - base.x, ship.y - base.y) < PIRATE_BASE_RADIUS;
+      // Home is inside its docking ring.
+      const dock = dockOf(base);
+      if (!dock) return false;
+      const at = onBody(base, dock);
+      return Math.hypot(ship.x - at.x, ship.y - at.y) < dock.size;
     }
     return this.isDocked(ship);
   }
@@ -2425,23 +2475,13 @@ export class Sim {
   haulerBerth(previous: boolean, base: Base): { x: number; y: number; angle: number } {
     const station = base.body;
     const rotation = previous ? station.prevRotation : station.rotation;
-    const cx = previous ? station.px : station.x;
-    const cy = previous ? station.py : station.y;
-    return {
-      x: cx + HAULER_BERTH_X * Math.cos(rotation),
-      y: cy + HAULER_BERTH_X * Math.sin(rotation),
-      angle: rotation + Math.PI / 2,
-    };
+    return { ...onBody(station, padOf(station, "berth") ?? { x: 0, y: 0 }, previous), angle: rotation + Math.PI / 2 };
   }
 
   /** Where a hauler stops before sliding into its berth: straight out from it. */
   haulerStandoff(previous: boolean, base: Base): { x: number; y: number } {
-    const station = base.body;
-    const rotation = previous ? station.prevRotation : station.rotation;
-    const cx = previous ? station.px : station.x;
-    const cy = previous ? station.py : station.y;
-    const out = HAULER_BERTH_X - HAULER_STANDOFF;
-    return { x: cx + out * Math.cos(rotation), y: cy + out * Math.sin(rotation) };
+    const berth = padOf(base.body, "berth") ?? { x: 0, y: 0 };
+    return onBody(base.body, { x: berth.x - HAULER_STANDOFF, y: berth.y }, previous);
   }
 
   /**
@@ -2522,13 +2562,19 @@ export class Sim {
     this.spendFuel(hauler, this.fuelBurn(fired, dt));
   }
 
+  /** Whether haulers come to a base: it sells ore at a trade point and has a berth on its frame. */
+  private hauledAt(base: Base): boolean {
+    return trades(base.body, "sells", PLAIN_ORE) && padOf(base.body, "berth") !== null;
+  }
+
   /** The hauler's legs: coming in, docking, loading, undocking and leaving. */
   private flyHauler(base: Base, dt: number): void {
     const { tuning } = this;
     const station = base.body;
     // Each base's blueprints come in on its own haulers.
     if (!base.hauler) {
-      if (!tuning.haulers) {
+      // A hauler comes to what sells it ore at a trade point and has a berth for it.
+      if (!tuning.haulers || !this.hauledAt(base)) {
         // With no haulers running, nothing would ever bring them.
         this.deliverBlueprints(base);
         return;
@@ -2973,7 +3019,8 @@ export class Sim {
     if (poi.name === "station") {
       const base = this.baseOf(poi);
       if (base && this.orderDeliver(base)) return true;
-      this.clickPilot.travelTo(poi, DOCK_OFFSET, 0);
+      const dock = dockOf(poi) ?? { x: 0, y: 0 };
+      this.clickPilot.travelTo(poi, dock.x, dock.y);
     } else if (poi.name === "pirate base") {
       this.clickPilot.travelTo(poi, 0, 0, poi.reach / 2);
     } else {
@@ -2997,7 +3044,7 @@ export class Sim {
    */
   orderDeliver(base: Base): boolean {
     const { ship } = this;
-    if (!ship.tow || isBlock(ship.tow) || !ship.parts.has("towControl") || !ship.parts.has("clickMove")) return false;
+    if (!ship.tow || isBlock(ship.tow) || !ship.parts.has("towControl") || !ship.parts.has("clickMove") || !this.refines(base)) return false;
     this.clickPilot.deliverTo(base.body);
     return true;
   }
@@ -3192,6 +3239,8 @@ export class Sim {
       return this.batteries.some((battery) => battery.id === id && battery.base === base.id && battery.partsLeft <= 0);
     }
     if (isProject(id)) return false;
+    // Modules, programs and drones are the shop's: a station without a shop part sells none.
+    if (!hasPart(base.body, "shop")) return false;
     if (itemDef(id)?.type === "module") return base.blueprints.has(id);
     if (base.blueprints.has(id)) return true;
     // A program is sold where the station's list has it; blueprints, where the shop needs them, on top.
@@ -3201,12 +3250,13 @@ export class Sim {
 
   /** Whether a station's list has a program: every program, for a station with no list. */
   sellsProgram(base: Base, id: PartId): boolean {
-    return base.spec.programs?.includes(id) ?? true;
+    const shop = partOn(base.body.parts, "shop");
+    return shop ? (shop.data.programs?.includes(id) ?? true) : false;
   }
 
   /** The hulls a base sells, by name: those on its list that the hull file has. */
   hullsSold(base: Base = this.shopBase()): ShipModel[] {
-    return (base.spec.hulls ?? []).filter((model) => shipModels().includes(model));
+    return shopData(base.body).hulls.filter((model) => shipModels().includes(model));
   }
 
   blueprintPrice(id: BlueprintId): number {
@@ -3247,10 +3297,13 @@ export class Sim {
    * wants it: nobody can push one on a station that doesn't.
    */
   private canOrder(id: BlueprintId, base: Base): boolean {
-    if (isProject(id) && !base.spec.projects) return false;
+    if (isProject(id) && !hasPart(base.body, "projects")) return false;
     // A program off a station's list can't be funded there while the shop needs no blueprints: there is nothing to fund.
     if (isProgram(id as PartId) && !this.tuning.stationUnlocks) return false;
     if (id === "depositGuards" && !this.unlocked("deposit", base)) return false;
+    // Turrets need a battery part to stand on: the station's own, or the deposit frame's.
+    if (id === "stationGuards" && !hasPart(base.body, "battery")) return false;
+    if (id === "depositGuards" && !partOn(resolveParts(DEPOSIT_FRAME), "battery")) return false;
     if (this.unlocked(id, base) || base.blueprintsOrdered.has(id)) return false;
     if (itemDef(id)?.type === "module" && !base.wanted.has(id as PartId)) return false;
     // A station doesn't spend its credits on tank blueprints while fuel is off: the game is the
@@ -3302,7 +3355,7 @@ export class Sim {
       base.blueprintsOrdered.delete(id);
       base.blueprints.add(id);
     }
-    if (!this.tuning.chatter || !base.spec.radio) return;
+    if (!this.tuning.chatter || !hasPart(base.body, "radio")) return;
     this.chatter.unlocked(
       this,
       base.body,
@@ -3327,14 +3380,7 @@ export class Sim {
 
   /** Where a station's block pad is, in the world: on its dock side, off the dock's own line. */
   blockSpot(base: Base, previous = false): { x: number; y: number } {
-    const { body } = base;
-    const rotation = previous ? body.prevRotation : body.rotation;
-    const x = previous ? body.px : body.x;
-    const y = previous ? body.py : body.y;
-    return {
-      x: x + Math.cos(rotation) * BLOCK_PAD.x - Math.sin(rotation) * BLOCK_PAD.y,
-      y: y + Math.sin(rotation) * BLOCK_PAD.x + Math.cos(rotation) * BLOCK_PAD.y,
-    };
+    return onBody(base.body, padOf(base.body, "block pad") ?? { x: 0, y: 0 }, previous);
   }
 
   /** What a block is worth: the part A in it, at part A's price. A job's deposit. */
@@ -3578,7 +3624,7 @@ export class Sim {
     const { x, y } = this.depositSpot(at, toward);
     const name = "field deposit";
     const blocks = Math.max(1, Math.ceil(partsLeft / this.tuning.blockParts));
-    const deposit: Deposit = { name, base: base.id, at, toward, x, y, px: x, py: y, ore: new Map(), fromSwitch, partsLeft, partsUsed: 0, purse, blocks, paid: 0 };
+    const deposit: Deposit = { name, base: base.id, at, toward, x, y, px: x, py: y, ore: new Map(), fromSwitch, parts: resolveParts(DEPOSIT_FRAME), partsLeft, partsUsed: 0, purse, blocks, paid: 0 };
     this.deposits.push(deposit);
     return deposit;
   }
@@ -3592,7 +3638,7 @@ export class Sim {
   private moveDeposits(): void {
     if (this.tuning.depositFree && this.extraFields.length > 0) {
       for (const base of this.bases) {
-        if (base.spec.projects && !this.deposits.some((deposit) => deposit.base === base.id)) this.addDeposit(base, true, 0);
+        if (hasPart(base.body, "projects") && !this.deposits.some((deposit) => deposit.base === base.id)) this.addDeposit(base, true, 0);
       }
     }
     if (this.tuning.depositFree) {
@@ -3618,7 +3664,7 @@ export class Sim {
     const base = this.projectBase(deposit);
     base?.blueprintsOrdered.delete("deposit");
     this.settleProject(deposit);
-    if (this.tuning.chatter && base?.spec.radio) this.chatter.depositBuilt(this, base.body);
+    if (this.tuning.chatter && base && hasPart(base.body, "radio")) this.chatter.depositBuilt(this, base.body);
   }
 
   /**
@@ -3646,16 +3692,25 @@ export class Sim {
     }
   }
 
-  /** A station's own turrets, as its spec or else the tuning says. */
-  private guardsOf(base: Base): { count: number; arc: number; distance: number } {
-    const { stationGuardCount, stationGuardArc, stationGuardDistance } = this.tuning;
-    return base.spec.guards ?? { count: stationGuardCount, arc: stationGuardArc, distance: stationGuardDistance };
+  /**
+   * The turrets a battery part on this host stands, as its data or else the tuning says for that
+   * host: a station's in an arc in front of it, a deposit's round its ring. Null without one.
+   */
+  private guardsOf(host: FrameBody | Deposit): { count: number; arc: number; distance: number } | null {
+    const battery = partOn(host.parts, "battery");
+    if (!battery) return null;
+    const { data } = battery;
+    const { tuning } = this;
+    if (host.name === "field deposit") return { count: data.count ?? tuning.depositGuardCount, arc: data.arc ?? 360, distance: data.distance ?? tuning.depositReach };
+    return { count: data.count ?? tuning.stationGuardCount, arc: data.arc ?? tuning.stationGuardArc, distance: data.distance ?? tuning.stationGuardDistance };
   }
 
   private addBattery(base: Base, id: Battery["id"], fromSwitch: boolean, partsLeft: number, purse = 0): void {
     const host = id === "stationGuards" ? base.body : this.deposits.find((deposit) => deposit.base === base.id && deposit.partsLeft <= 0);
-    if (!host) return;
-    const count = id === "stationGuards" ? this.guardsOf(base).count : this.tuning.depositGuardCount;
+    // Only something with a battery part on its frame gets turrets.
+    const guards = host && this.guardsOf(host);
+    if (!host || !guards) return;
+    const count = guards.count;
     const guns: Guard[] = [];
     for (let i = 0; i < count; i++) {
       const controls = { thrust: 0, strafe: 0, turn: 0, fire: false, retro: false, stabilize: false };
@@ -3681,12 +3736,12 @@ export class Sim {
     const { host, guns } = battery;
     const base = this.projectBase(battery);
     if (!base) return;
-    const { depositReach } = this.tuning;
-    const guards = this.guardsOf(base);
+    const guards = this.guardsOf(host as FrameBody | Deposit);
+    if (!guards) return;
     const atDeposit = host.name === "field deposit";
     const toward = atDeposit ? host.toward : this.baseField(base).poi;
     const facing = Math.atan2(toward.y - host.y, toward.x - host.x);
-    const radius = atDeposit ? depositReach : guards.distance;
+    const radius = guards.distance;
     const arc = (guards.arc * Math.PI) / 180;
     guns.forEach((guard, i) => {
       const angle = atDeposit
@@ -3704,7 +3759,7 @@ export class Sim {
   /** Each base that builds projects gets this battery free while its testing switch is on, and loses a free one when it's off. */
   private syncFreeBattery(id: Battery["id"], free: boolean): void {
     for (const base of this.bases) {
-      if (!base.spec.projects) continue;
+      if (!hasPart(base.body, "projects")) continue;
       const battery = this.batteries.find((candidate) => candidate.id === id && candidate.base === base.id);
       if (free && !battery) this.addBattery(base, id, true, 0);
       if (free && battery && battery.partsLeft > 0) this.finishBattery(battery);
@@ -3736,7 +3791,7 @@ export class Sim {
     const base = this.projectBase(battery);
     base?.blueprintsOrdered.delete(battery.id);
     this.settleProject(battery);
-    if (this.tuning.chatter && base?.spec.radio) this.chatter.guardsBuilt(this, base.body, battery.id === "stationGuards");
+    if (this.tuning.chatter && base && hasPart(base.body, "radio")) this.chatter.guardsBuilt(this, base.body, battery.id === "stationGuards");
   }
 
   /** Whether a spot is inside the reach of any finished turrets. */
@@ -3939,7 +3994,7 @@ export class Sim {
     let credits = 0;
     for (let i = ship.hold.length - 1; i >= 0; i--) {
       const placed = ship.hold[i];
-      if (!isOreItem(placed.module.part)) continue;
+      if (!isOreItem(placed.module.part) || !trades(deposit, "buys", placed.module.part)) continue;
       const size = volumeOf(placed.module.part);
       if (size > room) continue;
       if (this.floatingWithout(ship, i).length > 0) continue;
@@ -4106,7 +4161,7 @@ export class Sim {
 
   /** How much ore this ship could buy from the deposit right now. */
   depositBuyable(ship: Ship, deposit: Deposit): number {
-    if (this.depositAt(ship) !== deposit) return 0;
+    if (this.depositAt(ship) !== deposit || !trades(deposit, "sells", PLAIN_ORE)) return 0;
     const { depositSells } = this.tuning;
     const affordable = depositSells > 0 ? Math.floor(this.accountOf(ship).credits / depositSells) : Infinity;
     return Math.max(0, Math.min(this.oreCount(deposit.ore), affordable, this.cargoSpace(ship)));
@@ -4123,6 +4178,7 @@ export class Sim {
     if (amount <= 0) return 0;
     let taken = 0;
     for (const id of this.oreOrder(deposit.ore)) {
+      if (!trades(deposit, "sells", id)) continue;
       const held = deposit.ore.get(id) ?? 0;
       for (let i = 0; i < held && taken < amount; i++) {
         if (this.placeInBay(ship, id) === 0) break;
@@ -4280,7 +4336,8 @@ export class Sim {
 
   /** How many cells of storage a base has. */
   storageOf(base: Base): number {
-    return base.spec.storage ?? this.tuning.stationStorage;
+    const storage = partOn(base.body.parts, "storage");
+    return storage ? (storage.data.cells ?? this.tuning.stationStorage) : 0;
   }
 
   /**
@@ -5260,13 +5317,15 @@ export class Sim {
 
   /** Every station with a dock, in the layout's order. */
   get docks(): Poi[] {
-    return this.bases.map((base) => base.body);
+    return this.bases.filter((base) => hasPart(base.body, "dock")).map((base) => base.body);
   }
 
   /** Whether a dock rebuilds wrecks. */
   hasShipyard(dock: Poi): boolean {
     const base = this.baseOf(dock);
-    return base !== null && (base.spec.shipyard ?? this.tuning.stationShipyard);
+    // The tuning's switch stands in where the place says nothing of its own about a shipyard.
+    const shipyard = base && partOn(base.body.parts, "shipyard");
+    return !!shipyard && (base.spec.parts?.[shipyard.mount] !== undefined || this.tuning.stationShipyard);
   }
 
   /** The nearest dock to a spot, or the nearest with a shipyard. With no shipyard anywhere, the nearest of any. */
@@ -5286,11 +5345,7 @@ export class Sim {
 
   /** Center of a station's dock, now or as of the previous tick. */
   dockPoint(previous: boolean, station: Poi): { x: number; y: number } {
-    const rotation = previous ? station.prevRotation : station.rotation;
-    return {
-      x: (previous ? station.px : station.x) + Math.cos(rotation) * DOCK_OFFSET,
-      y: (previous ? station.py : station.y) + Math.sin(rotation) * DOCK_OFFSET,
-    };
+    return onBody(station, dockOf(station) ?? { x: 0, y: 0 }, previous);
   }
 
   /** A rock, shaped by the world's dice, or by `roll` when given (a fresh field's own). */
@@ -5748,7 +5803,7 @@ export class Sim {
     const gap = this.gapToView(now, ship.x, ship.y, viewHalfWidth, viewHalfHeight);
     const previousGap = this.gapToView(before, ship.px, ship.py, viewHalfWidth, viewHalfHeight);
     // A station's arrow points at its dock side, not at its middle.
-    const lead = now.box ? DOCK_OFFSET : 0;
+    const lead = now.box && target.poi ? (dockOf(target.poi)?.x ?? 0) : 0;
     return {
       dx: now.x + Math.cos(now.rotation) * lead - ship.x,
       dy: now.y + Math.sin(now.rotation) * lead - ship.y,
@@ -5775,7 +5830,9 @@ export class Sim {
       return { x: at.x, y: at.y, radius: body.radius, rotation: 0 };
     }
     if (!poi || !this.allPois().includes(poi)) return null;
-    const box = this.baseOf(poi) ? { center: STATION_SHAPE_CENTER, halfLength: STATION_SHAPE_HALF, halfWidth: STATION_HALF } : undefined;
+    // A station's box is its solid part and its dock together, along its own x axis.
+    const dock = this.baseOf(poi) ? (dockOf(poi)?.x ?? 0) : null;
+    const box = dock !== null ? { center: dock / 2, halfLength: STATION_HALF + dock / 2, halfWidth: STATION_HALF } : undefined;
     return {
       x: previous ? poi.px : poi.x,
       y: previous ? poi.py : poi.y,
@@ -5950,8 +6007,10 @@ export class Sim {
   /** The station whose dock a ship is in, or null. */
   dockedAt(ship: Ship = this.ship): Poi | null {
     for (const station of this.docks) {
+      const dock = dockOf(station);
+      if (!dock || dock.shape !== "box") continue;
       const local = this.toStationAxes(ship.x - station.x, ship.y - station.y, station);
-      if (Math.abs(local.x - DOCK_OFFSET) < STATION_HALF && Math.abs(local.y) < STATION_HALF) return station;
+      if (Math.abs(local.x - dock.x) < dock.size && Math.abs(local.y - dock.y) < dock.size) return station;
     }
     return null;
   }
@@ -7297,7 +7356,7 @@ export class Sim {
    */
   private catchRocks(dt: number): void {
     for (const base of this.bases) {
-      if (this.catchBusy(base)) continue;
+      if (!this.refines(base) || this.catchBusy(base)) continue;
       const rock = this.catchable(base);
       if (!rock) continue;
       rock.held = "catch";
@@ -7314,6 +7373,11 @@ export class Sim {
       this.pullCaught(base, rock, dt);
     }
     this.catchBlocks(dt);
+  }
+
+  /** Whether a base works whole rocks: a refinery part, and a pad on its frame for it to work them on. */
+  refines(base: Base): boolean {
+    return hasPart(base.body, "refinery") && padOf(base.body, "refinery pad") !== null;
   }
 
   /** The nearest rock let go of near a station, within its catch's reach, or null. */
@@ -7349,7 +7413,7 @@ export class Sim {
     // A step round at its own distance, so the way stays clear of the station's box all the way.
     const step = Math.sign(gap) * Math.min(Math.abs(gap), CATCH_TURN);
     const angle = at + step + body.rotation;
-    const round = Math.max(DOCK_OFFSET, distance);
+    const round = Math.max(HAND_OVER_REACH, distance);
     return { x: body.x + Math.cos(angle) * round, y: body.y + Math.sin(angle) * round };
   }
 
@@ -7482,11 +7546,7 @@ export class Sim {
    * dock. `previous` is the tick before, for drawing between the two.
    */
   refinerySpot(base: Base, previous = false): { x: number; y: number } {
-    const { body } = base;
-    const rotation = previous ? body.prevRotation : body.rotation;
-    const x = previous ? body.px : body.x;
-    const y = previous ? body.py : body.y;
-    return { x: x + Math.cos(rotation) * REFINERY_OFFSET, y: y + Math.sin(rotation) * REFINERY_OFFSET };
+    return onBody(base.body, padOf(base.body, "refinery pad") ?? { x: 0, y: 0 }, previous);
   }
 
   /** Where a delivery holds off while the refinery is busy: further out along the pad's own line. */
@@ -7495,7 +7555,7 @@ export class Sim {
     const rotation = previous ? body.prevRotation : body.rotation;
     const x = previous ? body.px : body.x;
     const y = previous ? body.py : body.y;
-    const out = REFINERY_OFFSET - DOCK_OFFSET * 1.4;
+    const out = (padOf(body, "refinery pad")?.x ?? 0) - HAND_OVER_REACH * 1.4;
     return { x: x + Math.cos(rotation) * out, y: y + Math.sin(rotation) * out };
   }
 
@@ -7511,7 +7571,7 @@ export class Sim {
     const held = ship.tow;
     if (!held) return { x: at.x, y: at.y, px: was.x, py: was.y, busy, done: true };
     const slow = Math.hypot(held.vx, held.vy) <= this.tuning.clampSpeed;
-    const near = Math.hypot(ship.x - at.x, ship.y - at.y) <= DOCK_OFFSET;
+    const near = Math.hypot(ship.x - at.x, ship.y - at.y) <= HAND_OVER_REACH;
     const clear = this.clearOfStations(held.x, held.y, at.x, at.y);
     if (!busy && slow && near && clear) {
       this.releaseTow(ship);
@@ -8525,7 +8585,10 @@ export class Sim {
     const away = Math.hypot(base.x - from.x, base.y - from.y) || 1;
     const dx = (base.x - from.x) / away;
     const dy = (base.y - from.y) / away;
-    return { x: base.x + dx * BLACK_MARKET_BERTH, y: base.y + dy * BLACK_MARKET_BERTH, dx, dy };
+    // Its berth's distance out from the base's middle, on the far side from what the base goes round.
+    const spot = padOf(base, "berth");
+    const out = spot ? Math.hypot(spot.x, spot.y) : 0;
+    return { x: base.x + dx * out, y: base.y + dy * out, dx, dy };
   }
 
   /**
@@ -8538,7 +8601,8 @@ export class Sim {
     if (!lane) return;
     let market = this.blackMarket;
     if (!market) {
-      if (tuning.blackMarketInterval <= 0) return;
+      // It only calls at a pirate base with a black market part.
+      if (tuning.blackMarketInterval <= 0 || !this.pirateBase || !hasPart(this.pirateBase, "blackMarket")) return;
       this.blackMarketTimer -= dt;
       if (this.blackMarketTimer > 0) return;
       this.blackMarketTimer = tuning.blackMarketInterval;
@@ -8638,7 +8702,7 @@ export class Sim {
   /** How much ore the pirate base would sell this ship: only to an empty hold, close by. */
   pirateBaseBuyable(ship: Ship): number {
     const base = this.pirateBase;
-    if (!base || ship.faction === "pirate" || this.oreIn(ship) > 0) return 0;
+    if (!base || ship.faction === "pirate" || this.oreIn(ship) > 0 || !trades(base, "sells", PLAIN_ORE)) return 0;
     if (Math.hypot(ship.x - base.x, ship.y - base.y) > this.tuning.pirateBaseReach) return 0;
     const { depositSells } = this.tuning;
     const affordable = depositSells > 0 ? Math.floor(this.accountOf(ship).credits / depositSells) : Infinity;
@@ -9299,10 +9363,12 @@ export class Sim {
       // Ore that holds something up in the bay stays aboard.
       const at = ship.hold.findIndex((placed, index) => isOreItem(placed.module.part) && this.floatingWithout(ship, index).length === 0);
       if (at < 0) break;
-      ship.unloadTimer -= UNLOAD_SECONDS;
       const placed = ship.hold[at];
+      ship.unloadTimer -= UNLOAD_SECONDS;
       const price = partOf(placed.module.part).price;
-      // A station with no room for it stops buying, and it stays aboard.
+      // Only a trade point that buys it takes it; one with no room for it stops buying, and it stays aboard.
+      const buyer = ship.faction === "pirate" ? this.pirateBase : this.serviceBase(ship).body;
+      if (!buyer || !trades(buyer, "buys", placed.module.part)) break;
       if (ship.faction !== "pirate") {
         const base = this.serviceBase(ship);
         if (this.storageFree(base) < volumeOf(placed.module.part)) break;
@@ -9345,6 +9411,8 @@ export class Sim {
   /** Whether the dock could repair this ship right now. */
   canRepair(ship: Ship): boolean {
     if (!this.isHome(ship)) return false;
+    // A station repairs with a repair part; pirates are patched up at their base as they always were.
+    if (ship.faction !== "pirate" && !hasPart(this.serviceBase(ship).body, "repair")) return false;
     const next = this.nextRepair(ship);
     return next !== null && this.canPayFor(ship, next.cost, next.stocked);
   }

@@ -92,7 +92,8 @@ import { multiSelect, withoutPick, withPick } from "./multiselect";
 import { blinkOf, blinkStart, defaultShade, dragHandle, driveFields, driveOf, fadeStart, hitShape, insidePolygon, previewState, restFor, shapeGrips, spinOf, type BlinkFields, type DriveChoice, type ShapeHandle } from "./shapes";
 import { UndoStack } from "./undo";
 import { shippedWorld } from "./shipped";
-import { walk } from "./world";
+import { stationSettings, walk } from "./world";
+import { FRAME_PART_KINDS, FRAME_PARTS, framePartRefusal, type FramePartKind } from "../frameParts";
 
 /** The hulls the game's own code flies by name (traffic, a new game, pirates, defenders): never removed. */
 const CODE_HULLS: readonly ShipModel[] = ["racer", "floater", "defender", "pirate", "drone"];
@@ -103,7 +104,7 @@ export function whyKeepHull(model: ShipModel): string | null {
   if (SHIP_MODELS.length <= 1) return "The last hull.";
   const named = walk(shippedWorld())
     .map((entry) => entry.node)
-    .filter((node) => node.spawns.includes(model) || node.hulls.includes(model))
+    .filter((node) => node.spawns.includes(model) || (node.kind === "station" && stationSettings(node).hulls.includes(model)))
     .map((node) => node.name);
   if (named.length > 0) return `The world file names it at ${named.join(", ")}: take it off there first.`;
   return null;
@@ -252,6 +253,39 @@ export class HullDesigner {
   private selected: MountId | null = "thrusterMain";
   private part: PartId = FITTED[0].id;
   private hover: MountId | null = null;
+  /**
+   * A frame mount's part: what a bare frame comes with on it (`src/frameParts.ts`). Every frame
+   * part is listed; one the mount or the frame refuses can't be picked, and says why ("Station
+   * only for now" for a thin part on another frame).
+   */
+  private framePartPicker(mount: Mount): HTMLElement {
+    const wrap = document.createElement("div");
+    const select = document.createElement("select");
+    select.append(new Option("nothing", ""));
+    const refused: string[] = [];
+    for (const kind of FRAME_PART_KINDS) {
+      const why = framePartRefusal(this.model, mount, kind);
+      const option = new Option(why ? `${FRAME_PARTS[kind].name} (${why})` : FRAME_PARTS[kind].name, kind, false, mount.framePart === kind);
+      option.disabled = why !== null;
+      select.append(option);
+      // Only a refusal that isn't just the mount's type is worth spelling out.
+      if (why && mount.types.includes(FRAME_PARTS[kind].mountType)) refused.push(`${FRAME_PARTS[kind].name}: ${why}`);
+    }
+    select.addEventListener("change", () => {
+      const kind = select.value as FramePartKind | "";
+      const was = mount.framePart;
+      if (!kind || framePartRefusal(this.model, mount, kind) !== null) delete mount.framePart;
+      else mount.framePart = kind;
+      // The data was the old part's.
+      if (mount.framePart !== was) delete mount.data;
+      this.changed();
+    });
+    const note = document.createElement("p");
+    note.textContent = refused.length > 0 ? `Refused here: ${refused.join("; ")}.` : "Frame parts go on the mount types of the same name.";
+    wrap.append(this.labelled("Frame comes with (a frame part)", select), note);
+    return wrap;
+  }
+
   /** The part each mount's preview overlays on the blueprint, keyed `model:mount`: "none", or a part. Unset, it starts on the part the bare hull comes with. */
   private preview: Partial<Record<string, PartId | "none">> = {};
   /** The parts page's blueprint hull: null shows just the part, no hull. */
@@ -1143,6 +1177,7 @@ export class HullDesigner {
         name,
         decal,
         ...(mount.decal ? [] : [role, bare]),
+        ...(isFrame(this.model) ? [this.framePartPicker(mount)] : []),
         preview,
         supports,
         takes,

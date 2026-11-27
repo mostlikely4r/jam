@@ -8,13 +8,14 @@ import {
   type Block,
   type Body,
   type Deposit,
-  DOCK_OFFSET,
+  dockOf,
+  HAND_OVER_REACH,
   isBlock,
   type MiningField,
   type Ore,
   type Poi,
   type Rock,
-  REFINERY_OFFSET,
+  padOf,
   SHIP_RADIUS,
   type Ship,
   type Sim,
@@ -166,7 +167,9 @@ function toPoiAxes(poi: Poi, x: number, y: number): { x: number; y: number } {
 /** Whether a trip is to this station's berth: a spot within the dock's own box. */
 function aimsAtBerth(station: Poi, target: { x: number; y: number }): boolean {
   const local = toPoiAxes(station, target.x, target.y);
-  return Math.abs(local.x - DOCK_OFFSET) <= STATION_HALF && Math.abs(local.y) <= STATION_HALF;
+  const dock = dockOf(station);
+  if (!dock) return false;
+  return Math.abs(local.x - dock.x) <= dock.size && Math.abs(local.y - dock.y) <= dock.size;
 }
 
 /**
@@ -180,7 +183,9 @@ function pastDockFace(station: Poi, x: number, y: number): boolean {
 /** Whether a trip is to this station's refinery pad: the spot beside it, away from the dock. */
 function aimsAtPad(station: Poi, target: { x: number; y: number }): boolean {
   const local = toPoiAxes(station, target.x, target.y);
-  return Math.abs(local.x - REFINERY_OFFSET) <= STATION_HALF && Math.abs(local.y) <= STATION_HALF;
+  const pad = padOf(station, "refinery pad");
+  if (!pad) return false;
+  return Math.abs(local.x - pad.x) <= STATION_HALF && Math.abs(local.y - pad.y) <= STATION_HALF;
 }
 
 /**
@@ -1437,7 +1442,7 @@ export class DronePilot extends ShipPilot {
       this.task = "carrying a block";
       const at = sim.siteSpot(project);
       const slow = Math.hypot(held.vx, held.vy) <= sim.tuning.clampSpeed;
-      if (slow && Math.hypot(ship.x - at.x, ship.y - at.y) <= DOCK_OFFSET) {
+      if (slow && Math.hypot(ship.x - at.x, ship.y - at.y) <= HAND_OVER_REACH) {
         sim.releaseTow(ship);
         this.towDecided = false;
         return;
@@ -1810,7 +1815,7 @@ export class ClickPilot extends ShipPilot {
   private towWait = false;
   /** How near the refinery pad a delivery lets go of its rock: close enough to be a hand-over. */
   private get handOverReach(): number {
-    return DOCK_OFFSET;
+    return HAND_OVER_REACH;
   }
 
   get active(): boolean {
@@ -1916,7 +1921,8 @@ export class ClickPilot extends ShipPilot {
    */
   deliverTo(poi: Poi): void {
     const { ship } = this;
-    const pad = poiSpot(poi, REFINERY_OFFSET, 0);
+    const local = padOf(poi, "refinery pad") ?? { x: 0, y: 0 };
+    const pad = poiSpot(poi, local.x, local.y);
     this.order = {
       spot: { x: pad.x, y: pad.y, px: pad.x, py: pad.y, vx: 0, vy: 0 },
       deliver: poi,

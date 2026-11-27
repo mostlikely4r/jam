@@ -6,6 +6,7 @@
  */
 import { moduleIds } from "./items";
 import { Sim, type FieldSpec, type PirateBaseSpec, type StationSpec } from "./sim";
+import { override } from "./frameParts";
 import { DEFAULTS, type Tuning } from "./tuning";
 
 /** The home field's and station's ids. The designer's go by their own ids. */
@@ -145,10 +146,12 @@ export function homeStation(home: Home = HOME): StationSpec {
     carryFull: home.stationCarryFull,
     carryNone: home.stationCarryNone,
     // The home station sells the lot, as every station did before the lists: all but the tractor.
-    unlocked: moduleIds().filter((id) => id !== "tractorAll"),
     field: FIRST_FIELD,
-    projects: true,
-    radio: true,
+    parts: {
+      shop: override("shop", { unlocked: moduleIds().filter((id) => id !== "tractorAll") }),
+      projects: override("projects"),
+      radio: override("radio"),
+    },
   };
 }
 

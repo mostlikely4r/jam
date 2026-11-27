@@ -18,7 +18,7 @@ import {
   bodyAt,
   DEPOSIT_FRAME,
   DEPOSIT_HALF,
-  DOCK_OFFSET,
+  dockOf,
   HAULER_LENGTH,
   HAULER_WIDTH,
   PIRATE_BASE_RADIUS,
@@ -631,7 +631,7 @@ export class Renderer {
     setArtState(stationArtState(sim, station));
     drawStationArt(ctx, {
       frame: station.frame,
-      dock: { x: DOCK_OFFSET, y: 0, half: STATION_HALF },
+      dock: dockArt(station),
       docked: sim.dockedAt() === station,
       ore: sim.oreCount(base.ore),
       parts: sim.partA(base),
@@ -1956,8 +1956,14 @@ export class Renderer {
   }
 }
 
+/** A station's dock box as its art draws it, or none when its frame has no dock part. */
+function dockArt(station: Poi): { x: number; y: number; half: number } | null {
+  const dock = dockOf(station);
+  return dock && dock.shape === "box" ? { x: dock.x, y: dock.y, half: dock.size } : null;
+}
+
 /** Whether a world point is on a station drawn at `spot`: its body, or the dock beside it. */
-function onStation(spot: { x: number; y: number; rotation: number }, at: { x: number; y: number }): boolean {
+function onStation(spot: { base: Base; x: number; y: number; rotation: number }, at: { x: number; y: number }): boolean {
   const dx = at.x - spot.x;
   const dy = at.y - spot.y;
   const cos = Math.cos(spot.rotation);
@@ -1965,8 +1971,9 @@ function onStation(spot: { x: number; y: number; rotation: number }, at: { x: nu
   // Back into the station's own frame, where both boxes sit square.
   const x = dx * cos + dy * sin;
   const y = -dx * sin + dy * cos;
-  const on = (left: number) => Math.abs(left) <= STATION_HALF && Math.abs(y) <= STATION_HALF;
-  return on(x) || on(x - DOCK_OFFSET);
+  const on = (left: number, down: number, half: number) => Math.abs(left) <= half && Math.abs(down) <= half;
+  const dock = dockOf(spot.base.body);
+  return on(x, y, STATION_HALF) || (!!dock && on(x - dock.x, y - dock.y, dock.size));
 }
 
 /** A module's colour: its own while it works, orange once damaged, near black once destroyed. */

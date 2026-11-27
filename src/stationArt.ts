@@ -145,8 +145,8 @@ export function drawZone(ctx: CanvasRenderingContext2D, radius: number, fill: st
 /** What a station shows: its frame, whether a ship is in its dock, what it stores, and its tank. */
 export interface StationLook {
   frame: ShipModel;
-  /** The dock's middle and half its size, in the station's frame. */
-  dock: { x: number; y: number; half: number };
+  /** The dock's middle and half its size, in the station's frame. None: a frame without a dock part. */
+  dock: { x: number; y: number; half: number } | null;
   docked: boolean;
   /** Its storage: how much ore and how many parts, on a deck `half` across. */
   ore: number;
@@ -158,7 +158,7 @@ export interface StationLook {
 
 /** A station: its dock, its frame, the ore and crates it stores, and its tank. */
 export function drawStationArt(ctx: CanvasRenderingContext2D, look: StationLook): void {
-  drawDockBox(ctx, look.dock.x, look.dock.y, look.dock.half, look.docked);
+  if (look.dock) drawDockBox(ctx, look.dock.x, look.dock.y, look.dock.half, look.docked);
   drawFrame(ctx, look.frame);
   drawOrePile(ctx, look.ore, look.half);
   drawCrates(ctx, look.parts, look.half);

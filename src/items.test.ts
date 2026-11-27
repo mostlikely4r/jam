@@ -23,6 +23,16 @@ import { PROGRAMS, programsFileNow, SHIPPED_PROGRAMS, useProgramsFile } from "./
 import { roundTrip } from "./save";
 import { DEFAULTS } from "./tuning";
 import { type FieldSpec, type Loose, type Poi, type Ship, Sim, type StationSpec, TICK } from "./sim";
+import { placeParts } from "./frameParts";
+
+type LooseStation = Parameters<typeof placeParts>[0];
+/** A spec with a station's settings named one by one, as they were before they were parts on its frame. */
+function withParts(spec: Partial<StationSpec> & LooseStation): Partial<StationSpec> {
+  const { shipyard, storage, unlocked, wanted, programs, hulls, items, projects, radio, guards, ...rest } = spec;
+  const parts = placeParts({ shipyard, storage, unlocked, wanted, programs, hulls, items, projects, radio, guards });
+  return { ...rest, parts: { ...parts, ...rest.parts } };
+}
+
 
 // Written for wrecks that happen at once, with a bare hull straight away (see stations.test.ts).
 Object.assign(DEFAULTS, { criticalSeconds: 0, askHull: false });
@@ -251,7 +261,7 @@ const FAR = 2.4;
 
 function world(
   tuning: Partial<typeof WORLD> = {},
-  outpost: Partial<StationSpec> = {},
+  outpost: Partial<StationSpec> & LooseStation = {},
   drops: FieldSpec["drops"] | null = [{ item: "oreB", chance: 1 }],
   seed = 1,
 ): { sim: Sim; outpost: Poi; field: FieldSpec } {
@@ -278,9 +288,7 @@ function world(
     orbits: orbit(FAR + 0.12),
     carryFull: 2000,
     carryNone: 6000,
-    shipyard: true,
-    unlocked: moduleIds(),
-    ...outpost,
+    ...withParts({ shipyard: true, unlocked: moduleIds(), ...outpost }),
   };
   sim.applyLayout(homeFields(sim, field), homeStations(sim, spec));
   return { sim, outpost: sim.bases[1].body, field };

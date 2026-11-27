@@ -4,9 +4,13 @@ import { FIRST_FIELD, HOME, type Home, homeFields, homeOf, homeSim, rehome } fro
 import { PARTS, type PartId } from "./parts";
 import { roundTrip } from "./save";
 import { DEFAULTS as GAME_DEFAULTS } from "./tuning";
-import { bodyAt, DOCK_OFFSET, type FieldSpec, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, type SolidBody, STATION_HALF, TICK } from "./sim";
+import { bodyAt, type FieldSpec, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, type SolidBody, STATION_HALF, TICK } from "./sim";
 import { partOf as partInfo } from "./parts";
 import { PROGRAM_PARTS } from "./programs";
+import { frameMountSpot } from "./frameParts";
+
+/** Where the station frame's dock sits from its middle, along its own axis. */
+const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
 
 // Written for wrecks that happen at once, with a bare hull straight away: critical, the pod
 // and the choice at the yard have their own tests in fitting.test.ts.

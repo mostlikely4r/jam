@@ -4,6 +4,7 @@
  * centred on whatever the first field orbits. Nothing goes through the tuning: the layout is
  * the one place a place is described (docs/home-pair-plan.md).
  */
+import type { PartOverrides } from "../frameParts";
 import { TICK, type AnchorSpec, type CloudSpec, type FieldSpec, type Orbit, type OrbitRing, type PirateBaseSpec, type Sim, type SolidBody, type Spawn, type StationSpec } from "../sim";
 import { shipChoices, copiesOf, isBody, parentOf, pathTo, walk, type Copy, type NodeKind, type World, type WorldNode } from "./world";
 
@@ -169,17 +170,9 @@ export function stationsFor(world: World): StationSpec[] {
           rings: ringsOf(world, place, node, copy),
           carryFull,
           carryNone,
-          shipyard: node.shipyard,
-          storage: node.storage,
-          unlocked: node.unlocked,
-          wanted: node.wanted,
-          programs: node.programs,
-          hulls: node.hulls,
           ...(field !== undefined ? { field } : {}),
-          projects: node.projects,
-          radio: node.radio,
-          guards: { count: node.guardCount, arc: node.guardArc, distance: node.guardDistance },
-          ...(node.items.length > 0 ? { items: node.items.map((each) => ({ ...each })) } : {}),
+          // Its own parts over its frame's; copies share them.
+          parts: JSON.parse(JSON.stringify(node.parts)) as PartOverrides,
         };
       });
     });

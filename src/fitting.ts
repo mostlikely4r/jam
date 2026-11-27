@@ -44,7 +44,20 @@ export interface Mount {
   default?: PartId;
   /** A decal mount: shows a random decal part that fits it, for looks only. Nothing real goes on it. */
   decal?: boolean;
+  /**
+   * A frame's mount: the frame part a bare frame comes with on it, and that part's data
+   * (`src/frameParts.ts`). A place in the world can override both (`StationSpec.parts`).
+   */
+  framePart?: FramePartKind;
+  data?: Record<string, unknown>;
 }
+
+/**
+ * The parts that go on a frame rather than a ship: what a station, the pirate base and a field
+ * deposit can do. See `src/frameParts.ts`; kept here because a mount names one.
+ */
+export const FRAME_PART_KINDS = ["dock", "storage", "trade", "battery", "shop", "refinery", "repair", "shipyard", "projects", "radio", "blackMarket"] as const;
+export type FramePartKind = (typeof FRAME_PART_KINDS)[number];
 
 /** Where a mount sits and faces. */
 export type MountPlace = Pick<Mount, "x" | "y" | "angle" | "scale">;
@@ -375,6 +388,8 @@ function readMount(raw: Partial<Mount>, index: number): Mount {
   if (typeof raw.alpha === "number" && Number.isFinite(raw.alpha) && raw.alpha < 1) mount.alpha = Math.max(0, raw.alpha);
   if (typeof raw.order === "number" && Number.isFinite(raw.order) && raw.order !== 0) mount.order = raw.order;
   if (raw.decal === true) mount.decal = true;
+  if (typeof raw.framePart === "string" && (FRAME_PART_KINDS as readonly string[]).includes(raw.framePart)) mount.framePart = raw.framePart;
+  if (raw.data && typeof raw.data === "object" && !Array.isArray(raw.data)) mount.data = JSON.parse(JSON.stringify(raw.data)) as Record<string, unknown>;
   return mount;
 }
 

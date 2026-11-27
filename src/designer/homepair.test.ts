@@ -10,6 +10,9 @@ import { Sim, TICK } from "../sim";
 import { DEFAULTS } from "../tuning";
 import { fieldsFor, linkedNodes, stationsFor, useLayout } from "./link";
 import { makeChild, seedWorld, type World } from "./world";
+import { hasPart } from "../sim";
+import { partOn, resolveParts } from "../frameParts";
+import { changeStation } from "./world";
 
 function play(world: World): Sim {
   const sim = new Sim(1, { ...DEFAULTS, chatter: false });
@@ -55,7 +58,8 @@ describe("the designer's first station", () => {
   it("plays with the designer's own orbit, shipyard, storage, carrying and settings", () => {
     const world = seedWorld();
     const { station } = linkedNodes(world);
-    Object.assign(station!, { orbitRadius: 11000, shipyard: false, storage: 120, carryFull: 500, carryNone: 3000, radio: false, guardCount: 2 });
+    Object.assign(station!, { orbitRadius: 11000, carryFull: 500, carryNone: 3000 });
+    changeStation(station!, { shipyard: false, storage: 120, radio: false, guardCount: 2 });
     const sim = play(world);
     const [base] = sim.bases;
     expect(base.id).toBe(stationsFor(world)[0].id);
@@ -63,15 +67,18 @@ describe("the designer's first station", () => {
     expect(sim.hasShipyard(base.body)).toBe(false);
     expect(sim.storageOf(base)).toBe(120);
     expect(sim.carryRange(base.body)).toEqual({ full: 500, none: 3000 });
-    expect(base.spec).toMatchObject({ projects: true, radio: false, guards: { count: 2 } });
+    expect(hasPart(base.body, "projects")).toBe(true);
+    expect(hasPart(base.body, "radio")).toBe(false);
+    expect(partOn(base.body.parts, "battery")?.data).toEqual({ count: 2 });
   });
 
   it("falls back to the tuning's shipyard and storage for a station spec that leaves them out", () => {
     const world = seedWorld();
     const sim = play(world);
     const [base] = sim.bases;
-    delete base.spec.shipyard;
-    delete base.spec.storage;
+    // A place that says nothing of its own: its frame's parts as they come.
+    base.spec.parts = {};
+    base.body.parts = resolveParts(base.body.frame);
     sim.tuning.stationShipyard = false;
     sim.tuning.stationStorage = 77;
     expect(sim.hasShipyard(base.body)).toBe(false);
@@ -132,7 +139,7 @@ describe("a base that's gone or can't do the job", () => {
 
   it("sends a wreck by a base without a shipyard to the nearest that has one", () => {
     const { world, outpost } = withOutpost();
-    outpost.shipyard = false;
+    changeStation(outpost, { shipyard: false });
     const sim = play(world);
     const [home, far] = sim.bases;
     expect(sim.nearestBase(far.body.x, far.body.y, true)).toBe(home);

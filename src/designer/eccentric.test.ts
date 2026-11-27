@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import { orbitState } from "../kepler";
 import { homeSim } from "../home";
 import { linkTo } from "../profile/world";
-import { DOCK_OFFSET, Sim, TICK, bodyAt, orbitsAt } from "../sim";
+import { Sim, TICK, bodyAt, orbitsAt } from "../sim";
 import { DEFAULTS } from "../tuning";
 import { anchorsFor, bodiesFor, fieldsFor, linkedNodes, pirateBaseFor, stationsFor, spawnsFor, useLayout } from "./link";
 import { closestApproach, copiesOf, copyPositions, makeChild, orbitShape, orbitSpeed, parseWorld, positions, seedWorld, stringifyWorld, walk, type World, type WorldNode } from "./world";
+import { frameMountSpot } from "../frameParts";
+
+/** Where the station frame's dock sits from its middle, along its own axis. */
+const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
 
 /** The seeded system with an eccentric moon, field, station and anchor round the planet, and copies of the field. */
 function eccentricWorld(): { world: World; planet: WorldNode; moon: WorldNode; field: WorldNode; station: WorldNode; anchor: WorldNode } {

@@ -4,6 +4,7 @@ import { homeSim } from "./home";
 import { layoutKey, loadStart, makeStart, roundTrip, type StartFile } from "./save";
 import { Sim, TICK } from "./sim";
 import { applyTuning, changedTuning, DEFAULTS } from "./tuning";
+import { partOn } from "./frameParts";
 
 function run(sim: Sim, seconds: number): void {
   for (let i = 0; i < Math.round(seconds / TICK); i++) {
@@ -90,10 +91,10 @@ describe("save and load", () => {
     // Storage is the place's, not the save's: a save carries no station spec, so a station
     // written when 300 cells was a full store comes back with the 1200 the layout says now.
     const before = homeSim(1, { ...DEFAULTS });
-    before.bases[0].spec.storage = 300;
+    partOn(before.bases[0].body.parts, "storage")!.data.cells = 300;
     before.ship.credits = 777;
     const now = homeSim(2, { ...DEFAULTS });
-    now.bases[0].spec.storage = DEFAULTS.stationStorage;
+    partOn(now.bases[0].body.parts, "storage")!.data.cells = DEFAULTS.stationStorage;
     roundTrip(before, now);
     expect(now.ship.credits).toBe(777);
     expect(now.storageOf(now.bases[0])).toBe(DEFAULTS.stationStorage);

@@ -3,7 +3,13 @@ import { bodyAt, orbitsAt } from "../sim";
 import { DEFAULTS } from "../tuning";
 import shipped from "./world.json";
 import { anchorsFor, bodiesFor, cloudsFor, fieldsFor, layoutFor, linkSummary, linkedNodes, pirateBaseFor, spawnsFor, stationsFor } from "./link";
-import { allPrograms, limitCarrying, makeChild, parseWorld, positions, seedWorld, stringifyWorld, walk } from "./world";
+import { allPrograms, changeStation, limitCarrying, makeChild, parseWorld, positions, seedWorld, stationSettings, stringifyWorld, walk, type WorldNode } from "./world";
+import type { StationSpec } from "../sim";
+
+/** A station node's settings, as its parts on its frame say. */
+const settingsOf = (node: Pick<WorldNode, "frame" | "parts">) => stationSettings(node);
+/** A station spec's settings, as the game will read its parts. */
+const specSettings = (spec: StationSpec) => stationSettings({ frame: spec.frame ?? "station", parts: spec.parts ?? {} });
 import { shippedWorld } from "./shipped";
 
 describe("the link between the designer and the game", () => {
@@ -22,7 +28,8 @@ describe("the link between the designer and the game", () => {
     expect(first.id).toBe("field:0");
     expect(first.orbits).toEqual([expect.objectContaining({ radius: 60000, period: 10800 })]);
     const [station] = stationsFor(world);
-    expect(station).toMatchObject({ id: "station:0", field: "field:0", projects: true, radio: true });
+    expect(station).toMatchObject({ id: "station:0", field: "field:0" });
+    expect(specSettings(station)).toMatchObject({ projects: true, radio: true });
     expect(station.orbits.map((orbit) => orbit.radius)).toEqual([60000, 10200]);
     expect(pirateBaseFor(world)!.orbits.map((orbit) => orbit.radius)).toEqual([60000, 9200]);
   });
@@ -161,14 +168,15 @@ describe("the link between the designer and the game", () => {
     const { planet } = linkedNodes(world);
     const extra = makeChild(world, planet!, "field");
     const outpost = makeChild(world, extra, "station");
-    Object.assign(outpost, { name: "Outpost", unlocked: ["tractorAll"] });
+    outpost.name = "Outpost";
+    changeStation(outpost, { unlocked: ["tractorAll"] });
     extra.children.push(outpost);
     planet!.children.push(extra);
-    expect(stationsFor(world).find((each) => each.name === "Outpost")!.unlocked).toEqual(["tractorAll"]);
+    expect(specSettings(stationsFor(world).find((each) => each.name === "Outpost")!).unlocked).toEqual(["tractorAll"]);
     // Only module items are a list's to hold: a decal or something that isn't an item at all is dropped.
     const text = stringifyWorld(world).replace('"tractorAll"', '"tractorAll", "reverse", "nonsense", "cockpitKite"');
     const back = walk(parseWorld(text)!).find((entry) => entry.node.name === "Outpost")!.node;
-    expect(back.unlocked).toEqual(["tractorAll", "reverse"]);
+    expect(settingsOf(back).unlocked).toEqual(["tractorAll", "reverse"]);
   });
 
   it("hands each cloud over on its own, copies included, where the field carries it", () => {
@@ -194,34 +202,34 @@ describe("the link between the designer and the game", () => {
   it("gives a station every program and no hull unless its lists say, and a saved world keeps them", () => {
     const world = seedWorld();
     const { station } = linkedNodes(world);
-    expect(station!.programs).toEqual(allPrograms());
-    expect(station!.hulls).toEqual([]);
+    expect(settingsOf(station!).programs).toEqual(allPrograms());
+    expect(settingsOf(station!).hulls).toEqual([]);
     // Every program and no hull is what a missing list reads as, so the file says nothing of either.
     const plain = stringifyWorld(world);
     expect(plain).not.toContain('"programs"');
     expect(plain).not.toContain('"hulls"');
-    expect(linkedNodes(parseWorld(plain)!).station!.programs).toEqual(allPrograms());
+    expect(settingsOf(linkedNodes(parseWorld(plain)!).station!).programs).toEqual(allPrograms());
     // A shorter list is written, an empty one too, and unknown names are dropped on the way back.
-    Object.assign(station!, { programs: ["retro"], hulls: ["floater"] });
+    changeStation(station!, { programs: ["retro"], hulls: ["floater"] });
     const text = stringifyWorld(world).replace('"retro"', '"retro", "nonsense"').replace('"floater"', '"floater", "nonsense"');
     const back = linkedNodes(parseWorld(text)!).station!;
-    expect(back.programs).toEqual(["retro"]);
-    expect(back.hulls).toEqual(["floater"]);
-    station!.programs = [];
-    expect(linkedNodes(parseWorld(stringifyWorld(world))!).station!.programs).toEqual([]);
+    expect(settingsOf(back).programs).toEqual(["retro"]);
+    expect(settingsOf(back).hulls).toEqual(["floater"]);
+    changeStation(station!, { programs: [] });
+    expect(settingsOf(linkedNodes(parseWorld(stringifyWorld(world))!).station!).programs).toEqual([]);
     const spec = stationsFor(world).find((each) => each.name === "Station")!;
-    expect(spec.programs).toEqual([]);
-    expect(spec.hulls).toEqual(["floater"]);
-    // Only a station has the lists.
-    expect(linkedNodes(world).field!.programs).toEqual([]);
+    expect(specSettings(spec).programs).toEqual([]);
+    expect(specSettings(spec).hulls).toEqual(["floater"]);
+    // Only a station has the lists: nothing else has parts of its own.
+    expect(linkedNodes(world).field!.parts).toEqual({});
   });
 
   it("loads the shipped world with every station selling every program and no hull", () => {
     const stations = walk(shippedWorld()).filter((entry) => entry.node.kind === "station");
     expect(stations.length).toBeGreaterThan(0);
     for (const { node } of stations) {
-      expect(node.programs).toEqual(allPrograms());
-      expect(node.hulls).toEqual([]);
+      expect(settingsOf(node).programs).toEqual(allPrograms());
+      expect(settingsOf(node).hulls).toEqual([]);
     }
   });
 
@@ -230,12 +238,13 @@ describe("the link between the designer and the game", () => {
     const { planet, station } = linkedNodes(world);
     const extra = makeChild(world, planet!, "field");
     const outpost = makeChild(world, extra, "station");
-    Object.assign(outpost, { name: "Outpost", shipyard: false, count: 2 });
+    Object.assign(outpost, { name: "Outpost", count: 2 });
+    changeStation(outpost, { shipyard: false });
     extra.children.push(outpost);
     planet!.children.push(extra);
-    station!.shipyard = false;
+    changeStation(station!, { shipyard: false });
     const stations = stationsFor(world);
-    expect(stations.map((each) => [each.name, each.shipyard])).toEqual([["Station", false], ["Outpost", false], ["Outpost 2", false]]);
+    expect(stations.map((each) => [each.name, specSettings(each).shipyard])).toEqual([["Station", false], ["Outpost", false], ["Outpost 2", false]]);
     const t = 300;
     const at = positions(world, t);
     const there = orbitsAt(stations[1].orbits, t);
@@ -250,21 +259,21 @@ describe("the link between the designer and the game", () => {
     const { planet, station } = linkedNodes(world);
     const outpost = makeChild(world, planet!, "station");
     // A new station starts with the default storage.
-    expect(outpost.storage).toBe(DEFAULTS.stationStorage);
-    outpost.storage = 80;
+    expect(settingsOf(outpost).storage).toBe(DEFAULTS.stationStorage);
+    changeStation(outpost, { storage: 80 });
     planet!.children.push(outpost);
-    station!.storage = 120;
-    expect(stationsFor(world).map((each) => each.storage)).toEqual([120, 80]);
-    // A world saved before storage gets the default; a saved storage reads back.
+    changeStation(station!, { storage: 120 });
+    expect(stationsFor(world).map((each) => specSettings(each).storage)).toEqual([120, 80]);
+    // A world that says nothing of a station's storage gets the default; a saved storage reads back.
     const text = stringifyWorld(world);
-    expect(linkedNodes(parseWorld(text)!).station!.storage).toBe(120);
+    expect(settingsOf(linkedNodes(parseWorld(text)!).station!).storage).toBe(120);
     const old = JSON.parse(text);
-    const strip = (node: { storage?: number; children: unknown[] }): void => {
-      delete node.storage;
+    const strip = (node: { parts?: Record<string, unknown>; children: unknown[] }): void => {
+      delete node.parts?.storage;
       node.children.forEach((child) => strip(child as typeof node));
     };
     strip(old.root);
-    expect(linkedNodes(parseWorld(JSON.stringify(old))!).station!.storage).toBe(DEFAULTS.stationStorage);
+    expect(settingsOf(linkedNodes(parseWorld(JSON.stringify(old))!).station!).storage).toBe(DEFAULTS.stationStorage);
   });
 
   it("gives a world saved before ground and full pull its kind's defaults", () => {

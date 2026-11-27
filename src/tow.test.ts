@@ -3,7 +3,11 @@ import { homeSim } from "./home";
 import { partOf, TRAFFIC_BUY_ORDER } from "./parts";
 import { roundTrip } from "./save";
 import { DEFAULTS } from "./tuning";
-import { DOCK_OFFSET, expectedOre, type Rock, SHIP_RADIUS, Sim, STATION_HALF, TICK, TOW_GAP } from "./sim";
+import { expectedOre, type Rock, SHIP_RADIUS, Sim, STATION_HALF, TICK, TOW_GAP } from "./sim";
+import { frameMountSpot } from "./frameParts";
+
+/** Where the station frame's dock sits from its middle, along its own axis. */
+const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
 
 // Long runs never give the worker a turn of the event loop otherwise (see pilot.test.ts).
 afterEach(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));

@@ -12,6 +12,7 @@ import { framesFor, newGameHulls, shipModels, type FrameUse } from "../fitting";
 import { type PartId, type ShipModel } from "../parts";
 import { PROGRAMS } from "../programs";
 import { DEFAULTS } from "../tuning";
+import { frameHas, override, partMount, partOn, readOverrides, resolveParts, type FramePartKind, type PartOverrides } from "../frameParts";
 
 export const WORLD_VERSION = 1;
 
@@ -84,33 +85,15 @@ export interface WorldNode {
   carryNone: number;
   /** Places only: the ships a new game can start at. */
   spawns: ShipChoice[];
-  /** Stations only: wrecked ships are rebuilt at the nearest station with a shipyard. */
-  shipyard: boolean;
-  /** Stations only: cells of storage. The player's lockers and the station's store of whole modules come out of it. */
-  storage: number;
-  /** Stations only: the modules it starts able to sell. None, and it sells no module at all. */
-  unlocked: PartId[];
-  /** Stations only: the modules it buys the blueprint for, when it can afford them. */
-  wanted: PartId[];
   /**
-   * Stations only: the programs it sells. A new station sells every program, as every station
-   * did before stations had a list. A program blueprint it buys later is sold as well.
+   * Stations and pirate bases: what this place has on its frame's mounts that differs from the
+   * frame's own, by mount id (`src/frameParts.ts`). A station's shop lists, starting items,
+   * storage, turrets, shipyard, projects and radio live here; `stationSettings` reads them.
+   * Copies share them. Every other kind has none.
    */
-  programs: PartId[];
-  /** Stations only: the hulls it sells, by name. None, and it sells no hull. */
-  hulls: ShipModel[];
+  parts: PartOverrides;
   /** Fields only: the items its rocks drop as well as plain ore, each with its chance on every ore roll. */
   drops: { item: string; chance: number }[];
-  /** Stations only: the items in its store when the game starts (they come from nowhere). */
-  items: { item: string; n: number }[];
-  /** Stations only: whether it builds projects: a deposit by its field, and turrets for itself and the deposit. */
-  projects: boolean;
-  /** Stations only: whether its news (new blueprints, projects built) goes out on the radio. */
-  radio: boolean;
-  /** Stations only: its own turrets, once built: how many, the arc they stand in (degrees), and how far out. */
-  guardCount: number;
-  guardArc: number;
-  guardDistance: number;
   /** Clouds only: gas glows smoothly; dust is dimmer and grainy. */
   look: CloudLook;
   /** Clouds only: the colour it glows, `#rrggbb`. */
@@ -279,18 +262,102 @@ function readFrame(kind: NodeKind, raw: unknown): ShipModel {
 }
 
 export function placeDefaults(kind: NodeKind): Pick<WorldNode, PlaceKey> {
-  const none = { frame: defaultFrame(kind), ...CLOUD_DEFAULTS, unlocked: [], wanted: [], programs: [], hulls: [], drops: [], items: [], ...NOT_A_BASE };
-  if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, shipyard: false, storage: 0, ...none };
-  if (kind === "station") {
-    // A new station builds nothing and keeps quiet until the designer says; its turrets, once it has them, are the game's usual.
-    const guards = { guardCount: DEFAULTS.stationGuardCount, guardArc: DEFAULTS.stationGuardArc, guardDistance: DEFAULTS.stationGuardDistance };
-    return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: true, storage: DEFAULTS.stationStorage, ...none, programs: allPrograms(), ...guards };
-  }
-  if (kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, shipyard: false, storage: 0, ...none };
-  return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, shipyard: false, storage: 0, ...none };
+  // A new station has its frame's parts as they come: a shipyard, no projects and no radio until the designer says.
+  const none = { frame: defaultFrame(kind), ...CLOUD_DEFAULTS, parts: {}, drops: [] };
+  if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, ...none };
+  if (kind === "station" || kind === "pirate base") return { rocks: 0, rockDrift: 0, rockInflow: 0, ...CARRY.station, ...none };
+  return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, ...none };
 }
 
-type PlaceKey = "frame" | "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "unlocked" | "wanted" | "programs" | "hulls" | "drops" | "items" | BaseKey | CloudKey;
+type PlaceKey = "frame" | "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "parts" | "drops" | CloudKey;
+
+/**
+ * A station's settings as the designer shows them, one value each: read from the parts on its
+ * frame at its place, and written back as that place's overrides (`writeStationSettings`).
+ */
+export interface StationSettings {
+  /** Wrecked ships are rebuilt at the nearest station with a shipyard. */
+  shipyard: boolean;
+  /** Cells of storage: the player's lockers and the station's store of whole modules come out of it. */
+  storage: number;
+  /** The modules it starts able to sell. None, and it sells no module at all. */
+  unlocked: PartId[];
+  /** The modules it buys the blueprint for, when it can afford them. */
+  wanted: PartId[];
+  /** The programs it sells. A program blueprint it buys later is sold as well. */
+  programs: PartId[];
+  /** The hulls it sells, by name. None, and it sells no hull. */
+  hulls: ShipModel[];
+  /** The items in its store when the game starts (they come from nowhere). */
+  items: { item: string; n: number }[];
+  /** Whether it builds projects: a deposit by its field, and turrets for itself and the deposit. */
+  projects: boolean;
+  /** Whether its news (new blueprints, projects built) goes out on the radio. */
+  radio: boolean;
+  /** Its own turrets, once built: how many, the arc they stand in (degrees), and how far out. */
+  guardCount: number;
+  guardArc: number;
+  guardDistance: number;
+}
+
+/** A station's settings, from the parts on its frame with its place's overrides on top. */
+export function stationSettings(node: Pick<WorldNode, "frame" | "parts">): StationSettings {
+  const parts = resolveParts(node.frame, node.parts);
+  const shop = partOn(parts, "shop")?.data;
+  const storage = partOn(parts, "storage");
+  const battery = partOn(parts, "battery")?.data;
+  return {
+    shipyard: partOn(parts, "shipyard") !== undefined,
+    storage: storage ? (storage.data.cells ?? DEFAULTS.stationStorage) : 0,
+    unlocked: [...(shop?.unlocked ?? [])],
+    wanted: [...(shop?.wanted ?? [])],
+    programs: shop ? [...(shop.programs ?? allPrograms())] : [],
+    hulls: [...(shop?.hulls ?? [])],
+    items: (shop?.items ?? []).map((each) => ({ ...each })),
+    projects: partOn(parts, "projects") !== undefined,
+    radio: partOn(parts, "radio") !== undefined,
+    guardCount: battery?.count ?? DEFAULTS.stationGuardCount,
+    guardArc: battery?.arc ?? DEFAULTS.stationGuardArc,
+    guardDistance: battery?.distance ?? DEFAULTS.stationGuardDistance,
+  };
+}
+
+/**
+ * Writes a station's settings as its place's overrides: only what differs from its frame's own
+ * parts, so a station that is just its frame has none. A setting its frame has no mount for is dropped.
+ */
+export function writeStationSettings(node: Pick<WorldNode, "frame" | "parts">, settings: StationSettings): void {
+  const parts: PartOverrides = {};
+  const { frame } = node;
+  const put = (kind: FramePartKind, entry: PartOverrides[string]) => {
+    const mount = partMount(frame, kind);
+    if (mount && entry !== undefined) parts[mount] = entry;
+  };
+  // A part that is only there or not: fitted where the frame lacks it, emptied where the frame has it.
+  const flag = (kind: FramePartKind, on: boolean) => put(kind, on === frameHas(frame, kind) ? undefined : on ? override(kind) : null);
+  flag("shipyard", settings.shipyard);
+  flag("projects", settings.projects);
+  flag("radio", settings.radio);
+  put("storage", override("storage", { cells: Math.max(0, Math.floor(settings.storage)) }));
+  const shop: Record<string, unknown> = {};
+  if (settings.unlocked.length > 0) shop.unlocked = [...settings.unlocked];
+  if (settings.wanted.length > 0) shop.wanted = [...settings.wanted];
+  if (!sellsEveryProgram(settings.programs)) shop.programs = [...settings.programs];
+  if (settings.hulls.length > 0) shop.hulls = [...settings.hulls];
+  if (settings.items.length > 0) shop.items = settings.items.map((each) => ({ ...each }));
+  if (Object.keys(shop).length > 0) put("shop", { part: "shop", ...shop });
+  const guards: Record<string, number> = {};
+  if (settings.guardCount !== DEFAULTS.stationGuardCount) guards.count = Math.max(0, Math.floor(settings.guardCount));
+  if (settings.guardArc !== DEFAULTS.stationGuardArc) guards.arc = settings.guardArc;
+  if (settings.guardDistance !== DEFAULTS.stationGuardDistance) guards.distance = settings.guardDistance;
+  if (Object.keys(guards).length > 0) put("battery", { part: "battery", ...guards });
+  node.parts = parts;
+}
+
+/** Changes some of a station's settings, keeping the rest. */
+export function changeStation(node: Pick<WorldNode, "frame" | "parts">, change: Partial<StationSettings>): void {
+  writeStationSettings(node, { ...stationSettings(node), ...change });
+}
 
 /** A cloud's own settings. Left out of every node that isn't a cloud, so other layouts save as they always did. */
 type CloudKey = "look" | "color" | "width" | "height" | "ringInner" | "falloff" | "opacity" | "layer" | "drawOrder";
@@ -304,10 +371,6 @@ export function allPrograms(): PartId[] {
 function sellsEveryProgram(programs: readonly string[]): boolean {
   return allPrograms().every((id) => programs.includes(id));
 }
-type BaseKey = "projects" | "radio" | "guardCount" | "guardArc" | "guardDistance";
-
-/** What a place that isn't a station has for a station's own settings. */
-const NOT_A_BASE: Pick<WorldNode, BaseKey> = { projects: false, radio: false, guardCount: 0, guardArc: 0, guardDistance: 0 };
 
 /** Default carrying, from each place's edge: full out to the first, fading to nothing by the second. */
 export const CARRY = {
@@ -470,10 +533,12 @@ export function seedWorld(): World {
     orbitPeriod: 10800,
     spinPeriod: 1800,
     children: [
-      node({ id: "station", name: "Station", kind: "station", radius: 300, orbitRadius: 10200, orbitPeriod: 900, orbitPhase: 180, spinPeriod: 300, projects: true, radio: true }),
+      node({ id: "station", name: "Station", kind: "station", radius: 300, orbitRadius: 10200, orbitPeriod: 900, orbitPhase: 180, spinPeriod: 300 }),
       node({ id: "pirates", name: "Pirate base", kind: "pirate base", radius: 200, orbitRadius: 9200, orbitPeriod: 900 }),
     ],
   });
+  // The home station builds projects and is on the radio.
+  changeStation(field.children[0], { projects: true, radio: true });
   const planet = node({
     id: "planet",
     name: "Planet",
@@ -494,6 +559,47 @@ function readDrops(raw: unknown): { item: string; chance: number }[] {
   return raw
     .filter((each): each is { item: string; chance: number } => !!each && typeof each.item === "string" && typeof each.chance === "number" && Number.isFinite(each.chance) && each.chance > 0)
     .map((each) => ({ item: each.item, chance: Math.min(1, each.chance) }));
+}
+
+/**
+ * A station saved before its settings were parts on its frame: its loose fields, as they read
+ * then, written as overrides. Missing ones are what a new station had.
+ */
+function legacyStation(raw: Record<string, unknown>, frame: ShipModel): PartOverrides {
+  const num = (key: string, missing: number) => (typeof raw[key] === "number" && Number.isFinite(raw[key]) ? (raw[key] as number) : key in raw ? 0 : missing);
+  const node = { frame, parts: {} as PartOverrides };
+  writeStationSettings(node, {
+    shipyard: typeof raw.shipyard === "boolean" ? raw.shipyard : true,
+    storage: num("storage", DEFAULTS.stationStorage),
+    unlocked: isModuleList(raw.unlocked),
+    wanted: isModuleList(raw.wanted),
+    // A station saved without a program list sells every program, as it did before it had one.
+    programs: "programs" in raw ? isProgramList(raw.programs) : allPrograms(),
+    hulls: isHullList(raw.hulls),
+    items: readItems(raw.items),
+    projects: raw.projects === true,
+    radio: raw.radio === true,
+    guardCount: Math.max(0, Math.floor(num("guardCount", DEFAULTS.stationGuardCount))),
+    guardArc: num("guardArc", DEFAULTS.stationGuardArc),
+    guardDistance: num("guardDistance", DEFAULTS.stationGuardDistance),
+  });
+  return node.parts;
+}
+
+/** A place's overrides read from a file, or turned from the loose fields of an older one. Only stations and pirate bases have any. */
+function readParts(kind: NodeKind, raw: Record<string, unknown>, frame: ShipModel): PartOverrides {
+  if (frameUse(kind) === null) return {};
+  if (!("parts" in raw)) return kind === "station" ? legacyStation(raw, frame) : {};
+  const parts = readOverrides(raw.parts);
+  // A shop's lists hold only what there is: module items, programs, the hulls ships fly, real items.
+  for (const entry of Object.values(parts)) {
+    if (entry?.part !== "shop") continue;
+    for (const key of ["unlocked", "wanted"]) if (key in entry) entry[key] = isModuleList(entry[key]);
+    if ("programs" in entry) entry.programs = isProgramList(entry.programs);
+    if ("hulls" in entry) entry.hulls = isHullList(entry.hulls);
+    if ("items" in entry) entry.items = readItems(entry.items);
+  }
+  return parts;
 }
 
 /** A station's starting items read from a file: each an item id and a whole number of at least 1. */
@@ -546,11 +652,12 @@ export function parseWorld(text: string): World | null {
       const share = (key: CloudKey) => Math.min(1, Math.max(0, cloudNum(key)));
       const width = Math.max(1, cloudNum("width"));
       const height = Math.max(1, cloudNum("height"));
+      const frame = readFrame(kind, raw.frame);
       return {
         id: raw.id,
         name: typeof raw.name === "string" ? raw.name : raw.kind,
         kind,
-        frame: readFrame(kind, raw.frame),
+        frame,
         radius: kind === "cloud" ? cloudRadius(width, height) : num("radius"),
         surface: (SURFACES as readonly unknown[]).includes(raw.surface) ? (raw.surface as Surface) : defaults.surface,
         pull: num("pull", defaults.pull),
@@ -564,20 +671,8 @@ export function parseWorld(text: string): World | null {
         carryFull: num("carryFull"),
         carryNone: num("carryNone"),
         spawns: Array.isArray(raw.spawns) ? shipChoices().filter((ship) => (raw.spawns as unknown[]).includes(ship)) : [],
-        shipyard: typeof raw.shipyard === "boolean" ? raw.shipyard : places.shipyard,
-        storage: num("storage", places.storage),
-        unlocked: isModuleList(raw.unlocked),
-        wanted: isModuleList(raw.wanted),
-        // A station saved without a program list sells every program, as it did before it had one.
-        programs: kind === "station" && !("programs" in raw) ? allPrograms() : kind === "station" ? isProgramList(raw.programs) : [],
-        hulls: kind === "station" ? isHullList(raw.hulls) : [],
+        parts: readParts(kind, raw, frame),
         drops: readDrops(raw.drops),
-        items: readItems(raw.items),
-        projects: typeof raw.projects === "boolean" ? raw.projects : places.projects,
-        radio: typeof raw.radio === "boolean" ? raw.radio : places.radio,
-        guardCount: Math.max(0, Math.floor(num("guardCount", places.guardCount))),
-        guardArc: num("guardArc", places.guardArc),
-        guardDistance: num("guardDistance", places.guardDistance),
         look: (CLOUD_LOOKS as readonly unknown[]).includes(raw.look) ? (raw.look as CloudLook) : places.look,
         color: typeof raw.color === "string" && /^#[0-9a-f]{6}$/i.test(raw.color) ? raw.color.toLowerCase() : places.color,
         width,
@@ -613,14 +708,10 @@ export function parseWorld(text: string): World | null {
  */
 const NODE_KEYS: (keyof WorldNode)[] = [
   "id", "name", "kind", "frame", "radius", "surface", "pull", "pullFull", "pullAccel", "atmosphere", "burnSpeed",
-  "rocks", "rockDrift", "rockInflow", "carryFull", "carryNone", "spawns", "shipyard", "storage", "unlocked", "wanted", "programs", "hulls", "drops", "items",
-  "projects", "radio", "guardCount", "guardArc", "guardDistance", "look", "color", "width", "height", "ringInner", "falloff", "opacity", "layer", "drawOrder",
+  "rocks", "rockDrift", "rockInflow", "carryFull", "carryNone", "spawns", "parts", "drops", "look", "color", "width", "height", "ringInner", "falloff", "opacity", "layer", "drawOrder",
   "count", "angleVariance", "orbitVariance", "orbitRadius", "eccentricity", "periapsisAngle", "orbitPeriod", "orbitPhase",
   "spinPeriod", "spinPhase", "children",
 ];
-
-/** A station's own settings, left out where they're the kind's default, so only a station that differs says so. */
-const BASE_KEYS: BaseKey[] = ["projects", "radio", "guardCount", "guardArc", "guardDistance"];
 
 /** The cloud's own settings, in the order they're written. Only a cloud keeps them. */
 const CLOUD_KEYS: CloudKey[] = ["look", "color", "width", "height", "ringInner", "falloff", "opacity", "layer", "drawOrder"];
@@ -628,16 +719,14 @@ const CLOUD_KEYS: CloudKey[] = ["look", "color", "width", "height", "ringInner",
 /** A node's keys in the fixed order, then anything else it carries, as it came. */
 function ordered(node: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  const usual = placeDefaults(node.kind as NodeKind);
   for (const key of NODE_KEYS) {
     if (!(key in node)) continue;
     // Only a station or a pirate base has a frame.
     if (key === "frame" && frameUse(node.kind as NodeKind) === null) continue;
-    if ((BASE_KEYS as string[]).includes(key) && node[key] === usual[key as BaseKey]) continue;
+    // Only a station or a pirate base has parts, and only when its place says something of its own.
+    if (key === "parts" && (frameUse(node.kind as NodeKind) === null || Object.keys(node.parts as object).length === 0)) continue;
     // Only a cloud has a cloud's settings: every other node saves without them, as it always did.
     if ((CLOUD_KEYS as string[]).includes(key) && node.kind !== "cloud") continue;
-    // Only a station has a program list, and one that sells every program is left out: that's what a missing list reads as.
-    if (key === "programs" && (node.kind !== "station" || sellsEveryProgram(node.programs as string[]))) continue;
     out[key] = node[key];
   }
   for (const key of Object.keys(node)) if (!(NODE_KEYS as string[]).includes(key)) out[key] = node[key];
@@ -647,8 +736,8 @@ function ordered(node: Record<string, unknown>): Record<string, unknown> {
 export function stringifyWorld(world: World): string {
   // A spin start angle of 0, and a circular orbit, are left out, so layouts from before they existed read and save the same.
   const left = ["spinPhase", "eccentricity", "periapsisAngle"];
-  // So are no drops, no starting items and no module lists, for the same reason.
-  const lists = ["drops", "items", "unlocked", "wanted", "hulls"];
+  // So are no drops, for the same reason.
+  const lists = ["drops"];
   const isNode = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value) && "kind" in value && "children" in value;
   const replacer = (key: string, value: unknown) => {

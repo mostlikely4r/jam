@@ -10,8 +10,12 @@
 import { describe, expect, it } from "vitest";
 import { hullInfo, isFrame, shipModels, framesFor } from "./fitting";
 import { SHIP_MODELS } from "./parts";
-import { DEPOSIT_FRAME, DEPOSIT_HALF, DOCK_OFFSET, PIRATE_BASE_FRAME, PIRATE_BASE_RADIUS, STATION_FRAME, STATION_HALF } from "./sim";
+import { DEPOSIT_FRAME, DEPOSIT_HALF, PIRATE_BASE_FRAME, PIRATE_BASE_RADIUS, STATION_FRAME, STATION_HALF } from "./sim";
 import { drawDepositArt, drawPirateBaseArt, drawStationArt } from "./stationArt";
+import { frameMountSpot } from "./frameParts";
+
+/** Where the station frame's dock sits from its middle, along its own axis. */
+const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
 
 // ---------- the old drawing, as `Renderer` had it ----------
 

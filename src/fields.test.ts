@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FIRST_FIELD, homeFields, homeSim } from "./home";
 import type { DronePilot } from "./pilot";
 import { DEFAULTS } from "./tuning";
-import { DOCK_OFFSET, type FieldSpec, keepOutRadius, type Sim, type SolidBody, TICK } from "./sim";
+import { type FieldSpec, keepOutRadius, type Sim, type SolidBody, TICK } from "./sim";
+import { frameMountSpot } from "./frameParts";
+
+/** Where the station frame's dock sits from its middle, along its own axis. */
+const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
 
 // Long runs never give the worker a turn of the event loop otherwise (see pilot.test.ts).
 afterEach(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));

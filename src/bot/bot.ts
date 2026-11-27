@@ -10,7 +10,7 @@
 import { computerSize, works, type Module, type MountId } from "../fitting";
 import { isOreItem } from "../items";
 import { isProgram, partOf, type PartId } from "../parts";
-import { DOCK_OFFSET, isRock, SHIP_RADIUS, STATION_HALF, TICK, type Loose, type Poi, type Rock, type Sim } from "../sim";
+import { HAND_OVER_REACH, isRock, SHIP_RADIUS, STATION_HALF, TICK, type Loose, type Poi, type Rock, type Sim } from "../sim";
 import { BotLog } from "./log";
 import { currentStep, missingPart, stepName, working, type Plan } from "./plan";
 
@@ -82,7 +82,7 @@ const STATION_CLEAR = Math.hypot(STATION_HALF, STATION_HALF) + SHIP_RADIUS + 40;
  * How far from a station's middle a trip out still counts as leaving it: the far corner of its
  * dock, so a ship docked anywhere in the berth is leaving, and one passing further out is not.
  */
-const STATION_NEAR = Math.hypot(DOCK_OFFSET + STATION_HALF, STATION_HALF);
+const STATION_NEAR = Math.hypot(HAND_OVER_REACH + STATION_HALF, STATION_HALF);
 /**
  * How fast a trip out backs away from the station it leaves, before it turns for the field: slow
  * enough that a hull rested against the dock's edge has nothing to run into.

@@ -11,7 +11,7 @@
 import { moduleIds } from "../items";
 import { linkedNodes } from "./link";
 import { FLIGHTS, sharedParent, tripSpread } from "./trips";
-import { bodyDefaults, closestApproach, isBody, makeChild, parentOf, walk, type NodeKind, type World, type WorldNode } from "./world";
+import { bodyDefaults, changeStation, closestApproach, isBody, stationSettings, makeChild, parentOf, walk, type NodeKind, type World, type WorldNode } from "./world";
 
 /**
  * What a station that sells the lot has unlocked: every module. The all-round tractor is the one
@@ -51,9 +51,9 @@ function listEveryStation(world: World): string[] {
   for (const { node } of walk(world)) {
     if (node.kind !== "station") continue;
     // Every station wants every module but the all-round tractor, so a player can fund any it loses.
-    if (node.wanted.length === 0) node.wanted = [...EVERY_MODULE_BUT_360];
-    if (node.unlocked.length > 0) continue;
-    node.unlocked = [...EVERY_MODULE_BUT_360];
+    if (stationSettings(node).wanted.length === 0) changeStation(node, { wanted: [...EVERY_MODULE_BUT_360] });
+    if (stationSettings(node).unlocked.length > 0) continue;
+    changeStation(node, { unlocked: [...EVERY_MODULE_BUT_360] });
     lines.push(`${node.name} sells every module but the all-round tractor`);
   }
   return lines;
@@ -249,13 +249,10 @@ export const RECIPES: Record<string, Recipe> = {
         orbitPeriod: home.orbitPeriod,
         orbitPhase: 0,
         spinPeriod: 300,
-        shipyard: true,
         spawns: [],
-        // The one station that sells the all-round tractor, and the only one with part B to make it from.
-        unlocked: EVERY_MODULE,
-        wanted: EVERY_MODULE_BUT_360,
-        items: [{ item: "partB", n: 3 }],
       });
+      // The one station that sells the all-round tractor, and the only one with part B to make it from.
+      changeStation(base, { shipyard: true, unlocked: EVERY_MODULE, wanted: EVERY_MODULE_BUT_360, items: [{ item: "partB", n: 3 }] });
       field.children.push(base);
       const span = tripSpan(world, home, base);
       const clear = closestApproach(world, planet, base);
@@ -315,11 +312,9 @@ export const RECIPES: Record<string, Recipe> = {
         orbitPeriod: home.orbitPeriod,
         orbitPhase: 90,
         spinPeriod: 420,
-        shipyard: true,
         spawns: [],
-        unlocked: EVERY_MODULE_BUT_360,
-        wanted: EVERY_MODULE_BUT_360,
       });
+      changeStation(ringside, { shipyard: true, unlocked: EVERY_MODULE_BUT_360, wanted: EVERY_MODULE_BUT_360 });
       // Outer: an ice ball, a pair of planets round each other, and a dark far world with one lonely field.
       add(star, "planet", "Pale", { radius: 11000, orbitRadius: 4600000, orbitPhase: 10, atmosphere: 0, burnSpeed: 0 });
       const duo = add(star, "planet", "Duo", { radius: 8000, orbitRadius: 5500000, orbitPhase: 140, atmosphere: 0, burnSpeed: 0 });

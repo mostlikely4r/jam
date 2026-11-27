@@ -7,8 +7,12 @@ import { APPROACH_HOLD, APPROACH_MIN_CLOSING, closingDistance, easeSpeed, firedL
 import { tankCapacity, type ArtShape, type ShapeBlink } from "./fitting";
 import { homeSim } from "./home";
 import { roundTrip } from "./save";
-import { DOCK_OFFSET, TICK, type Sim } from "./sim";
+import { TICK, type Sim } from "./sim";
 import { DEFAULTS } from "./tuning";
+import { frameMountSpot } from "./frameParts";
+
+/** Where the station frame's dock sits from its middle, along its own axis. */
+const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
 
 const WORLD = { ...DEFAULTS, trafficRacers: 0, trafficFloaters: 0, pirates: 0, defenders: 0, testDrones: 0, rockCount: 0, stationUnlocks: false };
 

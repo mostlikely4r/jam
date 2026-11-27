@@ -12,7 +12,21 @@
     "cargo bay",
     "fuel tank",
     "cockpit",
-    "wide cockpit"
+    "wide cockpit",
+    "dock",
+    "storage",
+    "trade",
+    "turret battery",
+    "shop",
+    "refinery",
+    "repair",
+    "shipyard",
+    "projects",
+    "radio",
+    "black market",
+    "refinery pad",
+    "block pad",
+    "berth"
   ],
   "partMounts": {
     "reverse": [
@@ -1642,7 +1656,171 @@
           "width": 3
         }
       ],
-      "mounts": []
+      "mounts": [
+        {
+          "id": "dock",
+          "name": "Dock",
+          "types": [
+            "dock"
+          ],
+          "x": 25,
+          "y": 0,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "dock",
+          "data": {
+            "shape": "box",
+            "size": 150
+          }
+        },
+        {
+          "id": "storage",
+          "name": "Storage",
+          "types": [
+            "storage"
+          ],
+          "x": -6,
+          "y": -6,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "storage"
+        },
+        {
+          "id": "trade",
+          "name": "Trade point",
+          "types": [
+            "trade"
+          ],
+          "x": 0,
+          "y": -6,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "trade",
+          "data": {
+            "buys": [
+              "ore"
+            ],
+            "sells": [
+              "ore"
+            ]
+          }
+        },
+        {
+          "id": "turrets",
+          "name": "Turret battery",
+          "types": [
+            "turret battery"
+          ],
+          "x": 6,
+          "y": -6,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "battery"
+        },
+        {
+          "id": "shop",
+          "name": "Shop",
+          "types": [
+            "shop"
+          ],
+          "x": -6,
+          "y": 0,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "shop"
+        },
+        {
+          "id": "refinery",
+          "name": "Refinery",
+          "types": [
+            "refinery"
+          ],
+          "x": -6,
+          "y": 6,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "refinery"
+        },
+        {
+          "id": "repair",
+          "name": "Repair",
+          "types": [
+            "repair"
+          ],
+          "x": 0,
+          "y": 0,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "repair"
+        },
+        {
+          "id": "shipyard",
+          "name": "Shipyard",
+          "types": [
+            "shipyard"
+          ],
+          "x": 0,
+          "y": 6,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "shipyard"
+        },
+        {
+          "id": "projects",
+          "name": "Projects",
+          "types": [
+            "projects"
+          ],
+          "x": 6,
+          "y": 0,
+          "angle": 0,
+          "scale": 1
+        },
+        {
+          "id": "radio",
+          "name": "Radio",
+          "types": [
+            "radio"
+          ],
+          "x": 6,
+          "y": 6,
+          "angle": 0,
+          "scale": 1
+        },
+        {
+          "id": "refineryPad",
+          "name": "Refinery pad",
+          "types": [
+            "refinery pad"
+          ],
+          "x": -25,
+          "y": 0,
+          "angle": 0,
+          "scale": 1
+        },
+        {
+          "id": "blockPad",
+          "name": "Block pad",
+          "types": [
+            "block pad"
+          ],
+          "x": 25,
+          "y": 25,
+          "angle": 0,
+          "scale": 1
+        },
+        {
+          "id": "haulerBerth",
+          "name": "Hauler berth",
+          "types": [
+            "berth"
+          ],
+          "x": -20,
+          "y": 0,
+          "angle": 0,
+          "scale": 1
+        }
+      ]
     },
     "pirateBase": {
       "edge": [
@@ -1712,7 +1890,79 @@
         ]
       ],
       "shapes": [],
-      "mounts": []
+      "mounts": [
+        {
+          "id": "dock",
+          "name": "Docking ring",
+          "types": [
+            "dock"
+          ],
+          "x": 0,
+          "y": 0,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "dock",
+          "data": {
+            "shape": "ring",
+            "size": 200
+          }
+        },
+        {
+          "id": "storage",
+          "name": "Storage",
+          "types": [
+            "storage"
+          ],
+          "x": -6,
+          "y": -6,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "storage"
+        },
+        {
+          "id": "trade",
+          "name": "Trade point",
+          "types": [
+            "trade"
+          ],
+          "x": 0,
+          "y": -6,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "trade",
+          "data": {
+            "buys": [
+              "ore"
+            ],
+            "sells": [
+              "ore"
+            ]
+          }
+        },
+        {
+          "id": "blackMarket",
+          "name": "Black market",
+          "types": [
+            "black market"
+          ],
+          "x": 6,
+          "y": -6,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "blackMarket"
+        },
+        {
+          "id": "berth",
+          "name": "Black market berth",
+          "types": [
+            "berth"
+          ],
+          "x": 22.5,
+          "y": 0,
+          "angle": 0,
+          "scale": 1
+        }
+      ]
     },
     "deposit": {
       "edge": [
@@ -1752,7 +2002,52 @@
           "width": 3
         }
       ],
-      "mounts": []
+      "mounts": [
+        {
+          "id": "storage",
+          "name": "Storage",
+          "types": [
+            "storage"
+          ],
+          "x": -3,
+          "y": -3,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "storage"
+        },
+        {
+          "id": "trade",
+          "name": "Trade point",
+          "types": [
+            "trade"
+          ],
+          "x": 3,
+          "y": -3,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "trade",
+          "data": {
+            "buys": [
+              "ore"
+            ],
+            "sells": [
+              "ore"
+            ]
+          }
+        },
+        {
+          "id": "turrets",
+          "name": "Turret battery",
+          "types": [
+            "turret battery"
+          ],
+          "x": 0,
+          "y": 3,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "battery"
+        }
+      ]
     }
   },
   "hullInfo": {

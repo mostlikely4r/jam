@@ -20,7 +20,9 @@ import {
   defaultFrame,
   framesForKind,
   spinAngle,
+  stationSettings,
   stringifyWorld,
+  writeStationSettings,
   shipChoices,
   SURFACES,
   walk,
@@ -707,7 +709,11 @@ Layouts: ${layouts.join(", ")}`, "");
       const frame = document.createElement("select");
       for (const model of framesForKind(node.kind)) frame.append(new Option(hullName(model), model, false, model === node.frame));
       frame.addEventListener("change", () => {
+        // A station's settings move with it: its overrides are keyed by the new frame's mounts.
+        const settings = node.kind === "station" ? stationSettings(node) : null;
         node.frame = frame.value;
+        if (settings) writeStationSettings(node, settings);
+        else node.parts = {};
         this.changed();
       });
       size.push(this.labelled("Frame (a hull flagged for this kind; its parts sit on its mounts)", frame));
@@ -823,19 +829,28 @@ Layouts: ${layouts.join(", ")}`, "");
       );
     }
     if (node.kind === "station") {
+      // Its settings are the parts on its frame; what differs from the frame is kept as this place's own.
+      const settings = stationSettings(node);
+      const save = () => writeStationSettings(node, settings);
       const flag = (key: "shipyard" | "projects" | "radio", text: string) => {
         const toggle = document.createElement("label");
         const box = document.createElement("input");
         box.type = "checkbox";
-        box.checked = node[key];
+        box.checked = settings[key];
         box.addEventListener("change", () => {
-          node[key] = box.checked;
+          settings[key] = box.checked;
+          save();
           this.changed();
         });
         toggle.append(box, ` ${text}`);
         return toggle;
       };
-      const storage = this.number(node, "storage", "Storage (cells)", (v) => `${Math.max(0, Math.floor(v))} cells for lockers and spare modules`);
+      const setting = (key: "storage" | "guardCount" | "guardArc" | "guardDistance", text: string, hint: (value: number) => string) =>
+        this.numberInput(text, settings[key], hint, (value) => {
+          settings[key] = value;
+          save();
+        });
+      const storage = setting("storage", "Storage (cells)", (v) => `${Math.max(0, Math.floor(v))} cells for lockers and spare modules`);
       const storageInput = storage.querySelector("input")!;
       storageInput.min = "0";
       storageInput.step = "10";
@@ -848,12 +863,14 @@ Layouts: ${layouts.join(", ")}`, "");
         ]),
         ...this.group("Blueprints", [
           this.text("Unlocked: the modules it has from the start, and sells. A module in no station's list is sold nowhere."),
-          this.moduleList(`unlocked:${node.id}`, node.unlocked, (id, on) => {
-            node.unlocked = on ? withPick(node.unlocked, id as PartId) : withoutPick(node.unlocked, id as PartId);
+          this.moduleList(`unlocked:${node.id}`, settings.unlocked, (id, on) => {
+            settings.unlocked = on ? withPick(settings.unlocked, id as PartId) : withoutPick(settings.unlocked, id as PartId);
+            save();
           }),
           this.text("Wanted: the modules it buys the blueprint for when it can afford them, and what a player may pay toward."),
-          this.moduleList(`wanted:${node.id}`, node.wanted, (id, on) => {
-            node.wanted = on ? withPick(node.wanted, id as PartId) : withoutPick(node.wanted, id as PartId);
+          this.moduleList(`wanted:${node.id}`, settings.wanted, (id, on) => {
+            settings.wanted = on ? withPick(settings.wanted, id as PartId) : withoutPick(settings.wanted, id as PartId);
+            save();
           }),
         ]),
         ...this.group("Sells", [
@@ -861,18 +878,20 @@ Layouts: ${layouts.join(", ")}`, "");
           this.pickList(
             `programs:${node.id}`,
             PROGRAMS.map((program) => ({ id: program.id, label: program.name })),
-            () => node.programs,
+            () => settings.programs,
             (id, on) => {
-              node.programs = on ? withPick(node.programs, id as PartId) : withoutPick(node.programs, id as PartId);
+              settings.programs = on ? withPick(settings.programs, id as PartId) : withoutPick(settings.programs, id as PartId);
+              save();
             },
           ),
           this.text("Hulls: the ones a player can buy here, trading in the hull they fly."),
           this.pickList(
             `hulls:${node.id}`,
             shipModels().map((model) => ({ id: model, label: hullName(model) })),
-            () => node.hulls,
+            () => settings.hulls,
             (id, on) => {
-              node.hulls = on ? withPick(node.hulls, id) : withoutPick(node.hulls, id);
+              settings.hulls = on ? withPick(settings.hulls, id) : withoutPick(settings.hulls, id);
+              save();
             },
           ),
         ]),
@@ -880,11 +899,23 @@ Layouts: ${layouts.join(", ")}`, "");
           this.text("A station that builds projects can fund a deposit by its field and turrets for itself and the deposit, from its own money and parts. One on the radio announces new blueprints and finished projects."),
           flag("projects", "Builds projects"),
           flag("radio", "On the radio"),
-          this.number(node, "guardCount", "Turrets, once built", (v) => `${Math.max(0, Math.floor(v))} turrets in front of the station`),
-          this.number(node, "guardArc", "Turrets' arc (degrees)", (v) => `spread over ${v}° facing its field`),
-          this.number(node, "guardDistance", "Turrets' distance", (v) => `${readableDistance(v)} out from the station`),
+          setting("guardCount", "Turrets, once built", (v) => `${Math.max(0, Math.floor(v))} turrets in front of the station`),
+          setting("guardArc", "Turrets' arc (degrees)", (v) => `spread over ${v}° facing its field`),
+          setting("guardDistance", "Turrets' distance", (v) => `${readableDistance(v)} out from the station`),
         ]),
-        ...this.group("Starting items", this.itemRows(node.items, "n", (item) => ({ item, n: 1 }), (next) => (node.items = next), "Items in this station's store when a new game begins. They come from nowhere.")),
+        ...this.group(
+          "Starting items",
+          this.itemRows(
+            settings.items,
+            "n",
+            (item) => ({ item, n: 1 }),
+            (next) => {
+              settings.items = next;
+              save();
+            },
+            "Items in this station's store when a new game begins. They come from nowhere.",
+          ),
+        ),
       );
     }
     if (!isRoot && !body && node.kind !== "cloud") {
@@ -1096,10 +1127,6 @@ Layouts: ${layouts.join(", ")}`, "");
       | "rockInflow"
       | "carryFull"
       | "carryNone"
-      | "storage"
-      | "guardCount"
-      | "guardArc"
-      | "guardDistance"
       | "width"
       | "height"
       | "ringInner"
@@ -1129,6 +1156,27 @@ Layouts: ${layouts.join(", ")}`, "");
       // A cloud reaches as far as half its longer side, which is what picking and culling read.
       if (key === "width" || key === "height") node.radius = cloudRadius(node.width, node.height);
       help.textContent = hint(value);
+      this.changed();
+    });
+    const label = this.labelled(text, input);
+    label.append(help);
+    return label;
+  }
+
+  /** A number field for a value that isn't one of the node's own: it shows `value` and hands each new one to `set`. */
+  private numberInput(text: string, value: number, hint: (value: number) => string, set: (value: number) => void): HTMLLabelElement {
+    const input = document.createElement("input");
+    input.type = "number";
+    input.step = "any";
+    input.value = String(value);
+    const help = document.createElement("span");
+    help.className = "hint";
+    help.textContent = hint(value);
+    input.addEventListener("input", () => {
+      const next = Number(input.value);
+      if (input.value === "" || !Number.isFinite(next)) return;
+      set(next);
+      help.textContent = hint(next);
       this.changed();
     });
     const label = this.labelled(text, input);

@@ -5,7 +5,11 @@ import { SHIP_MODELS, type PartId, type ThrusterRole } from "./parts";
 import { bayBox, drawBay, drawTanks, drawTurret, drawVectorShip, hullTint, tankBoxes } from "./shipArt";
 import { DEFAULTS } from "./tuning";
 import { partOf as partOfForTest } from "./parts";
-import { DOCK_OFFSET, SHIP_RADIUS, Sim, TICK, type Loose } from "./sim";
+import { SHIP_RADIUS, Sim, TICK, type Loose } from "./sim";
+import { frameMountSpot } from "./frameParts";
+
+/** Where the station frame's dock sits from its middle, along its own axis. */
+const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
 
 /** How much ore an empty bay of this part holds, at one ore per cell. */
 const bayCells = (id: "smallBay" | "bay" | "largeBay") => partOfForTest(id).bay!.w * partOfForTest(id).bay!.h;

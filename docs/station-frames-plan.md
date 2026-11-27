@@ -186,6 +186,45 @@ the user to try: the checks are tests, and the Try it below is one look at the e
 
 ### 2. Capabilities as parts
 
+*Built* 2026-11-27. What differs from the steps below, and why:
+
+- **Frame parts are their own list, not ship parts.** `src/frameParts.ts` holds the kinds (dock,
+  storage, trade point, turret battery, and the thin shop, refinery, repair, shipyard, projects,
+  radio and black market), each with its data, its mount type and its `onlyOn` mark. Ship parts
+  (`PARTS`, `PartId`) are items with prices and icons that shops list; putting a dock among them
+  would leak into every shop and item check. A frame mount names its part in `framePart` and its
+  data in `data` (`src/hulls.json`); `resolveParts(frame, overrides)` is what an entity has.
+- **Where the parts live.** A station's and the pirate base's body (`FrameBody.parts`) and a
+  deposit (`Deposit.parts`, always its frame's; a save's are re-read from the frame on load).
+- **Storage holds capacity, not yet the contents.** The ore and stock maps, `pirateOre` and the
+  deposit's ore stay on the entity where they were; moving them into the part is churn for no
+  play, and the Saves section's move waits for the step that changes the save anyway.
+- **The node's overrides are keyed by mount id** (`WorldNode.parts`, `StationSpec.parts`): an
+  entry fits a part with data over the frame's, `null` empties the mount. The designer edits a
+  station through `stationSettings` / `writeStationSettings`, which write only what differs from
+  the frame; a world with the old loose fields reads into overrides that say the same, and
+  `npm run world` rewrote the shipped file (same settings for all three stations, checked).
+- **Pads and berths are mounts with no part.** The refinery pad, block pad and hauler berth on the
+  station frame, the black market's berth on the pirate base's, at the old numbers (the black
+  market uses its berth's distance out, along its lane, as before). The constants are gone;
+  `HAND_OVER_REACH` (300) keeps the places that used the dock's length as a reach, not a place.
+- **What reads the parts:** docking (`docks`, `dockedAt`, the pirates' ring, the pilots' berth
+  and pad checks), the shop lists, storage, shipyard, projects, radio, turrets (count, arc,
+  distance, and a battery only where a battery part is), the refinery (a refinery part and a pad),
+  repair (a station's repair part; pirates are patched up at their base as before), haulers (a
+  trade point that sells ore and a berth), every ore sale (a trade point that buys it), what a
+  shop sells (nothing without a shop part, even what it had unlocked) and the black market (it
+  only calls at a pirate base with its part).
+- **The tuning still stands in** where a place says nothing of its own: storage cells, turrets'
+  numbers, and the shipyard switch. A station's turret numbers now follow the tuning sliders
+  unless its node sets its own; before, a world node fixed them at the defaults.
+- **The hull designer** shows a "Frame comes with" picker on a frame's mounts: every frame part,
+  the refused ones greyed with the reason ("Station only for now").
+- **Plays the same:** the hour of warm-up `npm run world` runs for `src/start.json` came out
+  identical to before, field for field, apart from the new `parts`.
+- **Tests:** `src/frameParts.test.ts`. Tests that built stations from loose fields pass them
+  through `placeParts`; tests that used `DOCK_OFFSET` read the frame's dock mount.
+
 - New mount types in `mountTypes`: dock, storage, trade, turret battery, refinery pad, block pad,
   berth, and one per thin part (shop, refinery, repair, shipyard, projects, radio, black market).
 - New part kinds with their data as listed under **Parts**, fitted to the three frames' mounts as

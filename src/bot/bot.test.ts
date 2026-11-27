@@ -3,11 +3,15 @@ import { hullMax, refresh } from "../fitting";
 import { homeSim, type Home } from "../home";
 import { partOf, type PartId } from "../parts";
 import { ClickPilot } from "../pilot";
-import { DOCK_OFFSET, SHIP_RADIUS, STATION_HALF, TICK, type Loose, type Rock, type Ship, type Sim } from "../sim";
+import { SHIP_RADIUS, STATION_HALF, TICK, type Loose, type Rock, type Ship, type Sim } from "../sim";
 import { DEFAULTS, type Tuning } from "../tuning";
 import { BOT_CALLS, Bot, CRUISE_SPEED, FIRE_CLOSE, SHIP_CLEARANCE, SIGHT, UNDOCK_SPEED } from "./bot";
 import { BotLog, type RunInfo } from "./log";
 import { FLOATER_JOURNEY, type Plan } from "./plan";
+import { frameMountSpot } from "../frameParts";
+
+/** Where the station frame's dock sits from its middle, along its own axis. */
+const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
 
 /** The plain home, with nothing else in it to make a run hard to read. */
 function world(extra: Partial<Tuning> & Partial<Home> = {}): Sim {

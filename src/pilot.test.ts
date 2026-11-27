@@ -4,9 +4,13 @@ import { APPROACH, BOUGHT, HEADING_BACK, OUTBOUND, THANKS, voiceLines, type Line
 import { PARTS, partOf, type PartId } from "./parts";
 import { moduleIds } from "./items";
 import { DEFAULTS } from "./tuning";
-import { DOCK_OFFSET, MAX_HULL, SHIP_RADIUS, STATION_HALF, Sim, TICK } from "./sim";
+import { MAX_HULL, SHIP_RADIUS, STATION_HALF, Sim, TICK } from "./sim";
 import { ClickPilot } from "./pilot";
 import { partOf as partInfo } from "./parts";
+import { frameMountSpot } from "./frameParts";
+
+/** Where the station frame's dock sits from its middle, along its own axis. */
+const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
 
 /**
  * Reaches the flying arithmetic the pilot keeps to itself, for the pure-logic tests. It flies

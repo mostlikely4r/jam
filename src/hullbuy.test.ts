@@ -4,7 +4,12 @@ import { copyHull, HULL_INFO, HULL_MOUNTS, hullDefaults, hullMax, refresh, shipF
 import { type PartId, type ShipModel } from "./parts";
 import { roundTrip } from "./save";
 import { DEFAULTS } from "./tuning";
-import { DOCK_OFFSET, type HullPlan, Sim } from "./sim";
+import { type HullPlan, Sim } from "./sim";
+import { frameMountSpot } from "./frameParts";
+import { shopData } from "./sim";
+
+/** Where the station frame's dock sits from its middle, along its own axis. */
+const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
 
 // Hull buying, `docs/hull-buying-plan.md` step 2.
 
@@ -31,7 +36,7 @@ function docked(model: "racer" | "floater", hulls: ShipModel[]): Sim {
   sim.ship.x = sim.ship.px = sim.station.x + DOCK_OFFSET;
   sim.ship.y = sim.ship.py = sim.station.y;
   sim.ship.credits = 10000;
-  sim.shopBase().spec.hulls = hulls;
+  shopData(sim.shopBase().body).hulls = hulls;
   return sim;
 }
 
@@ -71,7 +76,7 @@ describe("buying a hull", () => {
     expect(sim.ship.credits).toBe(credits - 600);
     expect(base.account.credits).toBe(stationCredits + 600);
     // Cheaper the other way, and the difference comes back.
-    base.spec.hulls = ["racer"];
+    shopData(base.body).hulls = ["racer"];
     expect(sim.buyHull(sim.ship, "racer")).toBe(true);
     expect(sim.ship.credits).toBe(credits);
   });
@@ -164,7 +169,7 @@ describe("buying a hull", () => {
     // A hull with no bay: the cargo goes to the locker, and with the locker full there's no sale.
     copyHull("racer", "noBay");
     HULL_MOUNTS.noBay.splice(HULL_MOUNTS.noBay.findIndex((mount) => mount.id === "section"), 1);
-    sim.shopBase().spec.hulls = ["noBay"];
+    shopData(sim.shopBase().body).hulls = ["noBay"];
     expect(plan(sim, "noBay").locker.filter((each) => each.module.part === "ore")).toHaveLength(3);
     fillLocker(sim);
     expect(sim.buyHull(ship, "noBay")).toBe(false);
@@ -239,7 +244,7 @@ describe("buying a hull", () => {
     const sim = docked("racer", []);
     expect(sim.hullsSold()).toEqual([]);
     expect(sim.planHull(sim.ship, "floater")).toEqual({ refused: "Not sold here" });
-    sim.shopBase().spec.hulls = ["floater", "racer"];
+    shopData(sim.shopBase().body).hulls = ["floater", "racer"];
     expect(sim.planHull(sim.ship, "racer")).toEqual({ refused: "You fly one already" });
     sim.ship.x += 5000;
     expect(sim.planHull(sim.ship, "floater")).toEqual({ refused: "Only in a dock" });

@@ -1,8 +1,8 @@
 import { Chatter, type FaceKey } from "./chatter";
-import { type BayGrid, type BlueprintId, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, SHIP_MODELS, TOW_BUY_ORDER, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
+import { type BayGrid, type BlueprintId, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, TOW_BUY_ORDER, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
 import { hubRecipes, isOreItem, itemDef, oreItems, saleRecipes } from "./items";
 import { copyPicks, pickOf, PROGRAMS, setPick as setTweakPick } from "./programs";
-import { computerSize, DAMAGED_AT, facing, fitPart, hullInfo, hullMax, hullMounts, isDecal, isTurretGun, mountTakes, mountsOf, thrustOf, tractorMounts, turretGunId, turretMounts, type Mount, type Fitting, type MountPlace, hullDefaults, install, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works, fullTanks, shareTanks, tankCapacity, tankMounts } from "./fitting";
+import { computerSize, DAMAGED_AT, facing, fitPart, hullInfo, hullMax, hullMounts, isDecal, isTurretGun, mountTakes, mountsOf, thrustOf, tractorMounts, turretGunId, turretMounts, type Mount, type Fitting, type MountPlace, hullDefaults, install, shipModels, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works, fullTanks, shareTanks, tankCapacity, tankMounts } from "./fitting";
 import { ClickPilot, DronePilot, FacePilot, FighterPilot, LOW_HULL, type TurnAway } from "./pilot";
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
@@ -546,6 +546,22 @@ export interface Battery {
   paid?: number;
 }
 
+/**
+ * Where a thing that stands still in the world should be: the spot the designer gave it on its
+ * orbit. It keeps to its rails and nothing ever pushes it. A field is its own place; a station and
+ * the pirate base have a body anchored to theirs (`FrameBody`).
+ */
+export interface Place {
+  x: number;
+  y: number;
+  px: number;
+  py: number;
+  /** Its chain of orbits. */
+  orbits: Orbit[];
+  /** Its own true orbit for the chart, when `orbits` can't show it. */
+  rings?: OrbitRing[];
+}
+
 /** A place from the layout: where it is comes from its chain of orbits and the clock, never added up. */
 export interface Poi {
   name: "field" | "station" | "pirate base";
@@ -568,11 +584,33 @@ export interface Poi {
 }
 
 /**
+ * A station's or the pirate base's body: the thing itself, drawn from its frame, anchored to its
+ * place by an offset, turning with its own spin, and carrying what's near it from where it actually
+ * is. What points at a station (docking, targeting, the maps, the autopilot) points here, never at
+ * the place. Its `orbits` and `rings` are its place's: the rails it is anchored to.
+ */
+export interface FrameBody extends Poi {
+  name: "station" | "pirate base";
+  /** Its frame: a hull in `src/hulls.json` used by stations, or by the pirate base. */
+  frame: ShipModel;
+  place: Place;
+  /** How far it stands from its place, in the world's frame. Zero: nothing can push a station yet. */
+  offset: { x: number; y: number };
+}
+
+/** The frames a station, the pirate base and a field deposit are drawn from when their spec names none. */
+export const STATION_FRAME = "station";
+export const PIRATE_BASE_FRAME = "pirateBase";
+export const DEPOSIT_FRAME = "deposit";
+
+/**
  * The pirate base: where pirates dock, sell and buy, and the black market calls. Where it is
  * comes from the layout each time; what it holds (ore, money, pirates) is the world's, and saved.
  */
 export interface PirateBaseSpec {
   name: string;
+  /** Its frame, by hull name. Without one, `PIRATE_BASE_FRAME`. */
+  frame?: ShipModel;
   rotationPeriod: number;
   /** Its spin at clock 0, in radians. */
   spinPhase?: number;
@@ -629,6 +667,8 @@ export interface MiningField {
 export interface StationSpec {
   id: string;
   name: string;
+  /** Its frame, by hull name. Without one, `STATION_FRAME`. */
+  frame?: ShipModel;
   rotationPeriod: number;
   /** Its spin at clock 0, in radians. */
   spinPhase?: number;
@@ -694,7 +734,8 @@ function newsKey(report: Report): string {
 export interface Base {
   id: string;
   spec: StationSpec;
-  poi: Poi;
+  /** The station itself: drawn from its frame, anchored to its place, docked at. */
+  body: FrameBody;
   account: { credits: number };
   /** Ore bought and held for the next hauler, by item. */
   ore: Map<PartId, number>;
@@ -1042,7 +1083,7 @@ export interface TargetSpot extends Body {
  */
 export function targetSpot(target: Targetable): TargetSpot {
   if ("spec" in target) {
-    const poi = target.poi;
+    const poi = target.body;
     return { x: poi.x, y: poi.y, px: poi.px, py: poi.py, vx: (poi.x - poi.px) / TICK, vy: (poi.y - poi.py) / TICK, radius: STATION_HALF };
   }
   if ("model" in target) return { x: target.x, y: target.y, px: target.px, py: target.py, vx: target.vx, vy: target.vy, radius: SHIP_RADIUS };
@@ -1283,7 +1324,7 @@ export class Sim {
   traffic: DronePilot[] = [];
   fighters: FighterPilot[] = [];
   /** Where pirates dock: the layout's pirate base, in a game with pirates. */
-  pirateBase: Poi | null = null;
+  pirateBase: FrameBody | null = null;
   /** The layout's pirate base, if it has one. Not saved: the layout hands it over each time. */
   pirateSpec: PirateBaseSpec | null = null;
   /** Every station with a dock, from the layout, in its order. */
@@ -1382,7 +1423,7 @@ export class Sim {
    */
   get station(): Poi {
     const [first] = this.bases;
-    return first?.poi ?? NOWHERE;
+    return first?.body ?? NOWHERE;
   }
   events: SimEvent[] = [];
   stats: Stats = { bestOre: 0, topSpeed: 0 };
@@ -1557,7 +1598,7 @@ export class Sim {
     }
     this.placePirateBase();
     // Every base starts out as a starter base.
-    this.bases = this.bases.map((base) => this.makeBase(base.id, base.spec, base.poi));
+    this.bases = this.bases.map((base) => this.makeBase(base.id, base.spec, base.body));
     for (const base of this.bases) this.fitBase(base);
     this.savedBases = new Map();
     this.startPlayer();
@@ -1719,7 +1760,7 @@ export class Sim {
   }
 
   /** A base as it starts out: the starter base's money and store, and its first hauler on the way. */
-  private makeBase(id: string, spec: StationSpec, poi: Poi): Base {
+  private makeBase(id: string, spec: StationSpec, body: FrameBody): Base {
     const { tuning } = this;
     // The items a station starts with come from nowhere: a listed hole in the item ledger.
     const stock = new Map(
@@ -1730,7 +1771,7 @@ export class Sim {
     return {
       id,
       spec,
-      poi,
+      body,
       account: { credits: tuning.stationStartCredits },
       ore: new Map<PartId, number>(tuning.stationStartOre > 0 ? [[PLAIN_ORE, tuning.stationStartOre]] : []),
       partCarry: 0,
@@ -1803,18 +1844,18 @@ export class Sim {
   /** The field a base sits by: the one its spec names, or the nearest. */
   baseField(base: Base): MiningField {
     const { field } = base.spec;
-    return (field !== undefined && this.miningFields().find((each) => each.id === field)) || this.miningFieldAt(base.poi.x, base.poi.y);
+    return (field !== undefined && this.miningFields().find((each) => each.id === field)) || this.miningFieldAt(base.body.x, base.body.y);
   }
 
   /** A base's own defenders, docked at it. */
   private addDefenders(base: Base): void {
-    const dock = this.dockPoint(false, base.poi);
+    const dock = this.dockPoint(false, base.body);
     for (let i = 0; i < this.tuning.defenders; i++) this.addFighter(dock.x, dock.y, "defender", base.id);
   }
 
   /** The base whose station this is. */
   baseOf(station: Poi): Base | null {
-    return this.bases.find((base) => base.poi === station) ?? null;
+    return this.bases.find((base) => base.body === station) ?? null;
   }
 
   /** The base a ship is docked at, or null. */
@@ -1834,7 +1875,7 @@ export class Sim {
   }
 
   private fitBase(base: Base): void {
-    this.fitPlace(base.poi, base.spec);
+    this.fitBody(base.body, base.spec);
   }
 
   /** Puts a place where its orbits say now, with its spec's carrying. */
@@ -1847,16 +1888,55 @@ export class Sim {
     poi.y = poi.py = at.y;
   }
 
-  /** Moves a place along its orbits to the clock, and turns it, for one tick. */
-  private movePlace(poi: Poi, spec: { orbits: Orbit[]; rotationPeriod: number }, dt: number): void {
-    poi.px = poi.x;
-    poi.py = poi.y;
-    poi.prevRotation = poi.rotation;
+  /**
+   * Puts a body's place where its orbits say now, and the body at its offset from it. The carrying
+   * is the body's: it carries from where it actually is, so a pushed station takes its field along.
+   */
+  private fitBody(body: FrameBody, spec: { frame?: ShipModel; orbits: Orbit[]; rings?: OrbitRing[]; carryFull: number; carryNone: number }): void {
+    const { place, offset } = body;
     const at = orbitsAt(spec.orbits, this.clock);
-    poi.x = at.x;
-    poi.y = at.y;
-    poi.turn = orbitRate(spec.rotationPeriod) * dt;
+    place.orbits = spec.orbits;
+    place.rings = spec.rings;
+    place.x = place.px = at.x;
+    place.y = place.py = at.y;
+    body.frame = spec.frame ?? body.frame;
+    body.orbits = spec.orbits;
+    body.rings = spec.rings;
+    body.carry = { full: spec.carryFull, none: Math.max(spec.carryFull, spec.carryNone) };
+    body.x = body.px = place.x + offset.x;
+    body.y = body.py = place.y + offset.y;
+  }
+
+  /** Moves a place along its orbits to the clock, for one tick. */
+  private moveOnRails(place: { x: number; y: number; px: number; py: number }, orbits: Orbit[]): void {
+    place.px = place.x;
+    place.py = place.y;
+    const at = orbitsAt(orbits, this.clock);
+    place.x = at.x;
+    place.y = at.y;
+  }
+
+  /** Turns a field or a body by its own spin, for one tick. */
+  private spin(poi: Poi, rotationPeriod: number, dt: number): void {
+    poi.prevRotation = poi.rotation;
+    poi.turn = orbitRate(rotationPeriod) * dt;
     poi.rotation += poi.turn;
+  }
+
+  /** Moves a field along its orbits to the clock, and turns it, for one tick: a field is its own place. */
+  private movePlace(poi: Poi, spec: { orbits: Orbit[]; rotationPeriod: number }, dt: number): void {
+    this.moveOnRails(poi, spec.orbits);
+    this.spin(poi, spec.rotationPeriod, dt);
+  }
+
+  /** Moves a body's place along its rails, the body with it at its offset, and turns the body by its own spin. */
+  private moveBody(body: FrameBody, spec: { orbits: Orbit[]; rotationPeriod: number }, dt: number): void {
+    this.moveOnRails(body.place, spec.orbits);
+    body.px = body.x;
+    body.py = body.y;
+    body.x = body.place.x + body.offset.x;
+    body.y = body.place.y + body.offset.y;
+    this.spin(body, spec.rotationPeriod, dt);
   }
 
   /** Every field with its size. */
@@ -1982,9 +2062,15 @@ export class Sim {
       this.pirateBase = null;
       return;
     }
-    const poi = this.makePoi("pirate base", PIRATE_BASE_RADIUS, (spec.spinPhase ?? 0) + orbitRate(spec.rotationPeriod) * this.clock);
-    this.fitPlace(poi, spec);
-    this.pirateBase = poi;
+    const body = this.makeBody("pirate base", spec.frame ?? PIRATE_BASE_FRAME, PIRATE_BASE_RADIUS, (spec.spinPhase ?? 0) + orbitRate(spec.rotationPeriod) * this.clock);
+    this.fitBody(body, spec);
+    this.pirateBase = body;
+  }
+
+  /** A body at the middle, turned to `rotation`, on a place at the middle, until its spec puts them where they go. */
+  private makeBody(name: FrameBody["name"], frame: ShipModel, reach: number, rotation: number): FrameBody {
+    const place: Place = { x: 0, y: 0, px: 0, py: 0, orbits: [] };
+    return { ...this.makePoi(name, reach, rotation), name, frame, place, offset: { x: 0, y: 0 } };
   }
 
   /** A place at the middle, turned to `rotation`, until its spec puts it where it goes. */
@@ -2036,7 +2122,7 @@ export class Sim {
       return previous ? { x: pirates.px, y: pirates.py } : { x: pirates.x, y: pirates.y };
     }
     const base = ship ? this.homeBaseOf(ship) : this.nearestBase(this.field.x, this.field.y);
-    return this.dockPoint(previous, base.poi);
+    return this.dockPoint(previous, base.body);
   }
 
   /** Whether a ship is where it can sell and repair. */
@@ -2337,7 +2423,7 @@ export class Sim {
 
   /** The berth: where a docked hauler sits and which way it points, now or a tick ago. */
   haulerBerth(previous: boolean, base: Base): { x: number; y: number; angle: number } {
-    const station = base.poi;
+    const station = base.body;
     const rotation = previous ? station.prevRotation : station.rotation;
     const cx = previous ? station.px : station.x;
     const cy = previous ? station.py : station.y;
@@ -2350,7 +2436,7 @@ export class Sim {
 
   /** Where a hauler stops before sliding into its berth: straight out from it. */
   haulerStandoff(previous: boolean, base: Base): { x: number; y: number } {
-    const station = base.poi;
+    const station = base.body;
     const rotation = previous ? station.prevRotation : station.rotation;
     const cx = previous ? station.px : station.x;
     const cy = previous ? station.py : station.y;
@@ -2363,7 +2449,7 @@ export class Sim {
    * would pass through the station, a point beside the station on the near side.
    */
   private haulerWaypoint(base: Base, fromX: number, fromY: number, toX: number, toY: number): { x: number; y: number; detour: boolean } {
-    const station = base.poi;
+    const station = base.body;
     const dx = toX - fromX;
     const dy = toY - fromY;
     const length2 = dx * dx + dy * dy || 1;
@@ -2385,7 +2471,7 @@ export class Sim {
 
   /** The way out and in for a base's haulers: from its station, away from the field it sits by. */
   private haulerLane(base: Base): { x: number; y: number } {
-    const station = base.poi;
+    const station = base.body;
     const field = this.extraFields.length > 0 ? this.baseField(base).poi : NOWHERE;
     const dx = station.x - field.x;
     const dy = station.y - field.y;
@@ -2415,7 +2501,7 @@ export class Sim {
       default: {
         if (!tuning.haulers) return null;
         // The next one only sets out its interval after this one is out of sight.
-        const left = Math.max(0, HAULER_GONE - Math.hypot(hauler.x - base.poi.x, hauler.y - base.poi.y));
+        const left = Math.max(0, HAULER_GONE - Math.hypot(hauler.x - base.body.x, hauler.y - base.body.y));
         const speed = Math.hypot(hauler.vx, hauler.vy);
         return (Math.sqrt(speed * speed + 2 * HAULER_LEAVE_ACCEL * left) - speed) / HAULER_LEAVE_ACCEL + fromLaunch;
       }
@@ -2439,7 +2525,7 @@ export class Sim {
   /** The hauler's legs: coming in, docking, loading, undocking and leaving. */
   private flyHauler(base: Base, dt: number): void {
     const { tuning } = this;
-    const station = base.poi;
+    const station = base.body;
     // Each base's blueprints come in on its own haulers.
     if (!base.hauler) {
       if (!tuning.haulers) {
@@ -2802,7 +2888,7 @@ export class Sim {
   }
 
   private startDocking(base: Base, hauler: Hauler, berth: { x: number; y: number; angle: number }): void {
-    const rotation = base.poi.rotation;
+    const rotation = base.body.rotation;
     const dx = hauler.x - berth.x;
     const dy = hauler.y - berth.y;
     hauler.dockOffset = {
@@ -2912,7 +2998,7 @@ export class Sim {
   orderDeliver(base: Base): boolean {
     const { ship } = this;
     if (!ship.tow || isBlock(ship.tow) || !ship.parts.has("towControl") || !ship.parts.has("clickMove")) return false;
-    this.clickPilot.deliverTo(base.poi);
+    this.clickPilot.deliverTo(base.body);
     return true;
   }
 
@@ -3120,7 +3206,7 @@ export class Sim {
 
   /** The hulls a base sells, by name: those on its list that the hull file has. */
   hullsSold(base: Base = this.shopBase()): ShipModel[] {
-    return (base.spec.hulls ?? []).filter((model) => SHIP_MODELS.includes(model));
+    return (base.spec.hulls ?? []).filter((model) => shipModels().includes(model));
   }
 
   blueprintPrice(id: BlueprintId): number {
@@ -3219,7 +3305,7 @@ export class Sim {
     if (!this.tuning.chatter || !base.spec.radio) return;
     this.chatter.unlocked(
       this,
-      base.poi,
+      base.body,
       arrived.map((id) => (id === "drone" ? "drones" : partOf(id).label.toLowerCase())),
     );
   }
@@ -3241,10 +3327,10 @@ export class Sim {
 
   /** Where a station's block pad is, in the world: on its dock side, off the dock's own line. */
   blockSpot(base: Base, previous = false): { x: number; y: number } {
-    const { poi } = base;
-    const rotation = previous ? poi.prevRotation : poi.rotation;
-    const x = previous ? poi.px : poi.x;
-    const y = previous ? poi.py : poi.y;
+    const { body } = base;
+    const rotation = previous ? body.prevRotation : body.rotation;
+    const x = previous ? body.px : body.x;
+    const y = previous ? body.py : body.y;
     return {
       x: x + Math.cos(rotation) * BLOCK_PAD.x - Math.sin(rotation) * BLOCK_PAD.y,
       y: y + Math.sin(rotation) * BLOCK_PAD.x + Math.cos(rotation) * BLOCK_PAD.y,
@@ -3488,7 +3574,7 @@ export class Sim {
   /** A base's deposit: out by the field it sits by, on that base's side. */
   private addDeposit(base: Base, fromSwitch: boolean, partsLeft: number, purse = 0): Deposit {
     const at = this.baseField(base).poi;
-    const toward = base.poi;
+    const toward = base.body;
     const { x, y } = this.depositSpot(at, toward);
     const name = "field deposit";
     const blocks = Math.max(1, Math.ceil(partsLeft / this.tuning.blockParts));
@@ -3518,7 +3604,7 @@ export class Sim {
       const base = this.projectBase(deposit);
       if (base && this.extraFields.length > 0) {
         deposit.at = this.baseField(base).poi;
-        deposit.toward = base.poi;
+        deposit.toward = base.body;
       }
       if (!deposit.fromSwitch) this.normalizeProject(deposit);
       deposit.px = deposit.x;
@@ -3532,7 +3618,7 @@ export class Sim {
     const base = this.projectBase(deposit);
     base?.blueprintsOrdered.delete("deposit");
     this.settleProject(deposit);
-    if (this.tuning.chatter && base?.spec.radio) this.chatter.depositBuilt(this, base.poi);
+    if (this.tuning.chatter && base?.spec.radio) this.chatter.depositBuilt(this, base.body);
   }
 
   /**
@@ -3567,7 +3653,7 @@ export class Sim {
   }
 
   private addBattery(base: Base, id: Battery["id"], fromSwitch: boolean, partsLeft: number, purse = 0): void {
-    const host = id === "stationGuards" ? base.poi : this.deposits.find((deposit) => deposit.base === base.id && deposit.partsLeft <= 0);
+    const host = id === "stationGuards" ? base.body : this.deposits.find((deposit) => deposit.base === base.id && deposit.partsLeft <= 0);
     if (!host) return;
     const count = id === "stationGuards" ? this.guardsOf(base).count : this.tuning.depositGuardCount;
     const guns: Guard[] = [];
@@ -3640,7 +3726,7 @@ export class Sim {
       if (!battery.fromSwitch) this.normalizeProject(battery);
       // A station's turrets stand on its station as the layout has it now, a loaded game's too.
       const base = this.projectBase(battery);
-      if (battery.id === "stationGuards" && base) battery.host = base.poi;
+      if (battery.id === "stationGuards" && base) battery.host = base.body;
       this.placeGuards(battery);
     }
   }
@@ -3650,7 +3736,7 @@ export class Sim {
     const base = this.projectBase(battery);
     base?.blueprintsOrdered.delete(battery.id);
     this.settleProject(battery);
-    if (this.tuning.chatter && base?.spec.radio) this.chatter.guardsBuilt(this, base.poi, battery.id === "stationGuards");
+    if (this.tuning.chatter && base?.spec.radio) this.chatter.guardsBuilt(this, base.body, battery.id === "stationGuards");
   }
 
   /** Whether a spot is inside the reach of any finished turrets. */
@@ -3812,7 +3898,7 @@ export class Sim {
     let found: Base | null = null;
     for (const base of this.bases) {
       if (base === from || excluded.has(base.id)) continue;
-      const distance = Math.hypot(base.poi.x - from.poi.x, base.poi.y - from.poi.y);
+      const distance = Math.hypot(base.body.x - from.body.x, base.body.y - from.body.y);
       if (distance < best) {
         best = distance;
         found = base;
@@ -5103,7 +5189,7 @@ export class Sim {
     const base = this.serviceBase(buyer);
     if (!this.unlocked("drone", base)) return null;
     this.chargeForService(buyer, tuning.dronePrice, base);
-    const dock = this.dockPoint(false, base.poi);
+    const dock = this.dockPoint(false, base.body);
     this.events.push({ type: "sale", x: dock.x, y: dock.y });
     const drone = this.addDrone(dock.x, dock.y);
     // The player's drones work for the player, and buy upgrades from what it can spare.
@@ -5174,7 +5260,7 @@ export class Sim {
 
   /** Every station with a dock, in the layout's order. */
   get docks(): Poi[] {
-    return this.bases.map((base) => base.poi);
+    return this.bases.map((base) => base.body);
   }
 
   /** Whether a dock rebuilds wrecks. */
@@ -5325,8 +5411,8 @@ export class Sim {
   /** Each POI follows a fixed circle or ellipse around its parent, or the system's center. */
   private movePois(dt: number): void {
     for (const { spec, poi } of this.extraFields) this.movePlace(poi, spec, dt);
-    if (this.pirateBase && this.pirateSpec) this.movePlace(this.pirateBase, this.pirateSpec, dt);
-    for (const { spec, poi } of this.bases) this.movePlace(poi, spec, dt);
+    if (this.pirateBase && this.pirateSpec) this.moveBody(this.pirateBase, this.pirateSpec, dt);
+    for (const { spec, body } of this.bases) this.moveBody(body, spec, dt);
   }
 
   /**
@@ -5336,7 +5422,9 @@ export class Sim {
   poiAt(poi: Poi, time: number): { x: number; y: number } {
     if (!poi.orbits) return { x: poi.x, y: poi.y };
     const { x, y } = orbitsAt(poi.orbits, time);
-    return { x, y };
+    // A body stands at its offset from the place its rails carry.
+    const offset = "offset" in poi ? (poi as FrameBody).offset : null;
+    return offset ? { x: x + offset.x, y: y + offset.y } : { x, y };
   }
 
   /**
@@ -5379,7 +5467,7 @@ export class Sim {
       this.bases = stationSpecs.map((spec) => {
         let base = kept.get(spec.id);
         if (!base) {
-          base = this.makeBase(spec.id, spec, this.makePoi("station", STATION_REACH, (spec.spinPhase ?? 0) + orbitRate(spec.rotationPeriod) * this.clock));
+          base = this.makeBase(spec.id, spec, this.makeBody("station", spec.frame ?? STATION_FRAME, STATION_REACH, (spec.spinPhase ?? 0) + orbitRate(spec.rotationPeriod) * this.clock));
           this.fitBase(base);
           // A new base comes with its defenders. One from a save has them in the save already.
           if (!this.takeSaved(base)) this.addDefenders(base);
@@ -5396,7 +5484,7 @@ export class Sim {
     if (pirates !== undefined) {
       this.pirateSpec = pirates;
       if (!pirates || this.tuning.pirates <= 0) this.pirateBase = null;
-      else if (this.pirateBase) this.fitPlace(this.pirateBase, pirates);
+      else if (this.pirateBase) this.fitBody(this.pirateBase, pirates);
       else this.placePirateBase();
     }
 
@@ -5406,7 +5494,7 @@ export class Sim {
       const removed =
         poi.orbits !== undefined &&
         !this.extraFields.some((extra) => extra.poi === poi) &&
-        !this.bases.some((base) => base.poi === poi) &&
+        !this.bases.some((base) => base.body === poi) &&
         poi !== this.pirateBase;
       if (!was || removed) return { x: 0, y: 0 };
       return { x: poi.x - was.x, y: poi.y - was.y };
@@ -5433,7 +5521,7 @@ export class Sim {
       if (at) shift(body, moved(at));
       else if (fieldsBefore.length > 0) shift(body, moved(fieldsBefore[this.fieldAtBefore(fieldsBefore, before, body)].poi));
     }
-    for (const base of this.bases) if (base.hauler) shift(base.hauler, moved(base.poi));
+    for (const base of this.bases) if (base.hauler) shift(base.hauler, moved(base.body));
     if (this.blackMarket) shift(this.blackMarket, moved(pirateBase ?? this.field));
     // These follow their POIs, and a jump in one of them would carry whatever is inside it.
     this.moveDeposits();
@@ -5742,7 +5830,7 @@ export class Sim {
   /** The base the player has pinned as home, or null. A base that's gone leaves no arrow. */
   private homeTarget(): Target | null {
     const base = this.bases.find((each) => each.id === this.ship.home);
-    return base ? { poi: base.poi } : null;
+    return base ? { poi: base.body } : null;
   }
 
   /** What a target is, in the words the game uses for it: a destination arrow's label. */
@@ -5780,7 +5868,7 @@ export class Sim {
             ? `pays ${credits} for ${sale.sold} of ${sale.total} ore`
             : `pays ${credits} for ${sale.sold} ore`;
     const lines = [
-      `${sale.takes ? "" : `${FULL_CROSS} `}${this.placeName(base.poi)}`,
+      `${sale.takes ? "" : `${FULL_CROSS} `}${this.placeName(base.body)}`,
       `Credits: ${base.account.credits.toLocaleString("en-US")}`,
       `Hauler: ${hauler}`,
       hold,
@@ -5970,7 +6058,7 @@ export class Sim {
     const { ship } = pilot;
     const { distress } = this;
     if (ship.faction !== "defender" || !distress || distress.ship === ship) return false;
-    return this.nearestDock(distress.ship.x, distress.ship.y) === this.homeBaseOf(ship).poi;
+    return this.nearestDock(distress.ship.x, distress.ship.y) === this.homeBaseOf(ship).body;
   }
 
   /**
@@ -6201,22 +6289,22 @@ export class Sim {
         const field = fields.find((each) => each.id === record.target) ?? fields[0];
         return this.poiAt(field.poi, time);
       }
-      return this.poiAt(this.recordBase(record).poi, time);
+      return this.poiAt(this.recordBase(record).body, time);
     }
     if (record.goal === "block") {
       if (record.hauling === "block" && record.site) return this.siteSpotAt(record.site, time);
-      return this.poiAt(this.recordBase(record).poi, time);
+      return this.poiAt(this.recordBase(record).body, time);
     }
     if (record.goal === "field") {
       const fields = this.miningFields();
       const field = fields.find((each) => each.id === record.target) ?? fields[0];
       return this.poiAt(field.poi, time);
     }
-    if (record.goal === "dock") return this.poiAt(this.recordBase(record).poi, time);
+    if (record.goal === "dock") return this.poiAt(this.recordBase(record).body, time);
     if (record.target === "pirate base" && this.pirateBase) return this.poiAt(this.pirateBase, time);
-    if (record.goal === "home") return this.poiAt(this.recordBase(record).poi, time);
+    if (record.goal === "home") return this.poiAt(this.recordBase(record).body, time);
     const deposit = this.deposits[Number(record.target)];
-    return deposit ? { x: deposit.x, y: deposit.y } : this.poiAt(this.recordBase(record).poi, time);
+    return deposit ? { x: deposit.x, y: deposit.y } : this.poiAt(this.recordBase(record).body, time);
   }
 
   /** The base a record is bound for: the one it names, or if that's gone, the nearest to where it was going. */
@@ -6307,8 +6395,8 @@ export class Sim {
     }
     if (record.goal === "dock") {
       const base = this.recordBase(record);
-      const spot = this.dockPoint(false, base.poi);
-      const before = this.dockPoint(true, base.poi);
+      const spot = this.dockPoint(false, base.body);
+      const before = this.dockPoint(true, base.body);
       ship.x = spot.x;
       ship.y = spot.y;
       ship.px = before.x;
@@ -6878,7 +6966,7 @@ export class Sim {
     let near: Base | null = null;
     let nearest = Infinity;
     for (const base of this.bases) {
-      const distance = Math.hypot(held.x - base.poi.x, held.y - base.poi.y);
+      const distance = Math.hypot(held.x - base.body.x, held.y - base.body.y);
       if (distance > this.tuning.catchRange || distance >= nearest) continue;
       near = base;
       nearest = distance;
@@ -6886,8 +6974,8 @@ export class Sim {
     if (!near) return "Nothing here takes it: it drifts";
     const station = near;
     return this.catchBusy(station)
-      ? `${this.placeName(station.poi)} is still working one: it drifts on`
-      : `${this.placeName(station.poi)} is taking it in`;
+      ? `${this.placeName(station.body)} is still working one: it drifts on`
+      : `${this.placeName(station.body)} is taking it in`;
   }
 
   /** Whether a station's catch is taken: its refinery is working a rock, or pulling one in. */
@@ -6933,7 +7021,7 @@ export class Sim {
     if (!held) {
       if (this.grabPadBlock(ship)) return true;
       const job = this.blockJobFor(ship);
-      if (job) return this.refuse(ship, `Your block waits at ${this.placeName(job.base.poi)}'s block pad`);
+      if (job) return this.refuse(ship, `Your block waits at ${this.placeName(job.base.body)}'s block pad`);
       return this.refuse(ship, "Nothing in reach of the clamp");
     }
     // A rock the station has is already held still: taking it back is no faster than it's going.
@@ -7235,7 +7323,7 @@ export class Sim {
     let nearest = catchRange;
     for (const rock of this.rocks) {
       if (rock.held || !rock.releasedBy) continue;
-      const distance = Math.hypot(rock.x - base.poi.x, rock.y - base.poi.y);
+      const distance = Math.hypot(rock.x - base.body.x, rock.y - base.body.y);
       if (distance > nearest) continue;
       best = rock;
       nearest = distance;
@@ -7250,19 +7338,19 @@ export class Sim {
    */
   private catchAim(base: Base, rock: Rock): { x: number; y: number } {
     const spot = this.refinerySpot(base);
-    const { poi } = base;
-    const dx = rock.x - poi.x;
-    const dy = rock.y - poi.y;
+    const { body } = base;
+    const dx = rock.x - body.x;
+    const dy = rock.y - body.y;
     const distance = Math.hypot(dx, dy);
     // Where it lies round the station, and the pad too, in the station's own turning frame.
-    const at = Math.atan2(dy, dx) - poi.rotation;
+    const at = Math.atan2(dy, dx) - body.rotation;
     const gap = Math.atan2(Math.sin(Math.PI - at), Math.cos(Math.PI - at));
     if (Math.abs(gap) < CATCH_ALIGN) return spot;
     // A step round at its own distance, so the way stays clear of the station's box all the way.
     const step = Math.sign(gap) * Math.min(Math.abs(gap), CATCH_TURN);
-    const angle = at + step + poi.rotation;
+    const angle = at + step + body.rotation;
     const round = Math.max(DOCK_OFFSET, distance);
-    return { x: poi.x + Math.cos(angle) * round, y: poi.y + Math.sin(angle) * round };
+    return { x: body.x + Math.cos(angle) * round, y: body.y + Math.sin(angle) * round };
   }
 
   /**
@@ -7394,19 +7482,19 @@ export class Sim {
    * dock. `previous` is the tick before, for drawing between the two.
    */
   refinerySpot(base: Base, previous = false): { x: number; y: number } {
-    const { poi } = base;
-    const rotation = previous ? poi.prevRotation : poi.rotation;
-    const x = previous ? poi.px : poi.x;
-    const y = previous ? poi.py : poi.y;
+    const { body } = base;
+    const rotation = previous ? body.prevRotation : body.rotation;
+    const x = previous ? body.px : body.x;
+    const y = previous ? body.py : body.y;
     return { x: x + Math.cos(rotation) * REFINERY_OFFSET, y: y + Math.sin(rotation) * REFINERY_OFFSET };
   }
 
   /** Where a delivery holds off while the refinery is busy: further out along the pad's own line. */
   refineryHoldSpot(base: Base, previous = false): { x: number; y: number } {
-    const { poi } = base;
-    const rotation = previous ? poi.prevRotation : poi.rotation;
-    const x = previous ? poi.px : poi.x;
-    const y = previous ? poi.py : poi.y;
+    const { body } = base;
+    const rotation = previous ? body.prevRotation : body.rotation;
+    const x = previous ? body.px : body.x;
+    const y = previous ? body.py : body.y;
     const out = REFINERY_OFFSET - DOCK_OFFSET * 1.4;
     return { x: x + Math.cos(rotation) * out, y: y + Math.sin(rotation) * out };
   }
@@ -8126,7 +8214,7 @@ export class Sim {
     }
     // Rebuilt at the nearest base with a shipyard, which takes the pay and spends its parts. With no shipyard anywhere, it's gone.
     const yard = this.nearestBase(ship.x, ship.y, true);
-    if (!this.hasShipyard(yard.poi) || (cost > 0 && (account.credits < cost || !this.hasStockFor(cost, yard)))) {
+    if (!this.hasShipyard(yard.body) || (cost > 0 && (account.credits < cost || !this.hasStockFor(cost, yard)))) {
       this.removeShip(ship);
       return;
     }
@@ -8204,7 +8292,7 @@ export class Sim {
 
   private planPod(down: Down): void {
     const base = this.podBase(down);
-    const end = this.dockPoint(false, base.poi);
+    const end = this.dockPoint(false, base.body);
     const path = [{ x: down.x, y: down.y }];
     for (let i = 0; i < 6; i++) {
       const at = path[path.length - 1];
@@ -8225,7 +8313,7 @@ export class Sim {
     const down = this.down;
     if (!down) return;
     const base = this.podBase(down);
-    const dock = this.dockPoint(false, base.poi);
+    const dock = this.dockPoint(false, base.body);
     down.px = down.x;
     down.py = down.y;
     if (down.stage === "pod" && down.path.length === 0 && (this.clock < down.depart || !down.exploded)) {
@@ -8327,10 +8415,10 @@ export class Sim {
     }
     this.down = null;
     this.respawn(ship);
-    const dock = this.dockPoint(false, base.poi);
+    const dock = this.dockPoint(false, base.body);
     ship.x = ship.px = dock.x;
     ship.y = ship.py = dock.y;
-    if (this.tuning.chatter) this.chatter.playerRebuilt(cost, cleared, base.poi);
+    if (this.tuning.chatter) this.chatter.playerRebuilt(cost, cleared, base.body);
   }
 
   /**
@@ -8651,19 +8739,19 @@ export class Sim {
     const { tuning } = this;
     if (base.lostTraffic.length === 0) return;
     const spare = this.partA(base) + base.partCarry - tuning.stationReserveParts;
-    const dock = this.dockPoint(false, base.poi);
+    const dock = this.dockPoint(false, base.body);
     const hasDefender = this.fighters.some((pilot) => pilot.ship.faction === "defender" && this.homeBaseOf(pilot.ship) === base);
     if (!hasDefender && tuning.defenderPrice > 0) {
       if (spare < this.stockFor(tuning.defenderPrice)) return;
       this.chargeForService(base.account, tuning.defenderPrice, base);
       this.addFighter(dock.x, dock.y, "defender", base.id);
-      if (this.tuning.chatter) this.chatter.defenderLaunched(this, base.poi);
+      if (this.tuning.chatter) this.chatter.defenderLaunched(this, base.body);
     } else {
       const cost = this.hullPrice(base.lostTraffic[0]);
       if (spare < this.stockFor(cost)) return;
       this.chargeForService(base.account, cost, base);
       this.addTraffic(dock.x, dock.y, base.lostTraffic.shift()!, base.id);
-      if (this.tuning.chatter) this.chatter.trafficReplaced(this, this.traffic[this.traffic.length - 1].ship, base.poi);
+      if (this.tuning.chatter) this.chatter.trafficReplaced(this, this.traffic[this.traffic.length - 1].ship, base.body);
     }
     this.events.push({ type: "sale", x: dock.x, y: dock.y });
   }

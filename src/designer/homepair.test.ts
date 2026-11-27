@@ -59,10 +59,10 @@ describe("the designer's first station", () => {
     const sim = play(world);
     const [base] = sim.bases;
     expect(base.id).toBe(stationsFor(world)[0].id);
-    expect(Math.hypot(base.poi.x - sim.field.x, base.poi.y - sim.field.y)).toBeCloseTo(11000, 3);
-    expect(sim.hasShipyard(base.poi)).toBe(false);
+    expect(Math.hypot(base.body.x - sim.field.x, base.body.y - sim.field.y)).toBeCloseTo(11000, 3);
+    expect(sim.hasShipyard(base.body)).toBe(false);
     expect(sim.storageOf(base)).toBe(120);
-    expect(sim.carryRange(base.poi)).toEqual({ full: 500, none: 3000 });
+    expect(sim.carryRange(base.body)).toEqual({ full: 500, none: 3000 });
     expect(base.spec).toMatchObject({ projects: true, radio: false, guards: { count: 2 } });
   });
 
@@ -74,7 +74,7 @@ describe("the designer's first station", () => {
     delete base.spec.storage;
     sim.tuning.stationShipyard = false;
     sim.tuning.stationStorage = 77;
-    expect(sim.hasShipyard(base.poi)).toBe(false);
+    expect(sim.hasShipyard(base.body)).toBe(false);
     expect(sim.storageOf(base)).toBe(77);
   });
 });
@@ -89,10 +89,10 @@ describe("a layout without the first field and station", () => {
     expect(sim.miningFields().map((each) => each.id)).not.toContain("field:0");
     expect(Number.isFinite(sim.ship.x)).toBe(true);
     const [base] = sim.bases;
-    const dock = sim.dockPoint(false, base.poi);
+    const dock = sim.dockPoint(false, base.body);
     Object.assign(sim.ship, { x: dock.x, y: dock.y, px: dock.x, py: dock.y, vx: 0, vy: 0 });
     sim.step();
-    expect(sim.dockedAt(sim.ship)).toBe(base.poi);
+    expect(sim.dockedAt(sim.ship)).toBe(base.body);
     for (let i = 0; i < Math.round(5 / TICK); i++) sim.step();
     expect(sim.ship.hull).toBeGreaterThan(0);
   });
@@ -112,7 +112,7 @@ describe("a base that's gone or can't do the job", () => {
     const [home, outpost] = sim.bases;
     const { ship } = sim.traffic.find((pilot) => pilot.ship.home === home.id)!;
     ship.home = "gone:0";
-    Object.assign(ship, { x: outpost.poi.x + 500, y: outpost.poi.y });
+    Object.assign(ship, { x: outpost.body.x + 500, y: outpost.body.y });
     expect(sim.homeBaseOf(ship)).toBe(outpost);
   });
 
@@ -124,10 +124,10 @@ describe("a base that's gone or can't do the job", () => {
     Object.assign(sim.ship, { x: 1e7, y: 1e7, px: 1e7, py: 1e7 });
     for (let i = 0; i < 4; i++) sim.step();
     const pilot = sim.traffic.find((each) => each.record)!;
-    const aim = { x: outpost.poi.x, y: outpost.poi.y };
+    const aim = { x: outpost.body.x, y: outpost.body.y };
     pilot.record = { goal: "dock", target: "gone:0", stage: "travel", depart: sim.now, arrive: sim.now, path: [aim], aim };
     sim.step();
-    expect(sim.dockedAt(pilot.ship)).toBe(outpost.poi);
+    expect(sim.dockedAt(pilot.ship)).toBe(outpost.body);
   });
 
   it("sends a wreck by a base without a shipyard to the nearest that has one", () => {
@@ -135,7 +135,7 @@ describe("a base that's gone or can't do the job", () => {
     outpost.shipyard = false;
     const sim = play(world);
     const [home, far] = sim.bases;
-    expect(sim.nearestBase(far.poi.x, far.poi.y, true)).toBe(home);
+    expect(sim.nearestBase(far.body.x, far.body.y, true)).toBe(home);
   });
 });
 

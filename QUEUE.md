@@ -78,7 +78,7 @@ drones and defenders wait. Trip records are charged rounds and restock at their 
 strong: changes traffic's decisions and the out-of-view records.
 
 ## Q-51 · Station frames: place and body, capabilities as parts, owners, construction · build
-- state: queued
+- state: in progress
 - who: strong
 - backlog: S-78
 - plan: docs/station-frames-plan.md

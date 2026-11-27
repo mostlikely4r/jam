@@ -283,7 +283,7 @@ function world(
     ...outpost,
   };
   sim.applyLayout(homeFields(sim, field), homeStations(sim, spec));
-  return { sim, outpost: sim.bases[1].poi, field };
+  return { sim, outpost: sim.bases[1].body, field };
 }
 
 function dockAt(sim: Sim, ship: Ship, station: Poi): void {

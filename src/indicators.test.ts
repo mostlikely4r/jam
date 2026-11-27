@@ -106,7 +106,7 @@ describe("the two indicators", () => {
     const sim = indicatorSim();
     const base = sim.bases[0];
     sim.toggleHome(base.id);
-    sim.setDestination({ poi: base.poi });
+    sim.setDestination({ poi: base.body });
     expect(sim.pointers(400, 300).map((each) => each.slot)).toEqual(["destination"]);
     expect(showing(sim)).toEqual(["station"]);
   });

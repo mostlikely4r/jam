@@ -46,7 +46,7 @@ function run(sim: Sim, seconds: number): void {
 
 /** The player's ship at the home station's dock. */
 function dock(sim: Sim): void {
-  const at = sim.dockPoint(false, sim.bases[0].poi);
+  const at = sim.dockPoint(false, sim.bases[0].body);
   Object.assign(sim.ship, { x: at.x, y: at.y, px: at.x, py: at.y, vx: 0, vy: 0 });
 }
 

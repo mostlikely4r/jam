@@ -7,7 +7,7 @@
  */
 import { LOW_SHARE, tankCapacity, type ArtShape, type MountId, type ShapeBlink, type ShapeSpin } from "./fitting";
 import type { ThrusterRole } from "./parts";
-import { TICK, type Ship, type Sim } from "./sim";
+import { TICK, type Poi, type Ship, type Sim } from "./sim";
 
 /** What's happening to the thing being drawn, for shapes driven by a state. */
 export interface ArtState {
@@ -153,4 +153,16 @@ export function shipArtState(sim: Sim, ship: Ship): ArtState {
   const shotAgo: ArtState["shotAgo"] = {};
   for (const [mount, ago] of ship.shotAgo) shotAgo[mount] = ago;
   return { thrust, approach: closingDistance(ship, docks, TICK), supply, shotAgo };
+}
+
+/**
+ * A station's snapshot: how near the nearest ship closing on its dock is, by the same rule a ship's
+ * approach light reads (`closingDistance`, each ship against this one dock). Nothing else drives a
+ * station's shapes yet.
+ */
+export function stationArtState(sim: Sim, station: Poi): ArtState {
+  const dock = [{ now: sim.dockPoint(false, station), before: sim.dockPoint(true, station) }];
+  let approach = Infinity;
+  for (const ship of sim.ships) approach = Math.min(approach, closingDistance(ship, dock, TICK));
+  return { ...quietState(), approach };
 }

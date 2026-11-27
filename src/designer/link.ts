@@ -162,6 +162,7 @@ export function stationsFor(world: World): StationSpec[] {
         return {
           id: `${node.id}:${index}`,
           name: index === 0 ? node.name : `${node.name} ${index + 1}`,
+          frame: node.frame,
           rotationPeriod: node.spinPeriod,
           spinPhase: toRadians(node.spinPhase),
           orbits: place(node, copy),
@@ -307,6 +308,7 @@ export function pirateBaseFor(world: World): PirateBaseSpec | null {
   const [carryFull, carryNone] = carrying(node);
   return {
     name: node.name,
+    frame: node.frame,
     rotationPeriod: node.spinPeriod,
     spinPhase: toRadians(node.spinPhase),
     orbits: place(node, null),

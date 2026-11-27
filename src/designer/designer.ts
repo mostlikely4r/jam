@@ -17,6 +17,8 @@ import {
   parseWorld,
   positions,
   limitCarrying,
+  defaultFrame,
+  framesForKind,
   spinAngle,
   stringifyWorld,
   shipChoices,
@@ -29,7 +31,7 @@ import {
   type CloudLayer,
   type CloudLook,
 } from "./world";
-import { hullName } from "../fitting";
+import { hullName, shipModels } from "../fitting";
 import { colorOf } from "../shipArt";
 import { clampEccentricity, orbitEllipse, phaseToward } from "../kepler";
 import { ITEMS, moduleItems } from "../items";
@@ -38,7 +40,7 @@ import { shippedWorld } from "./shipped";
 import { layoutKey } from "../save";
 import { type Route } from "../route";
 import { FLIGHTS, tripBetween } from "./trips";
-import { SHIP_MODELS, type PartId } from "../parts";
+import { type PartId } from "../parts";
 import { PROGRAMS } from "../programs";
 import { multiSelect, withoutPick, withPick } from "./multiselect";
 
@@ -689,6 +691,8 @@ Layouts: ${layouts.join(", ")}`, "");
         return;
       }
       node.kind = next;
+      // A frame is for its own kind of node: a station's isn't a pirate base's.
+      if (!framesForKind(next).includes(node.frame)) node.frame = defaultFrame(next);
       // A cloud reaches as far as half its longer side.
       if (next === "cloud") node.radius = cloudRadius(node.width, node.height);
       this.changed();
@@ -698,6 +702,16 @@ Layouts: ${layouts.join(", ")}`, "");
 
     const fixedSize = node.kind === "station" || node.kind === "pirate base";
     const size: HTMLElement[] = [];
+    if (fixedSize) {
+      // What it's drawn from: the hulls flagged for this kind on the Hulls page. Copies share it.
+      const frame = document.createElement("select");
+      for (const model of framesForKind(node.kind)) frame.append(new Option(hullName(model), model, false, model === node.frame));
+      frame.addEventListener("change", () => {
+        node.frame = frame.value;
+        this.changed();
+      });
+      size.push(this.labelled("Frame (a hull flagged for this kind; its parts sit on its mounts)", frame));
+    }
     if (node.kind === "cloud") {
       // A cloud's own two sides, which set its reach: half the longer one.
       size.push(
@@ -855,7 +869,7 @@ Layouts: ${layouts.join(", ")}`, "");
           this.text("Hulls: the ones a player can buy here, trading in the hull they fly."),
           this.pickList(
             `hulls:${node.id}`,
-            SHIP_MODELS.map((model) => ({ id: model, label: hullName(model) })),
+            shipModels().map((model) => ({ id: model, label: hullName(model) })),
             () => node.hulls,
             (id, on) => {
               node.hulls = on ? withPick(node.hulls, id) : withoutPick(node.hulls, id);

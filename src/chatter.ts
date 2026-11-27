@@ -266,7 +266,7 @@ export class Chatter {
       this.tasks.set(ship, task);
       const name = this.nameOf(sim, ship);
       // Its own base answers it.
-      const home = sim.homeBaseOf(ship).poi;
+      const home = sim.homeBaseOf(ship).body;
       const dock = sim.dockPoint(false, sim.nearestDock(ship.x, ship.y));
       const nearDock = Math.hypot(ship.x - dock.x, ship.y - dock.y) < APPROACH_DISTANCE;
       if (task !== "to station") this.approached.delete(ship);
@@ -368,7 +368,7 @@ export class Chatter {
     const spot = sim.haulerSpot(false, base);
     if (!spot) return;
     this.lineFrom(sim, HAULER_NAME, "At your berth and ready to load.", spot.x, spot.y);
-    this.reply(`Roger, ${HAULER_NAME}. Loading now.`, STATION_REPLY_DELAY, base.poi);
+    this.reply(`Roger, ${HAULER_NAME}. Loading now.`, STATION_REPLY_DELAY, base.body);
   }
 
   haulerLeaving(sim: Sim, base: Base, cargo: number): void {
@@ -413,12 +413,12 @@ export class Chatter {
   /** A ship docked with word the board didn't have: it tells the station, which posts it. */
   newsBrought(sim: Sim, ship: Ship, base: Base, reports: Report[]): void {
     this.sayKind(sim, ship, "news", NEWS, false, (pattern) => this.newsLine(sim, pattern, reports));
-    this.reply(this.pick(NEWS_REPLY).replace("{name}", this.nameOf(sim, ship)), STATION_REPLY_DELAY, base.poi);
+    this.reply(this.pick(NEWS_REPLY).replace("{name}", this.nameOf(sim, ship)), STATION_REPLY_DELAY, base.body);
   }
 
   /** The player docked where the board has word they hadn't heard: the station passes it on. */
   newsForPlayer(sim: Sim, base: Base, reports: Report[]): void {
-    this.reply(this.newsLine(sim, this.pick(NEWS_FOR_PLAYER), reports), STATION_REPLY_DELAY, base.poi);
+    this.reply(this.newsLine(sim, this.pick(NEWS_FOR_PLAYER), reports), STATION_REPLY_DELAY, base.body);
   }
 
   /** One report as a line, with a word on any others. */
@@ -435,7 +435,7 @@ export class Chatter {
   bought(sim: Sim, ship: Ship, part: string): void {
     const name = this.nameOf(sim, ship);
     this.sayKind(sim, ship, "bought", ship.owner ? BOUGHT_OWNED : BOUGHT, false, (line) => line.replace("{part}", part));
-    if (!ship.owner) this.reply(this.pick(BOUGHT_REPLY).replace("{part}", part).replace("{name}", name), STATION_REPLY_DELAY, sim.baseAt(ship)?.poi ?? sim.homeBaseOf(ship).poi);
+    if (!ship.owner) this.reply(this.pick(BOUGHT_REPLY).replace("{part}", part).replace("{name}", name), STATION_REPLY_DELAY, sim.baseAt(ship)?.body ?? sim.homeBaseOf(ship).body);
   }
 
   /** News that matters out in the field goes out to everyone, not just those near the station. */
@@ -477,7 +477,7 @@ export class Chatter {
       text = this.pick(BACK_TO_ROCKS);
       mood = "tired";
     } else {
-      const to = link?.poi ? sim.bases.find((each) => each.poi === link.poi) : undefined;
+      const to = link?.poi ? sim.bases.find((each) => each.body === link.poi) : undefined;
       text = this.pick(TO_STATION).replace("{station}", to ? sim.baseName(to.id) : "the next station");
       mood = "annoyed";
     }

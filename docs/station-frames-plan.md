@@ -2,7 +2,7 @@
 
 Written 2026-11-27, from the spec A talk (Q-47, backlog S-78). It builds steps 1–2 of
 `docs/roadmap.md`: the move from proof of concept to framework (`docs/framework.md`, `AGENTS.md`
-Architecture) starts with the things that stand still. Nothing here is built yet.
+Architecture) starts with the things that stand still. Step 1 is built; the rest is not yet.
 
 ## Why
 
@@ -140,6 +140,32 @@ Each step plays the same, passes the full check and is committed on its own. No 
 the user to try: the checks are tests, and the Try it below is one look at the end.
 
 ### 1. Place, body and frames
+
+*Built* 2026-11-27. What differs from the steps below, and why:
+
+- **Place and body.** A station's and the pirate base's body is a `FrameBody` (`src/sim.ts`): a
+  `Poi` with its `frame`, its `place` (a `Place` on the rails) and an `offset`. `Base.poi` is now
+  `Base.body`, so everything that read a station's position reads the body. The body keeps its
+  place's `orbits` and `rings` as the rails it's anchored to; `poiAt` adds the offset. Carrying
+  needed no change of its own: it reads the bodies where it read the station POIs.
+- **What frames hold.** The station's and the deposit's frames are their decks (a body rect and a
+  rim rect at width 3). The pirate base's frame is bare (a 16-sided outline at its zone radius,
+  no shapes): all it ever drew was its docking ring and its ore, which are part art. What shapes
+  can't carry stays code in `src/stationArt.ts`, as each part's art: the dock's box (dashed, and
+  brighter while docked), the deposit's trading ring and the pirate base's docking ring (dashed),
+  the ore pile and crates (they grow with what's stored), the station's tank, and the construction
+  site (an outline dashed, the deck filling from the bottom). No shape field was added.
+- **One reader fix.** A rim shape of any kind now keeps its `width` from the file, as
+  `ArtShape.width` always said; only rim polygons, open lines and arcs kept one before.
+- **Frames are hulls, not ships.** `isFrame`, `shipModels()` and `framesFor(use)` in
+  `src/fitting.ts`. The ship lists (station hull lists, the dev hull switcher, the shop) read
+  `shipModels()`; tests that listed every hull as a ship do too.
+- **The node's `frame`** is written after `kind` for stations and pirate bases only. The deposit
+  has no node, so it draws from `DEPOSIT_FRAME`; its own `frame` comes with step 4.
+- **State lights:** a station draws with `stationArtState` (`src/artState.ts`): its approach is the
+  nearest ship closing on its dock, by `closingDistance`.
+- **Tests:** `src/stationArt.test.ts` (the old drawing as a fixture, played through a recorder that
+  compares what's painted after every transform) and `src/frames.test.ts`.
 
 - `src/hulls.json` gets three frames, `station`, `pirateBase` and `deposit`, with `usedBy` set to
   the new uses. Their shapes are today's drawings converted exactly: `Renderer.drawStation`,

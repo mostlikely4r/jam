@@ -8,8 +8,8 @@
 
 import { clampEccentricity, orbitSpeeds, orbitState, type OrbitShape } from "../kepler";
 import { itemDef } from "../items";
-import { newGameHulls } from "../fitting";
-import { SHIP_MODELS, type PartId, type ShipModel } from "../parts";
+import { framesFor, newGameHulls, shipModels, type FrameUse } from "../fitting";
+import { type PartId, type ShipModel } from "../parts";
 import { PROGRAMS } from "../programs";
 import { DEFAULTS } from "../tuning";
 
@@ -39,6 +39,11 @@ export interface WorldNode {
   id: string;
   name: string;
   kind: NodeKind;
+  /**
+   * Stations and pirate bases: the frame it is drawn from, a hull flagged for its kind. Copies share
+   * it. Every other kind has none ("").
+   */
+  frame: ShipModel;
   /** A body's surface, or a place's size. */
   radius: number;
   /** Bodies only: what touching the ground does. */
@@ -246,8 +251,35 @@ export function cloudRadius(width: number, height: number): number {
   return Math.max(width, height) / 2;
 }
 
+/** The frame use a node of this kind is drawn from, or null for a kind that has no frame. */
+export function frameUse(kind: NodeKind): FrameUse | null {
+  return kind === "station" ? "station" : kind === "pirate base" ? "pirateBase" : null;
+}
+
+/** The frame a new node of this kind starts with: the first hull flagged for it, or "" for a kind with none. */
+export function defaultFrame(kind: NodeKind): ShipModel {
+  const use = frameUse(kind);
+  if (!use) return "";
+  const usual = use === "station" ? "station" : "pirateBase";
+  const frames = framesFor(use);
+  return frames.includes(usual) ? usual : (frames[0] ?? usual);
+}
+
+/** The frames a node of this kind can be drawn from: none for a kind without a frame. */
+export function framesForKind(kind: NodeKind): ShipModel[] {
+  const use = frameUse(kind);
+  return use ? framesFor(use) : [];
+}
+
+/** A node's frame read from a file: one flagged for its kind, or its kind's default. */
+function readFrame(kind: NodeKind, raw: unknown): ShipModel {
+  const use = frameUse(kind);
+  if (!use) return "";
+  return typeof raw === "string" && framesFor(use).includes(raw) ? raw : defaultFrame(kind);
+}
+
 export function placeDefaults(kind: NodeKind): Pick<WorldNode, PlaceKey> {
-  const none = { ...CLOUD_DEFAULTS, unlocked: [], wanted: [], programs: [], hulls: [], drops: [], items: [], ...NOT_A_BASE };
+  const none = { frame: defaultFrame(kind), ...CLOUD_DEFAULTS, unlocked: [], wanted: [], programs: [], hulls: [], drops: [], items: [], ...NOT_A_BASE };
   if (kind === "field") return { rocks: 520, rockDrift: 12, rockInflow: 1, ...CARRY.field, shipyard: false, storage: 0, ...none };
   if (kind === "station") {
     // A new station builds nothing and keeps quiet until the designer says; its turrets, once it has them, are the game's usual.
@@ -258,7 +290,7 @@ export function placeDefaults(kind: NodeKind): Pick<WorldNode, PlaceKey> {
   return { rocks: 0, rockDrift: 0, rockInflow: 0, carryFull: 0, carryNone: 0, shipyard: false, storage: 0, ...none };
 }
 
-type PlaceKey = "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "unlocked" | "wanted" | "programs" | "hulls" | "drops" | "items" | BaseKey | CloudKey;
+type PlaceKey = "frame" | "rocks" | "rockDrift" | "rockInflow" | "carryFull" | "carryNone" | "shipyard" | "storage" | "unlocked" | "wanted" | "programs" | "hulls" | "drops" | "items" | BaseKey | CloudKey;
 
 /** A cloud's own settings. Left out of every node that isn't a cloud, so other layouts save as they always did. */
 type CloudKey = "look" | "color" | "width" | "height" | "ringInner" | "falloff" | "opacity" | "layer" | "drawOrder";
@@ -489,7 +521,7 @@ function isProgramList(raw: unknown): PartId[] {
 /** A station's hull list read from a file: the hulls there are, by name. */
 function isHullList(raw: unknown): ShipModel[] {
   if (!Array.isArray(raw)) return [];
-  return [...new Set(raw.filter((id): id is ShipModel => typeof id === "string" && SHIP_MODELS.includes(id)))];
+  return [...new Set(raw.filter((id): id is ShipModel => typeof id === "string" && shipModels().includes(id)))];
 }
 
 /** Reads a saved world, or null when it doesn't look like one. Missing numbers become 0. */
@@ -518,6 +550,7 @@ export function parseWorld(text: string): World | null {
         id: raw.id,
         name: typeof raw.name === "string" ? raw.name : raw.kind,
         kind,
+        frame: readFrame(kind, raw.frame),
         radius: kind === "cloud" ? cloudRadius(width, height) : num("radius"),
         surface: (SURFACES as readonly unknown[]).includes(raw.surface) ? (raw.surface as Surface) : defaults.surface,
         pull: num("pull", defaults.pull),
@@ -579,7 +612,7 @@ export function parseWorld(text: string): World | null {
  * a layout changes only the lines that changed, however the node was made.
  */
 const NODE_KEYS: (keyof WorldNode)[] = [
-  "id", "name", "kind", "radius", "surface", "pull", "pullFull", "pullAccel", "atmosphere", "burnSpeed",
+  "id", "name", "kind", "frame", "radius", "surface", "pull", "pullFull", "pullAccel", "atmosphere", "burnSpeed",
   "rocks", "rockDrift", "rockInflow", "carryFull", "carryNone", "spawns", "shipyard", "storage", "unlocked", "wanted", "programs", "hulls", "drops", "items",
   "projects", "radio", "guardCount", "guardArc", "guardDistance", "look", "color", "width", "height", "ringInner", "falloff", "opacity", "layer", "drawOrder",
   "count", "angleVariance", "orbitVariance", "orbitRadius", "eccentricity", "periapsisAngle", "orbitPeriod", "orbitPhase",
@@ -598,6 +631,8 @@ function ordered(node: Record<string, unknown>): Record<string, unknown> {
   const usual = placeDefaults(node.kind as NodeKind);
   for (const key of NODE_KEYS) {
     if (!(key in node)) continue;
+    // Only a station or a pirate base has a frame.
+    if (key === "frame" && frameUse(node.kind as NodeKind) === null) continue;
     if ((BASE_KEYS as string[]).includes(key) && node[key] === usual[key as BaseKey]) continue;
     // Only a cloud has a cloud's settings: every other node saves without them, as it always did.
     if ((CLOUD_KEYS as string[]).includes(key) && node.kind !== "cloud") continue;

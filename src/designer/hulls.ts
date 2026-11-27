@@ -35,6 +35,8 @@ import {
   HULL_EDGE,
   HULL_INFO,
   HULL_MOUNTS,
+  hullEdge,
+  isFrame,
   HULL_SHAPES,
   HULL_USE_NAMES,
   HULL_USES,
@@ -84,6 +86,7 @@ import type { GlyphId } from "../glyphs";
 import { EVERY_GLYPH, glyphIcon, iconEl } from "../icons";
 import { DEFAULTS } from "../tuning";
 import { bayBox, drawBay, drawDecal, drawDecals, drawHull, drawPartArt, drawTanks, drawTurret, GLASS_HEX, METAL_HEX, RIM_HEX, setArtMount, setArtState, setArtTime, SHADE_HEX, tankBoxes } from "../shipArt";
+import { drawFrame } from "../stationArt";
 import { SpinMemory, type ArtState } from "../artState";
 import { multiSelect, withoutPick, withPick } from "./multiselect";
 import { blinkOf, blinkStart, defaultShade, dragHandle, driveFields, driveOf, fadeStart, hitShape, insidePolygon, previewState, restFor, shapeGrips, spinOf, type BlinkFields, type DriveChoice, type ShapeHandle } from "./shapes";
@@ -462,9 +465,17 @@ export class HullDesigner {
 
   /** The zoom that fits what's drawn, at this canvas size: the whole ship, or a part on its own. */
   private fitZoom(width: number, height: number): number {
-    // A part on its own is a twelfth of a hull's size, so its view fits about half a radius.
-    const across = this.alone() ? 0.6 : 4.2;
-    return Math.max(4, Math.min(width, height) / (R * across));
+    // A part on its own is a twelfth of a hull's size, so its view fits about half a radius. A
+    // frame for a station is many radii across, so the view zooms out to all of it and its mounts.
+    const across = this.alone() ? 0.6 : Math.max(4.2, this.reach() * 2.1);
+    return Math.max(this.alone() ? 4 : 0.05, Math.min(width, height) / (R * across));
+  }
+
+  /** How far the shown hull reaches from its middle, in radii: its outline and its mounts. */
+  private reach(): number {
+    const model = this.page === "parts" && this.showOn !== null ? this.showOn : this.model;
+    const points = [...hullEdge(model), ...(HULL_MOUNTS[model] ?? []).map((mount): [number, number] => [mount.x, mount.y])];
+    return Math.max(1, ...points.map(([x, y]) => Math.hypot(x, y)));
   }
 
   /** Back to the whole ship in view: the fit button, or key 0. */
@@ -3242,8 +3253,11 @@ export class HullDesigner {
 
     // Blueprint grid: a line every quarter radius, stronger every radius. A part drawn on its own
     // gets a finer one, a twentieth of a radius, since it is drawn that much larger.
-    const grid = this.alone() ? 1 / 20 : 1 / 4;
-    for (let i = -8; i <= 8; i++) {
+    // A frame for a station reaches many radii, so its grid is a line a radius and reaches all of it.
+    const big = !this.alone() && this.reach() > 4;
+    const grid = this.alone() ? 1 / 20 : big ? 1 : 1 / 4;
+    const lines = big ? Math.ceil(this.reach() * 1.2 / 4) * 4 : 8;
+    for (let i = -lines; i <= lines; i++) {
       ctx.strokeStyle = i % 4 === 0 ? "rgba(120,170,230,0.28)" : "rgba(120,170,230,0.1)";
       ctx.lineWidth = 1;
       const [x] = this.toScreen(i * grid, 0);
@@ -3306,7 +3320,11 @@ export class HullDesigner {
     // each layer in draw order, the way the game draws them.
     if (decals) drawDecals(ctx, model, decal, "below");
     if (parts) for (const mount of mounts.filter((each) => (each.order ?? 0) < 0).sort(byOrder)) this.drawPreview(ctx, model, mount);
-    if (this.shown("hull")) drawHull(ctx, model, [120, 150, 190]);
+    // A frame is only its shapes, in its own colours, as the game draws a station; a ship's hull fills its outline.
+    if (this.shown("hull")) {
+      if (isFrame(model)) drawFrame(ctx, model);
+      else drawHull(ctx, model, [120, 150, 190]);
+    }
     if (decals) drawDecals(ctx, model, decal, "above");
     // The bay's box, as in game: the bay the preview shows on its mount, or else the empty well.
     const spot = mounts.find((each) => each.types.includes("cargo bay"));

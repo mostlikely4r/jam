@@ -8,13 +8,15 @@ import { pickOf } from "./programs";
 import { relativeLine, willCollide, type Motion } from "./relative";
 import { cloudAt, cloudPuffs, cloudStops, strengthAt, type CloudPuff } from "./clouds";
 import { bayBox, colorOf, drawTurret, drawVectorShip, hullTint, mix, setArtState, setArtTime } from "./shipArt";
-import { holdApproach, shipArtState, SpinMemory, type ArtState, type HeldApproach } from "./artState";
+import { drawDepositArt, drawPirateBaseArt, drawStationArt } from "./stationArt";
+import { holdApproach, shipArtState, stationArtState, SpinMemory, type ArtState, type HeldApproach } from "./artState";
 import { canvasTip } from "./tooltip";
 import {
   BLACK_MARKET_LENGTH,
   BLACK_MARKET_WIDTH,
   BLOCK_RADIUS,
   bodyAt,
+  DEPOSIT_FRAME,
   DEPOSIT_HALF,
   DOCK_OFFSET,
   HAULER_LENGTH,
@@ -84,10 +86,7 @@ const HAULER_PAD_CLEARANCE = HAULER_LENGTH * 4;
 const GUARD_BARREL = 30;
 const HAULER_COLUMNS = 10;
 const HAULER_ROWS = 4;
-const PILE_ROWS = 12;
 const PILE_ORE_PER_LUMP = 5;
-/** Rows of the station's deck that crates of parts can fill. */
-const CRATE_ROWS = 4;
 const CRATE_COLOR = "#7f93b5";
 const CRATE_EDGE = "#c4d2ea";
 const DRONE_COLOR = [180, 200, 120];
@@ -615,70 +614,51 @@ export class Renderer {
     }
   }
 
-  /** A station and its dock, with the ore and parts its base holds. */
+  /** A station from its frame, with its dock and the ore and parts its base holds. */
   private drawStation(sim: Sim, base: Base, alpha: number): void {
     const { ctx } = this;
-    const station = base.poi;
+    const station = base.body;
     const x = lerp(station.px, station.x, alpha);
     const y = lerp(station.py, station.y, alpha);
-    const size = STATION_HALF * 2;
 
     ctx.save();
     ctx.translate(x, y);
     const rotation = lerp(station.prevRotation, station.rotation, alpha);
     ctx.rotate(rotation);
     this.stationSpots.push({ base, x, y, rotation });
-
-    const dockX = DOCK_OFFSET - STATION_HALF;
-    const dockY = -STATION_HALF;
-    ctx.fillStyle = sim.dockedAt() === station ? "rgba(143, 227, 161, 0.2)" : "rgba(143, 227, 161, 0.07)";
-    ctx.fillRect(dockX, dockY, size, size);
-    ctx.strokeStyle = "#8fe3a1";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([14, 10]);
-    ctx.strokeRect(dockX, dockY, size, size);
-    ctx.setLineDash([]);
-
-    ctx.fillStyle = "#6b7280";
-    ctx.fillRect(-STATION_HALF, -STATION_HALF, size, size);
-    ctx.strokeStyle = "#aab1bd";
-    ctx.lineWidth = 3;
-    ctx.strokeRect(-STATION_HALF, -STATION_HALF, size, size);
-    this.drawOrePile(sim.oreCount(base.ore), STATION_HALF);
-    this.drawCrates(sim.partA(base), STATION_HALF);
-    // Its own tank, out on the side away from the dock. This step's stations never run dry, so it shows full.
-    if (sim.tuning.fuel) this.drawTank(-STATION_HALF - 12, 0, 1, 10, STATION_HALF * 1.2);
+    // Its lights read what's happening to it: a ship closing on its dock.
+    setArtTime(performance.now() / 1000);
+    setArtState(stationArtState(sim, station));
+    drawStationArt(ctx, {
+      frame: station.frame,
+      dock: { x: DOCK_OFFSET, y: 0, half: STATION_HALF },
+      docked: sim.dockedAt() === station,
+      ore: sim.oreCount(base.ore),
+      parts: sim.partA(base),
+      half: STATION_HALF,
+      // This step's stations never run dry, so it shows full.
+      tank: sim.tuning.fuel,
+    });
+    setArtTime(null);
+    setArtState(null);
     ctx.restore();
   }
 
-  /** A small deck with its ore on it, inside the ring where ships can trade with it. */
+  /** Each deposit from its frame: a construction site while it's built, then its ring, its deck and its ore. */
   private drawDeposits(sim: Sim, alpha: number): void {
     const { ctx } = this;
     const here = sim.depositAt();
     for (const deposit of sim.deposits) {
-      const x = lerp(deposit.px, deposit.x, alpha);
-      const y = lerp(deposit.py, deposit.y, alpha);
-      if (deposit.partsLeft > 0) {
-        this.drawDepositFrame(x, y, deposit.partsUsed / (deposit.partsUsed + deposit.partsLeft));
-        continue;
-      }
-      ctx.fillStyle = deposit === here ? "rgba(143, 227, 161, 0.14)" : "rgba(143, 227, 161, 0.05)";
-      ctx.strokeStyle = "#8fe3a1";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([14, 10]);
-      ctx.beginPath();
-      ctx.arc(x, y, sim.tuning.depositReach, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.setLineDash([]);
       ctx.save();
-      ctx.translate(x, y);
-      ctx.fillStyle = "#6b7280";
-      ctx.fillRect(-DEPOSIT_HALF, -DEPOSIT_HALF, DEPOSIT_HALF * 2, DEPOSIT_HALF * 2);
-      ctx.strokeStyle = "#aab1bd";
-      ctx.lineWidth = 3;
-      ctx.strokeRect(-DEPOSIT_HALF, -DEPOSIT_HALF, DEPOSIT_HALF * 2, DEPOSIT_HALF * 2);
-      this.drawOrePile(sim.oreCount(deposit.ore), DEPOSIT_HALF);
+      ctx.translate(lerp(deposit.px, deposit.x, alpha), lerp(deposit.py, deposit.y, alpha));
+      drawDepositArt(ctx, {
+        frame: DEPOSIT_FRAME,
+        built: deposit.partsLeft > 0 ? deposit.partsUsed / (deposit.partsUsed + deposit.partsLeft) : 1,
+        reach: sim.tuning.depositReach,
+        here: deposit === here,
+        ore: sim.oreCount(deposit.ore),
+        half: DEPOSIT_HALF,
+      });
       ctx.restore();
     }
   }
@@ -717,48 +697,6 @@ export class Renderer {
         ctx.setLineDash([]);
       }
       ctx.globalAlpha = 1;
-    }
-  }
-
-  /** A deposit under construction: its outline, with the deck filling in as parts go into it. */
-  private drawDepositFrame(x: number, y: number, built: number): void {
-    const { ctx } = this;
-    const size = DEPOSIT_HALF * 2;
-    ctx.fillStyle = "#6b7280";
-    ctx.fillRect(x - DEPOSIT_HALF, y + DEPOSIT_HALF - size * built, size, size * built);
-    ctx.strokeStyle = "#aab1bd";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([10, 8]);
-    ctx.strokeRect(x - DEPOSIT_HALF, y - DEPOSIT_HALF, size, size);
-    ctx.setLineDash([]);
-  }
-
-  /** Parts as crates along the far edge of the deck, in front of any ore that reaches them. */
-  private drawCrates(parts: number, half: number): void {
-    const { ctx } = this;
-    const crates = Math.min(PILE_ROWS * CRATE_ROWS, Math.ceil(parts / PILE_ORE_PER_LUMP));
-    const pitch = (half * 2) / (PILE_ROWS + 1);
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = CRATE_EDGE;
-    for (let i = 0; i < crates; i++) {
-      ctx.fillStyle = CRATE_COLOR;
-      const x = -half + pitch * ((i % PILE_ROWS) + 1);
-      const y = -half + pitch * (Math.floor(i / PILE_ROWS) + 1);
-      ctx.fillRect(x - pitch * 0.36, y - pitch * 0.36, pitch * 0.72, pitch * 0.72);
-      ctx.strokeRect(x - pitch * 0.36, y - pitch * 0.36, pitch * 0.72, pitch * 0.72);
-    }
-  }
-
-  /** Ore as lumps on a deck around the origin, filling up row by row, with no number to read. */
-  private drawOrePile(ore: number, half: number): void {
-    const { ctx } = this;
-    const lumps = Math.min(PILE_ROWS * PILE_ROWS, Math.ceil(ore / PILE_ORE_PER_LUMP));
-    const pitch = (half * 2) / (PILE_ROWS + 1);
-    for (let i = 0; i < lumps; i++) {
-      ctx.fillStyle = ORE_COLORS[(i * 7) % ORE_COLORS.length];
-      const x = -half + pitch * ((i % PILE_ROWS) + 1);
-      const y = half - pitch * (Math.floor(i / PILE_ROWS) + 1);
-      ctx.fillRect(x - pitch * 0.3, y - pitch * 0.3, pitch * 0.6, pitch * 0.6);
     }
   }
 
@@ -805,24 +743,14 @@ export class Renderer {
     ctx.stroke();
   }
 
+  /** The pirate base from its frame, with its docking ring and its ore. */
   private drawPirateBase(sim: Sim, alpha: number): void {
     const base = sim.pirateBase;
     if (!base) return;
     const { ctx } = this;
-    ctx.fillStyle = "rgba(235, 90, 80, 0.08)";
-    ctx.strokeStyle = "#eb5a50";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([14, 10]);
-    ctx.beginPath();
-    const x = lerp(base.px, base.x, alpha);
-    const y = lerp(base.py, base.y, alpha);
-    ctx.arc(x, y, PIRATE_BASE_RADIUS, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.setLineDash([]);
     ctx.save();
-    ctx.translate(x, y);
-    this.drawOrePile(sim.oreCount(sim.pirateOre), PIRATE_BASE_RADIUS * 0.65);
+    ctx.translate(lerp(base.px, base.x, alpha), lerp(base.py, base.y, alpha));
+    drawPirateBaseArt(ctx, { frame: base.frame, radius: PIRATE_BASE_RADIUS, ore: sim.oreCount(sim.pirateOre) });
     ctx.restore();
   }
 
@@ -1166,7 +1094,7 @@ export class Renderer {
 
     if (sim.ship.tow && !this.haulerOnPad(base)) {
       // How far the catch reaches, while there's a rock to hand over.
-      const station = base.poi;
+      const station = base.body;
       ctx.strokeStyle = "rgba(111, 224, 200, 0.1)";
       ctx.lineWidth = 2;
       ctx.setLineDash([26, 22]);
@@ -1202,7 +1130,7 @@ export class Renderer {
   private haulerOnPad(base: Base): boolean {
     const hauler = base.hauler;
     if (!hauler) return false;
-    return Math.hypot(hauler.x - base.poi.x, hauler.y - base.poi.y) < HAULER_PAD_CLEARANCE;
+    return Math.hypot(hauler.x - base.body.x, hauler.y - base.body.y) < HAULER_PAD_CLEARANCE;
   }
 
   /** The words in the world that rise and fade: a refinery's credits coming in. */
@@ -1716,18 +1644,6 @@ export class Renderer {
     if (!this.showFuel) return null;
     const capacity = tankCapacity(ship);
     return capacity > 0 ? ship.fuel / capacity : 0;
-  }
-
-  /** A tank standing on its end, filled from the bottom to `share` of its height. */
-  private drawTank(x: number, y: number, share: number, w: number, h: number): void {
-    const { ctx } = this;
-    ctx.strokeStyle = "rgba(200, 212, 232, 0.7)";
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(x, y - h / 2, w, h);
-    const fill = Math.max(0, Math.min(1, share));
-    if (fill <= 0) return;
-    ctx.fillStyle = "#ffb03a";
-    ctx.fillRect(x + 1.5, y + h / 2 - 1.5 - (h - 3) * fill, w - 3, (h - 3) * fill);
   }
 
   /** The escape pod: a small capsule with a blinking light, flying itself to a shipyard. */

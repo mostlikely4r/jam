@@ -622,7 +622,7 @@ export class Bot {
   /** Out of the dock and back to the rocks: a drag towards the field, at the cruising speed. */
   private leave(sim: Sim): void {
     const base = sim.baseAt();
-    if (!base?.poi) return;
+    if (!base?.body) return;
     this.visit = null;
     // One drag a trip: the dock calls this every tick until the ship is out of it.
     if (this.outbound) return;

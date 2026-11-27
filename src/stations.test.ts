@@ -65,7 +65,7 @@ function world(tuning: Partial<typeof WORLD> = {}, outpost: Partial<StationSpec>
     ...outpost,
   };
   sim.applyLayout(homeFields(sim, second), homeStations(sim, spec));
-  return { sim, outpost: sim.bases[1].poi };
+  return { sim, outpost: sim.bases[1].body };
 }
 
 function dockAt(sim: Sim, ship: Ship, station: Poi): void {
@@ -159,7 +159,7 @@ describe("a second base", () => {
     expect(second.account.credits).toBeGreaterThan(0);
     // Its hauler berthed at its own station, not the first's.
     const berth = sim.haulerBerth(false, second);
-    expect(Math.hypot(berth.x - second.poi.x, berth.y - second.poi.y)).toBeLessThan(1000);
+    expect(Math.hypot(berth.x - second.body.x, berth.y - second.body.y)).toBeLessThan(1000);
   }, 60000);
 
   it("keeps what it holds through a save, and a save from before keeps it as new", () => {
@@ -172,7 +172,7 @@ describe("a second base", () => {
     expect(into.bases[1].ore.get("ore")).toBe(77);
     expect(into.bases[1].account.credits).toBe(4321);
     expect(into.bases[0].ore.get("ore")).toBe(11);
-    expect(into.bases[0].poi).toBe(into.station);
+    expect(into.bases[0].body).toBe(into.station);
   });
 
   it("starts the designer's bases out as starter bases on a new game", () => {
@@ -181,7 +181,7 @@ describe("a second base", () => {
     sim.reset(5);
     expect(sim.bases.length).toBe(2);
     expect(sim.bases[1].ore.get("ore")).toBe(sim.tuning.stationStartOre);
-    expect(sim.bases[0].poi).toBe(sim.station);
+    expect(sim.bases[0].body).toBe(sim.station);
   });
 
   it("rebuilds a wreck when it's the nearest with a shipyard, and otherwise the station does", () => {

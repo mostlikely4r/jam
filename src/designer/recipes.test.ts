@@ -37,7 +37,7 @@ describe("the shipped world", () => {
     const { ship } = sim;
     ship.credits = 100000;
     expect(sim.buyPart(ship, "tractorAll")).toBe(false);
-    const dock = sim.dockPoint(false, far.poi);
+    const dock = sim.dockPoint(false, far.body);
     Object.assign(ship, { x: dock.x, y: dock.y, px: dock.x, py: dock.y, vx: 0, vy: 0 });
     expect(sim.buyPart(ship, "tractorAll")).toBe(true);
   });

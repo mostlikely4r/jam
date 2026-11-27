@@ -49,8 +49,12 @@ export interface Mount {
 /** Where a mount sits and faces. */
 export type MountPlace = Pick<Mount, "x" | "y" | "angle" | "scale">;
 
-/** What a hull is used for. The flags are kept for the parts of the game that will pick hulls by them. */
-export const HULL_USES = ["newGame", "sold", "traffic", "defender", "pirate", "drone"] as const;
+/**
+ * What a hull is used for. The flags are kept for the parts of the game that will pick hulls by them.
+ * The last three make it a frame for something that stands still: the system designer's frame picker
+ * offers it for that node, and it never shows in a ship shop or the start menu.
+ */
+export const HULL_USES = ["newGame", "sold", "traffic", "defender", "pirate", "drone", "station", "pirateBase", "deposit"] as const;
 export type HullUse = (typeof HULL_USES)[number];
 export const HULL_USE_NAMES: Record<HullUse, string> = {
   newGame: "New game",
@@ -59,7 +63,13 @@ export const HULL_USE_NAMES: Record<HullUse, string> = {
   defender: "Defender",
   pirate: "Pirate",
   drone: "Drone",
+  station: "Station",
+  pirateBase: "Pirate base",
+  deposit: "Field deposit",
 };
+/** The uses that make a hull a frame for a station, the pirate base or a deposit rather than a ship. */
+export const FRAME_USES = ["station", "pirateBase", "deposit"] as const satisfies readonly HullUse[];
+export type FrameUse = (typeof FRAME_USES)[number];
 
 /**
  * A set of programs a hull is likely to fly with: what a loop needs to work (core) and what
@@ -622,6 +632,21 @@ export function hullInfo(model: ShipModel): HullInfo {
 }
 
 /** The hulls a new game offers: those the file marks `newGame`, in the file's order. */
+/** Whether a hull is a frame for something that stands still: a station, the pirate base or a deposit. */
+export function isFrame(model: ShipModel): boolean {
+  return hullInfo(model).usedBy.some((use) => (FRAME_USES as readonly HullUse[]).includes(use));
+}
+
+/** The hulls ships fly: every hull but the frames of things that stand still. */
+export function shipModels(): ShipModel[] {
+  return SHIP_MODELS.filter((model) => !isFrame(model));
+}
+
+/** The frames a node of this use can be drawn from: the hulls flagged for it. */
+export function framesFor(use: FrameUse): ShipModel[] {
+  return SHIP_MODELS.filter((model) => hullInfo(model).usedBy.includes(use));
+}
+
 export function newGameHulls(): ShipModel[] {
   return SHIP_MODELS.filter((model) => hullInfo(model).usedBy.includes("newGame"));
 }
@@ -702,11 +727,18 @@ function readShape(raw: Partial<ArtShape>): ArtShape | null {
   if (x === undefined || y === undefined) return null;
   shape.x = x;
   shape.y = y;
+  // A rim shape of any kind is a line, so it can have a width of its own, as an arc can. Kept last,
+  // where the file has it, so saving writes the keys in the order they came.
+  const rimWidth = size(raw.width, 0.05);
+  const lined = (done: ArtShape): ArtShape => {
+    if (role === "rim" && rimWidth !== undefined) done.width = rimWidth;
+    return done;
+  };
   if (kind === "circle") {
     const r = size(raw.r, 0.01);
     if (r === undefined) return null;
     shape.r = r;
-    return shape;
+    return lined(shape);
   }
   if (kind === "ellipse") {
     const rx = size(raw.rx, 0.01);
@@ -715,7 +747,7 @@ function readShape(raw: Partial<ArtShape>): ArtShape | null {
     shape.rx = rx;
     shape.ry = ry;
     if (number(raw.angle) !== undefined && raw.angle !== 0) shape.angle = raw.angle;
-    return shape;
+    return lined(shape);
   }
   if (kind === "ring") {
     const r = size(raw.r, 0.01);
@@ -723,7 +755,7 @@ function readShape(raw: Partial<ArtShape>): ArtShape | null {
     if (r === undefined || inner === undefined || inner <= 0 || inner >= r) return null;
     shape.r = r;
     shape.inner = inner;
-    return shape;
+    return lined(shape);
   }
   if (kind === "arc" || kind === "wedge") {
     const r = size(raw.r, 0.01);
@@ -734,9 +766,8 @@ function readShape(raw: Partial<ArtShape>): ArtShape | null {
     shape.from = from;
     shape.to = to;
     // An arc is a line, so it can have a width of its own. A wedge is a slice, filled.
-    const width = size(raw.width, 0.05);
-    if (kind === "arc" && width !== undefined) shape.width = width;
-    return shape;
+    if (kind === "arc" && rimWidth !== undefined) shape.width = rimWidth;
+    return lined(shape);
   }
   const w = size(raw.w, 0.01);
   const h = size(raw.h, 0.01);
@@ -746,7 +777,7 @@ function readShape(raw: Partial<ArtShape>): ArtShape | null {
   if (number(raw.angle) !== undefined && raw.angle !== 0) shape.angle = raw.angle;
   const corner = size(raw.corner, 0.01);
   if (corner !== undefined) shape.corner = Math.min(corner, Math.min(w, h) / 2);
-  return shape;
+  return lined(shape);
 }
 
 /** A `#rrggbb` colour as the file writes one, or undefined for anything else. */

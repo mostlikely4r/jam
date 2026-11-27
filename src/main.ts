@@ -17,9 +17,9 @@ import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partOf, type Part, type PartIcon, type PartId } from "./parts";
 import { ITEMS, itemDef } from "./items";
 import { PROGRAM_PARTS } from "./programs";
-import { computerSize, hullMax, hullName, mountsHolding, newFitting, newGameHulls, owns, tankMounts, } from "./fitting";
+import { computerSize, hullMax, hullName, mountsHolding, newFitting, newGameHulls, owns, shipModels, tankMounts, } from "./fitting";
 import { drawVectorShip } from "./shipArt";
-import { SHIP_MODELS, type ShipModel } from "./parts";
+import { type ShipModel } from "./parts";
 import { blueprintIcon, iconEl } from "./icons";
 import { canSupplyLine, partCategory, shopCellState, SHOP_CATEGORIES, type ShopBadge } from "./shop";
 import { setTip } from "./tooltip";
@@ -1472,7 +1472,7 @@ function buildPanel(): void {
       programRow.append(programPick, give);
       // Any hull, free, wherever the ship is: the carry-over a bought one gets, the station's list ignored.
       const hullPick = document.createElement("select");
-      for (const model of SHIP_MODELS) hullPick.append(new Option(hullName(model), model));
+      for (const model of shipModels()) hullPick.append(new Option(hullName(model), model));
       hullPick.value = sim.ship.model;
       const swap = document.createElement("button");
       swap.textContent = "Switch hull";
@@ -1730,7 +1730,7 @@ function stationAt(clientX: number, clientY: number): Base | null {
   let best: Base | null = null;
   let closest = Infinity;
   for (const base of sim.bases) {
-    const distance = screenDistance(clientX, clientY, base.poi.x, base.poi.y);
+    const distance = screenDistance(clientX, clientY, base.body.x, base.body.y);
     if (distance >= reachScreen(STATION_HALF) || distance >= closest) continue;
     best = base;
     closest = distance;

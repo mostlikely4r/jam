@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { homeSim } from "./home";
-import { copyHull, decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, PART_ART, refresh, removeHull, resetPartArt, resetPartStats, shipFileNow, thrustOf, unfit, useShipFile, type HullInfo, type Mount, type PartArt } from "./fitting";
+import { copyHull, decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, PART_ART, refresh, removeHull, resetPartArt, resetPartStats, shipFileNow, shipModels, thrustOf, unfit, useShipFile, type HullInfo, type Mount, type PartArt } from "./fitting";
 import { SHIP_MODELS, type PartId, type ThrusterRole } from "./parts";
 import { bayBox, drawBay, drawTanks, drawTurret, drawVectorShip, hullTint, tankBoxes } from "./shipArt";
 import { DEFAULTS } from "./tuning";
@@ -614,8 +614,9 @@ describe("hulls, defaults and decals", () => {
   }
 
   it("lists every hull the file ships, and each one can fly", () => {
-    expect([...SHIP_MODELS].sort()).toEqual(["defender", "drone", "floater", "floaterCopy", "pirate", "racer"]);
-    for (const model of SHIP_MODELS) {
+    // The ships' hulls: the station, pirate base and deposit frames don't fly (stationArt.test.ts).
+    expect([...shipModels()].sort()).toEqual(["defender", "drone", "floater", "floaterCopy", "pirate", "racer"]);
+    for (const model of shipModels()) {
       expect(HULL_MOUNTS[model].length).toBeGreaterThan(6);
       expect(newFitting(model).fit.thrusterMain).toBeDefined();
       expect(newFitting(model).fit.computer).toBeDefined();
@@ -668,7 +669,7 @@ describe("hulls, defaults and decals", () => {
   it("keeps what each hull is used for", () => {
     expect(HULL_INFO.racer.usedBy).toContain("newGame");
     expect(HULL_INFO.pirate.usedBy).toEqual(["pirate"]);
-    expect(HULL_USES).toEqual(["newGame", "sold", "traffic", "defender", "pirate", "drone"]);
+    expect(HULL_USES).toEqual(["newGame", "sold", "traffic", "defender", "pirate", "drone", "station", "pirateBase", "deposit"]);
     withFile(
       () => (HULL_INFO.drone.usedBy = ["drone", "traffic"]),
       () => {

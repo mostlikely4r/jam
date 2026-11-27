@@ -81,7 +81,7 @@ function run(sim: Sim, seconds: number, each?: () => boolean | void): void {
 /** The first base's traffic, docked at its full store with `ore` aboard and hauling. */
 function turnedAway(sim: Sim, ore: number): DronePilot {
   const pilot = sim.traffic.find((each) => each.ship.home === sim.bases[0].id)!;
-  dockAt(sim, pilot.ship, sim.bases[0].poi);
+  dockAt(sim, pilot.ship, sim.bases[0].body);
   sim.setOre(pilot.ship, ore);
   pilot.startHauling();
   return pilot;
@@ -108,8 +108,8 @@ function fixRoll(sim: Sim, pilot: DronePilot, choice: TurnAway): void {
 
 /** Parks the player's ship, and so the camera, far out from both bases. */
 function parkAway(sim: Sim): void {
-  sim.ship.x = sim.ship.px = sim.bases[0].poi.x * 3;
-  sim.ship.y = sim.ship.py = sim.bases[0].poi.y * 3;
+  sim.ship.x = sim.ship.px = sim.bases[0].body.x * 3;
+  sim.ship.y = sim.ship.py = sim.bases[0].body.y * 3;
   sim.ship.vx = sim.ship.vy = 0;
 }
 
@@ -170,7 +170,7 @@ describe("traffic turned away at a full store", () => {
     run(sim, 2);
     expect(pilot.lastTurnAway).toBe("wait");
     run(sim, 60);
-    expect(sim.dockedAt(pilot.ship)).toBe(sim.bases[0].poi);
+    expect(sim.dockedAt(pilot.ship)).toBe(sim.bases[0].body);
     expect(sim.oreIn(pilot.ship)).toBe(4);
     expect(pilot.task).toBe("unloading");
     // Once there's room, it sells as ever.
@@ -216,8 +216,8 @@ describe("traffic turned away at a full store", () => {
     fixRoll(sim, pilot, "station");
     run(sim, sim.tuning.turnAwaySeconds + 1);
     expect(pilot.sellAt).toBe(sim.bases[1].id);
-    run(sim, 900, () => sim.dockedAt(pilot.ship) === sim.bases[1].poi);
-    expect(sim.dockedAt(pilot.ship)).toBe(sim.bases[1].poi);
+    run(sim, 900, () => sim.dockedAt(pilot.ship) === sim.bases[1].body);
+    expect(sim.dockedAt(pilot.ship)).toBe(sim.bases[1].body);
     // Turned away again. Both bases have turned this load away, so the top roll, once the next
     // station, now falls on whatever's left.
     sim.roll = () => 0.999;
@@ -252,7 +252,7 @@ describe("traffic turned away at a full store", () => {
     pilot.ship.owner = sim.ship;
     run(sim, 20);
     expect(pilot.lastTurnAway).toBeNull();
-    expect(sim.dockedAt(pilot.ship)).toBe(sim.bases[0].poi);
+    expect(sim.dockedAt(pilot.ship)).toBe(sim.bases[0].body);
   });
 
   it("never sits in the dock with ore for long unless it chose to wait", () => {
@@ -335,14 +335,14 @@ describe("the radio when turned away", () => {
   it("says where it's going, with a link that points the destination there", () => {
     const sim = world({ chatter: true });
     const pilot = turnedAway(sim, 4);
-    dockAt(sim, sim.ship, sim.bases[0].poi);
+    dockAt(sim, sim.ship, sim.bases[0].body);
     fixRoll(sim, pilot, "station");
     const lines = linked(sim);
     expect(lines).toHaveLength(1);
     expect(lines[0].text).toContain("Outpost");
-    expect(lines[0].link).toEqual({ poi: sim.bases[1].poi });
-    sim.toggleDestination({ poi: sim.bases[1].poi });
-    expect(sim.ship.destination?.poi).toBe(sim.bases[1].poi);
+    expect(lines[0].link).toEqual({ poi: sim.bases[1].body });
+    sim.toggleDestination({ poi: sim.bases[1].body });
+    expect(sim.ship.destination?.poi).toBe(sim.bases[1].body);
   });
 
   it("says nothing as a record out of view", () => {

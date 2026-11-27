@@ -20,6 +20,7 @@ import {
   hullShapes,
   newFitting,
   onGrid,
+  shipModels,
   PART_ART,
   removePoint,
   resetPartArt,
@@ -95,7 +96,8 @@ describe("today's hulls, read from the file", () => {
   const drawnBefore = (): string[] => SHIP_MODELS.filter((model) => model in OLD_HULL);
 
   it("has the same outlines as the code drew, hull for hull", () => {
-    expect([...SHIP_MODELS].sort()).toEqual(["defender", "drone", "floater", "floaterCopy", "pirate", "racer"]);
+    // The ships' hulls: the station, pirate base and deposit frames are checked in stationArt.test.ts.
+    expect([...shipModels()].sort()).toEqual(["defender", "drone", "floater", "floaterCopy", "pirate", "racer"]);
     for (const model of drawnBefore()) {
       expect(hullEdge(model)).toHaveLength(OLD_HULL[model].length);
       radii(OLD_HULL[model]).forEach(([x, y], i) => {
@@ -124,7 +126,7 @@ describe("today's hulls, read from the file", () => {
     expect(rim?.width).toBeCloseTo(1.4, 5);
     expect(rim?.points).toEqual([[1, -0.7], [1, 0.7]]);
     // No other hull has one: their lit edge is their outline.
-    for (const model of SHIP_MODELS.filter((each) => each !== "floater")) {
+    for (const model of shipModels().filter((each) => each !== "floater")) {
       expect(hullShapes(model).some((shape) => shape.role === "rim")).toBe(false);
     }
   });

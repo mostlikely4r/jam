@@ -291,7 +291,7 @@ describe("the station's catch and refinery", () => {
     const held = beside(sim, 2, 10);
     expect(sim.toggleClamp()).toBe(true);
     // Flown to the dock, rock and all, and let go of there: the catch takes it.
-    const dock = sim.dockPoint(false, base.poi);
+    const dock = sim.dockPoint(false, base.body);
     Object.assign(sim.ship, { x: dock.x, y: dock.y, px: dock.x, py: dock.y, vx: 0, vy: 0 });
     sim.step();
     expect(sim.toggleClamp()).toBe(false);
@@ -337,7 +337,7 @@ describe("the station's catch and refinery", () => {
     expect(sim.note?.text).toMatch(/drifts/);
 
     // Beside the station, the station is taking it in.
-    const dock = sim.dockPoint(false, base.poi);
+    const dock = sim.dockPoint(false, base.body);
     Object.assign(sim.ship, { x: dock.x, y: dock.y, px: dock.x, py: dock.y, vx: 0, vy: 0 });
     Object.assign(held, { x: held.px = dock.x + SHIP_RADIUS + held.radius + 10, y: held.py = dock.y });
     expect(sim.toggleClamp()).toBe(true);
@@ -347,7 +347,7 @@ describe("the station's catch and refinery", () => {
     // And while its refinery is busy, another rock drifts on.
     const busy = world();
     takeIn(busy, 1);
-    const at = busy.dockPoint(false, busy.bases[0].poi);
+    const at = busy.dockPoint(false, busy.bases[0].body);
     Object.assign(busy.ship, { x: at.x, y: at.y, px: at.x, py: at.y, vx: 0, vy: 0 });
     beside(busy, 1, 10);
     expect(busy.toggleClamp()).toBe(true);
@@ -358,7 +358,7 @@ describe("the station's catch and refinery", () => {
   it("goes round a station, not through it, when the rock is let go of on the dock side", () => {
     const sim = world();
     const base = sim.bases[0];
-    const dock = sim.dockPoint(false, base.poi);
+    const dock = sim.dockPoint(false, base.body);
     const let_go = rock(sim, 2, dock.x, dock.y);
     let_go.releasedBy = sim.ship;
     run(sim, 60);
@@ -409,14 +409,14 @@ describe("the station's catch and refinery", () => {
     const base = sim.bases[0];
     takeIn(sim, 2);
     const spot = sim.refinerySpot(base);
-    const dock = sim.dockPoint(false, base.poi);
+    const dock = sim.dockPoint(false, base.body);
     // Opposite the dock, and far enough out that a big rock clears the station's box.
     expect(Math.hypot(spot.x - dock.x, spot.y - dock.y)).toBeCloseTo(2 * DOCK_OFFSET, 6);
-    expect(Math.hypot(spot.x - base.poi.x, spot.y - base.poi.y)).toBeGreaterThan(STATION_HALF + base.refining!.radius);
+    expect(Math.hypot(spot.x - base.body.x, spot.y - base.body.y)).toBeGreaterThan(STATION_HALF + base.refining!.radius);
     // And it turns with the station, staying on that side.
     run(sim, 1);
     const moved = sim.refinerySpot(base);
-    expect(Math.hypot(moved.x - base.poi.x, moved.y - base.poi.y)).toBeCloseTo(DOCK_OFFSET, 6);
+    expect(Math.hypot(moved.x - base.body.x, moved.y - base.body.y)).toBeCloseTo(DOCK_OFFSET, 6);
   });
 
   it("pauses while the station has no room, and carries on when there is", () => {
@@ -486,7 +486,7 @@ describe("tow control", () => {
     const sim = world(settings);
     sim.giveProgram(sim.ship, "towControl");
     // Well out from the station, on the dock's side of it, so the pad is round the far side.
-    const station = sim.bases[0].poi;
+    const station = sim.bases[0].body;
     Object.assign(sim.ship, { x: station.x + 2500, y: station.y, px: station.x + 2500, py: station.y });
     return sim;
   }
@@ -504,8 +504,8 @@ describe("tow control", () => {
     for (let i = 0; i < Math.round(seconds / TICK); i++) {
       sim.step();
       sim.events.length = 0;
-      const dx = base.poi.x - held.x;
-      const dy = base.poi.y - held.y;
+      const dx = base.body.x - held.x;
+      const dy = base.body.y - held.y;
       const distance = Math.hypot(dx, dy) || 1;
       // Closing on the station, in the frame it stands still in.
       worst = Math.max(worst, (dx * held.vx + dy * held.vy) / distance);
@@ -540,7 +540,7 @@ describe("tow control", () => {
     const passStation = (program: boolean) => {
       const sim = world();
       const base = sim.bases[0];
-      const station = base.poi;
+      const station = base.body;
       // Well out on the dock's side of the station, as `towShip` puts it.
       Object.assign(sim.ship, { x: station.x + 2500, y: station.y, px: station.x + 2500, py: station.y });
       const held = beside(sim, 2, 10);
@@ -588,7 +588,7 @@ describe("tow control", () => {
     expect(sim.note?.text).toMatch(/Waiting for the refinery/);
     expect(sim.clickPilot.task).toBe("waiting for the refinery");
     // Held off the pad, not sitting on it, so the rock the refinery is pulling in has the room.
-    expect(Math.hypot(sim.ship.x - base.poi.x, sim.ship.y - base.poi.y)).toBeGreaterThan(DOCK_OFFSET);
+    expect(Math.hypot(sim.ship.x - base.body.x, sim.ship.y - base.body.y)).toBeGreaterThan(DOCK_OFFSET);
 
     // The pad comes free: it flies the last of the way in and lets go.
     base.refining = null;
@@ -634,7 +634,7 @@ describe("tow traffic", () => {
 
   /** Puts a traffic ship at the home station's dock with money to spend. */
   function atDock(sim: Sim, pilot: Sim["traffic"][number]): void {
-    const at = sim.dockPoint(false, sim.bases[0].poi);
+    const at = sim.dockPoint(false, sim.bases[0].body);
     Object.assign(pilot.ship, { x: at.x, y: at.y, px: at.x, py: at.y, vx: 0, vy: 0 });
     sim.accountOf(pilot.ship).credits = 10000;
   }
@@ -803,7 +803,7 @@ describe("tow traffic", () => {
     });
     const base = sim.bases[0];
     // The player funds the deposit from the dock, then leaves the area.
-    const at = sim.dockPoint(false, base.poi);
+    const at = sim.dockPoint(false, base.body);
     Object.assign(sim.ship, { x: at.x, y: at.y, px: at.x, py: at.y, vx: 0, vy: 0 });
     sim.ship.credits = 100000;
     expect(sim.fundBlueprint(sim.ship, "deposit")).toBe(true);

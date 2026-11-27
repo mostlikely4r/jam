@@ -1050,7 +1050,7 @@ export class DronePilot extends ShipPilot {
     // Repairs come before shopping, so it never spends its repair money on parts.
     if (sim.oreIn(ship) === 0 && sim.canRepair(ship)) {
       this.task = "repairing";
-      const dock = sim.dockedAt(ship) ?? sim.homeBaseOf(ship).poi;
+      const dock = sim.dockedAt(ship) ?? sim.homeBaseOf(ship).body;
       this.hold(sim, sim.dockPoint(false, dock), sim.dockPoint(true, dock));
       return;
     }
@@ -1120,13 +1120,13 @@ export class DronePilot extends ShipPilot {
     }
     // Selling away from its own base, it goes back to the field by its own.
     const own = sim.homeBaseOf(ship);
-    if (sim.dockedAt(ship) !== own.poi) {
-      const home = sim.miningFieldAt(own.poi.x, own.poi.y);
+    if (sim.dockedAt(ship) !== own.body) {
+      const home = sim.miningFieldAt(own.body.x, own.body.y);
       if (open.includes(home)) return home;
     }
     const lately = ship.pirateKilledAt !== null && sim.now - ship.pirateKilledAt < tuning.fieldFearSeconds;
     const feared = lately && sim.roll() < tuning.fieldFearChance ? ship.pirateKilledIn : null;
-    const here = sim.dockedAt(ship) ?? sim.homeBaseOf(ship).poi;
+    const here = sim.dockedAt(ship) ?? sim.homeBaseOf(ship).body;
     let best = fields[0];
     let bestCost = Infinity;
     for (const field of fields) {
@@ -1468,7 +1468,7 @@ export class DronePilot extends ShipPilot {
     let nearest = Infinity;
     for (const base of sim.bases) {
       if (base === own || sim.catchBusy(base)) continue;
-      const seconds = Math.hypot(base.poi.x - ship.x, base.poi.y - ship.y) / Math.max(1, this.cruiseSpeed(sim));
+      const seconds = Math.hypot(base.body.x - ship.x, base.body.y - ship.y) / Math.max(1, this.cruiseSpeed(sim));
       if (seconds > LONG_TRIP || seconds >= nearest) continue;
       best = base;
       nearest = seconds;
@@ -1511,7 +1511,7 @@ export class DronePilot extends ShipPilot {
     if (this.sellAt === null) return null;
     const base = sim.bases.find((each) => each.id === this.sellAt);
     if (!base) this.sellAt = null;
-    return base?.poi ?? null;
+    return base?.body ?? null;
   }
 
   private haul(sim: Sim): void {
@@ -1570,7 +1570,7 @@ export class DronePilot extends ShipPilot {
     }
     if (choice === "station" && station) {
       this.sellAt = station.id;
-      sim.turnedAway(this, choice, base, { poi: station.poi });
+      sim.turnedAway(this, choice, base, { poi: station.body });
       return true;
     }
     // Back to the rocks with what it has: a field picked as on any stay.
@@ -1614,7 +1614,7 @@ export class DronePilot extends ShipPilot {
 
     const station = this.turnAways > MOST_TRIES ? null : sim.otherBase(base, this.turnedAwayBy);
     if (!station) weights.station = 0;
-    else if (this.tripSeconds(sim, base.poi, station.poi) > LONG_TRIP) weights.station *= 0.5;
+    else if (this.tripSeconds(sim, base.body, station.body) > LONG_TRIP) weights.station *= 0.5;
 
     return { weights, deposit, station };
   }
@@ -2427,7 +2427,7 @@ export class FighterPilot extends ShipPilot {
   /** The field it keeps watch over: a defender's is the one by its base. */
   patrolField(sim: Sim): MiningField {
     if (this.ship.faction === "defender") {
-      const home = sim.homeBaseOf(this.ship).poi;
+      const home = sim.homeBaseOf(this.ship).body;
       return sim.miningFieldAt(home.x, home.y);
     }
     return sim.miningFields()[0];
@@ -2530,7 +2530,7 @@ export class FighterPilot extends ShipPilot {
     }
     const distress = sim.distress;
     // A defender answers a call near its own base: the nearest base answers each call.
-    const ours = (other: Ship) => sim.nearestDock(other.x, other.y) === sim.homeBaseOf(ship).poi;
+    const ours = (other: Ship) => sim.nearestDock(other.x, other.y) === sim.homeBaseOf(ship).body;
     if (ship.faction === "defender" && distress && distress.ship !== ship && ours(distress.ship)) {
       this.task = "responding";
       this.flyTo(sim, distress.ship, FIGHT_DISTANCE, PATROL_PASS_SPEED, null);

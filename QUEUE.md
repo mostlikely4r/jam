@@ -40,6 +40,17 @@ Slice 2: blueprints as items, the moon port hole, the hub removed with the stand
 the nearest ore factory, blocks as items. Watch starving on the dev cards; don't fix it.
 strong: removes the hub and rewires haulers, blueprints and the save format.
 
+## Q-50 · Materials flow, spec B2: ammo · spec
+- state: queued
+- who: pair
+- backlog: S-80
+- added: 2026-11-27
+
+Roadmap step 5: the ammo item, gun 1 naming its ammo, where the ship keeps it, running out. The
+consuming half generalises fuel ("a part consumes an item from where its entity stores it") and
+doesn't touch stations, so it can be specced before spec A; only making ammo needs B1 (Q-48).
+pair: the ammo rules are design calls.
+
 ## Q-40 · Face cast: first interviews · other
 - state: queued
 - who: pair
@@ -52,17 +63,6 @@ Bring kept faces into chat, one at a time; the agent follows "The interview" in 
 each entry in `src/cast.json`. Gus and Pip get interviewed too. Needs the pack format of step 2;
 until it is built, write the fields as the plan names them.
 pair: the answers are the user's.
-
-## Q-50 · Materials flow, spec B2: ammo · spec
-- state: queued
-- who: pair
-- backlog: S-80
-- added: 2026-11-27
-
-Roadmap step 5: the ammo item, gun 1 naming its ammo, where the ship keeps it, running out. The
-consuming half generalises fuel ("a part consumes an item from where its entity stores it") and
-doesn't touch stations, so it can be specced before spec A; only making ammo needs B1 (Q-48).
-pair: the ammo rules are design calls.
 
 ## Q-49 · Materials flow, spec C: lanes, prices and watching · spec
 - state: queued

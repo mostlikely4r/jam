@@ -786,10 +786,10 @@ Specced 2026-11-27 in `docs/ammo-plan.md`: boxes with rounds in the cargo bay, a
 and the ammo-free gun is the laser, bought later, not needed for idle mining. Builds Q-54, Q-55.
 
 ## S-81 · Trade lanes, prices from stock, and watching the flow
-- status: idea
+- status: specced
 - area: World
 - effort: L
-- plan: docs/roadmap.md
+- plan: docs/lanes-prices-plan.md
 - from: the roadmap talk, 2026-11-27
 
 Lanes drawn in the system designer (authored, *decided*), run by haulers by stock and wants; prices
@@ -846,3 +846,14 @@ still bases choose their own factories by what pays (see S-37, expansion as a si
 Spec B2 tops the pirate base's ammo up from nothing, as its fuel is today. Its real supply could be
 raiding haulers or the black market, as part of the living economy (pirates, defenders, traffic
 and money as one loop).
+
+## S-87 · Operations and factions: going broke and getting bought
+- status: parked
+- area: World
+- plan: docs/lanes-prices-plan.md
+- from: the lanes and prices talk, 2026-11-27
+
+*Decided* direction: a privateer system, every actor on its own account. An actor that goes broke
+gets bought: a station buys a broke hauler, a station buys another broke station, a planet buys a
+station and later auctions it to a new actor. Spec C keeps owners as data that can change hands.
+Later factions and operations grow from this; see S-37 (expansion as a sim).

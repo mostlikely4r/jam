@@ -2,6 +2,31 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-57 · Lanes and prices, steps 1–3: prices from stock, lanes, lane haulers · build
+- state: queued
+- who: strong
+- after: Q-53, Q-23
+- backlog: S-81
+- plan: docs/lanes-prices-plan.md
+- added: 2026-11-27
+
+Slice 1: goods quotes from stock on Q-23's price function, lanes drawn in the system designer,
+lane haulers on their own account trading by margin and waiting when nothing pays; B1's stand-in
+route removed. Stops for the user to watch the network.
+strong: replaces the hauler system, touches prices, the designer and the save format.
+
+## Q-58 · Lanes and prices, steps 4–6: traders, out of view, the flow log · build
+- state: queued
+- who: strong
+- after: Q-57
+- backlog: S-81
+- plan: docs/lanes-prices-plan.md
+- added: 2026-11-27
+
+Slice 2: traffic trades by earnings and news, boards post goods prices, miners pick where to sell,
+lane trip records, the no-player flow log and a warm start with lanes in motion.
+strong: traffic decisions, out-of-view records and the news format.
+
 ## Q-7 · Fuel step 3, parts 3.1–3.2: real station stock, and traffic leaving · build
 - state: queued
 - who: strong
@@ -102,18 +127,6 @@ Bring kept faces into chat, one at a time; the agent follows "The interview" in 
 each entry in `src/cast.json`. Gus and Pip get interviewed too. Needs the pack format of step 2;
 until it is built, write the fields as the plan names them.
 pair: the answers are the user's.
-
-## Q-49 · Materials flow, spec C: lanes, prices and watching · spec
-- state: queued
-- who: pair
-- after: Q-47
-- backlog: S-81
-- added: 2026-11-27
-
-Roadmap steps 6–8: trade lanes drawn in the system designer and run by haulers, prices from stock
-and wants (rewrites Q-23), stock bars and lane lines on the dev map, a no-player run logging stocks
-over hours. Starving stations are measured, not fixed.
-pair: design calls on lanes and prices.
 
 ## Q-39 · Face cast, step 1: the pool and the roll page · build
 - state: queued
@@ -242,7 +255,8 @@ strong: changes the save format (bumps SAVE_VERSION).
 - added: 2026-11-25
 - after: Q-49
 
-Waits for spec C (Q-49): prices come from stock and wants, which may rewrite this plan.
+Spec C (`docs/lanes-prices-plan.md`) is written and needs no rewrite here: this builds as planned,
+and spec C's step 1 (Q-57) then adds stock to goods prices inside `price()`.
 Step 1 moves every price into `price()` with no change in play and stops for a check; step 2
 brings the 60% buy share, frame-plus-parts hulls and the contracts, then stops for the user to try.
 strong: moves every price into one function.
@@ -325,6 +339,19 @@ and per-ship phase.
 pair: design choices on which states and how they show.
 
 ## Done
+
+## Q-49 · Materials flow, spec C: lanes, prices and watching · spec
+- state: done
+- who: pair
+- backlog: S-81
+- plan: docs/lanes-prices-plan.md
+- added: 2026-11-27
+- done: 2026-11-27
+
+Roadmap steps 6–8: trade lanes drawn in the system designer and run by haulers, prices from stock
+and wants (rewrites Q-23), stock bars and lane lines on the dev map, a no-player run logging stocks
+over hours. Starving stations are measured, not fixed.
+pair: design calls on lanes and prices.
 
 ## Q-50 · Materials flow, spec B2: ammo · spec
 - state: done

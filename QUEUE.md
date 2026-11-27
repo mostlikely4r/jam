@@ -40,6 +40,19 @@ Slice 2: blueprints as items, the moon port hole, the hub removed with the stand
 the nearest ore factory, blocks as items. Watch starving on the dev cards; don't fix it.
 strong: removes the hub and rewires haulers, blueprints and the save format.
 
+## Q-40 · Face cast: first interviews · other
+- state: queued
+- who: pair
+- after: Q-39
+- backlog: S-39
+- plan: docs/face-cast-plan.md
+- added: 2026-11-26
+
+Bring kept faces into chat, one at a time; the agent follows "The interview" in the plan and writes
+each entry in `src/cast.json`. Gus and Pip get interviewed too. Needs the pack format of step 2;
+until it is built, write the fields as the plan names them.
+pair: the answers are the user's.
+
 ## Q-50 · Materials flow, spec B2: ammo · spec
 - state: queued
 - who: pair
@@ -72,19 +85,6 @@ pair: design calls on lanes and prices.
 
 Stops for the user to roll and keep faces on the dev page (F under `?dev`).
 strong: rests on a guess (that parts knowing their moods roll faces worth keeping); design by eye.
-
-## Q-40 · Face cast: first interviews · other
-- state: queued
-- who: pair
-- after: Q-39
-- backlog: S-39
-- plan: docs/face-cast-plan.md
-- added: 2026-11-26
-
-Bring kept faces into chat, one at a time; the agent follows "The interview" in the plan and writes
-each entry in `src/cast.json`. Gus and Pip get interviewed too. Needs the pack format of step 2;
-until it is built, write the fields as the plan names them.
-pair: the answers are the user's.
 
 ## Q-41 · Face cast, steps 2–3: knobs, situations and dealing the cast · build
 - state: queued

@@ -96,23 +96,42 @@ station plus one factory station with factories 1 and 2, and factory 3 on a thir
 | 2 | First capabilities as parts | Dock, counted storage, a trade point where haulers buy and sell. Only what the second station needs | sim's station code |
 | 3 | The unified recipe | Inputs, conditions, output, time for every item; blueprints as conditions; a factory part runs recipes | Q-32, Q-7 |
 | 4 | Holes | A planet base trades anything at a fixed price; the moon's fuel first | Q-7 |
-| 5 | Ammo | The item, guns that name their ammo, where the ship keeps it, running out | guns, bays |
+| 5 | Ammo (spec B2) | The item, guns that name their ammo, where the ship keeps it, running out | guns, bays |
 | 6 | Trade lanes | Drawn in the system designer; haulers run them by stock and wants | Q-19 |
 | 7 | Prices from stock and wants | A base pays more as it runs short | Q-23 |
 | 8 | Watching it | Stock bars and lane lines on the dev map; a no-player run that logs stocks over hours. Background only | dev map, no-player runs |
 | 9 | The stations | Factory stations placed in the designer from the pieces above: the proof | designer files |
 
-Three spec sessions:
+Four spec sessions (B split in two, *decided*):
 
-- **A: framework and station frames** (steps 1–2).
-- **B: recipes, factories, holes and ammo** (steps 3–5).
-- **C: lanes, prices and watching** (steps 6–8).
+- **A: framework and station frames** (steps 1–2), Q-47.
+- **B1: recipes, factories and holes** (steps 3–4), Q-48.
+- **B2: ammo** (step 5), Q-50.
+- **C: lanes, prices and watching** (steps 6–8), Q-49.
 
-A comes first; B and C can be specced and built side by side after it. Step 9 is designer work
-once they are built.
+All four can be specced today. A comes first for B1 and C, which lean on its words, its storage and
+its trade point; B1 and C can then be specced and built side by side. B2's consuming half
+generalises fuel and doesn't touch stations, so it can be specced even before A; only making ammo
+waits for B1. Step 9 is designer work once they are built.
 
-Q-7 (fuel supply chain), Q-23 (pricing) and Q-32 (blueprints) wait for spec B and spec C, which
+Q-7 (fuel supply chain), Q-23 (pricing) and Q-32 (blueprints) wait for spec B1 and spec C, which
 rewrite them; the faces, live shapes and small fixes run alongside, untouched.
+
+## Open ends, for the spec that faces them
+
+Raised in the talk, not decided. Each spec answers the ones it meets.
+
+- **Out of view, flows run as records** (spec C). Away from the player, a hauler's trip is a trip
+  record and a stock change, as in the simulation levels design; otherwise the network can't grow
+  past a few stations.
+- **Traders for the gaps** (spec C). The user's picture: haulers are the backbone, traffic does the
+  same quicker or more specialised to fill gaps. The player is one more trader.
+- **Who owns a hauler, and who pays it** (spec C). The station, the hauler on its own account, or a
+  hole. It decides whether a starving station can still afford to be supplied.
+- **A warm start** (spec C). `npm run world` already warms `start.json`; a new game should begin
+  with stocks and haulers in motion, not a dead first hour.
+- **A factory you can see** (spec B1, or parked). Visible production from the goods-flow dreams;
+  S-53's refinery laser is the same picture.
 
 ## Later milestones
 

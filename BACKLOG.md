@@ -769,7 +769,7 @@ storage and a trade point become parts, pulled by the second station. Words and 
 Inputs, conditions (a factory, a blueprint, later power or a place), output and time, for ore,
 materials, parts, fuel, hulls, programs and station parts. A factory part runs recipes. Planet bases
 are holes: they take and give anything at a fixed price. First goods: ore → parts, parts → ammo,
-parts → guns or thrusters. Spec B (Q-48); reshapes Q-7 and Q-32.
+parts → guns or thrusters. Spec B1 (Q-48); reshapes Q-7 and Q-32.
 
 ## S-80 · Ammo for gun 1
 - status: idea
@@ -780,7 +780,7 @@ parts → guns or thrusters. Spec B (Q-48); reshapes Q-7 and Q-32.
 
 *Decided:* a consumable so goods keep flowing, and the answer to "what is my gun shooting". Gun 1
 uses ammo; one gun stays ammo-free so idle mining can't run dry. Fuel's twin: a part consumes an
-item from where the ship stores it. Later ammo types carry damage types for the hunt. Spec B (Q-48).
+item from where the ship stores it. Later ammo types carry damage types for the hunt. Spec B2 (Q-50).
 
 ## S-81 · Trade lanes, prices from stock, and watching the flow
 - status: idea

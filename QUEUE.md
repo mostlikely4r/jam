@@ -13,17 +13,29 @@ designer (who, where, mounts), today's base rebuilt as one that plays the same, 
 storage and a trade point as parts, pulled by the second station. Write it to `docs/station-frames-plan.md`.
 pair: framework calls are the user's.
 
-## Q-48 · Materials flow, spec B: recipes, factories, holes and ammo · spec
+## Q-48 · Materials flow, spec B1: recipes, factories and holes · spec
 - state: queued
 - who: pair
 - after: Q-47
-- backlog: S-79, S-80
+- backlog: S-79
 - added: 2026-11-27
 
-Roadmap steps 3–5: one recipe shape for every item (inputs, conditions, output, time; blueprints as
-conditions), a factory part, planet bases as holes, ammo for gun 1. Rewrites the shape of Q-7 and
-Q-32. Factory 1 ore → parts, factory 2 parts → ammo, factory 3 parts → guns or thrusters.
-pair: the goods and ammo rules are design calls.
+Roadmap steps 3–4: one recipe shape for every item (inputs, conditions, output, time; blueprints as
+conditions), a factory part, planet bases as holes. Rewrites the shape of Q-7 and Q-32. Factory 1
+ore → parts, factory 2 parts → ammo, factory 3 parts → guns or thrusters. Also face the open end
+"a factory you can see" in `docs/roadmap.md`.
+pair: the goods are design calls.
+
+## Q-50 · Materials flow, spec B2: ammo · spec
+- state: queued
+- who: pair
+- backlog: S-80
+- added: 2026-11-27
+
+Roadmap step 5: the ammo item, gun 1 naming its ammo, where the ship keeps it, running out. The
+consuming half generalises fuel ("a part consumes an item from where its entity stores it") and
+doesn't touch stations, so it can be specced before spec A; only making ammo needs B1 (Q-48).
+pair: the ammo rules are design calls.
 
 ## Q-49 · Materials flow, spec C: lanes, prices and watching · spec
 - state: queued

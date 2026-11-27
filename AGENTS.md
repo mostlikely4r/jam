@@ -26,7 +26,8 @@ matching a draft to a test.
   and features), `INBOX.md` (quick notes) and `PLAY.md` (what waits for the user to try) are
   plain markdown, edited by hand or from the vibeview page. Format and agent rules:
   `~/Desktop/vibeview/FORMAT.md`; check a file with `node ~/Desktop/vibeview/scripts/check.ts
-  <file>`, and see what can run with `node ~/Desktop/vibeview/scripts/check.ts --ready QUEUE.md`.
+  <file>`, see what your model may take with `... check.ts --pick QUEUE.md`, and what can run in
+  each lane with `... check.ts --ready QUEUE.md`.
 <!-- vibeview:commands end -->
 
 ## Sessions

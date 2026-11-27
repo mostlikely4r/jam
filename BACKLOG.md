@@ -100,7 +100,8 @@ Built since: the start menu picks a ship to begin.
 Fuel and cargo tradeoffs, drone upgrades such as cargo. A stronger gun, even though parts should mainly make the game different.
 
 Being built in `docs/fuel-plan.md`: steps 1, 2 and 2b (tanks as modules) are built; step 3, the
-supply chain, waits in the queue as Q-7, and step 4, running dry, after it.
+supply chain, was rewritten 2026-11-27 on top of spec B1 and waits as Q-7 and Q-56; step 4,
+running dry, after it.
 
 ## S-14 · Tractor beam balance
 - status: parked

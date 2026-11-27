@@ -122,8 +122,9 @@ That's why step 1 measures before anything is set, and slice 1 stops for the use
   2. **Move** (*decided*, for good): its home (`ship.home`) becomes the nearest other station that
      has ammo in storage now and that its fuel can reach (proposal: the same route-and-burn
      estimate as `burnHome`). It works that station's field from then on and moves again only if
-     its new home starves too (*decided*). It says so on the radio as it leaves (proposal, a
-     chatter line in `src/chatter.ts`: "No rounds here. Moving to Ringside.").
+     its new home starves too (*decided*). It says so on the radio as it leaves, a staying
+     miner sometimes answers, and the station signs off plainly (*decided*). The chatter and the
+     move are shared with fuel: see **The chatter** in step 3 of `docs/fuel-plan.md`.
   3. **Wait at the dock** (proposal), checking again every few seconds, so a stuck ship stays
      visible.
 - **Drones never move** (proposal): they're the player's. They take a job if they can, or wait.
@@ -184,7 +185,9 @@ bay feel fair? The numbers get tuned here, before slice 2 leans on them.
 
 **5. No ammo at the dock.** For traffic, the three choices under **Everyone follows the same
 rule**: a job here, else a move, else a wait. Drones and defenders take a job or wait. The move
-changes `ship.home` and the pilot's `working` field (`ownField`), with the radio line. The dev
+changes `ship.home` and the pilot's `working` field (`ownField`), with the chatter. The move and
+the chatter are one function shared with fuel step 3 (`docs/fuel-plan.md`, proposal:
+`Sim.moveHome(pilot, reason)`): whichever is built first writes it, and the other reuses it. The dev
 card on the chart (B1's, `src/chart.ts`, `?dev`) adds each station's ammo bar (it's an item in
 storage, so the bar comes with B1's card) and a count of miners moved in and out.
 

@@ -1,6 +1,7 @@
 # Fuel plan
 
-Written 2026-11-20. Steps 1, 2 and 2b are built, 2026-11-23. Steps 3 and 4 are not built.
+Written 2026-11-20. Steps 1, 2 and 2b are built, 2026-11-23. Steps 3 and 4 are not built. Step 3
+was rewritten 2026-11-27 on top of spec B1 (`docs/recipes-factories-plan.md`).
 
 This is an experiment. Every ship and station gets a visible fuel tank, and thrusters burn fuel.
 Fuel costs credits and flows from the haulers that bring it to stations, then to ships, then
@@ -37,9 +38,9 @@ names (`fuelPrice` and the like) are proposals too, so pick better ones if they 
   full they are.
 - **Fuel costs credits and flows hauler → station → ship → ship** (*decided*). Every sale adds
   a markup, except ship to ship, which is free (*decided*).
-- **Fuel comes from planets and moons** (*decided*). A hauler spends fuel to land on a body and
-  lift off again, and sells what's left. So fuel is cheaper near a body and dearer far from
-  one.
+- **Fuel comes from planets and moons** (*decided*). Since spec B1, the moon port's hole makes it
+  and haulers carry it to the stations (step 3). The 2026-11-11 picture of haulers landing on a
+  body, with fuel cheaper near one, waits for spec C's lanes and prices.
 - **Ships go home to refuel when low.** "Low" is a setting in the tab menu (*decided*).
 - **A ship that runs dry drifts and pings for help** (*decided*). It keeps its momentum, and
   nothing stops it but another ship.
@@ -312,44 +313,152 @@ pump loose and watch one tank drop.
 
 ## Step 3: the supply chain
 
-- **Haulers go to the nearest body** (*decided* 2026-11-11):
-  - The nearest planet or moon by trip time, picked when the hauler sets out, never a star.
-  - Today a hauler comes in from nothing along `haulerLane` and leaves to the off-screen `hub`.
-    Now it flies to the body.
-  - Landing is a placeholder: it reaches the surface, is gone for a while (`haulerLandedSeconds`),
-    and lifts off again.
-  - A base with no body in range keeps today's arrive-from-nothing hauler.
-  - The hub stays the place where carried ore and parts go and come from. The hauler just
-    reaches it by way of the body.
-- **Land and lift-off cost a fixed amount of fuel per body** (*decided*). Proposal:
-  `fuelLanding` × the body's radius ÷ a reference radius, so big planets cost more. This is a
-  set cost, not flying in gravity.
-- **The hauler's fuel:**
-  - At the body it fills its own tank first, then loads fuel as cargo at `fuelSourcePrice` per
-    unit, money from outside the world.
-  - It burns from its own tank, never from the cargo, and it never strands: if its tank can't
-    cover the trip it fills up again before leaving.
-  - At the station it sells the fuel cargo at `fuelSourcePrice` × `fuelHaulerMarkup`.
-  - An arrive-from-nothing hauler sells at a higher price: proposal `fuelFarPrice`.
-- **Stations hold fuel stock now, no longer unlimited:**
-  - It's kept in station storage as the `fuel` item, and the station's tank draws its real fill.
-  - Ships pay the station's buying price × `fuelStationMarkup`.
-  - When the station runs out, ships take what's left and wait docked for the hauler (proposal),
-    and the player sees "no fuel".
-  - The station orders fuel from the hauler the way it orders parts, up to a stock target
-    (proposal: `fuelStationTarget`).
-- **The pirate base:** the black market freighter brings its fuel the same way, at its own price
-  (proposal).
-- **The ledger:** fuel made at a body and fuel burned by thrusters both show in `itemFlow`, so
-  the existing item-count check still balances.
-- **Save:** station fuel stock and hauler fuel.
-- **Tests:**
-  - A hauler picks the nearest body by trip time.
-  - Landing and lift-off cost the body's amount.
-  - The markups stack: source → hauler → station → ship.
-  - The ledger balances over a long run with fuel on.
-- **Try in game:** compare the fuel price at a station near a moon with one far from any body.
-  Watch a station run low and a hauler come in to fill it.
+Rewritten 2026-11-27, after spec B1 (`docs/recipes-factories-plan.md`) changed where fuel comes
+from, and after the ammo talk (`docs/ammo-plan.md`), whose moving rule fuel shares. It replaces the
+2026-11-11 version: haulers landing on the nearest body and a fixed landing cost. B1's stand-in
+route replaced that trip, and it comes back with spec C's lanes if haulers ever fly to a body
+again (see **Not in this step**).
+
+### Why
+
+Since step 2, a station's fuel comes from nowhere: `refuel` in `src/sim.ts` fills any tank at
+`fuelPrice`, and the station's tank art is always drawn full. B1 makes fuel real at its source.
+The moon port's hole factory makes it at a rate, and its stand-in hauler carries it to the
+stations (B1, "Fuel's stand-in pair is Q-7's"). This step makes the stations' end real: a station
+holds fuel stock, sells only what it holds, and can run short. When it runs low, its traffic
+leaves (*decided*): "if you let ammo or fuel run dry you lose your traffic", the lesson future
+player-owned stations will teach.
+
+Premises: the rules are the user's own, from the 2026-11-27 talk. The numbers are guesses: the
+stock target, and the band of lines at which miners leave. That's why the step stops after its
+first half for the user to watch it.
+
+### The picture
+
+**Stations hold real fuel**
+
+- **Fuel is the `fuel` item in a station's storage** (spec A's storage part). Haulers bring it
+  through B1's stand-in route, up to a stock target (proposal: `fuelStationTarget`, 200 units, read
+  by B1's `needsItem` and `itemTarget`).
+- **The dock fills tanks from that stock** (proposal): `refuel` takes `fuel` items out of the
+  station's storage and no longer makes them from nothing. The price stays today's `fuelPrice`
+  (spec C, Q-49, brings prices from stock). Who pays is unchanged: the ship, its owner, a
+  defender's station, or the pirate base.
+- **The station's tank art shows its real fill** (proposal): the stock against its target. Today
+  `drawTank` in `src/render.ts` is always drawn full.
+- **An empty station** (proposal): ships take what's left and then wait docked, as today's
+  `refuel` already stops when the purse does. The dock screen says "No fuel here".
+- **The pirate base keeps fuel from nothing** (proposal, temporary), booked in `itemFlow`, as its
+  ammo does in the ammo plan. Its real supply is S-86.
+
+**Traffic leaves before it's too late**
+
+- **Fuel is hard and ammo is soft** (*decided*). A ship without ammo can still take a job or fly
+  away, so ammo waits until a miner gets none (`docs/ammo-plan.md`). A ship without fuel can't fly,
+  so a miner leaves **while the station can still fill its tank**, when the stock falls below a
+  line (*decided*: "10%/25%").
+- **Each miner has its own line** (proposal): rolled once, between 10% and 25% of the station's
+  fuel target, when the pilot is made, and saved. The nervous ones leave first, and the patient
+  ones hold on until 10%. A late hauler costs a station a few miners. A long shortage costs it
+  all of them.
+- **Leaving** (*decided*: move away, for good, as in the ammo plan): at a dock visit, after the dock
+  has filled its tank, a traffic miner whose home station's stock is below its line moves. Its new
+  home (`ship.home`) is the nearest other station whose fuel stock is above that miner's own line,
+  and that its full tank can reach (the route-and-burn estimate of `burnHome` in `src/pilot.ts`).
+  It works that station's field (`ownField`) from then on. It moves again only if its new home
+  runs low too, and never moves back on its own (*decided*). With nowhere to go, it stays.
+- **Drones and defenders never move** (proposal, as for ammo): they wait at their station.
+  Pirates never run short here.
+
+**The chatter** (*decided*: "a chatter between traffic, and station optionally")
+
+Shared with the ammo plan: whichever of this step and the ammo plan's step 5 (Q-55) is built
+first writes it, and the other reuses it.
+
+- **The leaving miner says why and where** (proposal for the words), as a radio line through the
+  `chatter` event (`src/chatter.ts`, `src/radio.ts`): "Tank's down to 15% here. I'm moving to
+  Ringside." For ammo: "No rounds left here. I'm off to Planet base." The number and the station
+  are real.
+- **A staying miner sometimes answers** (proposal: one chance in two, a miner of the same station
+  that's docked or in its field): "I'll hold out a while longer."
+- **The station signs off plainly** (*decided*: plain to start, which matches today's chatter):
+  "Copy, safe flight." Later the reply depends on the station's personality (*decided*), through
+  the face cast's knobs (`docs/face-cast-plan.md`, Q-39 to Q-41). Not in this step.
+
+### The build
+
+**3.1. Real stock.** With `fuel` on: `refuel` takes from the station's `fuel` storage and stops at
+none. Add the station fuel target through B1's targets, so the stand-in hauler brings fuel from
+the moon port. The station's tank art draws its real fill. The dock screen says "No fuel here" at
+zero. The pirate base's fuel comes from nothing, booked in `itemFlow`.
+
+**3.2. Leaving, and the chatter.** Each traffic pilot rolls its line (saved). At a dock visit,
+after refuelling: the line check, the choice of new home, the move (`ship.home`, the pilot's
+`working` field) and the chatter. Write the move as one function shared with the ammo plan's step
+5 (proposal: `Sim.moveHome(pilot, reason)`), so both shortages move ships the same way. The dev
+card (B1's, on the chart with `?dev`) shows each station's fuel bar and the miners moved in and
+out.
+
+**Stop here for the user to try.** Does the station's tank read at a glance? Do miners leave at
+a pace that feels like a shortage and not a stampede? Is the chatter clear about why? The band
+(10% to 25%) and the target get tuned here.
+
+**3.3. Out of view.** Trip records refuel at their dock visit (`dockVisit`, `fighterArrived` in
+`src/sim.ts`) from the station's real stock, run the same line check and move, and send the
+chatter only when the player can hear it. `src/farside.ts`'s `refuel` line says so. A record's
+own tank still never runs dry out there (step 2).
+
+### Saves
+
+One more `SAVE_VERSION` than whatever it is when this step is built (B1 makes it 13, the ammo plan
+14), in 3.2: each traffic pilot's line. Station fuel stock is already saved in spec A's storage.
+An older save rolls a line for every traffic pilot on load.
+
+### How we'll know
+
+- **Unit tests** (in `src/fuel.test.ts`):
+  - A dock fills a tank from the station's stock, takes the units out of storage, and stops at
+    none. An empty station leaves the ship docked and short.
+  - The stand-in hauler brings fuel from the moon port up to the station's target.
+  - A miner whose line is above the stock moves after it fills up, to the nearest station above
+    its line that it can reach. One whose line is below stays. With nowhere to go, it stays.
+  - Lines are rolled between 10% and 25% and saved. A save without them rolls them on load.
+  - A drone and a defender never move. The pirate base's fuel comes from nothing, and the ledger
+    (`itemFlow`) balances.
+  - A move sends the miner's line with the real number and station, and the station's sign-off.
+  - Out of view (3.3): a record at its dock visit refuels from stock and moves by the same rule.
+- **Existing suites:** `fuel.test.ts`, `farside.test.ts`, `records.test.ts`, `pilot.test.ts`,
+  `save.test.ts` and `sim.test.ts` pass. With `fuel` off, nothing changes.
+- **No-player run** (background, `docs/parity-log.md`): a few hours with fuel on. Per station, its
+  fuel stock over time and the miners moved in and out. A station emptied of traffic is measured,
+  never a failure.
+- Full check: `npm test`, then `npm run build`.
+
+**Try it (3.1–3.2):** `npm run dev`, turn on `fuel` in the tab menu, `?dev`, open the chart (C).
+In the system designer, turn the moon port's fuel rate down and speed up time. The home Station's
+tank art drains. Miners start saying they're moving to another station, the station signs them
+off, and its card counts them out one by one. Dock there yourself at zero: "No fuel here".
+
+**Try it (3.3):** the same with the camera far from the home Station. Fly back after a while: its
+traffic has thinned the same way.
+
+### Needs first
+
+- **Spec A built** (Q-51): storage, owners and accounts. Queued, not built.
+- **Spec B1 built** (Q-52, Q-53): the moon port's hole making fuel, the stand-in route, targets
+  and the dev cards. Queued, not built. This step waits for Q-53.
+- Fuel steps 1, 2 and 2b (built): `refuel`, `fuelLow`, `burnHome`, record charging per leg.
+- Chatter (`src/chatter.ts`, `src/radio.ts`, exists).
+
+### Not in this step
+
+- **Haulers landing on a body** and its fixed landing cost (*decided* 2026-11-11): B1's stand-in
+  route replaced the trip. They return with spec C's lanes if a lane ends at a body.
+- **The hauler's own tank:** stand-in haulers stay unmetered until spec C's lanes.
+- **Prices and markups** (source → hauler → station → ship): spec C, Q-49.
+- **The pirate base's real fuel:** S-86.
+- **Personality in the station's reply:** the face cast.
+- **Running dry and rescue:** step 4, unchanged.
 
 ## Step 4: running dry
 

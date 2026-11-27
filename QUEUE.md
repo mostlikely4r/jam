@@ -2,6 +2,31 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-7 · Fuel step 3, parts 3.1–3.2: real station stock, and traffic leaving · build
+- state: queued
+- who: strong
+- after: Q-53
+- backlog: S-13
+- plan: docs/fuel-plan.md
+- added: 2026-11-23
+
+Step 3 rewritten 2026-11-27 on top of spec B1: stations sell fuel only from real stock the
+stand-in hauler brings from the moon port; the station's tank shows its fill; each miner leaves
+for good when the stock falls below its own line (10–25%), with chatter shared with the ammo plan.
+Stops for the user to try.
+strong: touches refuelling, traffic's homes, chatter and the save format.
+
+## Q-56 · Fuel step 3, part 3.3: out of view · build
+- state: queued
+- who: strong
+- after: Q-7
+- backlog: S-13
+- plan: docs/fuel-plan.md
+- added: 2026-11-27
+
+Trip records refuel from the station's real stock at their dock visit and leave by the same line.
+strong: the out-of-view records and farside table.
+
 ## Q-54 · Ammo, steps 1–4: measure, the box, Gun 1 consumes, the bay's settings and the factory · build
 - state: queued
 - who: strong
@@ -183,18 +208,6 @@ cheap: stands alone and the plan is precise.
 The effect machinery, a gap that turns with the cloud, dampening as the penalty and nanites as the
 gift. Ships fly straight through. Waits on the user flying step 1 (Q-11).
 cheap: precise plan; step 1 is played.
-
-## Q-7 · Fuel step 3: the supply chain · build
-- state: queued
-- who: strong
-- backlog: S-13
-- plan: docs/fuel-plan.md
-- added: 2026-11-23
-- after: Q-53
-
-Rewritten by `docs/recipes-factories-plan.md`: fuel comes from the moon port hole by the stand-in route. Rewrite this plan before building.
-Haulers bring fuel from a body; the station gets a fuel stock, prices and markups. Waits for 2b.
-strong: the supply chain touches haulers, station stock and prices.
 
 ## Q-9 · Faces: settle the shapes · other
 - state: queued

@@ -2,6 +2,19 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-51 · Station frames: place and body, capabilities as parts, owners, construction · build
+- state: queued
+- who: strong
+- backlog: S-78
+- plan: docs/station-frames-plan.md
+- added: 2026-11-27
+
+All four steps, each playing the same and committed on its own: the station, pirate base and
+deposit as frames (converted exactly, looks-the-same test), every capability a part, owner and
+account, then the deposit's construction made generic. Bumps `SAVE_VERSION` to 12. No stop; the
+Try it is one look at the end.
+strong: wide refactor of the sim's station code and the save format.
+
 ## Q-52 · Recipes and factories, steps 1–2: recipe shape, factory part, super factory · build
 - state: queued
 - who: strong
@@ -26,19 +39,6 @@ strong: sits on spec A's parts, changes buying and the save format.
 Slice 2: blueprints as items, the moon port hole, the hub removed with the stand-in hauler route to
 the nearest ore factory, blocks as items. Watch starving on the dev cards; don't fix it.
 strong: removes the hub and rewires haulers, blueprints and the save format.
-
-## Q-51 · Station frames: place and body, capabilities as parts, owners, construction · build
-- state: queued
-- who: strong
-- backlog: S-78
-- plan: docs/station-frames-plan.md
-- added: 2026-11-27
-
-All four steps, each playing the same and committed on its own: the station, pirate base and
-deposit as frames (converted exactly, looks-the-same test), every capability a part, owner and
-account, then the deposit's construction made generic. Bumps `SAVE_VERSION` to 12. No stop; the
-Try it is one look at the end.
-strong: wide refactor of the sim's station code and the save format.
 
 ## Q-50 · Materials flow, spec B2: ammo · spec
 - state: queued

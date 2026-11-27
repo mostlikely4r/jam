@@ -2376,10 +2376,10 @@ export class Sim {
   }
 
   /**
-   * The one thing Auto targeting picks while the queue is empty, or null when there's nothing in
-   * reach: rocks, loose ore or ships by its "Picks" tweak, never itself, a ship it shares an
-   * owner with (a drone, or its own owner) or a station. Ranked by Targeting's "Next main target"
-   * rule; "In order picked" reads as nearest, there being no order to keep yet.
+   * The one thing Auto targeting picks once nothing picked is inside its Max range, or null when
+   * there's nothing new in reach: rocks, loose ore or ships by its "Picks" tweak, never itself, a
+   * ship it shares an owner with (a drone, or its own owner) or a station. Ranked by Targeting's
+   * "Next main target" rule; "In order picked" reads as nearest, there being no order to keep.
    */
   private autoTargetPick(ship: Ship): Targetable | null {
     const reach = this.autoTargetRange(ship);
@@ -2387,6 +2387,7 @@ export class Sim {
     const near = this.targetables().filter(
       (target) =>
         target !== ship &&
+        !ship.targets.includes(target) &&
         this.pickable(target) &&
         this.autoTargetKind(ship, target) &&
         !("model" in target && this.ownerRoot(target) === mine) &&
@@ -2398,7 +2399,9 @@ export class Sim {
 
   /**
    * Auto targeting: once a second (it looks over everything, so not every tick), a ship in flight
-   * with nothing picked picks one thing and stops there. What the player picks is left alone.
+   * with nothing picked inside its Max range picks the nearest new thing in reach, behind whatever
+   * is already picked. What the player picks stays where it is, the main target most of all: the
+   * program never moves the head, so it stays blind to what reads the queue.
    */
   private autoTarget(ships: Ship[], dt: number): void {
     for (const ship of ships) {
@@ -2409,10 +2412,21 @@ export class Sim {
         continue;
       }
       this.autoTargetWaits.set(ship, AUTO_TARGET_SECONDS);
-      if (ship.targets.length > 0 || !this.programsFly(ship)) continue;
+      if (!this.programsFly(ship) || this.pickedInReach(ship)) continue;
       const pick = this.autoTargetPick(ship);
-      if (pick) ship.targets = [pick];
+      if (pick) ship.targets.push(pick);
     }
+  }
+
+  /**
+   * Whether anything picked is inside Auto targeting's Max range. Its own reach, not the lock
+   * range: a pick gone stale behind the ship is no reason to keep the search off.
+   */
+  private pickedInReach(ship: Ship): boolean {
+    const reach = this.autoTargetRange(ship);
+    return ship.targets.some(
+      (target) => Math.hypot(targetSpot(target).x - ship.x, targetSpot(target).y - ship.y) <= reach,
+    );
   }
 
   /**

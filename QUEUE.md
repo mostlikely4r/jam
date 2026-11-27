@@ -183,24 +183,6 @@ strong: changes the save format (bumps SAVE_VERSION).
 Step 1 (templates and a spawn point) stops for the user to try. Waits on Q-17.
 strong: wide: templates, spawning, and part ids moving from code to data.
 
-## Q-42 · Auto targeting: keep one pick inside its Max range · build
-- state: queued
-- who: cheap
-- after: Q-31
-- backlog: S-63
-- plan: docs/auto-targeting-plan.md
-- added: 2026-11-26
-
-Q-31's step leaves the queue alone while anything at all is picked, so a ship floating slowly keeps a
-rock behind it and never takes a fresh one. Decided 2026-11-26: the gate is the program's own Max
-range instead — pick again while nothing picked is inside it, pushed to the tail, never moving the
-head — so the program stays blind to what reads the queue (guns now, a tractor or a scan later).
-Never gate it on a consumer's reach. The plan's Built section and the try-it lines say 300 now, since
-600 is past a turret. One condition in `Sim.autoTarget`, one line in `Sim.autoTargetPick`, and tests
-for both halves: adds while nothing picked is in range, adds nothing while one is, and the head is
-never replaced.
-cheap: one rule, on top of Q-31's step; the plan names it.
-
 ## Q-20 · Damage levels · build
 - state: queued
 - who: cheap
@@ -326,6 +308,28 @@ the start menu cards to each hull's own outline (and its mounts) instead of a ra
 cheap: small and visible, with a clear outcome.
 
 ## Done
+
+## Q-42 · Auto targeting: keep one pick inside its Max range · build
+- state: done
+- who: cheap
+- after: Q-31
+- backlog: S-63
+- plan: docs/auto-targeting-plan.md
+- added: 2026-11-26
+- done: 2026-11-27
+
+Q-31's step leaves the queue alone while anything at all is picked, so a ship floating slowly keeps a
+rock behind it and never takes a fresh one. Decided 2026-11-26: the gate is the program's own Max
+range instead — pick again while nothing picked is inside it, pushed to the tail, never moving the
+head — so the program stays blind to what reads the queue (guns now, a tractor or a scan later).
+Never gate it on a consumer's reach. The plan's Built section and the try-it lines say 300 now, since
+600 is past a turret. One condition in `Sim.autoTarget`, one line in `Sim.autoTargetPick`, and tests
+for both halves: adds while nothing picked is in range, adds nothing while one is, and the head is
+never replaced.
+cheap: one rule, on top of Q-31's step; the plan names it.
+
+Built 2026-11-27: `Sim.pickedInReach` is the gate, the pick goes on the tail, and the three tests
+the entry asked for are in `src/targeting.test.ts`.
 
 ## Q-59 · Live shapes, slice 2: state lights and spinning shapes · build
 - state: done

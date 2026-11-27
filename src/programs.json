@@ -210,7 +210,7 @@
       "id": "autoTarget",
       "name": "Auto targeting",
       "short": "atarg",
-      "description": "Picks the next thing for you while you've picked nothing, so Auto-mine keeps going when the queue runs dry. Needs Targeting loaded",
+      "description": "Picks the next thing for you while nothing you've picked is in range, so Auto-mine keeps going as the picks behind you go stale. Needs Targeting loaded",
       "price": 500,
       "tier": 1,
       "icon": {

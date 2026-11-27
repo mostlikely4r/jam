@@ -3,6 +3,18 @@
 <!-- vibeview play v1. Things to try when you next play or use the project: one item per build
 that wants a human look. Format: see vibeview/FORMAT.md -->
 
+## P-6 · Auto targeting: a stale pick no longer freezes the search
+- from: Q-42
+- plan: docs/auto-targeting-plan.md
+- added: 2026-11-27
+
+Buy Targeting, Auto-mine and Auto targeting, set Auto targeting's Max range to 300 (right click it
+in the ship screen, I) and pick a rock from a few hundred out. Mine it, then drift on the other
+way: the pick behind you falls out of reach, a fresh rock gets a box behind it, and the one you
+picked stays main. With several picked, only the tail grows and the box on your main target never
+jumps. Then check it still feels right with Max range on Lock range: while anything is picked,
+nothing is added, as before.
+
 ## P-5 · State lights and spin: throttle, approach, running low, firing
 - from: Q-59
 - plan: docs/live-shapes-plan.md

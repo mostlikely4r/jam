@@ -67,7 +67,8 @@ away. Does the hold fill, and does it pick sensibly?
   Parts group once the dev tools plan is in). Stop in a field, right click Auto targeting in the
   ship screen (I) and set Max range to 300: a turret reaches about 400, so 300 is the mining
   setting, and 600 or more is for the hull's own gun. Don't click anything: the nearest rock gets
-  a box and the guns start; when it's mined out, the next one does.
+  a box and the guns start; when it's mined out, the next one does. Then drift on past a pick so
+  it falls behind you: another rock gets a box behind it, and the one you picked stays main.
 
 ## Needs first
 
@@ -78,6 +79,9 @@ Targeting, its tweaks and Auto-mine are built. Nothing else.
 - Turret tracking per turret (the many mounts plan leaves all turrets on one aim).
 - AI ships buying Auto targeting.
 - Smarter picks (most ore, rarest ore first): later, with the goods flow.
+- A cap on how many the program adds: with the default *Lock range* the reach and the lock range
+  are one, so nothing out of reach can wait; only a lowered Max range in a dense field leaves
+  picks waiting at the head, and they drop out as the ship comes round.
 
 ## Built
 
@@ -92,11 +96,19 @@ Targeting, its tweaks and Auto-mine are built. Nothing else.
   Its step, `Sim.autoTarget`, keeps a per-ship wait outside the save (as gun cooldowns are) and
   searches once a second on a ship in flight with nothing picked.
 
-The **empty-queue gate** stands only until Q-42 (*decided* 2026-11-26, queued): floating slowly,
-stale picks stayed behind the ship and nothing fresh ever came, since anything picked froze the
-search. The gate becomes the program's own Max range — pick again while nothing picked is inside
-it, adding at the tail and never touching the head — which keeps the program blind to what reads
-the queue: guns now, a tractor or a scan later.
+The gate was the empty queue in Q-31; Q-42 (*decided* 2026-11-26, built 2026-11-27) made it the
+program's own Max range instead. Floating slowly, stale picks stayed behind the ship and nothing
+fresh ever came, since anything picked froze the search; and an idle ship that did keep one pick
+in reach has nothing to fix, so a pick the guns are working on holds the search off. The program
+picks again while nothing picked is inside its reach, adding at the tail and never touching the
+head, which keeps it blind to what reads the queue: guns now, a tractor or a scan later.
+
+What Q-42 changed in the code: `Sim.pickedInReach` is the gate, `Sim.autoTargetPick` leaves out
+anything already picked, and `Sim.autoTarget` pushes rather than replacing. The reach is the
+program's own (capped by the lock range), not `targetRange`: with the default *Lock range* pick
+the two are the same, so only a lowered Max range lets stale picks wait at the head. Nothing caps
+how many it adds, so in a dense field a lowered Max range can leave several waiting; they drop out
+by themselves once past the lock range or mined out.
 
 What landed differently from the proposal:
 
@@ -113,11 +125,12 @@ What landed differently from the proposal:
 **How we'll know**, as tested: `src/targeting.test.ts` has each Next main target option against
 three rocks round a ship (In order picked, Nearest, Most in front, Collision, the pieces of a
 broken main target), and Auto targeting picking the nearest rock in reach, nothing past its max
-range and everything once it's raised, nothing while something is picked, picking again when its
-rock is mined out, rocks unless the Picks tweak says otherwise (loose ore, then ships), and
-nothing at all without Targeting. `src/relative.test.ts` has `closestApproach` and
-`src/programs.test.ts` the two shipped programs' tweaks. `Sim.autoTarget` is in `farside.ts` as
-running everywhere, since only flown ships hold targets.
+range and everything once it's raised, nothing while something picked is inside that reach (the
+default lock range and a lowered 300), picking again when its rock is mined out, a fresh pick on
+the tail behind a stale one with the head left alone, rocks unless the Picks tweak says otherwise
+(loose ore, then ships), and nothing at all without Targeting. `src/relative.test.ts` has
+`closestApproach` and `src/programs.test.ts` the two shipped programs' tweaks. `Sim.autoTarget` is
+in `farside.ts` as running everywhere, since only flown ships hold targets.
 
 The review raised one finding, fixed: with Picks on Ships the search only kept out a ship's own
 drones, so a drone with the program could still pick its owner, or a fellow drone. `ownerRoot` now

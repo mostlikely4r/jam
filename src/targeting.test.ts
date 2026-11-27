@@ -394,7 +394,7 @@ describe("auto targeting", () => {
     expect(sim.ship.targets).toEqual([a]);
   });
 
-  it("does nothing while anything is picked", () => {
+  it("does nothing while something picked is inside the default lock range", () => {
     const sim = autoSim();
     const [a, b, c, d] = sim.rocks;
     place(a, 400, 0);
@@ -404,6 +404,39 @@ describe("auto targeting", () => {
     sim.selectTarget(sim.ship, b);
     stepSeconds(sim, 3);
     expect(sim.ship.targets).toEqual([b]);
+  });
+
+  it("picks again while nothing picked is inside its max range, on the tail", () => {
+    const sim = autoSim();
+    const [a, b, c, d] = sim.rocks;
+    place(a, 200, 0);
+    place(b, -900, 0);
+    place(c, 5000, 0);
+    place(d, 5000, 0);
+    expect(sim.setTweak(sim.ship, "autoTarget", "maxRange", "300")).toBe(true);
+    // A stale pick behind the ship: inside the lock range, out of the turrets' reach.
+    sim.selectTarget(sim.ship, b);
+    stepSeconds(sim, 1.2);
+    expect(sim.ship.targets).toEqual([b, a]);
+    // The head is the player's, whatever the program adds.
+    expect(sim.mainTarget(sim.ship)).toBe(b);
+    // A fresh pick at the tail is now in reach, so the search goes quiet again.
+    stepSeconds(sim, 2);
+    expect(sim.ship.targets).toEqual([b, a]);
+  });
+
+  it("adds nothing while something picked is inside its max range", () => {
+    const sim = autoSim();
+    const [a, b, c, d] = sim.rocks;
+    place(a, 200, 0);
+    place(b, 100, 0);
+    place(c, 5000, 0);
+    place(d, 5000, 0);
+    expect(sim.setTweak(sim.ship, "autoTarget", "maxRange", "300")).toBe(true);
+    // The nearer rock is left out: one pick in reach is enough.
+    sim.selectTarget(sim.ship, a);
+    stepSeconds(sim, 3);
+    expect(sim.ship.targets).toEqual([a]);
   });
 
   it("picks again the rock it picked is mined out", () => {

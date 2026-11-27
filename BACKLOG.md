@@ -745,3 +745,91 @@ a procedure) design a system that is fun to play, then play it. The road starts 
 session (pair) that sets up how a system gets designed this way, what "fun" is measured against
 (the experience targets in `docs/vision.md`) and a first system to try. Builds on the system
 designer and the layout recipes (`npm run layout`).
+
+## S-78 · Station frames: a station is a hull, its behaviour parts
+- status: idea
+- area: World
+- effort: L
+- plan: docs/roadmap.md
+- from: the roadmap talk, 2026-11-27
+
+A station's core is who (name, owner, account), where (an anchor) and a frame with mounts, drawn in
+the hull designer. Everything else is a part: dock, shop, storage, lockers, fuel tanks, refinery,
+repair, factories, turrets. Today's base becomes a frame that plays the same; then dock, counted
+storage and a trade point become parts, pulled by the second station. Words and rules in
+`docs/framework.md`. Spec A (Q-47).
+
+## S-79 · One recipe for every item, factories and holes
+- status: idea
+- area: World
+- effort: L
+- plan: docs/roadmap.md
+- from: the roadmap talk, 2026-11-27
+
+Inputs, conditions (a factory, a blueprint, later power or a place), output and time, for ore,
+materials, parts, fuel, hulls, programs and station parts. A factory part runs recipes. Planet bases
+are holes: they take and give anything at a fixed price. First goods: ore → parts, parts → ammo,
+parts → guns or thrusters. Spec B (Q-48); reshapes Q-7 and Q-32.
+
+## S-80 · Ammo for gun 1
+- status: idea
+- area: Ships and gear
+- effort: M
+- plan: docs/roadmap.md
+- from: the roadmap talk, 2026-11-27
+
+*Decided:* a consumable so goods keep flowing, and the answer to "what is my gun shooting". Gun 1
+uses ammo; one gun stays ammo-free so idle mining can't run dry. Fuel's twin: a part consumes an
+item from where the ship stores it. Later ammo types carry damage types for the hunt. Spec B (Q-48).
+
+## S-81 · Trade lanes, prices from stock, and watching the flow
+- status: idea
+- area: World
+- effort: L
+- plan: docs/roadmap.md
+- from: the roadmap talk, 2026-11-27
+
+Lanes drawn in the system designer (authored, *decided*), run by haulers by stock and wants; prices
+rise as a base runs short; stock bars and lane lines on the dev map, and a no-player run logging
+stocks over hours. A starving station is measured and shown, never fixed or gated. Spec C (Q-49);
+reshapes Q-23.
+
+## S-82 · Ore types and ore per rock, then scanning
+- status: parked
+- area: World
+- plan: docs/roadmap.md
+- from: the roadmap talk, 2026-11-27
+
+More ore types, each wanted by different recipes; a rock's ore fixed when it is made (or known
+after a scan); then scanning, which only matters once ores differ. Built after the factories, from
+the demand end. S-8's radar pulse is a cousin.
+
+## S-83 · Power and the fitting puzzle
+- status: parked
+- area: Ships and gear
+- plan: docs/roadmap.md
+- from: the roadmap talk, 2026-11-27
+
+Guns use little energy but need ammo; lasers use no ammo but need an expensive reactor or rule out a
+power-hungry tractor; ion thrusters use no fuel but need power. Solar panels, reactors, uranium or a
+fusion fuel slot into recipes and transport. Power at a base is a recipe condition, on a ship a
+budget: two designs that may share items.
+
+## S-84 · The far base that builds the end-game miner from goods
+- status: parked
+- area: World
+- plan: docs/roadmap.md
+- from: the roadmap talk, 2026-11-27
+
+*Decided:* the end-game miner is sold somewhere else, and that base builds it from parts it
+actually holds; short of them, you wait or bring them. Heard of through news that ships carry, late
+and going stale. Pushes idle mining to 4 and gives the shopping journey its want.
+
+## S-85 · A transport AI that draws lanes, and a network that grows
+- status: parked
+- area: World
+- plan: docs/roadmap.md
+- from: the roadmap talk, 2026-11-27
+
+Lanes are authored first. Later a god transport AI draws them before or during the game, and later
+still bases choose their own factories by what pays (see S-37, expansion as a sim).

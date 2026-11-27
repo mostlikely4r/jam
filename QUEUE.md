@@ -2,6 +2,41 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-47 · Materials flow, spec A: framework and station frames · spec
+- state: queued
+- who: pair
+- backlog: S-78
+- added: 2026-11-27
+
+Roadmap steps 1–2 (`docs/roadmap.md`, `docs/framework.md`): a station as a frame in the hull
+designer (who, where, mounts), today's base rebuilt as one that plays the same, then dock, counted
+storage and a trade point as parts, pulled by the second station. Write it to `docs/station-frames-plan.md`.
+pair: framework calls are the user's.
+
+## Q-48 · Materials flow, spec B: recipes, factories, holes and ammo · spec
+- state: queued
+- who: pair
+- after: Q-47
+- backlog: S-79, S-80
+- added: 2026-11-27
+
+Roadmap steps 3–5: one recipe shape for every item (inputs, conditions, output, time; blueprints as
+conditions), a factory part, planet bases as holes, ammo for gun 1. Rewrites the shape of Q-7 and
+Q-32. Factory 1 ore → parts, factory 2 parts → ammo, factory 3 parts → guns or thrusters.
+pair: the goods and ammo rules are design calls.
+
+## Q-49 · Materials flow, spec C: lanes, prices and watching · spec
+- state: queued
+- who: pair
+- after: Q-47
+- backlog: S-81
+- added: 2026-11-27
+
+Roadmap steps 6–8: trade lanes drawn in the system designer and run by haulers, prices from stock
+and wants (rewrites Q-23), stock bars and lane lines on the dev map, a no-player run logging stocks
+over hours. Starving stations are measured, not fixed.
+pair: design calls on lanes and prices.
+
 ## Q-39 · Face cast, step 1: the pool and the roll page · build
 - state: queued
 - who: strong
@@ -54,7 +89,9 @@ strong: rests on a guess about where things are seen, so the ground is unclear.
 - backlog: S-65
 - plan: docs/blueprints-plan.md
 - added: 2026-11-25
+- after: Q-48
 
+Waits for spec B (Q-48), which makes a blueprint a recipe condition and may rewrite this plan.
 Hulls first, then programs; stops after hulls for the user to fund one. Bumps `SAVE_VERSION`.
 strong: changes the save format (bumps SAVE_VERSION).
 
@@ -113,7 +150,9 @@ cheap: precise plan; step 1 is played.
 - backlog: S-13
 - plan: docs/fuel-plan.md
 - added: 2026-11-23
+- after: Q-48
 
+Waits for spec B (Q-48): fuel becomes a recipe chain and the moon a hole.
 Haulers bring fuel from a body; the station gets a fuel stock, prices and markups. Waits for 2b.
 strong: the supply chain touches haulers, station stock and prices.
 
@@ -148,7 +187,9 @@ strong: changes the save format (bumps SAVE_VERSION).
 - backlog: S-55
 - plan: docs/pricing-plan.md
 - added: 2026-11-25
+- after: Q-49
 
+Waits for spec C (Q-49): prices come from stock and wants, which may rewrite this plan.
 Step 1 moves every price into `price()` with no change in play and stops for a check; step 2
 brings the 60% buy share, frame-plus-parts hulls and the contracts, then stops for the user to try.
 strong: moves every price into one function.

@@ -75,6 +75,9 @@ See `docs/shopping-trip-test.md` for the tractor split it also depends on.
 
 **Road.** Refined 2026-11-20 (moment, place, rhythm, earnings above). The features, bundles and
 order toward it are in `docs/idle-mining-road.md`; auto-fire with measurement is specced in `docs/keeps-mining-plan.md`.
+2026-11-27: 3 confirmed by an early end-game miner the user built; it needs tweaks and balance, not
+features. Its 4 comes from the world: a far base that builds that miner from real goods
+(`docs/roadmap.md`).
 
 ### Shopping journey: 2
 

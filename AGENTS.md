@@ -42,6 +42,21 @@ matching a draft to a test.
   project lives in the Workflow section below. Their source is `~/Desktop/vibeview/prompts/`:
   change them there and run `node scripts/sync-prompts.ts` in vibeview; never edit a copy here.
 
+## Architecture
+
+The code is moving from proof of concept to framework: entities closed for change, open for
+extension. The words and the shape are in `docs/framework.md`, the road in `docs/roadmap.md`.
+
+- **Entities are data:** a frame (hull), the parts on its mounts, an anchor or motion, an account.
+  Ships and stations are both frames.
+- **Behaviour comes from parts.** A new behaviour is a new part kind plus the system that reads it;
+  nothing existing changes.
+- **Systems ask about capabilities, never types:** "what has a dock?", not "is this the station?".
+- **A part declares what it consumes** (fuel, ammo, later power); every item has one recipe shape
+  (inputs, conditions, output, time).
+- **Pulled, not up front:** turn a behaviour into a part when a feature needs it. Don't add new code
+  written for one station, ship or item; where old code like that stays, it is temporary.
+
 ## Workflow
 
 Read by `/spec` and `/build`.

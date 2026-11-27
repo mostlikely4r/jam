@@ -2,6 +2,31 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-52 · Recipes and factories, steps 1–2: recipe shape, factory part, super factory · build
+- state: queued
+- who: strong
+- after: Q-51
+- backlog: S-79
+- plan: docs/recipes-factories-plan.md
+- added: 2026-11-27
+
+Slice 1: recipes get time and conditions, a factory part with working/waiting state, each station's
+workshop builds bought modules and hulls behind a short progress bar, dev cards on the chart. Stops
+for the user to try the build times.
+strong: sits on spec A's parts, changes buying and the save format.
+
+## Q-53 · Recipes and factories, steps 3–6: blueprint items, holes, the hub gone · build
+- state: queued
+- who: strong
+- after: Q-52
+- backlog: S-79
+- plan: docs/recipes-factories-plan.md
+- added: 2026-11-27
+
+Slice 2: blueprints as items, the moon port hole, the hub removed with the stand-in hauler route to
+the nearest ore factory, blocks as items. Watch starving on the dev cards; don't fix it.
+strong: removes the hub and rewires haulers, blueprints and the save format.
+
 ## Q-51 · Station frames: place and body, capabilities as parts, owners, construction · build
 - state: queued
 - who: strong
@@ -14,19 +39,6 @@ deposit as frames (converted exactly, looks-the-same test), every capability a p
 account, then the deposit's construction made generic. Bumps `SAVE_VERSION` to 12. No stop; the
 Try it is one look at the end.
 strong: wide refactor of the sim's station code and the save format.
-
-## Q-48 · Materials flow, spec B1: recipes, factories and holes · spec
-- state: queued
-- who: pair
-- after: Q-47
-- backlog: S-79
-- added: 2026-11-27
-
-Roadmap steps 3–4: one recipe shape for every item (inputs, conditions, output, time; blueprints as
-conditions), a factory part, planet bases as holes. Rewrites the shape of Q-7 and Q-32. Factory 1
-ore → parts, factory 2 parts → ammo, factory 3 parts → guns or thrusters. Also face the open end
-"a factory you can see" in `docs/roadmap.md`.
-pair: the goods are design calls.
 
 ## Q-50 · Materials flow, spec B2: ammo · spec
 - state: queued
@@ -103,9 +115,9 @@ strong: rests on a guess about where things are seen, so the ground is unclear.
 - backlog: S-65
 - plan: docs/blueprints-plan.md
 - added: 2026-11-25
-- after: Q-48
+- after: Q-53
 
-Waits for spec B (Q-48), which makes a blueprint a recipe condition and may rewrite this plan.
+Rewritten by `docs/recipes-factories-plan.md` (see Rewrites there): rewrite this plan before building.
 Hulls first, then programs; stops after hulls for the user to fund one. Bumps `SAVE_VERSION`.
 strong: changes the save format (bumps SAVE_VERSION).
 
@@ -164,9 +176,9 @@ cheap: precise plan; step 1 is played.
 - backlog: S-13
 - plan: docs/fuel-plan.md
 - added: 2026-11-23
-- after: Q-48
+- after: Q-53
 
-Waits for spec B (Q-48): fuel becomes a recipe chain and the moon a hole.
+Rewritten by `docs/recipes-factories-plan.md`: fuel comes from the moon port hole by the stand-in route. Rewrite this plan before building.
 Haulers bring fuel from a body; the station gets a fuel stock, prices and markups. Waits for 2b.
 strong: the supply chain touches haulers, station stock and prices.
 
@@ -286,6 +298,13 @@ and per-ship phase.
 pair: design choices on which states and how they show.
 
 ## Done
+
+## Q-48 · Materials flow, spec B1: recipes, factories and holes · spec
+- state: done
+- done: 2026-11-27
+- backlog: S-79
+- plan: docs/recipes-factories-plan.md
+- added: 2026-11-27
 
 ## Q-47 · Materials flow, spec A: framework and station frames · spec
 - state: done

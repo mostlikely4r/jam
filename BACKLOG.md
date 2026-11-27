@@ -760,10 +760,10 @@ storage and a trade point become parts, pulled by the second station. Words and 
 `docs/framework.md`. Spec A (Q-47).
 
 ## S-79 · One recipe for every item, factories and holes
-- status: idea
+- status: specced
 - area: World
 - effort: L
-- plan: docs/roadmap.md
+- plan: docs/recipes-factories-plan.md
 - from: the roadmap talk, 2026-11-27
 
 Inputs, conditions (a factory, a blueprint, later power or a place), output and time, for ore,

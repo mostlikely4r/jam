@@ -3,17 +3,6 @@
 <!-- vibeview play v1. Things to try when you next play or use the project: one item per build
 that wants a human look. Format: see vibeview/FORMAT.md -->
 
-## P-9 · Nothing vanishes in view: the camera is the viewer
-- from: Q-30
-- plan: docs/in-view-plan.md
-- added: 2026-11-28
-
-`npm run dev`, with traffic on. Die near a busy station or field (fly into a rock at speed) and
-watch the wreck, then the pod's ride home: ships and rocks along the way stay drawn, and no rock
-pops up on screen. Fly fast past a field. Zoom all the way out next to a station and wait for a
-hauler to leave (that one may still vanish: step 2 fixes it). Does anything else still vanish in
-view, and where was the camera when it did?
-
 ## P-8 · Face pool: roll faces for each role, keep the ones that read as someone
 - from: Q-39
 - plan: docs/face-cast-plan.md
@@ -64,6 +53,18 @@ blink, mine with auto-mine and see each gun flash on its own shot, burn the tank
 see the lamp (fuel on). Then drop what you don't want (tools only).
 
 ## Passed
+
+## P-9 · Nothing vanishes in view: the camera is the viewer
+- from: Q-30
+- plan: docs/in-view-plan.md
+- added: 2026-11-28
+- passed: 2026-11-28
+
+`npm run dev`, with traffic on. Die near a busy station or field (fly into a rock at speed) and
+watch the wreck, then the pod's ride home: ships and rocks along the way stay drawn, and no rock
+pops up on screen. Fly fast past a field. Zoom all the way out next to a station and wait for a
+hauler to leave (that one may still vanish: step 2 fixes it). Does anything else still vanish in
+view, and where was the camera when it did?
 
 ## P-4 · Auto targeting: pick and mine without clicking
 - from: Q-31

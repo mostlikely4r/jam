@@ -8,6 +8,7 @@ export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
 import { frameMountSpot, partOn, partSpot, resolveParts, tradeNames, type FramePart, type FramePartData, type FramePartKind, type PartOverrides } from "./frameParts";
 import { closestApproach as closestMeeting, type Motion } from "./relative";
+import { accountOf as ownedAccount, type Account, type Agent, type Owned, ownerLoop } from "./owners";
 import { orbitState } from "./kepler";
 import { autoPlace, canPlace, cellsOf, floatsAfterRemoval, footprint, reachable, reachableCells, sticks, usedCells, type GridSpec, type Placed } from "./grid";
 import { pilotKind, type StepProfile } from "./profile/step";
@@ -490,6 +491,8 @@ export interface Deposit {
   name: "field deposit";
   /** The base that built it, by id. */
   base: string;
+  /** Who it belongs to (`src/owners.ts`): the station that built it, whose account it uses. */
+  owner: string;
   /** The POI it stands by, and the one whose side of that POI it keeps to. */
   at: Poi;
   toward: Poi;
@@ -530,6 +533,8 @@ export interface Battery {
   id: "stationGuards" | "depositGuards";
   /** The base that built it, by id. */
   base: string;
+  /** Who it belongs to: the station it stands on, or the deposit. Its money is its owner's. */
+  owner: string;
   host: Poi | Deposit;
   guns: Guard[];
   fromSwitch: boolean;
@@ -655,6 +660,26 @@ export function shopData(holder: { parts: readonly FramePart[] }): FramePartData
 /** The frames a station, the pirate base and a field deposit are drawn from when their spec names none. */
 export const STATION_FRAME = "station";
 export const PIRATE_BASE_FRAME = "pirateBase";
+/** The pirate base as an owner (`src/owners.ts`): the pirates' own entity. */
+export const PIRATE_BASE_ID = "pirate base";
+/** A base's deposit as an owner. */
+export function depositId(base: string): string {
+  return `${base}/deposit`;
+}
+/** A battery as an owner. */
+function batteryId(battery: Pick<Battery, "id" | "base">): string {
+  return `${battery.base}/${battery.id}`;
+}
+
+/** Everything in a world that has an owner, as saved or as it is: the loop check reads these. */
+function ownedIn(bases: { id: string }[], deposits: Pick<Deposit, "base" | "owner">[], batteries: Pick<Battery, "id" | "base" | "owner">[]): Owned[] {
+  return [
+    ...bases.map((base): Owned => ({ id: base.id, owner: "stations", account: { credits: 0 } })),
+    { id: PIRATE_BASE_ID, owner: "pirates", account: { credits: 0 } },
+    ...deposits.map((deposit): Owned => ({ id: depositId(deposit.base), owner: deposit.owner ?? deposit.base, account: "owner" })),
+    ...batteries.map((battery): Owned => ({ id: batteryId(battery), owner: battery.owner ?? battery.base, account: "owner" })),
+  ];
+}
 export const DEPOSIT_FRAME = "deposit";
 
 /**
@@ -776,7 +801,9 @@ export interface Base {
   spec: StationSpec;
   /** The station itself: drawn from its frame, anchored to its place, docked at. */
   body: FrameBody;
-  account: { credits: number };
+  /** Who it belongs to: every station is the stations' (`src/owners.ts`). */
+  owner: Agent;
+  account: Account;
   /** Ore bought and held for the next hauler, by item. */
   ore: Map<PartId, number>;
   /**
@@ -1377,8 +1404,15 @@ export class Sim {
   batteries: Battery[] = [];
   /** Ore at the pirate base, by item: for sale to empty holds and to the black market. */
   pirateOre = new Map<PartId, number>();
-  /** The pirate base's money. It pays for repairs, rebuilds, new pirates and parts. */
-  pirateCredits = 0;
+  /** The pirate base's account. It pays for repairs, rebuilds, new pirates and parts. */
+  pirateAccount: Account = { credits: 0 };
+  /** The pirate base's money, in its account. */
+  get pirateCredits(): number {
+    return this.pirateAccount.credits;
+  }
+  set pirateCredits(credits: number) {
+    this.pirateAccount.credits = credits;
+  }
   /** How many pirates the base fields. It grows once every pirate is fully fitted. */
   pirateCap = 0;
   blackMarket: BlackMarket | null = null;
@@ -1545,6 +1579,9 @@ export class Sim {
   restore(saved: unknown): void {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data = saved as any;
+    // Nothing may end up owning itself: a save where something does is turned away, unread.
+    const loop = ownerLoop(ownedIn(data.bases ?? [], data.deposits ?? [], data.batteries ?? []));
+    if (loop) throw new Error(`Save refused: ${loop} ends up owning itself`);
     // A save's own tweaks go on top of these. An older save kept every value, stale defaults and
     // all, under \`tuning\`: that's left unread, and the tweaks in play stand.
     if (data.tweaks) applyTuning(this.tuning, data.tweaks);
@@ -1596,6 +1633,9 @@ export class Sim {
     for (const key of plain) if (key in data) Object.assign(this, { [key]: data[key] });
     // A deposit's parts are its frame's, as the hull file has them now, not as they were saved.
     for (const deposit of this.deposits) deposit.parts = resolveParts(DEPOSIT_FRAME);
+    // A save from before owners: a deposit is its station's, and turrets are what they stand on's.
+    for (const deposit of this.deposits) deposit.owner ??= deposit.base;
+    for (const battery of this.batteries) battery.owner ??= battery.id === "stationGuards" ? battery.base : depositId(battery.base);
     this.blocks = data.blocks ?? [];
     const bases: BaseState[] = data.bases;
     this.savedBases = new Map(bases.map((state) => [state.id, state]));
@@ -1817,6 +1857,7 @@ export class Sim {
       id,
       spec,
       body,
+      owner: "stations",
       account: { credits: tuning.stationStartCredits },
       ore: new Map<PartId, number>(tuning.stationStartOre > 0 ? [[PLAIN_ORE, tuning.stationStartOre]] : []),
       partCarry: 0,
@@ -3512,7 +3553,9 @@ export class Sim {
     const account = this.accountOf(ship);
     if (account.credits - deposit < buffer) return null;
     account.credits -= deposit;
-    base.account.credits += deposit;
+    // The project holds the deposit, through its owner's account: its station's.
+    const holder = this.accountFor(job.site) ?? base.account;
+    holder.credits += deposit;
     job.carrier = ship;
     job.payer = ship;
     return job;
@@ -3530,7 +3573,8 @@ export class Sim {
     if (!this.siteOpen(project)) {
       // It closed under the block, such as an older save's extra: the base gives the deposit back.
       if (block.payer) {
-        if (base) base.account.credits -= this.blockDeposit();
+        const holder = this.accountFor(project) ?? base?.account;
+        if (holder) holder.credits -= this.blockDeposit();
         this.accountOf(block.payer).credits += this.blockDeposit();
       }
       return;
@@ -3542,9 +3586,10 @@ export class Sim {
     project.paid! += pay;
     project.partsUsed += Math.min(this.tuning.blockParts, project.partsLeft);
     project.partsLeft = Math.max(0, project.partsLeft - this.tuning.blockParts);
-    // The deposit comes back from the base that held it; the pay was held as the project's own.
+    // The deposit comes back from the account that held it; the pay was held as the project's own.
     const deposit = this.blockDeposit();
-    if (base) base.account.credits -= deposit;
+    const holder = this.accountFor(project) ?? base?.account;
+    if (holder) holder.credits -= deposit;
     if (block.payer) {
       const payer = this.accountOf(block.payer);
       payer.credits += deposit;
@@ -3638,7 +3683,7 @@ export class Sim {
     const { x, y } = this.depositSpot(at, toward);
     const name = "field deposit";
     const blocks = Math.max(1, Math.ceil(partsLeft / this.tuning.blockParts));
-    const deposit: Deposit = { name, base: base.id, at, toward, x, y, px: x, py: y, ore: new Map(), fromSwitch, parts: resolveParts(DEPOSIT_FRAME), partsLeft, partsUsed: 0, purse, blocks, paid: 0 };
+    const deposit: Deposit = { name, base: base.id, owner: base.id, at, toward, x, y, px: x, py: y, ore: new Map(), fromSwitch, parts: resolveParts(DEPOSIT_FRAME), partsLeft, partsUsed: 0, purse, blocks, paid: 0 };
     this.deposits.push(deposit);
     return deposit;
   }
@@ -3687,9 +3732,11 @@ export class Sim {
    */
   private settleProject(project: Deposit | Battery): void {
     const deposit = this.blockDeposit();
+    const holder = this.accountFor(project);
     const refund = (payer: Ship | null, base: Base | null) => {
       if (!payer) return;
-      if (base) base.account.credits -= deposit;
+      const from = holder ?? base?.account;
+      if (from) from.credits -= deposit;
       this.accountOf(payer).credits += deposit;
     };
     for (const base of this.bases) {
@@ -3733,7 +3780,8 @@ export class Sim {
       guns.push({ x: host.x, y: host.y, px: host.x, py: host.y, angle: 0, prevAngle: 0, cooldown: 0, gun });
     }
     const blocks = Math.max(1, Math.ceil(partsLeft / this.tuning.blockParts));
-    const battery: Battery = { id, base: base.id, host, guns, fromSwitch, partsLeft, partsUsed: 0, purse, blocks, paid: 0 };
+    const owner = id === "stationGuards" ? base.id : depositId(base.id);
+    const battery: Battery = { id, base: base.id, owner, host, guns, fromSwitch, partsLeft, partsUsed: 0, purse, blocks, paid: 0 };
     this.batteries.push(battery);
     this.placeGuards(battery);
     for (const guard of guns) {
@@ -4021,8 +4069,9 @@ export class Sim {
     }
     if (!sell || count === 0) return count;
     this.accountOf(ship).credits += credits;
-    const base = this.projectBase(deposit);
-    if (base) base.account.credits -= credits;
+    // The deposit pays through its owner's account: its station's.
+    const purse = this.accountFor(deposit);
+    if (purse) purse.credits -= credits;
     ship.earned += credits;
     if (this.oreIn(ship) === 0) ship.trips++;
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
@@ -4205,8 +4254,8 @@ export class Sim {
     const credits = taken * this.tuning.depositSells;
     ship.oreField = null;
     this.accountOf(ship).credits -= credits;
-    const base = this.projectBase(deposit);
-    if (base) base.account.credits += credits;
+    const purse = this.accountFor(deposit);
+    if (purse) purse.credits += credits;
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     return taken;
   }
@@ -5327,6 +5376,40 @@ export class Sim {
   accountOf(ship: Ship): { credits: number } {
     if (ship.faction === "defender") return this.homeBaseOf(ship).account;
     return ship.owner ?? ship;
+  }
+
+  /**
+   * Who a ship belongs to, read from the links it already has: the player's ship is the
+   * player's, a drone is its owner's, a pirate its base's, and a defender or traffic its home
+   * station's. Only money reads owners yet, and ships keep their accounts as before (`accountOf`).
+   */
+  ownerOf(ship: Ship): Ship | string {
+    if (ship === this.ship) return "player";
+    if (ship.owner) return ship.owner;
+    if (ship.faction === "pirate") return this.pirateBase ? PIRATE_BASE_ID : "pirates";
+    return ship.home ?? this.homeBaseOf(ship).id;
+  }
+
+  /** The things that stand still in the world, each with its owner and account (`src/owners.ts`). */
+  private owned(id: string): Owned | null {
+    if (id === PIRATE_BASE_ID) return { id, owner: "pirates", account: this.pirateAccount };
+    const base = this.bases.find((each) => each.id === id);
+    if (base) return base;
+    const deposit = this.deposits.find((each) => depositId(each.base) === id);
+    if (deposit) return { id, owner: deposit.owner, account: "owner" };
+    const battery = this.batteries.find((each) => batteryId(each) === id);
+    if (battery) return { id, owner: battery.owner, account: "owner" };
+    return null;
+  }
+
+  /**
+   * The account a project's or the pirate base's money goes through: up its owner chain to the
+   * first account of its own. A deposit's and a battery's are their station's.
+   */
+  accountFor(thing: Deposit | Battery | typeof PIRATE_BASE_ID): Account | null {
+    if (thing === PIRATE_BASE_ID) return this.pirateAccount;
+    const owner = this.owned(thing.owner);
+    return owner ? ownedAccount(owner, (id) => this.owned(id)) : null;
   }
 
   /** Every station with a dock, in the layout's order. */
@@ -8683,7 +8766,7 @@ export class Sim {
       }
       this.addTo(this.pirateOre, id, -1);
       market.cargo += volumeOf(id);
-      this.pirateCredits += Math.round((itemDef(id)?.price ?? 0) * tuning.blackMarketShare);
+      this.accountFor(PIRATE_BASE_ID)!.credits += Math.round((itemDef(id)?.price ?? 0) * tuning.blackMarketShare);
     }
   }
 
@@ -8798,7 +8881,7 @@ export class Sim {
     const credits = taken * this.tuning.depositSells;
     ship.oreField = null;
     this.accountOf(ship).credits -= credits;
-    this.pirateCredits += credits;
+    this.accountFor(PIRATE_BASE_ID)!.credits += credits;
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     return amount;
   }

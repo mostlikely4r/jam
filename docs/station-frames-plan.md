@@ -242,6 +242,26 @@ the user to try: the checks are tests, and the Try it below is one look at the e
 
 ### 3. Owner and account
 
+*Built* 2026-11-28. What differs from the steps below, and why:
+
+- **Where owners live.** `src/owners.ts` has the agents, `Owned` (an id, an owner, an account of
+  its own or `"owner"`), the loop check and the walk up a chain to the first own account. A base
+  carries `owner: "stations"` beside its `account`; a deposit and a battery carry `owner` (the
+  station for a deposit and the station's turrets, the deposit for the deposit's turrets) and use
+  their owner's account. The pirate base is the entity `"pirate base"`, owned by `pirates`; its
+  account is `Sim.pirateAccount`, and `pirateCredits` reads and writes it (the save keeps the same
+  key, so nothing saved changed shape and the bump waits for step 4).
+- **Money through the owner:** `Sim.accountFor` gives a project's or the pirate base's account.
+  The deposit's sales and purchases, the block deposits held while a block is carried and given
+  back, and the pirate base's sales (ore to ships, the black market's share) go through it. All
+  of them resolve to the account they used before, so the money is the same.
+- **Ships:** `Sim.ownerOf(ship)`: `player` for the player's ship, a drone's owner ship, the pirate
+  base for pirates, the home station for defenders and traffic. A hauler is its base's by being
+  `base.hauler`; nothing reads it yet. Ships keep their accounts as they were (`accountOf`).
+- **The loop check** runs on a save as it is loaded, before anything is read into the world. A
+  world node names no owner yet (every station is the stations'), so a world can't loop.
+- **Tests:** `src/owners.test.ts`.
+
 - An `owner` on every entity: another entity's id or an agent (`player`, `stations`, `pirates`).
   A check refuses a loop when a world or save is loaded.
 - An `account` that is either its own (`{ credits }`) or its owner's. The station keeps

@@ -15,6 +15,19 @@ account, then the deposit's construction made generic. Bumps `SAVE_VERSION` to 1
 Try it is one look at the end.
 strong: wide refactor of the sim's station code and the save format.
 
+## Q-52 · Recipes and factories, steps 1–2: recipe shape, factory part, super factory · build
+- state: queued
+- who: strong
+- after: Q-51
+- backlog: S-79
+- plan: docs/recipes-factories-plan.md
+- added: 2026-11-27
+
+Slice 1: recipes get time and conditions, a factory part with working/waiting state, each station's
+workshop builds bought modules and hulls behind a short progress bar, dev cards on the chart. Stops
+for the user to try the build times.
+strong: sits on spec A's parts, changes buying and the save format.
+
 ## Q-57 · Lanes and prices, steps 1–3: prices from stock, lanes, lane haulers · build
 - state: queued
 - who: strong
@@ -89,19 +102,6 @@ strong: touches firing for every pilot, the dock services and the save format.
 Slice 2: a miner that gets no ammo takes another job, else moves home for good, else waits;
 drones and defenders wait. Trip records are charged rounds and restock at their dock visit.
 strong: changes traffic's decisions and the out-of-view records.
-
-## Q-52 · Recipes and factories, steps 1–2: recipe shape, factory part, super factory · build
-- state: queued
-- who: strong
-- after: Q-51
-- backlog: S-79
-- plan: docs/recipes-factories-plan.md
-- added: 2026-11-27
-
-Slice 1: recipes get time and conditions, a factory part with working/waiting state, each station's
-workshop builds bought modules and hulls behind a short progress bar, dev cards on the chart. Stops
-for the user to try the build times.
-strong: sits on spec A's parts, changes buying and the save format.
 
 ## Q-53 · Recipes and factories, steps 3–6: blueprint items, holes, the hub gone · build
 - state: queued

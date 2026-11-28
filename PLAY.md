@@ -3,17 +3,6 @@
 <!-- vibeview play v1. Things to try when you next play or use the project: one item per build
 that wants a human look. Format: see vibeview/FORMAT.md -->
 
-## P-7 · Station frames: everything plays as before, and the frames in the designer
-- from: Q-51
-- plan: docs/station-frames-plan.md
-- added: 2026-11-28
-
-`npm run dev`, play a few minutes: dock, sell ore, take a block job, watch a hauler and the
-pirates. It all looks and works as before. Then open the designer (`?dev`), Hulls page: the
-station, the pirate base and the deposit are frames you can zoom out to, with their dock, pads,
-berths and turrets as mounts. Try fitting a shop to the deposit: it's refused. On the system
-designer, pick the station node: it shows its frame, and the shop lists sit on its parts.
-
 ## P-6 · Auto targeting: a stale pick no longer freezes the search
 - from: Q-42
 - plan: docs/auto-targeting-plan.md
@@ -42,6 +31,18 @@ blink, mine with auto-mine and see each gun flash on its own shot, burn the tank
 see the lamp (fuel on). Then drop what you don't want (tools only).
 
 ## Passed
+
+## P-7 · Station frames: everything plays as before, and the frames in the designer
+- from: Q-51
+- plan: docs/station-frames-plan.md
+- added: 2026-11-28
+- passed: 2026-11-28
+
+`npm run dev`, play a few minutes: dock, sell ore, take a block job, watch a hauler and the
+pirates. It all looks and works as before. Then open the designer (`?dev`), Hulls page: the
+station, the pirate base and the deposit are frames you can zoom out to, with their dock, pads,
+berths and turrets as mounts. Try fitting a shop to the deposit: it's refused. On the system
+designer, pick the station node: it shows its frame, and the shop lists sit on its parts.
 
 ## P-8 · Face pool: roll faces for each role, keep the ones that read as someone
 - from: Q-39

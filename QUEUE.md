@@ -2,6 +2,19 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
+## Q-51 · Station frames: place and body, capabilities as parts, owners, construction · build
+- state: in progress
+- who: strong
+- backlog: S-78
+- plan: docs/station-frames-plan.md
+- added: 2026-11-27
+
+All four steps, each playing the same and committed on its own: the station, pirate base and
+deposit as frames (converted exactly, looks-the-same test), every capability a part, owner and
+account, then the deposit's construction made generic. Bumps `SAVE_VERSION` to 12. No stop; the
+Try it is one look at the end.
+strong: wide refactor of the sim's station code and the save format.
+
 ## Q-57 · Lanes and prices, steps 1–3: prices from stock, lanes, lane haulers · build
 - state: queued
 - who: strong
@@ -76,19 +89,6 @@ strong: touches firing for every pilot, the dock services and the save format.
 Slice 2: a miner that gets no ammo takes another job, else moves home for good, else waits;
 drones and defenders wait. Trip records are charged rounds and restock at their dock visit.
 strong: changes traffic's decisions and the out-of-view records.
-
-## Q-51 · Station frames: place and body, capabilities as parts, owners, construction · build
-- state: in progress
-- who: strong
-- backlog: S-78
-- plan: docs/station-frames-plan.md
-- added: 2026-11-27
-
-All four steps, each playing the same and committed on its own: the station, pirate base and
-deposit as frames (converted exactly, looks-the-same test), every capability a part, owner and
-account, then the deposit's construction made generic. Bumps `SAVE_VERSION` to 12. No stop; the
-Try it is one look at the end.
-strong: wide refactor of the sim's station code and the save format.
 
 ## Q-52 · Recipes and factories, steps 1–2: recipe shape, factory part, super factory · build
 - state: queued

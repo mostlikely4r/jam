@@ -15,6 +15,18 @@ account, then the deposit's construction made generic. Bumps `SAVE_VERSION` to 1
 Try it is one look at the end.
 strong: wide refactor of the sim's station code and the save format.
 
+## Q-53 · Recipes and factories, steps 3–6: blueprint items, holes, the hub gone · build
+- state: queued
+- who: strong
+- after: Q-52
+- backlog: S-79
+- plan: docs/recipes-factories-plan.md
+- added: 2026-11-27
+
+Slice 2: blueprints as items, the moon port hole, the hub removed with the stand-in hauler route to
+the nearest ore factory, blocks as items. Watch starving on the dev cards; don't fix it.
+strong: removes the hub and rewires haulers, blueprints and the save format.
+
 ## Q-52 · Recipes and factories, steps 1–2: recipe shape, factory part, super factory · build
 - state: queued
 - who: strong
@@ -102,18 +114,6 @@ strong: touches firing for every pilot, the dock services and the save format.
 Slice 2: a miner that gets no ammo takes another job, else moves home for good, else waits;
 drones and defenders wait. Trip records are charged rounds and restock at their dock visit.
 strong: changes traffic's decisions and the out-of-view records.
-
-## Q-53 · Recipes and factories, steps 3–6: blueprint items, holes, the hub gone · build
-- state: queued
-- who: strong
-- after: Q-52
-- backlog: S-79
-- plan: docs/recipes-factories-plan.md
-- added: 2026-11-27
-
-Slice 2: blueprints as items, the moon port hole, the hub removed with the stand-in hauler route to
-the nearest ore factory, blocks as items. Watch starving on the dev cards; don't fix it.
-strong: removes the hub and rewires haulers, blueprints and the save format.
 
 ## Q-40 · Face cast: first interviews · other
 - state: queued

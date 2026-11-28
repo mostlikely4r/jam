@@ -967,6 +967,28 @@ export function useShipFile(file: ShipFile): void {
 }
 useShipFile(SHIPPED_SHIPS);
 
+/**
+ * A hull draft kept from before the shipped file grew: the shipped hulls, mount types and part
+ * fits it hasn't got are put in, so the game still finds the hulls its code and world name
+ * (a draft from before station frames has no "station"). What the draft has stays as it is.
+ * A hull taken out in the draft comes back too: a draft can't tell taken out from added since.
+ * Returns the filled-in file and the names of the hulls put back.
+ */
+export function topUpShipFile(draft: ShipFile, shipped: ShipFile): { file: ShipFile; added: string[] } {
+  const file = JSON.parse(JSON.stringify(draft)) as ShipFile;
+  const missing = <T>(have: T[], from: T[]) => from.filter((each) => !have.includes(each));
+  file.mountTypes = [...strings(file.mountTypes), ...missing(strings(file.mountTypes), strings(shipped.mountTypes))];
+  file.partMounts = { ...JSON.parse(JSON.stringify(shipped.partMounts ?? {})), ...(file.partMounts ?? {}) };
+  file.hulls ??= {};
+  const added = Object.keys(shipped.hulls ?? {}).filter((model) => !(model in file.hulls));
+  for (const model of added) {
+    file.hulls[model] = JSON.parse(JSON.stringify(shipped.hulls[model]));
+    const info = shipped.hullInfo?.[model];
+    if (info) (file.hullInfo ??= {})[model] = JSON.parse(JSON.stringify(info));
+  }
+  return { file, added };
+}
+
 /** The ship file as it is now, to save. */
 export function shipFileNow(): ShipFile {
   const hulls: Record<string, Hull> = {};

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { homeSim } from "./home";
-import { copyHull, decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, PART_ART, refresh, removeHull, resetPartArt, resetPartStats, shipFileNow, shipModels, thrustOf, unfit, useShipFile, type HullInfo, type Mount, type PartArt } from "./fitting";
+import { copyHull, decalChoices, decalOf, HULL_INFO, HULL_MOUNTS, HULL_USES, hullDefaults, hullMax, isDecal, MAX_HULL, mountOf, mountsFor, mountTakes, newFitting, PART_ART, refresh, removeHull, resetPartArt, SHIPPED_SHIPS, resetPartStats, shipFileNow, shipModels, thrustOf, topUpShipFile, unfit, useShipFile, type HullInfo, type Mount, type PartArt } from "./fitting";
 import { SHIP_MODELS, type PartId, type ThrusterRole } from "./parts";
 import { bayBox, drawBay, drawTanks, drawTurret, drawVectorShip, hullTint, tankBoxes } from "./shipArt";
 import { DEFAULTS } from "./tuning";
@@ -1582,5 +1582,32 @@ describe("each mount counts on its own", () => {
     sim.devSet(sim.ship, "clamp", true);
     expect(sim.ship.parts.has("clamp")).toBe(true);
     expect(sim.tractorOn(sim.ship)).toBe(false);
+  });
+});
+
+describe("a hull draft from before the shipped file grew", () => {
+  it("gets the hulls, mount types and fits it's missing, and keeps its own", () => {
+    const draft = JSON.parse(JSON.stringify(SHIPPED_SHIPS));
+    delete draft.hulls.station;
+    delete draft.hulls.pirateBase;
+    delete draft.hullInfo?.station;
+    draft.mountTypes = draft.mountTypes.filter((type: string) => type !== "dock" && type !== "berth");
+    delete draft.partMounts.gun1;
+    draft.hulls.racer.edge = [[1, 0], [-1, 1], [-1, -1]];
+    const { file, added } = topUpShipFile(draft, SHIPPED_SHIPS);
+    expect(added.sort()).toEqual(["pirateBase", "station"]);
+    expect(file.hulls.station).toEqual(SHIPPED_SHIPS.hulls.station);
+    expect(file.hullInfo?.station).toEqual(SHIPPED_SHIPS.hullInfo?.station);
+    expect(file.mountTypes).toEqual(expect.arrayContaining(["dock", "berth"]));
+    expect(file.partMounts.gun1).toEqual(SHIPPED_SHIPS.partMounts.gun1);
+    // The draft's own edits stand, and the draft itself isn't changed.
+    expect(file.hulls.racer.edge).toEqual([[1, 0], [-1, 1], [-1, -1]]);
+    expect(draft.hulls.station).toBeUndefined();
+  });
+
+  it("is left as it is when it has everything", () => {
+    const { file, added } = topUpShipFile(SHIPPED_SHIPS, SHIPPED_SHIPS);
+    expect(added).toEqual([]);
+    expect(file).toEqual(JSON.parse(JSON.stringify(SHIPPED_SHIPS)));
   });
 });

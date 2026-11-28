@@ -68,6 +68,7 @@ import {
   shipFileNow,
   THRUSTER_ROLES,
   turretGunId,
+  topUpShipFile,
   useShipFile,
   type HullUse,
   type HullInfo,
@@ -364,7 +365,13 @@ export class HullDesigner {
         return null;
       };
       const draft = draftOf(DRAFT_KEY, shipFileNow());
-      if (draft) useShipFile(JSON.parse(draft) as ShipFile);
+      if (draft) {
+        // One kept from before the shipped file grew gets what it's missing, or the game can't
+        // find a hull it names (a draft from before station frames has no station).
+        const { file, added } = topUpShipFile(JSON.parse(draft) as ShipFile, SHIPPED_SHIPS);
+        if (added.length > 0) console.warn(`jam: your hull draft predates ${added.join(", ")}; the shipped ones are put in`);
+        useShipFile(file);
+      }
       const items = draftOf(ITEMS_DRAFT_KEY, itemsFileNow());
       if (items) useItemsFile(JSON.parse(items));
       const programs = draftOf(PROGRAMS_DRAFT_KEY, programsFileNow());

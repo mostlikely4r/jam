@@ -16,6 +16,7 @@ import {
   type Voice,
 } from "../faces";
 import { DEFAULT_NOD, accentAt, phaseAt, poseTransform, swayAt, type Nod, type NodKind } from "../sway";
+import { ROLL_STYLE, RollShelf } from "./roll";
 
 const DATA = file as unknown as FaceFile;
 
@@ -27,7 +28,9 @@ const DATA = file as unknown as FaceFile;
  * and the mood marks. A face also appears at the size it really lives at, 26px in a radio line,
  * since a shape that only works big is a shape that doesn't work.
  *
- * Nothing here saves. Tune `src/voices.json`, look again; the game picks it up on reload.
+ * The hand-written faces don't save: tune `src/voices.json`, look again; the game picks it up on
+ * reload. The Roll and the Shelf at the top (`./roll.ts`) roll faces from the pool and save the
+ * kept ones to `src/cast.json`.
  */
 
 const NAMES: Record<Voice, string> = { gus: "Gus", pip: "Pip", generic: "Generic", station: "Station" };
@@ -110,10 +113,15 @@ export class FaceGallery {
   /** Each face's features group and the nod of the voice it belongs to. */
   private readonly posed = new Map<SVGElement, Nod>();
   private readonly beatSquare: HTMLSpanElement;
+  private readonly shelf = new RollShelf(
+    (markup, voice, nod) => svg(markup, voice, nod),
+    () => this.size,
+    () => this.collect(),
+  );
 
   constructor(private readonly onClose: () => void) {
     const style = document.createElement("style");
-    style.textContent = STYLE;
+    style.textContent = STYLE + ROLL_STYLE;
     document.head.append(style);
 
     this.element = document.createElement("div");
@@ -124,7 +132,7 @@ export class FaceGallery {
     const title = document.createElement("h1");
     title.textContent = "Faces";
     const hint = document.createElement("p");
-    hint.textContent = "shapes live in src/voices.json — this page is for looking";
+    hint.textContent = "hand-written shapes live in src/voices.json, the pool in src/face-pool.json";
     const sizeLabel = document.createElement("label");
     sizeLabel.textContent = "size ";
     const slider = document.createElement("input");
@@ -369,7 +377,10 @@ export class FaceGallery {
     for (const element of this.body.querySelectorAll<SVGSVGElement>("svg[data-voice]")) {
       if (element.closest(".option")) continue;
       const features = element.querySelector<SVGElement>(".features");
-      if (features) this.posed.set(features, swayFor(element.dataset.voice as Voice));
+      if (!features) continue;
+      // SAFETY: data-nod is only ever written by this page, from a nod it holds.
+      const nod = element.dataset.nod ? (JSON.parse(element.dataset.nod) as Nod) : swayFor(element.dataset.voice as Voice);
+      this.posed.set(features, nod);
     }
   }
 
@@ -427,7 +438,7 @@ export class FaceGallery {
   }
 
   private rebuild(): void {
-    this.body.replaceChildren(this.options(), this.lines());
+    this.body.replaceChildren(this.shelf.render(), this.options(), this.lines());
     for (const voice of VOICES) {
       const head = document.createElement("h2");
       head.textContent = NAMES[voice];
@@ -446,11 +457,13 @@ export class FaceGallery {
 
 /**
  * The markup `renderFaceSvg` returns, as an element to put on the page, tagged with the voice it
- * belongs to so the sway preview knows which nod to give it.
+ * belongs to so the sway preview knows which nod to give it, or with the nod itself for a face no
+ * file holds yet.
  */
-function svg(markup: string, voice: Voice): Element {
+function svg(markup: string, voice: Voice, nod?: Nod): Element {
   const parsed = new DOMParser().parseFromString(markup, "image/svg+xml").documentElement;
   const element = document.importNode(parsed, true);
   element.setAttribute("data-voice", voice);
+  if (nod) element.setAttribute("data-nod", JSON.stringify(nod));
   return element;
 }

@@ -3,6 +3,17 @@
 <!-- vibeview play v1. Things to try when you next play or use the project: one item per build
 that wants a human look. Format: see vibeview/FORMAT.md -->
 
+## P-8 · Face pool: roll faces for each role, keep the ones that read as someone
+- from: Q-39
+- plan: docs/face-cast-plan.md
+- added: 2026-11-28
+
+`npm run dev`, open `?dev`, press F. At the top, pick a role and press Roll 24, a few batches per
+role. Hover or click a face for its four moods. Do most rolls read as a person in all four moods
+at 26px? Does each role look like a kind at a glance? Would you keep one in five, or fewer? Keep
+the good ones: they go on the Shelf below, where you set their sway against the page's sway
+preview (tick sway), and save to `src/cast.json`. Say what to tune: styles, leanings, dials.
+
 ## P-7 · Station frames: everything plays as before, and the frames in the designer
 - from: Q-51
 - plan: docs/station-frames-plan.md

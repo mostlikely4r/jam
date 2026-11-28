@@ -115,16 +115,6 @@ each entry in `src/cast.json`. Gus and Pip get interviewed too. Needs the pack f
 until it is built, write the fields as the plan names them.
 pair: the answers are the user's.
 
-## Q-39 · Face cast, step 1: the pool and the roll page · build
-- state: queued
-- who: strong
-- backlog: S-39
-- plan: docs/face-cast-plan.md
-- added: 2026-11-26
-
-Stops for the user to roll and keep faces on the dev page (F under `?dev`).
-strong: rests on a guess (that parts knowing their moods roll faces worth keeping); design by eye.
-
 ## Q-41 · Face cast, steps 2–3: knobs, situations and dealing the cast · build
 - state: queued
 - who: strong
@@ -295,6 +285,17 @@ the start menu cards to each hull's own outline (and its mounts) instead of a ra
 cheap: small and visible, with a clear outcome.
 
 ## Done
+
+## Q-39 · Face cast, step 1: the pool and the roll page · build
+- state: done
+- done: 2026-11-28
+- who: strong
+- backlog: S-39
+- plan: docs/face-cast-plan.md
+- added: 2026-11-26
+
+Stops for the user to roll and keep faces on the dev page (F under `?dev`).
+strong: rests on a guess (that parts knowing their moods roll faces worth keeping); design by eye.
 
 ## Q-51 · Station frames: place and body, capabilities as parts, owners, construction · build
 - state: done

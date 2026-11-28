@@ -4,7 +4,7 @@ Written 2026-11-26, from a spec talk on Q-8 (S-39). It follows `docs/chatter-fac
 which built the face renderer, the part vocabulary, two hand-written regulars (Gus and Pip) and
 faces on the radio log. This plan adds three things: a **pool** that rolls whole faces from named
 parts, an **interview** that turns a kept face into a person, and a **cast** of those people
-dealt out across the system. Nothing here is built yet.
+dealt out across the system. Step 1 is built (2026-11-28); steps 2 and 3 are not.
 
 ## Why
 
@@ -182,7 +182,7 @@ list, as in the chatter plan.
 
 ## What to build
 
-### 1. The pool and the roll page
+### 1. The pool and the roll page — *built* 2026-11-28
 
 **Stop here for the user to try.** Nothing in chatter, the radio or play changes in this step.
 
@@ -209,6 +209,17 @@ list, as in the chatter plan.
 - Below it is the **Shelf**: every kept face, with a sway picker (kind, size, beats per nod)
   previewed against the page's existing music preview, a role picker, and **Remove**. Changes
   save to `src/cast.json` through `/__cast`.
+- **As built:** seven eye styles (lid, square, glint, ring, dome, slit, pip), three brows (none,
+  heavy, thin), five mouths (crooked, blob, cat, flat, teeth), six identity marks (none, scar,
+  slash, patch, glasses, stud), four screens (round, soft, the station's bezel, a dark red
+  `ember` glass for pirates), mood marks (blush, sparkle, anger vein, sweat drop) and five
+  quirks (wink, lopsided mouth, lean, one brow raised, one eye squinting). Styles are written
+  for the left side and mirrored. Changes from the plan: `/__cast` also answers GET, and the
+  page reads the shelf from it, because the dev server caches the file's import (saving reloads
+  nothing) and a save from a stale shelf would drop faces kept since the server started. A
+  kept face's id is `<role>-<seed in hex>`. `faces.ts` gained `resolveFace` (a face no file
+  holds, resolved the same way), `CAST`, `Role` and `CastEntry`. The roll page is
+  `src/designer/roll.ts`, added to the editor-boundary check.
 - **Try it:** `npm run dev`, open `?dev`, press F, pick a role and roll a few batches. Do most
   rolls read as a person in all four moods at 26px? Does each role look like a kind at a glance?
   Would you keep one in five, or fewer? The leanings and dials are tuned from what the user

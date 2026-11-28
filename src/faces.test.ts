@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 // SAFETY: the file is the data under test; the test walks it as unknown parts and checks them.
 import file from "./voices.json";
 import {
@@ -187,5 +187,34 @@ describe("the nod a face sways with", () => {
     // SAFETY: a voice the file doesn't have is exactly the fallback under test.
     expect(swayFor("nosuchvoice" as Voice)).toEqual(DATA.generic.sway);
     expect(swayFor("nosuchvoice" as Voice)).toEqual(swayFor("generic"));
+  });
+});
+
+describe("kept faces from src/cast.json", () => {
+  it("resolve and draw like a voice, and a missing id falls back to the generic face", async () => {
+    const { rollFace } = await import("./face-pool");
+    const roll = rollFace(7, "pirate");
+    const entry = { id: "pirate-7", role: "pirate", status: "kept", face: roll.face, sway: { every: 2, kind: "yaw", amount: 3 }, from: { seed: 7, picks: roll.picks } };
+    vi.resetModules();
+    vi.doMock("./cast.json", () => ({ default: [entry] }));
+    try {
+      const faces = await import("./faces");
+      expect(faces.CAST.map((e) => e.id)).toEqual(["pirate-7"]);
+      const face = faces.faceFor("pirate-7", "annoyed");
+      expect(face).toEqual(faces.resolveFace("pirate-7", roll.face, "annoyed"));
+      expect(face.color).toBe(roll.face.color);
+      expect(face.eyes).toEqual(roll.face.moods.annoyed!.eyes);
+      expect(faces.swayFor("pirate-7")).toEqual(entry.sway);
+      const markup = faces.renderFaceSvg("pirate-7", "angry", { size: 26 });
+      expect(markup).toBe(faces.renderFace(faces.resolveFace("pirate-7", roll.face, "angry"), { size: 26 }));
+      expect(markup).not.toContain("NaN");
+      // An id no file holds wears the generic face, mood by mood.
+      expect(faces.faceFor("nobody-kept", "scared").eyes).toEqual(faces.faceFor("generic", "scared").eyes);
+      // And a kept id never takes over a hand-written voice.
+      expect(faces.faceFor("gus", "neutral")).toEqual(faceFor("gus", "neutral"));
+    } finally {
+      vi.doUnmock("./cast.json");
+      vi.resetModules();
+    }
   });
 });

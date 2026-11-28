@@ -294,7 +294,7 @@ Expansion as a sim (2026-11-13, "that's then, this is now"): the start is one pl
 Raised 2026-11-20 (targeting spec thread): a tractor tweak "drag all / drag targets", since ore B, dropped items and limited cargo make a selective tractor matter; future tractors might drag rocks or ships. Not in the targeting spec.
 
 ## S-39 · Faces from a pool, not one drawing each
-- status: specced
+- status: building
 - area: Comms
 - plan: docs/face-cast-plan.md
 

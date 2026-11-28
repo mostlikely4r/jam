@@ -1,6 +1,8 @@
-// SAFETY: the file is hand-authored data checked by faces.test.ts, which walks every voice and
-// mood and reads every part; the type below is the shape it is written to.
+// SAFETY: the files are hand-authored (voices) and page-written (cast) data checked by
+// faces.test.ts, which walks every voice and kept face at every mood and reads every part; the
+// types below are the shapes they are written to.
 import file from "./voices.json";
+import castFile from "./cast.json";
 import { DEFAULT_NOD, type Nod } from "./sway";
 
 /**
@@ -20,8 +22,27 @@ import { DEFAULT_NOD, type Nod } from "./sway";
 
 export type Pt = [number, number];
 
-export type Voice = "gus" | "pip" | "generic" | "station";
+/**
+ * Who a face belongs to: a hand-written voice in `src/voices.json`, or the id of a kept face in
+ * `src/cast.json`. An id neither file has wears the generic face.
+ */
+export type Voice = "gus" | "pip" | "generic" | "station" | (string & {});
+/** The hand-written voices. */
 export const VOICES: Voice[] = ["gus", "pip", "generic", "station"];
+
+/** What a cast member is for: the role a face is rolled for, which it keeps once kept. */
+export type Role = "traffic" | "defender" | "pirate" | "station";
+
+/** A face kept from the pool (docs/face-cast-plan.md), stored resolved with where it came from. */
+export interface CastEntry {
+  id: string;
+  role: Role;
+  status: "kept";
+  face: VoiceFace;
+  sway: Nod;
+  /** The seed and the picks it was rolled from, so the roll can be read back or rolled again. */
+  from: { seed: number; picks: unknown };
+}
 
 export type Mood = "neutral" | "happy" | "annoyed" | "tired" | "scared" | "angry";
 export const MOODS: Mood[] = ["neutral", "happy", "annoyed", "tired", "scared", "angry"];
@@ -112,7 +133,15 @@ export interface FaceFile {
   [voice: string]: { face: VoiceFace; sway?: Nod };
 }
 
-const DATA = file as unknown as FaceFile;
+/** The kept faces, as the page last saved them. */
+export const CAST = castFile as unknown as CastEntry[];
+
+/**
+ * Every face by who wears it: the hand-written voices, then the kept faces. A kept id never
+ * takes over a hand-written voice's name.
+ */
+const DATA: FaceFile = { ...(file as unknown as FaceFile) };
+for (const entry of CAST) DATA[entry.id] ??= { face: entry.face, sway: entry.sway };
 
 const SCREEN: Screen = { color: "#0A1520", middle: "#16293C", edge: "#070D16", rim: "#2A4A66", radius: 10 };
 
@@ -141,16 +170,16 @@ type LayerName = "eyes" | "brows" | "mouth" | "marks";
  * generic voice's, so a voice that wrote only a neutral face still wears the generic scared eyes
  * rather than its own neutral ones.
  */
-function pick(voice: Voice, chain: Mood[], layer: LayerName): Part[] | undefined {
+function pick(face: VoiceFace | undefined, chain: Mood[], layer: LayerName): Part[] | undefined {
   for (const mood of chain) {
-    const parts = own(voice, mood, layer) ?? own("generic", mood, layer);
+    const parts = own(face, mood, layer) ?? own(faceOf("generic"), mood, layer);
     if (parts) return parts;
   }
   return undefined;
 }
 
-function own(voice: Voice, mood: Mood, layer: LayerName): Part[] | undefined {
-  const parts = faceOf(voice)?.moods[mood]?.[layer];
+function own(face: VoiceFace | undefined, mood: Mood, layer: LayerName): Part[] | undefined {
+  const parts = face?.moods[mood]?.[layer];
   return parts && parts.length > 0 ? parts : undefined;
 }
 
@@ -173,7 +202,14 @@ export interface Face {
  * mood it has, else the generic voice's, with the identity layers always the voice's own.
  */
 export function faceFor(voice: Voice, mood: Mood): Face {
-  const own = faceOf(voice);
+  return resolveFace(voice, faceOf(voice), mood);
+}
+
+/**
+ * A face that no file holds yet resolved the same way, layer by layer: a roll on the dev page
+ * before it is kept. `voice` only names it.
+ */
+export function resolveFace(voice: Voice, own: VoiceFace | undefined, mood: Mood): Face {
   const chain = MOOD_CHAIN[mood];
   let tilt = 0;
   if (own) for (const m of chain) if (own.moods[m]?.tilt !== undefined) { tilt = own.moods[m]!.tilt!; break; }
@@ -183,11 +219,11 @@ export function faceFor(voice: Voice, mood: Mood): Face {
     color: own?.color ?? genericFace().color,
     screen: { ...SCREEN, ...own?.screen },
     under: own?.identity?.under ?? [],
-    eyes: pick(voice, chain, "eyes") ?? [],
-    brows: pick(voice, chain, "brows") ?? [],
-    mouth: pick(voice, chain, "mouth") ?? [],
+    eyes: pick(own, chain, "eyes") ?? [],
+    brows: pick(own, chain, "brows") ?? [],
+    mouth: pick(own, chain, "mouth") ?? [],
     over: own?.identity?.over ?? [],
-    marks: pick(voice, chain, "marks") ?? [],
+    marks: pick(own, chain, "marks") ?? [],
     tilt,
   };
 }

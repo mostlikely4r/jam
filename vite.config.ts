@@ -11,6 +11,8 @@ const HULLS_FILE = fileURLToPath(new URL("./src/hulls.json", import.meta.url));
 const ITEMS_FILE = fileURLToPath(new URL("./src/items.json", import.meta.url));
 /** Where the hull designer's Programs page keeps the programs. */
 const PROGRAMS_FILE = fileURLToPath(new URL("./src/programs.json", import.meta.url));
+/** Where the faces page keeps the faces kept from the pool (docs/face-cast-plan.md). */
+const CAST_FILE = fileURLToPath(new URL("./src/cast.json", import.meta.url));
 /** Layouts made by recipes (npm run layout), for trying out. Never shipped. */
 const LAYOUTS = fileURLToPath(new URL("./src/designer/layouts/", import.meta.url));
 
@@ -57,12 +59,25 @@ function worldFile(): Plugin {
           res.end(String(error));
         }
       });
-      // The item designer's items, and the program designer's programs.
+      // The item designer's items, the program designer's programs, and the faces page's cast.
       for (const [path, file] of [
         ["/__items", ITEMS_FILE],
         ["/__programs", PROGRAMS_FILE],
+        ["/__cast", CAST_FILE],
       ] as const) {
         server.middlewares.use(path, async (req, res) => {
+          // The file as it is on disk: its import is cached, since saving it reloads nothing.
+          if (req.method === "GET") {
+            try {
+              const text = await readFile(file, "utf8");
+              res.setHeader("Content-Type", "application/json");
+              res.end(text);
+            } catch (error) {
+              res.statusCode = 404;
+              res.end(String(error));
+            }
+            return;
+          }
           if (req.method !== "POST") {
             res.statusCode = 405;
             res.end();
@@ -115,6 +130,6 @@ export default defineConfig({
   // Saving the layout or the hulls from a designer shouldn't reload the game under it: the
   // designer's draft is already in play, and the next start or build picks the file up.
   server: {
-    watch: { ignored: ["**/src/designer/world.json", "**/src/designer/layouts/**", "**/src/start.json", "**/src/hulls.json", "**/src/items.json", "**/src/programs.json"] },
+    watch: { ignored: ["**/src/designer/world.json", "**/src/designer/layouts/**", "**/src/start.json", "**/src/hulls.json", "**/src/items.json", "**/src/programs.json", "**/src/cast.json"] },
   },
 });

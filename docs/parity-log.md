@@ -144,5 +144,5 @@ Looked at: not yet.
 | pirate ore | 0 | 0 | ok |
 | base ore | 451 | 654 | ok |
 
-Looked at: 2026-11-28, after Q-51 (station frames). The three checks are the flown-vs-records gaps seen before (traffic hits taken in every entry since 11-13, pirate credits on 11-13 and 11-19), not new: Q-51 changes no flown play (the hour-long warm-up of `src/start.json` came out identical entry for entry). Pirate hits taken is new as a check, but within the earlier range of flown counts.
+Looked at: 2026-11-28, after Q-51 (station frames). The three checks are the flown-vs-records gaps seen before (traffic hits taken in every entry since 11-13, pirate credits on 11-13 and 11-19), not new: Q-51 changes no flown play (the hour-long warm-up of `src/start.json` came out identical entry for entry). Pirate hits taken is a check again (783 flown against 419 as records; 525 against 305 on 11-12): worth a look if it shows on the next run.
 

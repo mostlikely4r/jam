@@ -15,18 +15,6 @@ account, then the deposit's construction made generic. Bumps `SAVE_VERSION` to 1
 Try it is one look at the end.
 strong: wide refactor of the sim's station code and the save format.
 
-## Q-53 · Recipes and factories, steps 3–6: blueprint items, holes, the hub gone · build
-- state: queued
-- who: strong
-- after: Q-52
-- backlog: S-79
-- plan: docs/recipes-factories-plan.md
-- added: 2026-11-27
-
-Slice 2: blueprints as items, the moon port hole, the hub removed with the stand-in hauler route to
-the nearest ore factory, blocks as items. Watch starving on the dev cards; don't fix it.
-strong: removes the hub and rewires haulers, blueprints and the save format.
-
 ## Q-52 · Recipes and factories, steps 1–2: recipe shape, factory part, super factory · build
 - state: queued
 - who: strong
@@ -39,6 +27,18 @@ Slice 1: recipes get time and conditions, a factory part with working/waiting st
 workshop builds bought modules and hulls behind a short progress bar, dev cards on the chart. Stops
 for the user to try the build times.
 strong: sits on spec A's parts, changes buying and the save format.
+
+## Q-53 · Recipes and factories, steps 3–6: blueprint items, holes, the hub gone · build
+- state: queued
+- who: strong
+- after: Q-52
+- backlog: S-79
+- plan: docs/recipes-factories-plan.md
+- added: 2026-11-27
+
+Slice 2: blueprints as items, the moon port hole, the hub removed with the stand-in hauler route to
+the nearest ore factory, blocks as items. Watch starving on the dev cards; don't fix it.
+strong: removes the hub and rewires haulers, blueprints and the save format.
 
 ## Q-57 · Lanes and prices, steps 1–3: prices from stock, lanes, lane haulers · build
 - state: queued

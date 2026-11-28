@@ -14,6 +14,11 @@ hours, with you alongside). It prints one `pick:` line, then what is already `in
 lane, the entries it passed over as another lane's, and the ones in your lane that wait (`after:`)
 and on what.
 
+If `PI_MODEL` is empty (as under Claude Code), the lane still comes from your own model: match
+your model id (from your system prompt, e.g. `claude-opus-…`) against the `modelTiers` keys
+(`opus` → `strong`) and run the pick again with `--as=<that tier>`. Only when no key matches is
+your lane unknown.
+
 Take the `pick:` line. The rest are rules for when that isn't the whole answer:
 
 - `$ARGUMENTS` names a queue id: take that one, whatever its lane — say which lane it is. If it

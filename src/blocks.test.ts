@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { homeSim } from "./home";
 import { isBlock } from "./sim";
-import { roundTrip } from "./save";
+import { finishConstruction, isBuilt, startConstruction } from "./construction";
+import { OLDEST_SAVE, roundTrip } from "./save";
 import { DEFAULTS } from "./tuning";
-import { type Block, Sim, TICK } from "./sim";
+import { type Block, dockOf, hasPart, Sim, TICK, trades, working } from "./sim";
 
 // Long runs never give the worker a turn of the event loop otherwise (see pilot.test.ts).
 afterEach(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
@@ -105,13 +106,13 @@ describe("construction blocks", () => {
     expect(job!.carrier).toBe(sim.ship);
     expect(sim.ship.credits).toBe(before - depositWorth);
     // The purse is the funding, shared over the blocks: one block here.
-    expect(deposit.purse).toBe(1000);
-    expect(deposit.blocks).toBe(1);
-    expect(deposit.partsLeft).toBe(10);
+    expect(deposit.build.purse).toBe(1000);
+    expect(deposit.build.blocks).toBe(1);
+    expect(deposit.build.left).toBe(10);
     dock(sim);
     carry(sim, base);
-    expect(deposit.partsLeft).toBe(0);
-    expect(deposit.partsUsed).toBe(10);
+    expect(deposit.build.left).toBe(0);
+    expect(deposit.build.used).toBe(10);
     // The deposit comes back, and the whole purse with it.
     expect(sim.ship.credits).toBe(before + 1000);
     expect(sim.unlocked("deposit")).toBe(true);
@@ -163,8 +164,8 @@ describe("construction blocks", () => {
     expect(sim.blocks).toHaveLength(0);
     expect(sim.ship.tow).toBeNull();
     // Its parts are gone, and the base keeps the deposit: none of it comes back.
-    expect(deposit.partsLeft).toBe(10);
-    expect(deposit.partsUsed).toBe(0);
+    expect(deposit.build.left).toBe(10);
+    expect(deposit.build.used).toBe(0);
     expect(sim.ship.credits).toBe(credits);
   });
 
@@ -172,20 +173,20 @@ describe("construction blocks", () => {
     const sim = building({ depositParts: 30, blockParts: 10, depositPrice: 900 });
     const base = sim.bases[0];
     const deposit = sim.deposits[0];
-    expect(deposit.blocks).toBe(3);
+    expect(deposit.build.blocks).toBe(3);
     for (let i = 0; i < 2; i++) {
       if (i > 0) dock(sim);
       carry(sim, base);
       if (i === 0) run(sim, 2);
-      expect(deposit.partsLeft).toBe(20 - i * 10);
+      expect(deposit.build.left).toBe(20 - i * 10);
       expect(sim.unlocked("deposit")).toBe(false);
     }
     dock(sim);
     carry(sim, base);
-    expect(deposit.partsLeft).toBe(0);
+    expect(deposit.build.left).toBe(0);
     expect(sim.unlocked("deposit")).toBe(true);
     // The whole purse went out over the three blocks.
-    expect(deposit.paid).toBe(900);
+    expect(deposit.build.paid).toBe(900);
   });
 
   it("gives a deposit back when its project finishes without its block", () => {
@@ -203,7 +204,7 @@ describe("construction blocks", () => {
     const before = sim.ship.credits;
     // Another block finishes the project; the one still out there can never be placed.
     carry(sim, base);
-    expect(deposit.partsLeft).toBe(0);
+    expect(deposit.build.left).toBe(0);
     expect(sim.blocks).not.toContain(extra);
     // Its deposit came back, on top of the finished one's pay.
     expect(sim.ship.credits).toBe(before + worth + 1000);
@@ -257,7 +258,80 @@ describe("construction blocks", () => {
     expect(Math.hypot(open!.x - 40000, open!.y - 40000)).toBeLessThan(1);
     // And the project's own funding and plan came with them.
     const project = into.deposits[0];
-    expect(project.purse).toBe(1000);
-    expect(project.blocks).toBe(3);
+    expect(project.build.purse).toBe(1000);
+    expect(project.build.blocks).toBe(3);
+  });
+});
+
+describe("construction, the generic way things are built", () => {
+  it("turrets built from blocks take the same blocks and money as the deposit's", () => {
+    const sim = building({ depositParts: 10, blockParts: 10, guardsDepositFree: false, depositGuardParts: 20, depositGuardPrice: 600 });
+    const base = sim.bases[0];
+    carry(sim, base);
+    expect(sim.unlocked("deposit")).toBe(true);
+    dock(sim);
+    expect(sim.fundBlueprint(sim.ship, "depositGuards")).toBe(true);
+    run(sim, 1);
+    const guards = sim.batteries.find((battery) => battery.id === "depositGuards")!;
+    expect(guards.build).toMatchObject({ left: 20, used: 0, purse: 600, blocks: 2, paid: 0 });
+    for (let i = 0; i < 2; i++) {
+      dock(sim);
+      carry(sim, base);
+    }
+    expect(guards.build).toMatchObject({ left: 0, used: 20, paid: 600 });
+    expect(sim.unlocked("depositGuards")).toBe(true);
+  });
+
+  it("a construction site can't trade, and a station frame being built can't be docked at", () => {
+    const sim = building({ depositParts: 20, blockParts: 10 });
+    const deposit = sim.deposits[0];
+    Object.assign(sim.ship, { x: deposit.x, y: deposit.y, px: deposit.x, py: deposit.y, vx: 0, vy: 0 });
+    sim.setOre(sim.ship, 5);
+    expect(working(deposit)).toBe(false);
+    expect(trades(deposit, "buys", "ore")).toBe(false);
+    expect(hasPart(deposit, "storage")).toBe(false);
+    expect(sim.depositAt()).toBeNull();
+    expect(sim.sellToDeposit(sim.ship, deposit)).toBe(0);
+    // The same holds for a station's own frame: under construction, its dock doesn't work.
+    const station = sim.bases[0].body;
+    station.build = startConstruction(10, 0, 10);
+    expect(dockOf(station)).toBeNull();
+    expect(sim.docks).not.toContain(station);
+    dock(sim);
+    expect(sim.dockedAt()).toBeNull();
+    finishConstruction(station.build);
+    dock(sim);
+    expect(sim.dockedAt()).toBe(station);
+  });
+
+  it("loads a version 11 save with a deposit half built, and finishes it with the blocks it had left", () => {
+    const sim = building({ depositParts: 30, blockParts: 10, depositPrice: 900 });
+    const base = sim.bases[0];
+    carry(sim, base);
+    const deposit = sim.deposits[0];
+    deposit.ore.set("ore", 7);
+    expect(deposit.build).toMatchObject({ left: 20, used: 10, paid: 300 });
+    // As version 11 saved it: the parts and the funding loose on the project.
+    const old = deposit as unknown as Record<string, unknown>;
+    Object.assign(old, { partsLeft: 20, partsUsed: 10, purse: 900, blocks: 3, paid: 300 });
+    delete old.build;
+    expect(OLDEST_SAVE).toBe(11);
+    const into = homeSim(99, { ...WORLD, depositParts: 30, blockParts: 10, depositPrice: 900 });
+    roundTrip(sim, into);
+    const back = into.deposits[0];
+    expect(back.build).toEqual({ left: 20, used: 10, purse: 900, blocks: 3, paid: 300 });
+    expect("partsLeft" in back).toBe(false);
+    expect(back.ore.get("ore")).toBe(7);
+    // Two more blocks finish it, and the rest of the purse goes out.
+    into.ship.credits = 100000;
+    into.devSet(into.ship, "clamp", true);
+    run(into, 1);
+    for (let i = 0; i < 2; i++) {
+      dock(into);
+      carry(into, into.bases[0]);
+    }
+    expect(isBuilt(back.build)).toBe(true);
+    expect(back.build.paid).toBe(900);
+    expect(into.unlocked("deposit", into.bases[0])).toBe(true);
   });
 });

@@ -8,6 +8,7 @@ export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
 import { frameMountSpot, partOn, partSpot, resolveParts, tradeNames, type FramePart, type FramePartData, type FramePartKind, type PartOverrides } from "./frameParts";
 import { closestApproach as closestMeeting, type Motion } from "./relative";
+import { addParts, constructionFromOld, finishConstruction, isBuilt, placeBlock as setBlockIn, startConstruction, type Construction } from "./construction";
 import { accountOf as ownedAccount, type Account, type Agent, type Owned, ownerLoop } from "./owners";
 import { orbitState } from "./kepler";
 import { autoPlace, canPlace, cellsOf, floatsAfterRemoval, footprint, reachable, reachableCells, sticks, usedCells, type GridSpec, type Placed } from "./grid";
@@ -506,13 +507,8 @@ export interface Deposit {
   fromSwitch: boolean;
   /** What is fitted to its frame (`DEPOSIT_FRAME`): storage, a trade point, a turret battery. */
   parts: FramePart[];
-  /** Parts still to come before it opens, and the parts already built into it. */
-  partsLeft: number;
-  partsUsed: number;
-  /** The funding held to pay the blocks that build it, and what's left of it; paid over `blocks`, of which `paid` credits have gone out. Older saves have none. */
-  purse?: number;
-  blocks?: number;
-  paid?: number;
+  /** Its frame being built (`src/construction.ts`): a construction site until the last part is in. */
+  build: Construction;
 }
 
 /** One gun of a battery. */
@@ -538,12 +534,8 @@ export interface Battery {
   host: Poi | Deposit;
   guns: Guard[];
   fromSwitch: boolean;
-  partsLeft: number;
-  partsUsed: number;
-  /** The funding held to pay the blocks that build it, as on a deposit. */
-  purse?: number;
-  blocks?: number;
-  paid?: number;
+  /** The part being built, as a deposit's frame is: its turrets work once it's done. */
+  build: Construction;
 }
 
 /**
@@ -598,6 +590,8 @@ export interface FrameBody extends Poi {
   offset: { x: number; y: number };
   /** What is fitted to its frame's mounts here: what it can do. */
   parts: FramePart[];
+  /** Its frame being built, if it is: until then it is a construction site, and none of its parts work. */
+  build?: Construction;
 }
 
 /** A spot on a body's frame, `local` in world units from its middle, turned with it: now, or a tick ago. */
@@ -623,6 +617,7 @@ const PADS = new WeakMap<readonly FramePart[], Map<string, { x: number; y: numbe
 export function dockOf(poi: Poi): DockSpot | null {
   if (!("parts" in poi)) return null;
   const body = poi as FrameBody;
+  if (!working(body)) return null;
   const known = DOCKS.get(body.parts);
   if (known !== undefined) return known;
   const dock = partOn(body.parts, "dock");
@@ -642,12 +637,21 @@ export function padOf(poi: Poi, type: "refinery pad" | "block pad" | "berth"): {
 }
 
 /** What fits a frame, by kind: whether something has a part. */
-export function hasPart(holder: { parts: readonly FramePart[] }, kind: FramePartKind): boolean {
-  return partOn(holder.parts, kind) !== undefined;
+/** Something with parts that may still be under construction. */
+type PartHolder = { parts: readonly FramePart[]; build?: Construction };
+
+/** Whether its parts work: it isn't a construction site. A site exists and is owned, but can't dock, store or trade. */
+export function working(holder: PartHolder): boolean {
+  return !holder.build || isBuilt(holder.build);
+}
+
+export function hasPart(holder: PartHolder, kind: FramePartKind): boolean {
+  return working(holder) && partOn(holder.parts, kind) !== undefined;
 }
 
 /** Whether something's trade point buys, or sells, an item: by its id or its type. Nothing without a trade point. */
-export function trades(holder: { parts: readonly FramePart[] }, way: "buys" | "sells", item: string): boolean {
+export function trades(holder: PartHolder, way: "buys" | "sells", item: string): boolean {
+  if (!working(holder)) return false;
   const trade = partOn(holder.parts, "trade");
   return !!trade && tradeNames(trade.data[way], item);
 }
@@ -1631,6 +1635,8 @@ export class Sim {
       "shots", "ores", "loot", "down", "stats", "randomState", "lookState", "seed",
     ] as const;
     for (const key of plain) if (key in data) Object.assign(this, { [key]: data[key] });
+    // A save from before construction was generic keeps its projects' parts, funding and blocks.
+    for (const project of [...this.deposits, ...this.batteries]) this.takeOldProject(project);
     // A deposit's parts are its frame's, as the hull file has them now, not as they were saved.
     for (const deposit of this.deposits) deposit.parts = resolveParts(DEPOSIT_FRAME);
     // A save from before owners: a deposit is its station's, and turrets are what they stand on's.
@@ -3289,9 +3295,9 @@ export class Sim {
    * need a blueprint once the shop needs them paid for. A project is the base's own once built.
    */
   unlocked(id: BlueprintId, base: Base = this.shopBase()): boolean {
-    if (id === "deposit") return this.deposits.some((deposit) => deposit.base === base.id && deposit.partsLeft <= 0);
+    if (id === "deposit") return this.deposits.some((deposit) => deposit.base === base.id && isBuilt(deposit.build));
     if (id === "stationGuards" || id === "depositGuards") {
-      return this.batteries.some((battery) => battery.id === id && battery.base === base.id && battery.partsLeft <= 0);
+      return this.batteries.some((battery) => battery.id === id && battery.base === base.id && isBuilt(battery.build));
     }
     if (isProject(id)) return false;
     // Modules, programs and drones are the shop's: a station without a shop part sells none.
@@ -3500,21 +3506,24 @@ export class Sim {
     return project.id === "stationGuards" ? this.tuning.stationGuardPrice : this.tuning.depositGuardPrice;
   }
 
-  /** Fills in the funding and block plan of a project made before projects were carried in blocks. */
-  private normalizeProject(project: Deposit | Battery): void {
-    if (project.purse === undefined) {
-      const total = project.partsLeft + project.partsUsed;
-      project.purse = total > 0 ? Math.round(this.projectPrice(project) * (project.partsLeft / total)) : 0;
-    }
-    if (project.blocks === undefined) project.blocks = Math.max(1, Math.ceil(project.partsLeft / this.tuning.blockParts));
-    if (project.paid === undefined) project.paid = 0;
+  /**
+   * A project from a save made before construction was generic: its parts, funding and block
+   * plan go into its construction. One from before projects were carried in blocks gets the
+   * share of its price still to pay, as such saves always did.
+   */
+  private takeOldProject(project: Deposit | Battery): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const old = project as any;
+    if (project.build || old.partsLeft === undefined) return;
+    project.build = constructionFromOld(old, project.fromSwitch ? 0 : this.projectPrice(project), this.tuning.blockParts);
+    for (const key of ["partsLeft", "partsUsed", "purse", "blocks", "paid"]) delete old[key];
   }
 
   /** The project of a base that blocks are made for: its deposit first, then the turrets for one. */
   private buildingProject(base: Base): Deposit | Battery | null {
     return (
-      this.deposits.find((each) => each.base === base.id && each.partsLeft > 0) ??
-      this.batteries.find((each) => each.base === base.id && each.id === "depositGuards" && each.partsLeft > 0) ??
+      this.deposits.find((each) => each.base === base.id && !isBuilt(each.build)) ??
+      this.batteries.find((each) => each.base === base.id && each.id === "depositGuards" && !isBuilt(each.build)) ??
       null
     );
   }
@@ -3579,13 +3588,8 @@ export class Sim {
       }
       return;
     }
-    this.normalizeProject(project);
-    // The pay is the project's funding shared over its blocks, the last block taking the rest.
-    const share = Math.round(project.purse! / Math.max(1, project.blocks!));
-    const pay = Math.min(share, project.purse! - project.paid!);
-    project.paid! += pay;
-    project.partsUsed += Math.min(this.tuning.blockParts, project.partsLeft);
-    project.partsLeft = Math.max(0, project.partsLeft - this.tuning.blockParts);
+    // The pay is the project's funding shared over its blocks, never more than is left of it.
+    const pay = setBlockIn(project.build, this.tuning.blockParts);
     // The deposit comes back from the account that held it; the pay was held as the project's own.
     const deposit = this.blockDeposit();
     const holder = this.accountFor(project) ?? base?.account;
@@ -3601,7 +3605,7 @@ export class Sim {
     }
     const spot = this.siteSpot(project);
     this.events.push({ type: "payout", x: spot.x, y: spot.y, amount: deposit + (placer ? pay : 0) });
-    if (project.partsLeft > 0) return;
+    if (!isBuilt(project.build)) return;
     if ("guns" in project) this.finishBattery(project);
     else this.finishDeposit(project);
   }
@@ -3677,13 +3681,13 @@ export class Sim {
   }
 
   /** A base's deposit: out by the field it sits by, on that base's side. */
-  private addDeposit(base: Base, fromSwitch: boolean, partsLeft: number, purse = 0): Deposit {
+  private addDeposit(base: Base, fromSwitch: boolean, parts: number, purse = 0): Deposit {
     const at = this.baseField(base).poi;
     const toward = base.body;
     const { x, y } = this.depositSpot(at, toward);
     const name = "field deposit";
-    const blocks = Math.max(1, Math.ceil(partsLeft / this.tuning.blockParts));
-    const deposit: Deposit = { name, base: base.id, owner: base.id, at, toward, x, y, px: x, py: y, ore: new Map(), fromSwitch, parts: resolveParts(DEPOSIT_FRAME), partsLeft, partsUsed: 0, purse, blocks, paid: 0 };
+    const build = startConstruction(parts, purse, this.tuning.blockParts);
+    const deposit: Deposit = { name, base: base.id, owner: base.id, at, toward, x, y, px: x, py: y, ore: new Map(), fromSwitch, parts: resolveParts(DEPOSIT_FRAME), build };
     this.deposits.push(deposit);
     return deposit;
   }
@@ -3701,7 +3705,7 @@ export class Sim {
       }
     }
     if (this.tuning.depositFree) {
-      for (const deposit of this.deposits) if (deposit.partsLeft > 0) this.finishDeposit(deposit);
+      for (const deposit of this.deposits) if (!isBuilt(deposit.build)) this.finishDeposit(deposit);
     }
     if (!this.tuning.depositFree) this.deposits = this.deposits.filter((deposit) => !deposit.fromSwitch);
     for (const deposit of this.deposits) {
@@ -3711,7 +3715,6 @@ export class Sim {
         deposit.at = this.baseField(base).poi;
         deposit.toward = base.body;
       }
-      if (!deposit.fromSwitch) this.normalizeProject(deposit);
       deposit.px = deposit.x;
       deposit.py = deposit.y;
       Object.assign(deposit, this.depositSpot(deposit.at, deposit.toward));
@@ -3719,7 +3722,7 @@ export class Sim {
   }
 
   private finishDeposit(deposit: Deposit): void {
-    deposit.partsLeft = 0;
+    finishConstruction(deposit.build);
     const base = this.projectBase(deposit);
     base?.blueprintsOrdered.delete("deposit");
     this.settleProject(deposit);
@@ -3766,8 +3769,8 @@ export class Sim {
     return { count: data.count ?? tuning.stationGuardCount, arc: data.arc ?? tuning.stationGuardArc, distance: data.distance ?? tuning.stationGuardDistance };
   }
 
-  private addBattery(base: Base, id: Battery["id"], fromSwitch: boolean, partsLeft: number, purse = 0): void {
-    const host = id === "stationGuards" ? base.body : this.deposits.find((deposit) => deposit.base === base.id && deposit.partsLeft <= 0);
+  private addBattery(base: Base, id: Battery["id"], fromSwitch: boolean, parts: number, purse = 0): void {
+    const host = id === "stationGuards" ? base.body : this.deposits.find((deposit) => deposit.base === base.id && isBuilt(deposit.build));
     // Only something with a battery part on its frame gets turrets.
     const guards = host && this.guardsOf(host);
     if (!host || !guards) return;
@@ -3779,9 +3782,9 @@ export class Sim {
       gun.faction = "defender";
       guns.push({ x: host.x, y: host.y, px: host.x, py: host.y, angle: 0, prevAngle: 0, cooldown: 0, gun });
     }
-    const blocks = Math.max(1, Math.ceil(partsLeft / this.tuning.blockParts));
+    const build = startConstruction(parts, purse, this.tuning.blockParts);
     const owner = id === "stationGuards" ? base.id : depositId(base.id);
-    const battery: Battery = { id, base: base.id, owner, host, guns, fromSwitch, partsLeft, partsUsed: 0, purse, blocks, paid: 0 };
+    const battery: Battery = { id, base: base.id, owner, host, guns, fromSwitch, build };
     this.batteries.push(battery);
     this.placeGuards(battery);
     for (const guard of guns) {
@@ -3824,7 +3827,7 @@ export class Sim {
       if (!hasPart(base.body, "projects")) continue;
       const battery = this.batteries.find((candidate) => candidate.id === id && candidate.base === base.id);
       if (free && !battery) this.addBattery(base, id, true, 0);
-      if (free && battery && battery.partsLeft > 0) this.finishBattery(battery);
+      if (free && battery && !isBuilt(battery.build)) this.finishBattery(battery);
       if (!free && battery?.fromSwitch) this.batteries = this.batteries.filter((other) => other !== battery);
     }
   }
@@ -3840,7 +3843,6 @@ export class Sim {
       return false;
     });
     for (const battery of this.batteries) {
-      if (!battery.fromSwitch) this.normalizeProject(battery);
       // A station's turrets stand on its station as the layout has it now, a loaded game's too.
       const base = this.projectBase(battery);
       if (battery.id === "stationGuards" && base) battery.host = base.body;
@@ -3849,7 +3851,7 @@ export class Sim {
   }
 
   private finishBattery(battery: Battery): void {
-    battery.partsLeft = 0;
+    finishConstruction(battery.build);
     const base = this.projectBase(battery);
     base?.blueprintsOrdered.delete(battery.id);
     this.settleProject(battery);
@@ -3860,7 +3862,7 @@ export class Sim {
   inGuardRange(x: number, y: number): boolean {
     const { guardRange } = this.tuning;
     return this.batteries.some(
-      ({ guns, partsLeft }) => partsLeft <= 0 && guns.some((guard) => Math.hypot(guard.x - x, guard.y - y) < guardRange),
+      ({ guns, build }) => isBuilt(build) && guns.some((guard) => Math.hypot(guard.x - x, guard.y - y) < guardRange),
     );
   }
 
@@ -3872,7 +3874,7 @@ export class Sim {
       .map((pilot) => pilot.ship)
       .filter((ship) => ship.faction === "pirate" && !this.isHome(ship));
     for (const battery of this.batteries) {
-      if (battery.partsLeft > 0) continue;
+      if (!isBuilt(battery.build)) continue;
       for (const guard of battery.guns) {
         guard.cooldown = Math.max(0, guard.cooldown - dt);
         guard.prevAngle = guard.angle;
@@ -3935,28 +3937,25 @@ export class Sim {
       const project = this.buildingProject(base);
       if (!project) continue;
       // Only as many as the project still needs: blocks waiting, carried or adrift cover the rest.
-      const wanted = Math.ceil(project.partsLeft / blockParts);
+      const wanted = Math.ceil(project.build.left / blockParts);
       const outstanding =
         base.blocks.filter((job) => job.site === project).length + this.blocks.filter((block) => block.site === project).length;
       if (outstanding >= wanted) continue;
       const spare = this.partA(base) + base.partCarry - stationReserveParts;
       if (spare < blockParts) continue;
       this.spendPartA(base, blockParts);
-      this.normalizeProject(project);
       base.blocks.push({ site: project, carrier: null, payer: null });
     }
     // The station's own turrets: the one project with no trip to make.
     for (const battery of this.batteries) {
-      if (battery.id !== "stationGuards" || battery.partsLeft <= 0) continue;
+      if (battery.id !== "stationGuards" || isBuilt(battery.build)) continue;
       const base = this.projectBase(battery);
       if (!base) continue;
       const spare = this.partA(base) + base.partCarry - stationReserveParts;
-      const used = Math.min(depositBuildRate * dt, spare, battery.partsLeft);
+      const used = Math.min(depositBuildRate * dt, spare, battery.build.left);
       if (used <= 0) continue;
       this.spendPartA(base, used);
-      battery.partsLeft -= used;
-      battery.partsUsed += used;
-      if (battery.partsLeft > 1e-9) continue;
+      if (!addParts(battery.build, used)) continue;
       this.finishBattery(battery);
     }
   }
@@ -3966,7 +3965,7 @@ export class Sim {
     const { depositReach } = this.tuning;
     return (
       this.deposits.find(
-        (deposit) => deposit.partsLeft <= 0 && Math.hypot(deposit.x - body.x, deposit.y - body.y) < depositReach,
+        (deposit) => isBuilt(deposit.build) && Math.hypot(deposit.x - body.x, deposit.y - body.y) < depositReach,
       ) ?? null
     );
   }
@@ -3978,7 +3977,7 @@ export class Sim {
     let found: Deposit | null = null;
     for (const deposit of this.deposits) {
       const distance = Math.hypot(deposit.x - ship.x, deposit.y - ship.y);
-      if (deposit.partsLeft <= 0 && this.depositRoom(deposit) > 0 && distance < best) {
+      if (isBuilt(deposit.build) && this.depositRoom(deposit) > 0 && distance < best) {
         best = distance;
         found = deposit;
       }
@@ -3998,7 +3997,7 @@ export class Sim {
     let found: Deposit | null = null;
     for (const deposit of this.deposits) {
       const distance = Math.hypot(deposit.x - ship.x, deposit.y - ship.y);
-      if (deposit.partsLeft <= 0 && this.depositRoom(deposit) >= smallest && distance < best) {
+      if (isBuilt(deposit.build) && this.depositRoom(deposit) >= smallest && distance < best) {
         best = distance;
         found = deposit;
       }
@@ -5803,7 +5802,7 @@ export class Sim {
     const count = pois.length;
     const carriers: Carriers = {
       pois,
-      deposits: this.deposits.some((deposit) => deposit.partsLeft <= 0),
+      deposits: this.deposits.some((deposit) => isBuilt(deposit.build)),
       full: new Float64Array(count),
       none: new Float64Array(count),
       cos: new Float64Array(count),
@@ -7141,7 +7140,7 @@ export class Sim {
 
   /** Whether a project is still being built and in the world: a site its catch can still take blocks to. */
   siteOpen(project: Deposit | Battery): boolean {
-    if (project.partsLeft <= 0) return false;
+    if (isBuilt(project.build)) return false;
     return "guns" in project ? this.batteries.includes(project) : this.deposits.includes(project);
   }
 
@@ -8783,7 +8782,7 @@ export class Sim {
     let found: Deposit | "pirate base" | null = null;
     for (const deposit of this.deposits) {
       const distance = Math.hypot(deposit.x - ship.x, deposit.y - ship.y);
-      if (deposit.partsLeft <= 0 && this.oreCount(deposit.ore) >= load && distance < best) {
+      if (isBuilt(deposit.build) && this.oreCount(deposit.ore) >= load && distance < best) {
         best = distance;
         found = deposit;
       }

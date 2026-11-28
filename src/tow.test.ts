@@ -820,7 +820,7 @@ describe("tow traffic", () => {
       sim.events.length = 0;
       parkAway(sim);
     }
-    expect(deposit.partsUsed).toBe(20);
+    expect(deposit.build.used).toBe(20);
     expect(sim.unlocked("deposit")).toBe(true);
   }, 45000);
 });

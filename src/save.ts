@@ -4,7 +4,17 @@ import type { Sim } from "./sim";
  * Bump this whenever what a save holds changes shape, so an old save is turned away
  * rather than loaded into a world it no longer fits.
  */
-export const SAVE_VERSION = 11;
+export const SAVE_VERSION = 12;
+/**
+ * The oldest save that still loads: `Sim.restore` reads saves from here on into today's shape.
+ * Version 11 kept a project's parts and funding loose on it, before construction was generic.
+ */
+export const OLDEST_SAVE = 11;
+
+/** Whether a save of this version can be loaded. */
+function loads(version: number): boolean {
+  return version >= OLDEST_SAVE && version <= SAVE_VERSION;
+}
 
 /** Where the two saves live: the one kept for you, and the one you make yourself. */
 export const SAVE_SLOTS = { auto: "jam-save-auto", manual: "jam-save-manual" } as const;
@@ -98,7 +108,7 @@ export function saveInfo(slot: SaveSlot): { savedAt: number; fits: boolean } | n
     const raw = localStorage.getItem(SAVE_SLOTS[slot]);
     if (!raw) return null;
     const file = JSON.parse(raw) as SaveFile;
-    return { savedAt: file.savedAt, fits: file.version === SAVE_VERSION };
+    return { savedAt: file.savedAt, fits: loads(file.version) };
   } catch {
     return null;
   }
@@ -110,7 +120,7 @@ export function loadGame(sim: Sim, slot: SaveSlot): boolean {
     const raw = localStorage.getItem(SAVE_SLOTS[slot]);
     if (!raw) return false;
     const file = JSON.parse(raw) as SaveFile;
-    if (file.version !== SAVE_VERSION) return false;
+    if (!loads(file.version)) return false;
     sim.restore(decode(file.data));
     return true;
   } catch {

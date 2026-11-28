@@ -13,6 +13,7 @@ import { MUSIC_TIMING, type MusicMode, MusicPlayer, MusicScheduler, musicSetting
 import musicList from "./music.json";
 import { Radio, type Beat } from "./radio";
 import { type Base, type Battery, type Deposit, DEPOSIT_REACH, type HullPlan, SHIP_RADIUS, type Ship, Sim, STATION_HALF, TICK, targetSpot, type Targetable } from "./sim";
+import { blocksToGo, isBuilt } from "./construction";
 import { type DragStart, ORDER_RING, Renderer } from "./render";
 import { type BlueprintId, isGear, isProgram, isProject, PARTS, partOf, type Part, type PartIcon, type PartId } from "./parts";
 import { ITEMS, itemDef } from "./items";
@@ -954,7 +955,7 @@ function updateShop(): void {
   if (!docked) shopOpen = false;
   if (!docked || !shopOpen) hullAsked = null;
   const locker = base ? sim.lockerAt(base) : null;
-  const state = `${shopOpen} ${sim.buyRefused} ${sim.oreIn(ship)} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.home} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.shopBase().blocks.map((job) => job.carrier?.home ?? "free").join()} ${buildingProject(sim.shopBase())?.partsLeft ?? 0} ${sim.hasClamp(ship)} ${sim.blockJobFor(ship)?.base.id ?? ""} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${sim.hub.size} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()} ${ship.model} ${hullAsked} ${shopOpen && base ? hullOffers() : ""}`;
+  const state = `${shopOpen} ${sim.buyRefused} ${sim.oreIn(ship)} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.home} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.shopBase().blocks.map((job) => job.carrier?.home ?? "free").join()} ${buildingProject(sim.shopBase())?.build.left ?? 0} ${sim.hasClamp(ship)} ${sim.blockJobFor(ship)?.base.id ?? ""} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${sim.hub.size} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()} ${ship.model} ${hullAsked} ${shopOpen && base ? hullOffers() : ""}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked || !shopOpen;
@@ -1169,8 +1170,8 @@ const BLOCK_ICON: PartIcon = { glyph: "crate", primary: "#4a4f5d", secondary: "#
 /** The project of a base that its blocks are for: the one its pad is supplying. */
 function buildingProject(base: Base): Deposit | Battery | null {
   return (
-    sim.deposits.find((each) => each.base === base.id && each.partsLeft > 0) ??
-    sim.batteries.find((each) => each.base === base.id && each.id === "depositGuards" && each.partsLeft > 0) ??
+    sim.deposits.find((each) => each.base === base.id && !isBuilt(each.build)) ??
+    sim.batteries.find((each) => each.base === base.id && each.id === "depositGuards" && !isBuilt(each.build)) ??
     null
   );
 }
@@ -1181,9 +1182,9 @@ function blockJobLine(): ShopLine | null {
   const project = buildingProject(base);
   if (!project) return null;
   const name = "guns" in project ? "Deposit turrets" : "Field deposit";
-  const blocks = Math.ceil(project.partsLeft / tuning.blockParts);
+  const blocks = blocksToGo(project.build, tuning.blockParts);
   const deposit = sim.blockDeposit();
-  const pay = Math.round((project.purse ?? 0) / Math.max(1, project.blocks ?? 1));
+  const pay = Math.round(project.build.purse / Math.max(1, project.build.blocks));
   const { ship } = sim;
   const note = `${name}: ${blocks} block${blocks === 1 ? "" : "s"} to go
 Deposit ${deposit}, pays ${pay} a block`;
@@ -2032,7 +2033,7 @@ function frame(now: number): void {
           )
         : []),
       ...(tuning.showTraffic
-        ? [`${sim.baseName(base.id)} balance ${base.account.credits}  Ore held ${sim.oreCount(base.ore)}  Part A held ${Math.floor(sim.partA(base))}  Next blueprint ${sim.blueprintQueue(base)[0] ?? "none"}${sim.deposits.some((deposit) => deposit.base === base.id && deposit.partsLeft > 0) ? "  Building deposit" : ""}  Lost traffic ${base.lostTraffic.length}  Pirate base ore ${sim.oreCount(sim.pirateOre)} credits ${Math.floor(sim.pirateCredits)} pirates ${sim.fighters.filter((pilot) => pilot.ship.faction === "pirate").length}/${sim.pirateCap}${sim.blackMarket ? `  Black market ${sim.blackMarket.stage}` : ""}`]
+        ? [`${sim.baseName(base.id)} balance ${base.account.credits}  Ore held ${sim.oreCount(base.ore)}  Part A held ${Math.floor(sim.partA(base))}  Next blueprint ${sim.blueprintQueue(base)[0] ?? "none"}${sim.deposits.some((deposit) => deposit.base === base.id && !isBuilt(deposit.build)) ? "  Building deposit" : ""}  Lost traffic ${base.lostTraffic.length}  Pirate base ore ${sim.oreCount(sim.pirateOre)} credits ${Math.floor(sim.pirateCredits)} pirates ${sim.fighters.filter((pilot) => pilot.ship.faction === "pirate").length}/${sim.pirateCap}${sim.blackMarket ? `  Black market ${sim.blackMarket.stage}` : ""}`]
         : []),
       `FPS   ${Math.round(fps)}${paused ? "  PAUSED" : ""}`,
     ].join("\n");

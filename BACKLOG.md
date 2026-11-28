@@ -750,7 +750,7 @@ session (pair) that sets up how a system gets designed this way, what "fun" is m
 designer and the layout recipes (`npm run layout`).
 
 ## S-78 · Station frames: a station is a hull, its behaviour parts
-- status: specced
+- status: built
 - area: World
 - effort: L
 - plan: docs/station-frames-plan.md

@@ -2,7 +2,7 @@
 
 Written 2026-11-27, from the spec A talk (Q-47, backlog S-78). It builds steps 1–2 of
 `docs/roadmap.md`: the move from proof of concept to framework (`docs/framework.md`, `AGENTS.md`
-Architecture) starts with the things that stand still. Step 1 is built; the rest is not yet.
+Architecture) starts with the things that stand still. All four steps are built (2026-11-27 and 2026-11-28).
 
 ## Why
 
@@ -273,6 +273,30 @@ the user to try: the checks are tests, and the Try it below is one look at the e
 
 ### 4. Construction, from the deposit's
 
+*Built* 2026-11-28. What differs from the steps below, and why:
+
+- **One shape for anything being built.** `src/construction.ts`: a `Construction` (parts left and
+  used, the purse, the blocks it's paid over, what's paid), with starting one, setting a block in
+  (the same rounded share as before, never more than is left), building straight from parts (the
+  station's own turrets from its parts A), finishing at once (the testing switches) and reading an
+  old save's project. A deposit and a battery each hold theirs as `build`; the loose `partsLeft`,
+  `partsUsed`, `purse`, `blocks` and `paid` are gone, and so is `normalizeProject`: a project has
+  its whole plan from the start, and only a save from before gets one made up, on load.
+- **A construction site's parts don't work.** `working(holder)` (`src/sim.ts`): something whose
+  `build` isn't finished has no dock (`dockOf`), no part (`hasPart`) and no trade (`trades`). A
+  station's body can carry a `build` too (`FrameBody.build`), and a test shows a station frame being
+  built can't be docked at; nothing builds one yet, that's the frame swap. The deposit's own checks
+  (`depositAt` and the rest) read `isBuilt` where they read `partsLeft`.
+- **Funded by its owner's account** as before: the station pays for the blueprint and that is the
+  purse; the block deposits go through the project's owner's account (step 3).
+- **Saves:** `SAVE_VERSION` is 12, and `OLDEST_SAVE` (11) says what still loads: `Sim.restore`
+  turns a version 11 project into its construction (`takeOldProject`), keeping its parts, purse,
+  blocks and pay. Ore, stock, lockers and the pirate base's money stay where they were saved (see
+  Saves). The start file is re-warmed at 12: the hour came out identical, entry for entry.
+- **Tests:** `src/construction.test.ts`; in `src/blocks.test.ts`, turrets through the generic path,
+  a construction site that can't trade or dock, and a version 11 save with a deposit half built.
+  Tests that read the loose fields read `build`.
+
 - The deposit's construction (`partsLeft`, `partsUsed`, `purse`, `blocks`, `paid`, block jobs,
   `finishDeposit`) becomes the generic way any frame or part is built: a frame or a part **under
   construction** with N blocks to go, funded by its owner's account, filled by delivered blocks, and
@@ -290,6 +314,12 @@ the user to try: the checks are tests, and the Try it below is one look at the e
 storage and account, and a deposit or battery in an old save becomes an entity or part under
 construction with its blocks so far, its purse and its paid amount. The bump lands in the step that
 first changes what's saved.
+
+*Built* in step 4, smaller than proposed: only the projects changed shape, so only they are read
+anew. The ore, stock and lockers stay on the base and `pirateOre` on the sim, since storage holds
+capacity, not contents (step 2); `pirateCredits` is saved under its old key and read into the
+pirate base's account (step 3). Moving the contents into the storage parts waits for the build
+that needs it.
 
 ## How we'll know
 

@@ -2,19 +2,6 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-51 · Station frames: place and body, capabilities as parts, owners, construction · build
-- state: in progress
-- who: strong
-- backlog: S-78
-- plan: docs/station-frames-plan.md
-- added: 2026-11-27
-
-All four steps, each playing the same and committed on its own: the station, pirate base and
-deposit as frames (converted exactly, looks-the-same test), every capability a part, owner and
-account, then the deposit's construction made generic. Bumps `SAVE_VERSION` to 12. No stop; the
-Try it is one look at the end.
-strong: wide refactor of the sim's station code and the save format.
-
 ## Q-52 · Recipes and factories, steps 1–2: recipe shape, factory part, super factory · build
 - state: queued
 - who: strong
@@ -308,6 +295,20 @@ the start menu cards to each hull's own outline (and its mounts) instead of a ra
 cheap: small and visible, with a clear outcome.
 
 ## Done
+
+## Q-51 · Station frames: place and body, capabilities as parts, owners, construction · build
+- state: done
+- done: 2026-11-28
+- who: strong
+- backlog: S-78
+- plan: docs/station-frames-plan.md
+- added: 2026-11-27
+
+All four steps, each playing the same and committed on its own: the station, pirate base and
+deposit as frames (converted exactly, looks-the-same test), every capability a part, owner and
+account, then the deposit's construction made generic. Bumps `SAVE_VERSION` to 12. No stop; the
+Try it is one look at the end.
+strong: wide refactor of the sim's station code and the save format.
 
 ## Q-42 · Auto targeting: keep one pick inside its Max range · build
 - state: done

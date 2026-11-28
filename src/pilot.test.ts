@@ -1425,7 +1425,7 @@ describe("pirate and defender", () => {
         carryBlock(sim, deposit);
         expect(sim.unlocked("deposit")).toBe(true);
         expect(sim.bases[0].blueprintsOrdered.has("deposit")).toBe(false);
-        expect(deposit.partsUsed).toBeCloseTo(10, 6);
+        expect(deposit.build.used).toBeCloseTo(10, 6);
       });
 
       it("doesn't carry anything until it opens", () => {
@@ -1449,7 +1449,7 @@ describe("pirate and defender", () => {
         // Five spare past the reserve is no block: nothing has left the station's stock.
         expect(sim.partA(sim.bases[0])).toBeCloseTo(25, 6);
         expect(sim.bases[0].blocks).toHaveLength(0);
-        expect(sim.deposits[0].partsLeft).toBeCloseTo(50, 6);
+        expect(sim.deposits[0].build.left).toBeCloseTo(50, 6);
         sim.bases[0].stock.set("partA", 100);
         run(sim, 1);
         expect(sim.bases[0].blocks.length).toBeGreaterThan(0);

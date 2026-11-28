@@ -2,6 +2,7 @@ import type { FighterPilot, DronePilot } from "./pilot";
 import type { ThrusterId } from "./tuning";
 import { DAMAGED_AT, facing, hullMax, hullMounts, tankCapacity, tractorMounts, turretGunId, turretMounts, works, type Module } from "./fitting";
 import { footprint, gridRect, type Rect } from "./grid";
+import { builtShare, isBuilt } from "./construction";
 import { isItem, partOf } from "./parts";
 import { isOreItem } from "./items";
 import { pickOf } from "./programs";
@@ -653,7 +654,7 @@ export class Renderer {
       ctx.translate(lerp(deposit.px, deposit.x, alpha), lerp(deposit.py, deposit.y, alpha));
       drawDepositArt(ctx, {
         frame: DEPOSIT_FRAME,
-        built: deposit.partsLeft > 0 ? deposit.partsUsed / (deposit.partsUsed + deposit.partsLeft) : 1,
+        built: builtShare(deposit.build),
         reach: sim.tuning.depositReach,
         here: deposit === here,
         ore: sim.oreCount(deposit.ore),
@@ -667,8 +668,8 @@ export class Renderer {
   private drawGuards(sim: Sim, alpha: number): void {
     const { ctx } = this;
     for (const battery of sim.batteries) {
-      const built = battery.partsLeft <= 0;
-      ctx.globalAlpha = built ? 1 : 0.25 + (0.5 * battery.partsUsed) / (battery.partsUsed + battery.partsLeft);
+      const built = isBuilt(battery.build);
+      ctx.globalAlpha = built ? 1 : 0.25 + 0.5 * builtShare(battery.build);
       for (const guard of battery.guns) {
         const x = lerp(guard.px, guard.x, alpha);
         const y = lerp(guard.py, guard.y, alpha);

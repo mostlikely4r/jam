@@ -122,3 +122,27 @@ Looked at: not yet.
 
 Looked at: not yet.
 
+## 2026-11-28 06:51 — a2e6e83 (with uncommitted changes) — 3 to check
+
+8 seeds × 60 game minutes, camera far away. Took 48 min; flown side 20624 s of work, records 3010 s.
+
+| Total | Flown | Records | |
+|---|---:|---:|---|
+| traffic wrecked | 9 | 7 | ok |
+| pirate wrecked | 8 | 12 | ok |
+| defender wrecked | 4 | 5 | ok |
+| traffic left | 48 | 48 | ok |
+| pirates left | 12 | 15 | ok |
+| defenders left | 20 | 19 | ok |
+| traffic hits taken | 917 | 204 | **check** |
+| pirate hits taken | 783 | 419 | **check** |
+| defender hits taken | 189 | 271 | ok |
+| attacks begun by pirate | 39 | 31 | ok |
+| attacks begun by defender | 55 | 38 | ok |
+| traffic sold | 3229 | 3512 | ok |
+| pirate credits | 4773 | 7440 | **check** |
+| pirate ore | 0 | 0 | ok |
+| base ore | 451 | 654 | ok |
+
+Looked at: 2026-11-28, after Q-51 (station frames). The three checks are the flown-vs-records gaps seen before (traffic hits taken in every entry since 11-13, pirate credits on 11-13 and 11-19), not new: Q-51 changes no flown play (the hour-long warm-up of `src/start.json` came out identical entry for entry). Pirate hits taken is new as a check, but within the earlier range of flown counts.
+

@@ -59,12 +59,16 @@
         "glow": "#f0d86a"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "ore",
             "n": 2
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "ore"
+        },
+        "time": 2
       }
     },
     {
@@ -87,12 +91,16 @@
         "glow": "#f0d86a"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "oreB",
             "n": 2
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "ore"
+        },
+        "time": 2
       }
     },
     {
@@ -132,12 +140,16 @@
         "border": "#f0a868"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 10
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 120
       }
     },
     {
@@ -158,12 +170,16 @@
         "border": "#f0a868"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 15
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 180
       }
     },
     {
@@ -185,12 +201,16 @@
         "mark": "2"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 13
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 156
       }
     },
     {
@@ -211,12 +231,16 @@
         "border": "#7fdfe6"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 15
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 180
       }
     },
     {
@@ -238,7 +262,7 @@
         "mark": "360"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 30
@@ -247,7 +271,11 @@
             "item": "partB",
             "n": 1
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 372
       }
     },
     {
@@ -268,12 +296,16 @@
         "border": "#7fdfe6"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 18
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 216
       }
     },
     {
@@ -294,12 +326,16 @@
         "border": "#e88a8a"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 15
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 180
       }
     },
     {
@@ -320,12 +356,16 @@
         "border": "#f0d86a"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 13
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 156
       }
     },
     {
@@ -347,12 +387,16 @@
         "mark": "+"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 30
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 360
       }
     },
     {
@@ -374,12 +418,16 @@
         "mark": "-"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 5
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 60
       }
     },
     {
@@ -401,12 +449,16 @@
         "mark": "10"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 8
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 96
       }
     },
     {
@@ -428,12 +480,16 @@
         "mark": "20"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 16
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 192
       }
     },
     {
@@ -455,12 +511,16 @@
         "mark": "40"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 32
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 384
       }
     },
     {
@@ -482,12 +542,16 @@
         "mark": "4"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 25
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 300
       }
     },
     {
@@ -509,12 +573,16 @@
         "mark": "6"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 60
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 720
       }
     },
     {
@@ -536,12 +604,16 @@
         "mark": "1"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 5
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 60
       }
     },
     {
@@ -562,12 +634,16 @@
         "border": "#f0a868"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 15
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 180
       }
     },
     {
@@ -588,12 +664,16 @@
         "border": "#f0a868"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 10
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 120
       }
     },
     {
@@ -614,12 +694,16 @@
         "border": "#f0a868"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 5
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 60
       }
     },
     {
@@ -641,12 +725,16 @@
         "mark": "2"
       },
       "recipe": {
-        "from": [
+        "inputs": [
           {
             "item": "partA",
             "n": 8
           }
-        ]
+        ],
+        "conditions": {
+          "factory": "workshop"
+        },
+        "time": 96
       }
     }
   ]

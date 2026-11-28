@@ -7,6 +7,7 @@ import { DEFAULTS } from "./tuning";
 import { type HullPlan, Sim } from "./sim";
 import { frameMountSpot } from "./frameParts";
 import { shopData } from "./sim";
+import { buyHullNow } from "./testing";
 
 /** Where the station frame's dock sits from its middle, along its own axis. */
 const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
@@ -71,13 +72,13 @@ describe("buying a hull", () => {
     const credits = sim.ship.credits;
     const stationCredits = base.account.credits;
     expect(plan(sim, "floater").net).toBe(600);
-    expect(sim.buyHull(sim.ship, "floater")).toBe(true);
+    expect(buyHullNow(sim, sim.ship, "floater")).toBe(true);
     expect(sim.ship.model).toBe("floater");
     expect(sim.ship.credits).toBe(credits - 600);
     expect(base.account.credits).toBe(stationCredits + 600);
     // Cheaper the other way, and the difference comes back.
     shopData(base.body).hulls = ["racer"];
-    expect(sim.buyHull(sim.ship, "racer")).toBe(true);
+    expect(buyHullNow(sim, sim.ship, "racer")).toBe(true);
     expect(sim.ship.credits).toBe(credits);
   });
 
@@ -86,7 +87,7 @@ describe("buying a hull", () => {
     HULL_INFO.floater.price = 1500;
     HULL_INFO.racer.price = 900;
     sim.ship.credits = 599;
-    expect(sim.buyHull(sim.ship, "floater")).toBe(false);
+    expect(buyHullNow(sim, sim.ship, "floater")).toBe(false);
     expect(sim.buyRefused).toBe("Not enough credits");
     expect(sim.ship.model).toBe("racer");
   });
@@ -96,7 +97,7 @@ describe("buying a hull", () => {
     const out = plan(sim, "floater");
     expect(out.moved).toEqual([]);
     expect(out.locker).toEqual([]);
-    expect(sim.buyHull(sim.ship, "floater")).toBe(true);
+    expect(buyHullNow(sim, sim.ship, "floater")).toBe(true);
     const parts = Object.fromEntries(Object.entries(sim.ship.fit).map(([mount, module]) => [mount, module!.part]));
     expect(parts).toEqual(hullDefaults("floater"));
     expect(sim.lockerAt(sim.baseAt()!).items).toEqual([]);
@@ -109,7 +110,7 @@ describe("buying a hull", () => {
     ship.fit.thrusterReverse = { part: "reverse", wear: 0.3 };
     ship.fit.computer = { part: "navComputer", wear: 0.1 };
     refresh(ship);
-    expect(sim.buyHull(ship, "floater")).toBe(true);
+    expect(buyHullNow(sim, ship, "floater")).toBe(true);
     expect(ship.fit.thrusterReverse).toEqual({ part: "reverse", wear: 0.3 });
     expect(ship.fit.computer).toEqual({ part: "navComputer", wear: 0.1 });
     // The floater's own computer is yours now, in the locker.
@@ -126,7 +127,7 @@ describe("buying a hull", () => {
     expect(out.moved).toHaveLength(2);
     expect(out.moved).toContainEqual({ part: "reverse", from: "thrusterReverse", to: "aft" });
     expect(out.moved).toContainEqual({ part: "gun2", from: "gun", to: "nose" });
-    expect(sim.buyHull(ship, "testHull")).toBe(true);
+    expect(buyHullNow(sim, ship, "testHull")).toBe(true);
     expect(ship.fit.nose).toEqual({ part: "gun2", wear: 0.2 });
     // The floater copy's own gun2 was pushed off: it's yours, in the locker.
     expect(sim.lockerAt(sim.baseAt()!).items.map((each) => each.module.part)).toEqual(["gun2"]);
@@ -138,7 +139,7 @@ describe("buying a hull", () => {
     // Only the floater's gun mount takes a turret.
     ship.fit.gun = { part: "turret", wear: 0 };
     refresh(ship);
-    expect(sim.buyHull(ship, "racer")).toBe(true);
+    expect(buyHullNow(sim, ship, "racer")).toBe(true);
     expect(ship.fit.gun!.part).toBe("gun1");
     expect(sim.lockerAt(sim.baseAt()!).items.map((each) => each.module.part)).toEqual(["turret"]);
   });
@@ -154,7 +155,7 @@ describe("buying a hull", () => {
     expect(out.hold.map((each) => each.module.part)).toContain("flightComputer");
     // With the bay full of ore as well, there is nowhere for it.
     sim.setOre(ship, sim.cargoSpace(ship));
-    expect(sim.buyHull(ship, "floater")).toBe(false);
+    expect(buyHullNow(sim, ship, "floater")).toBe(false);
     expect(sim.buyRefused).toBe("No room for the Flight computer in your locker here or the new bay");
     expect(ship.model).toBe("racer");
     expect(ship.fit.computer!.part).toBe("navComputer");
@@ -164,7 +165,7 @@ describe("buying a hull", () => {
     const sim = docked("racer", ["floater"]);
     const { ship } = sim;
     sim.setOre(ship, 3);
-    expect(sim.buyHull(ship, "floater")).toBe(true);
+    expect(buyHullNow(sim, ship, "floater")).toBe(true);
     expect(sim.oreIn(ship)).toBe(3);
     // A hull with no bay: the cargo goes to the locker, and with the locker full there's no sale.
     copyHull("racer", "noBay");
@@ -172,7 +173,7 @@ describe("buying a hull", () => {
     shopData(sim.shopBase().body).hulls = ["noBay"];
     expect(plan(sim, "noBay").locker.filter((each) => each.module.part === "ore")).toHaveLength(3);
     fillLocker(sim);
-    expect(sim.buyHull(ship, "noBay")).toBe(false);
+    expect(buyHullNow(sim, ship, "noBay")).toBe(false);
     expect(sim.buyRefused).toBe("No room for your cargo in the new bay or your locker here: unload first");
   });
 
@@ -183,7 +184,7 @@ describe("buying a hull", () => {
     refresh(ship);
     ship.tankFuel = { tankLeft: 7, tankRight: 3 };
     ship.fuel = 10;
-    expect(sim.buyHull(ship, "floater")).toBe(true);
+    expect(buyHullNow(sim, ship, "floater")).toBe(true);
     expect(ship.fit.tankLeft!.part).toBe("mediumTank");
     expect(ship.tankFuel.tankLeft).toBe(7);
     expect(ship.tankFuel.tankRight).toBe(3);
@@ -197,7 +198,7 @@ describe("buying a hull", () => {
     const owned = [...ship.software];
     expect(ship.programs.length).toBeGreaterThan(2);
     expect(plan(sim, "racer").unloaded).toEqual(ship.programs.slice(2));
-    expect(sim.buyHull(ship, "racer")).toBe(true);
+    expect(buyHullNow(sim, ship, "racer")).toBe(true);
     expect(ship.programs).toHaveLength(2);
     expect([...ship.software]).toEqual(owned);
   });
@@ -209,7 +210,7 @@ describe("buying a hull", () => {
     ship.fit.gun = { part: "turret", wear: 0 };
     ship.fit["turretGun:gun"] = { part: "gun1", wear: 0.1 };
     refresh(ship);
-    expect(sim.buyHull(ship, "turretHull")).toBe(true);
+    expect(buyHullNow(sim, ship, "turretHull")).toBe(true);
     expect(ship.fit.gun!.part).toBe("turret");
     expect(ship.fit["turretGun:gun"]).toEqual({ part: "gun1", wear: 0.1 });
     // The new hull's own gun was pushed off by the turret: it's yours, in the locker.
@@ -230,7 +231,7 @@ describe("buying a hull", () => {
     ship.fit["turretGun:gun"] = { part: "gun1", wear: 0 };
     ship.fit["turretGun:gunTwo"] = { part: "gun2", wear: 0 };
     refresh(ship);
-    expect(sim.buyHull(ship, "twinNew")).toBe(true);
+    expect(buyHullNow(sim, ship, "twinNew")).toBe(true);
     expect(ship.fit.gun!.part).toBe("turret");
     expect(ship.fit.gunTwo!.part).toBe("turret");
     // Each gun follows its turret into that turret's own mount on the new hull.
@@ -254,7 +255,7 @@ describe("buying a hull", () => {
     const sim = docked("racer", ["floater"]);
     sim.ship.fit.thrusterReverse = { part: "reverse", wear: 0.3 };
     refresh(sim.ship);
-    expect(sim.buyHull(sim.ship, "floater")).toBe(true);
+    expect(buyHullNow(sim, sim.ship, "floater")).toBe(true);
     const into = homeSim(2, { ...WORLD });
     roundTrip(sim, into);
     expect(into.ship.model).toBe("floater");

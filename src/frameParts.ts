@@ -3,7 +3,7 @@
  * of their frames (`docs/station-frames-plan.md`, step 2). A part that isn't there is the empty
  * value: the pirate base has no refinery part, not a refinery set to 0.
  *
- * Full parts (dock, storage, trade, battery) carry real data. Thin parts (shop, refinery, repair,
+ * Full parts (dock, storage, trade, battery, factory) carry real data. Thin parts (shop, refinery, repair,
  * shipyard, projects, radio, black market) wrap what exists: their presence switches the capability
  * on, they hold just what a world node held, and the code behind them stays. Each thin part is
  * marked for its current owner (`onlyOn`): fitting one anywhere else is refused, and the sim never
@@ -14,7 +14,8 @@
  * that data over the frame's, `null` leaves the mount empty, and a missing one keeps the frame's.
  */
 import { FRAME_PART_KINDS, HULL_USE_NAMES, hullInfo, hullMounts, isFrame, type FramePartKind, type FrameUse, type Mount, type MountId } from "./fitting";
-import { itemDef } from "./items";
+import type { FactoryData } from "./factories";
+import { FACTORY_KINDS, itemDef, type FactoryKind } from "./items";
 import type { PartId, ShipModel } from "./parts";
 
 export { FRAME_PART_KINDS, type FramePartKind };
@@ -40,6 +41,8 @@ export interface FramePartData {
   projects: Record<string, never>;
   radio: Record<string, never>;
   blackMarket: Record<string, never>;
+  /** Makes things from the station's storage: see `src/factories.ts`. */
+  factory: FactoryData;
 }
 
 /** One part fitted to a frame: what it is, which mount it's on, and its data. */
@@ -112,6 +115,18 @@ export const FRAME_PARTS: { [K in FramePartKind]: FramePartDef<K> } = {
   projects: { name: "Projects", mountType: "projects", onlyOn: "station", read: none },
   radio: { name: "Radio", mountType: "radio", onlyOn: "station", read: none },
   blackMarket: { name: "Black market", mountType: "black market", onlyOn: "pirateBase", read: none },
+  factory: {
+    name: "Factory",
+    mountType: "factory",
+    read: (raw) => {
+      const kind: FactoryKind = (FACTORY_KINDS as readonly unknown[]).includes(raw.kind) ? (raw.kind as FactoryKind) : "workshop";
+      const targets: Record<string, number> = {};
+      if (raw.targets && typeof raw.targets === "object" && !Array.isArray(raw.targets)) {
+        for (const [id, n] of Object.entries(raw.targets as Record<string, unknown>)) if (count(n) !== undefined) targets[id] = Math.floor(count(n)!);
+      }
+      return { kind, speed: count(raw.speed) ?? 1, mode: raw.mode === "stock" ? "stock" : "order", ...(Object.keys(targets).length > 0 ? { targets } : {}) };
+    },
+  },
 };
 
 /** The mount types frame parts and the pads and berths use, for the ship file's list. */

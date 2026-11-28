@@ -5,6 +5,7 @@ import { roundTrip } from "./save";
 import { DEFAULTS } from "./tuning";
 import { expectedOre, type Rock, SHIP_RADIUS, Sim, STATION_HALF, TICK, TOW_GAP } from "./sim";
 import { frameMountSpot } from "./frameParts";
+import { buyNow } from "./testing";
 
 /** Where the station frame's dock sits from its middle, along its own axis. */
 const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
@@ -645,7 +646,7 @@ describe("tow traffic", () => {
 
   /** Every upgrade a floater's list asks for, so it has nothing left to buy but the tow pair. */
   function boughtEverything(sim: Sim, pilot: Sim["traffic"][number]): void {
-    for (const id of TRAFFIC_BUY_ORDER.floater) sim.buyPart(pilot.ship, id);
+    for (const id of TRAFFIC_BUY_ORDER.floater) buyNow(sim, pilot.ship, id);
   }
 
   /** A tow ship with its clamp and program, ready to work. */

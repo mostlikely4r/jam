@@ -87,6 +87,7 @@ export const STEP_PARTS: Record<string, FarSide> = {
   spendPirateCredits: { out: "everywhere", note: "Pirate base economy." },
   moveHauler: { out: "everywhere", note: "One hauler per base, flown always: few enough not to matter yet." },
   refineBase: { out: "everywhere", note: "Base economy: a whole rock keeps refining while nobody is near." },
+  runFactories: { out: "everywhere", note: "Base economy: a station's factories keep working while nobody is near, as its storage does." },
   moveBlackMarket: { out: "everywhere", note: "One ship, flown always." },
   "chatter.update": { out: "everywhere", note: "Radio: it only speaks of what's near the player." },
 };

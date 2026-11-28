@@ -1,5 +1,7 @@
 import { orbitEllipse } from "./kepler";
-import { bodyAt, DEPOSIT_REACH, orbitsAt, type OrbitRing, type Sim, type Target } from "./sim";
+import { progressOf } from "./factories";
+import { partOf, type PartId } from "./parts";
+import { bodyAt, DEPOSIT_REACH, orbitsAt, type Base, type OrbitRing, type Sim, type Target } from "./sim";
 
 /**
  * The system chart, the starmap part's view of the whole world at once. A top-down map of
@@ -38,7 +40,11 @@ export class Chart {
   /** The right-click menu, when one is open. */
   private menu: HTMLDivElement | null = null;
 
-  constructor(private readonly sim: Sim) {}
+  /** With `dev` (`?dev`): a card by each station with factories, saying what they make and what it holds. */
+  constructor(
+    private readonly sim: Sim,
+    private readonly dev = false,
+  ) {}
 
   toggle(): void {
     if (this.isOpen) this.close();
@@ -507,7 +513,63 @@ export class Chart {
     ctx.textAlign = "center";
     for (const { x, y, text } of labels) ctx.fillText(text, x, y - 10);
 
+    if (this.dev) for (const base of sim.bases) this.drawDevCard(base, to(base.body.x, base.body.y), dpr);
     this.drawPanel(sim, dpr);
+  }
+
+  /** A dev card beside a station on screen: its factories, each with a ring for its job, and its storage as bars. */
+  private drawDevCard(base: Base, at: { x: number; y: number }, dpr: number): void {
+    const { ctx } = this;
+    const card = devCard(this.sim, base);
+    if (!ctx || !card) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.textAlign = "left";
+    const row = 14;
+    const width = 230;
+    const height = 20 + card.factories.length * row + card.storage.length * row + 6;
+    const x = at.x / dpr + 14;
+    const y = at.y / dpr - height / 2;
+    ctx.fillStyle = "rgba(14, 18, 28, 0.88)";
+    ctx.strokeStyle = "rgba(120, 140, 180, 0.5)";
+    ctx.lineWidth = 1;
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+    let line = y + 14;
+    ctx.fillStyle = "#7ad0ff";
+    ctx.fillText(card.title, x + 6, line);
+    for (const factory of card.factories) {
+      line += row;
+      ctx.fillStyle = factory.state === "working" ? "#9ee8a0" : factory.state === "waiting" ? "#f0c060" : "rgba(220, 224, 232, 0.7)";
+      ctx.fillText(factory.text, x + 20, line);
+      // The job's ring: how far along it is.
+      const cx = x + 11;
+      const cy = line - 4;
+      ctx.strokeStyle = "rgba(220, 224, 232, 0.25)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+      ctx.stroke();
+      if (factory.progress !== null) {
+        ctx.strokeStyle = "#9ee8a0";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 4.5, -Math.PI / 2, -Math.PI / 2 + factory.progress * Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+    }
+    for (const item of card.storage) {
+      line += row;
+      ctx.fillStyle = "rgba(220, 224, 232, 0.75)";
+      ctx.fillText(`${item.label} ${item.held}/${item.target}`, x + 6, line);
+      const bx = x + 130;
+      const bw = width - 138;
+      ctx.fillStyle = "rgba(120, 140, 180, 0.25)";
+      ctx.fillRect(bx, line - 8, bw, 6);
+      ctx.fillStyle = item.held >= item.target ? "#9ee8a0" : "#f0c060";
+      ctx.fillRect(bx, line - 8, bw * Math.min(1, item.target > 0 ? item.held / item.target : 1), 6);
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   /** The picked thing, in words: what it is, how far, and whether a course can end there. */
@@ -554,4 +616,40 @@ function fmt(units: number): string {
   if (units >= 1e6) return `${(units / 1e6).toFixed(2)}M`;
   if (units >= 1e3) return `${(units / 1e3).toFixed(1)}k`;
   return `${Math.round(units)}`;
+}
+
+/** What a station's dev card says: its factories and its storage. */
+export interface DevCard {
+  title: string;
+  factories: { text: string; state: "idle" | "working" | "waiting"; progress: number | null }[];
+  storage: { label: string; held: number; target: number }[];
+}
+
+/**
+ * A station's dev card (`?dev`, on the chart), or null for one with no factory: each factory
+ * with its kind, speed and mode and what it's doing (making what, waiting on what, or idle), and
+ * the station's storage, one bar per item against its target.
+ */
+export function devCard(sim: Sim, base: Base): DevCard | null {
+  if (base.factories.length === 0) return null;
+  const factories: DevCard["factories"] = [];
+  const targets = new Map<PartId, number>();
+  const label = (id: string) => partOf(id as PartId)?.label ?? id;
+  for (const factory of base.factories) {
+    const data = sim.factoryData(base, factory);
+    if (!data) continue;
+    for (const [id, n] of Object.entries(data.targets ?? {})) targets.set(id as PartId, n);
+    const name = `${data.kind === "ore" ? "Ore factory" : "Workshop"} ×${data.speed}${data.mode === "stock" ? ", to stock" : ""}`;
+    const { state } = factory;
+    const more = factory.queue.length > 0 ? `, ${factory.queue.length} more` : "";
+    const doing = state.is === "working" ? `making ${label(state.makes)}${more}` : state.is === "waiting" ? `waiting on ${state.on.join(" and ")}` : "idle";
+    const ready = factory.ready.length > 0 ? `, ${factory.ready.length} hull ready` : "";
+    factories.push({ text: `${name}: ${doing}${ready}`, state: state.is, progress: factory.job ? progressOf(factory.job) : null });
+  }
+  const storage: DevCard["storage"] = [];
+  for (const id of new Set<PartId>([...base.stock.keys(), ...targets.keys()])) {
+    const target = targets.get(id) ?? (id === "partA" ? sim.tuning.stationPartsTarget : sim.tuning.itemTarget);
+    storage.push({ label: label(id), held: sim.stockOf(base, id), target });
+  }
+  return { title: sim.baseName(base.id), factories, storage };
 }

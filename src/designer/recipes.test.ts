@@ -5,6 +5,7 @@ import { RECIPES } from "./recipes";
 import { shippedWorld } from "./shipped";
 import { walk, type WorldNode } from "./world";
 import { partOn, resolveParts } from "../frameParts";
+import { buyNow } from "../testing";
 
 describe("layout recipes", () => {
   it("far-base adds one field round the planet and a base round it, holding the all-round tractor, however often it runs", () => {
@@ -38,10 +39,10 @@ describe("the shipped world", () => {
     expect(far).toBeDefined();
     const { ship } = sim;
     ship.credits = 100000;
-    expect(sim.buyPart(ship, "tractorAll")).toBe(false);
+    expect(buyNow(sim, ship, "tractorAll")).toBe(false);
     const dock = sim.dockPoint(false, far.body);
     Object.assign(ship, { x: dock.x, y: dock.y, px: dock.x, py: dock.y, vx: 0, vy: 0 });
-    expect(sim.buyPart(ship, "tractorAll")).toBe(true);
+    expect(buyNow(sim, ship, "tractorAll")).toBe(true);
   });
 
   it("full-system gives every planet two moons with ten fields each, the same however often it runs, and no planet's moons meet another's", () => {

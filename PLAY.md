@@ -3,6 +3,19 @@
 <!-- vibeview play v1. Things to try when you next play or use the project: one item per build
 that wants a human look. Format: see vibeview/FORMAT.md -->
 
+## P-10 · The workshop: buys build behind a short bar
+- from: Q-52
+- plan: docs/recipes-factories-plan.md
+- added: 2026-11-28
+
+`npm run dev`, `?dev`, start a racer. Tab, Parts: "Dock at nearest station" and "Give money".
+Open the shop (B) and buy a gun 2: a green bar fills along its cell for about 8 s (a gun 1 is about
+3 s), then it's in your bay; its tooltip says how long is left. Buy something the station lacks
+the parts for: refused, same words as before. Buy something and undock before the bar fills: it
+waits in your locker there. Then the chart (C; it needs the System chart program: Tab, Parts,
+Give program): the Station's card shows "Workshop ×20: making …" with a ring while it builds, idle after. Does a few
+seconds of build feel right, and is the bar where the eye is? The times are the numbers to tune.
+
 ## P-6 · Auto targeting: a stale pick no longer freezes the search
 - from: Q-42
 - plan: docs/auto-targeting-plan.md

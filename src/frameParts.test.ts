@@ -52,7 +52,7 @@ describe("frame parts", () => {
 
   it("give each frame only the parts it has: no field for what it doesn't do", () => {
     const kinds = (model: string) => resolveParts(model).map((part) => part.kind).sort();
-    expect(kinds("station")).toEqual(["battery", "dock", "refinery", "repair", "shipyard", "shop", "storage", "trade"]);
+    expect(kinds("station")).toEqual(["battery", "dock", "factory", "refinery", "repair", "shipyard", "shop", "storage", "trade"]);
     expect(kinds("pirateBase")).toEqual(["blackMarket", "dock", "storage", "trade"]);
     expect(kinds("deposit")).toEqual(["battery", "storage", "trade"]);
   });

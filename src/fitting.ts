@@ -56,7 +56,7 @@ export interface Mount {
  * The parts that go on a frame rather than a ship: what a station, the pirate base and a field
  * deposit can do. See `src/frameParts.ts`; kept here because a mount names one.
  */
-export const FRAME_PART_KINDS = ["dock", "storage", "trade", "battery", "shop", "refinery", "repair", "shipyard", "projects", "radio", "blackMarket"] as const;
+export const FRAME_PART_KINDS = ["dock", "storage", "trade", "battery", "shop", "refinery", "repair", "shipyard", "projects", "radio", "blackMarket", "factory"] as const;
 export type FramePartKind = (typeof FRAME_PART_KINDS)[number];
 
 /** Where a mount sits and faces. */

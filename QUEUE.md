@@ -2,19 +2,6 @@
 
 <!-- vibeview queue v1. Order = the order tasks go to agents; top is next. Format: see vibeview/FORMAT.md -->
 
-## Q-52 · Recipes and factories, steps 1–2: recipe shape, factory part, super factory · build
-- state: queued
-- who: strong
-- after: Q-51
-- backlog: S-79
-- plan: docs/recipes-factories-plan.md
-- added: 2026-11-27
-
-Slice 1: recipes get time and conditions, a factory part with working/waiting state, each station's
-workshop builds bought modules and hulls behind a short progress bar, dev cards on the chart. Stops
-for the user to try the build times.
-strong: sits on spec A's parts, changes buying and the save format.
-
 ## Q-53 · Recipes and factories, steps 3–6: blueprint items, holes, the hub gone · build
 - state: queued
 - who: strong
@@ -286,6 +273,20 @@ the start menu cards to each hull's own outline (and its mounts) instead of a ra
 cheap: small and visible, with a clear outcome.
 
 ## Done
+
+## Q-52 · Recipes and factories, steps 1–2: recipe shape, factory part, super factory · build
+- state: done
+- who: strong
+- after: Q-51
+- backlog: S-79
+- plan: docs/recipes-factories-plan.md
+- added: 2026-11-27
+- done: 2026-11-28
+
+Slice 1: recipes get time and conditions, a factory part with working/waiting state, each station's
+workshop builds bought modules and hulls behind a short progress bar, dev cards on the chart. Stops
+for the user to try the build times.
+strong: sits on spec A's parts, changes buying and the save format.
 
 ## Q-30 · Nothing vanishes in view, step 1: the camera is the viewer · build
 - state: done

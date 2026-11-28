@@ -188,7 +188,7 @@ async function toggleBot(): Promise<void> {
   keys.clear();
 }
 /** The system chart, for whoever has the starmap part. It lives over the game, which keeps running. */
-const chart = new Chart(sim);const startOverlay = document.getElementById("start") as HTMLDivElement;
+const chart = new Chart(sim, dev);const startOverlay = document.getElementById("start") as HTMLDivElement;
 const startBox = document.querySelector("#start .box") as HTMLDivElement;
 /** The live demos behind the start menu's ship cards, while it's open. */
 let demos: ShipDemo[] = [];
@@ -796,7 +796,7 @@ function badgeEl(badge: ShopBadge): HTMLElement | null {
  * tooltip. A cell that can't be bought is `aria-disabled` rather than `disabled`, so its
  * tooltip still shows; its click is ignored.
  */
-function shopCell(line: ShopLine, onClick: () => void, drag?: PartId): HTMLButtonElement {
+function shopCell(line: ShopLine, onClick: () => void, drag?: PartId, makes?: string): HTMLButtonElement {
   const cell = document.createElement("button");
   cell.type = "button";
   cell.className = "shop-cell";
@@ -807,14 +807,45 @@ function shopCell(line: ShopLine, onClick: () => void, drag?: PartId): HTMLButto
   else if (line.icon) cell.append(iconEl(line.icon, 26));
   const badge = badgeEl(state.badge);
   if (badge) cell.append(badge);
+  // What the workshop is making of it for you: a bar along the cell's foot, filled each frame.
+  const making = makes ? orderOf(makes) : undefined;
+  if (makes && making) {
+    const bar = document.createElement("span");
+    bar.className = "shop-progress";
+    const fill = document.createElement("span");
+    bar.append(fill);
+    cell.append(bar);
+    shopBars.push({ fill, makes });
+  }
   if (!line.enabled) cell.setAttribute("aria-disabled", "true");
-  if (line.label) setTip(cell, () => [line.label, line.text].filter(Boolean).join("\n"));
+  if (line.label) setTip(cell, () => [line.label, line.text, makes ? orderText(makes) : ""].filter(Boolean).join("\n"));
   cell.addEventListener("click", () => {
     if (!line.enabled) return;
     onClick();
     cell.blur();
   });
   return cell;
+}
+
+/** The bars of what the workshop is making for you, on the shop's cells: filled each frame, rebuilt with the shop. */
+let shopBars: { fill: HTMLElement; makes: string }[] = [];
+
+/** The first of your orders at this dock's workshop that makes this, if there is one. */
+function orderOf(makes: string): { makes: string; progress: number; seconds: number } | undefined {
+  return sim.ordersAt(sim.shopBase()).find((order) => order.makes === makes);
+}
+
+/** Your order for this at the workshop, in words for its tooltip. */
+function orderText(makes: string): string {
+  const order = orderOf(makes);
+  if (!order) return "";
+  if (order.progress >= 1 && order.seconds <= 0) return "Built, waiting for you here";
+  return `Being made in the workshop: ${Math.ceil(order.seconds)} s to go`;
+}
+
+/** Fills the shop's bars to how far along each order is. */
+function fillShopBars(): void {
+  for (const { fill, makes } of shopBars) fill.style.width = `${Math.round((orderOf(makes)?.progress ?? 1) * 100)}%`;
 }
 
 /** The hauler's arrival, in words for the shop's heading. */
@@ -955,13 +986,16 @@ function updateShop(): void {
   if (!docked) shopOpen = false;
   if (!docked || !shopOpen) hullAsked = null;
   const locker = base ? sim.lockerAt(base) : null;
-  const state = `${shopOpen} ${sim.buyRefused} ${sim.oreIn(ship)} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.home} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.shopBase().blocks.map((job) => job.carrier?.home ?? "free").join()} ${buildingProject(sim.shopBase())?.build.left ?? 0} ${sim.hasClamp(ship)} ${sim.blockJobFor(ship)?.base.id ?? ""} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${sim.hub.size} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()} ${ship.model} ${hullAsked} ${shopOpen && base ? hullOffers() : ""}`;
+  fillShopBars();
+  const orders = base ? sim.ordersAt(base).map((order) => `${order.makes}${order.progress >= 1 ? "!" : ""}`).join() : "";
+  const state = `${shopOpen} ${orders} ${sim.buyRefused} ${sim.oreIn(ship)} ${ship.hold.length} ${locker?.rows} ${locker?.items.length} ${base?.id} ${ship.home} ${ship.credits} ${[...ship.parts].join()} ${sim.drones.length} ${tuning.partPriceScale} ${tuning.partWeightScale} ${tuning.dronePrice} ${tuning.droneLimit} ${PARTS.map((part) => sim.hasPartsFor(sim.partPrice(part.id))).join()} ${sim.hasPartsFor(tuning.dronePrice)} ${[...sim.shopBase().blueprints].join()} ${[...sim.shopBase().blueprintPaid].join()} ${[...sim.shopBase().blueprintsOrdered].join()} ${sim.unlocked("deposit")} ${tuning.depositPrice} ${tuning.depositParts} ${sim.shopBase().blocks.map((job) => job.carrier?.home ?? "free").join()} ${buildingProject(sim.shopBase())?.build.left ?? 0} ${sim.hasClamp(ship)} ${sim.blockJobFor(ship)?.base.id ?? ""} ${sim.unlocked("stationGuards")} ${sim.unlocked("depositGuards")} ${tuning.stationGuardPrice} ${tuning.stationGuardParts} ${tuning.depositGuardPrice} ${tuning.depositGuardParts} ${tuning.stationUnlocks} ${newsState()} ${[...sim.shopBase().stock].join()} ${sim.hub.size} ${JSON.stringify(ship.fit)} ${ship.programs.join()} ${[...ship.software].join()} ${PARTS.map((part) => part.icon.glyph + (part.icon.mark ?? "")).join()} ${ship.model} ${hullAsked} ${shopOpen && base ? hullOffers() : ""}`;
   if (state === shopState) return;
   shopState = state;
   shop.hidden = !docked || !shopOpen;
   dockHint.hidden = !docked || shopOpen;
   if (!docked || !shopOpen) return;
 
+  shopBars = [];
   shop.replaceChildren(shopHeading);
   if (sim.buyRefused) {
     const refused = document.createElement("p");
@@ -1002,7 +1036,7 @@ function updateShop(): void {
           ? hullCells()
           : forSale.filter((part) => partCategory(part) === category).flatMap((part) => {
             const line = partLine(part);
-            return line ? [shopCell(line, () => tradePart(part), line.tag === "buy" ? part.id : undefined)] : [];
+            return line ? [shopCell(line, () => tradePart(part), line.tag === "buy" ? part.id : undefined, part.id)] : [];
           });
     if (cells.length === 0) continue;
     const head = document.createElement("h2");
@@ -1083,6 +1117,7 @@ function hullCells(): HTMLButtonElement[] {
     const label = `${hullName(model)} hull`;
     const art = () => hullArt(model);
     if (model === ship.model) return shopCell({ tag: "yours", label, art, text: "You fly one", enabled: false }, () => {});
+    if (orderOf(model)) return shopCell({ tag: "being built", label, art, text: "Yours, being built", enabled: false }, () => {}, undefined, model);
     const plan = sim.planHull(ship, model);
     if ("refused" in plan) {
       const net = sim.hullPrice(model) - sim.hullPrice(ship.model);
@@ -1494,7 +1529,15 @@ function buildPanel(): void {
         sim.ship.credits += 1000;
         money.blur();
       });
-      body.append(note, row, programRow, hullRow, said, money);
+      // Straight into the nearest dock, for trying the shop without the trip.
+      const dockNow = document.createElement("button");
+      dockNow.textContent = "Dock at nearest station";
+      dockNow.addEventListener("click", () => {
+        const where = sim.devDock();
+        said.textContent = where ? `Docked at ${where}` : "No station";
+        dockNow.blur();
+      });
+      body.append(note, row, programRow, hullRow, said, money, dockNow);
     }
   }
 

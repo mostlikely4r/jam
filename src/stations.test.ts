@@ -5,6 +5,7 @@ import { moduleIds } from "./items";
 import { roundTrip } from "./save";
 import { type FieldSpec, MAX_HULL, type Poi, type Ship, Sim, type StationSpec, TICK } from "./sim";
 import { placeParts } from "./frameParts";
+import { buyNow } from "./testing";
 
 type Loose = Parameters<typeof placeParts>[0];
 /** A spec with a station's settings named one by one, as they were before they were parts on its frame. */
@@ -130,14 +131,14 @@ describe("a second base", () => {
     expect(sim.atShop(ship)).toBe(true);
     expect(sim.baseAt(ship)).toBe(second);
     const firstParts = sim.partA(first);
-    expect(sim.buyPart(ship, "strafe")).toBe(true);
+    expect(buyNow(sim, ship, "strafe")).toBe(true);
     expect(sim.partA(second)).toBeLessThan(sim.tuning.stationStartParts);
     expect(sim.partA(first)).toBe(firstParts);
     // Out of parts there means out of parts there, whatever the first base holds.
     second.stock.set("partA", 0);
-    expect(sim.buyPart(ship, "reverse")).toBe(false);
+    expect(buyNow(sim, ship, "reverse")).toBe(false);
     dockAt(sim, ship, sim.station);
-    expect(sim.buyPart(ship, "reverse")).toBe(true);
+    expect(buyNow(sim, ship, "reverse")).toBe(true);
   });
 
   it("charges a rebuild to the base that does it", () => {
@@ -291,11 +292,11 @@ describe("blueprints per base", () => {
     const { sim, outpost } = world({}, { unlocked: moduleIds(), items: [{ item: "partB", n: 1 }] });
     const { ship } = sim;
     ship.credits = 100000;
-    expect(sim.buyPart(ship, "tractorAll")).toBe(false);
+    expect(buyNow(sim, ship, "tractorAll")).toBe(false);
     expect(sim.fundBlueprint(ship, "tractorAll")).toBe(false);
     dockAt(sim, ship, outpost);
     expect(sim.unlocked("tractorAll")).toBe(true);
-    expect(sim.buyPart(ship, "tractorAll")).toBe(true);
+    expect(buyNow(sim, ship, "tractorAll")).toBe(true);
     expect(ship.parts.has("tractorAll")).toBe(true);
   });
 
@@ -304,9 +305,9 @@ describe("blueprints per base", () => {
     const { ship } = sim;
     ship.credits = 100000;
     dockAt(sim, ship, outpost);
-    expect(sim.buyPart(ship, "tractorAll")).toBe(false);
+    expect(buyNow(sim, ship, "tractorAll")).toBe(false);
     dockAt(sim, ship, sim.station);
-    expect(sim.buyPart(ship, "tractorAll")).toBe(false);
+    expect(buyNow(sim, ship, "tractorAll")).toBe(false);
   });
 
   it("puts what a ship pays toward a blueprint into the base it's docked at", () => {
@@ -336,10 +337,10 @@ describe("blueprints per base", () => {
     expect(sim.unlocked("autopilot", second)).toBe(false);
     expect(sim.shopLists("autopilot", second)).toBe(false);
     dockAt(sim, ship, outpost);
-    expect(sim.buyPart(ship, "autopilot")).toBe(false);
+    expect(buyNow(sim, ship, "autopilot")).toBe(false);
     // Nothing to fund while the shop needs no blueprints.
     expect(sim.fundBlueprint(ship, "autopilot")).toBe(false);
-    expect(sim.buyPart(ship, "spinStabilizer")).toBe(true);
+    expect(buyNow(sim, ship, "spinStabilizer")).toBe(true);
     second.blueprints.add("autopilot");
     expect(sim.unlocked("autopilot", second)).toBe(true);
   });

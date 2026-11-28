@@ -566,6 +566,20 @@ export class Bot {
       this.snag(sim, want, this.slotsReason(sim));
       return false;
     }
+    // What it bought is being built in the workshop: it waits in the dock for it, as a player does.
+    const base = sim.baseAt();
+    if (base && sim.ordersAt(base).length > 0) return true;
+    // Bought already and handed over into the bay or the locker: fit it from there.
+    if (!isProgram(want)) {
+      const inHold = ship.hold.findIndex((item) => item.module.part === want);
+      const inLocker = base ? sim.lockerAt(base).items.findIndex((item) => item.module.part === want) : -1;
+      const from = inHold >= 0 ? { at: "hold" as const, index: inHold } : inLocker >= 0 ? { at: "locker" as const, index: inLocker } : null;
+      if (from) {
+        if (sim.fitItem(ship, from)) this.log.event(now, `${label} fitted`);
+        else this.snag(sim, want, "the ship wouldn't take it");
+        return true;
+      }
+    }
     if (!sim.canBuy(ship, want)) {
       this.snag(sim, want, "this shop can't sell it to this ship");
       return false;
@@ -585,12 +599,15 @@ export class Bot {
       else this.snag(sim, want, this.slotsReason(sim));
       return true;
     }
+    if (base && sim.ordersAt(base).some((order) => order.makes === want)) {
+      this.log.event(now, `bought ${label} (${price}), being built`);
+      return true;
+    }
     if (where === null || where === "mount") {
       this.log.event(now, `bought ${label} (${price}), fitted`);
       return true;
     }
     // It went into the bay or the locker: fit it from there, as a click on Fit does.
-    const base = sim.baseAt();
     const index = where === "hold" ? ship.hold.length - 1 : base ? sim.lockerAt(base).items.length - 1 : -1;
     if (index >= 0 && sim.fitItem(ship, where === "hold" ? { at: "hold", index } : { at: "locker", index })) {
       this.log.event(now, `bought ${label} (${price}), fitted`);

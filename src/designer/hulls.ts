@@ -81,7 +81,7 @@ import {
   itemOwned,
 } from "../fitting";
 import { PART_KINDS, partOf, PARTS, SHIP_MODELS, type PartIcon, type PartId, type PartKind, type ShipModel, type ThrusterRole } from "../parts";
-import { ITEMS, ITEM_TYPES, itemDef, itemsFileNow, SHIPPED_ITEMS, useItemsFile, type ItemDef, type ItemsFile, type ItemType } from "../items";
+import { defaultFactory, defaultRecipeTime, FACTORY_KINDS, ITEMS, ITEM_TYPES, itemDef, itemsFileNow, SHIPPED_ITEMS, useItemsFile, type FactoryKind, type ItemDef, type ItemsFile, type ItemType } from "../items";
 import { PROGRAMS, PROGRAM_PARTS, programDef, programsFileNow, SHIPPED_PROGRAMS, useProgramsFile, needsMet, type ProgramDef, type ProgramsFile } from "../programs";
 import type { GlyphId } from "../glyphs";
 import { EVERY_GLYPH, glyphIcon, iconEl } from "../icons";
@@ -1518,13 +1518,13 @@ export class HullDesigner {
   /**
    * The Items page: every good in the game. An item has a type (an ore, a part or a module), a
    * name, a shape on the grid, a volume for everywhere else, a price, a blueprint price and an
-   * icon with a glow for when it floats loose. What it's made from is its own recipe: a part is
-   * made at the hub, a module at the station that sells it. Kept in src/items.json.
+   * icon with a glow for when it floats loose. What it's made from is its own recipe: its inputs,
+   * the factory that runs it and its time. Kept in src/items.json.
    */
   private itemsPage(): HTMLElement[] {
     const intro = document.createElement("p");
     intro.textContent =
-      "Every good: ore, the parts made from it, and the modules made from those. A module is an item and a part at once, with the same id: the item owns what shows and what it costs. Where a recipe runs follows the type: a part is made at the hub, a module at the station that sells it.";
+      "Every good: ore, the parts made from it, and the modules made from those. A module is an item and a part at once, with the same id: the item owns what shows and what it costs. A recipe runs on a factory part of the kind it names, for its time divided by the part's speed: a module on a station's workshop when it's bought, a part at the hub until ore factories exist.";
     if (this.itemId === null || !itemDef(this.itemId)) this.itemId = ITEMS[0]?.id ?? null;
     const id = this.itemId;
     const list = this.labelled(
@@ -1674,7 +1674,7 @@ export class HullDesigner {
     return body;
   }
 
-  /** What an item is made from, on the item itself: the items it takes in, and how many it makes. */
+  /** What an item is made from, on the item itself: the items it takes in, how many it makes, the factory that runs it and how long it takes. */
   private recipeRows(id: string): HTMLElement[] {
     const live = () => this.liveItem(id);
     const rows: HTMLElement[] = [];
@@ -1683,8 +1683,8 @@ export class HullDesigner {
       live().type === "ore"
         ? "An ore is mined, not made: it has no recipe, and is picked in a field as a drop chance."
         : live().type === "part"
-          ? "A part is made at the hub, off-screen, when haulers bring its inputs."
-          : "A module is made at the station that sells it, at the moment of sale.";
+          ? "A part is made at the hub, off-screen, when haulers bring its inputs, until ore factories exist."
+          : "A module is made by the workshop of the station that sells it, when it's bought: the bar runs for its time over the workshop's speed.";
     rows.push(note);
     if (live().type === "ore") return rows;
     const recipe = live().recipe;
@@ -1693,7 +1693,8 @@ export class HullDesigner {
         this.button("+ recipe", () => {
           const other = ITEMS.find((each) => each.id !== id);
           if (!other) return;
-          live().recipe = { from: [{ item: other.id, n: 1 }] };
+          const inputs = [{ item: other.id, n: 1 }];
+          live().recipe = { inputs, conditions: { factory: defaultFactory(live().type) }, time: defaultRecipeTime(live().type, inputs, 1) };
           this.itemsChanged();
         }),
       );
@@ -1730,24 +1731,54 @@ export class HullDesigner {
       ),
     );
     rows.push(head);
-    recipe.from.forEach((ingredient, at) => {
+    const runs = document.createElement("div");
+    runs.className = "row";
+    const time = document.createElement("input");
+    time.type = "number";
+    time.min = "0";
+    time.step = "any";
+    time.value = String(recipe.time);
+    time.style.width = "64px";
+    time.title = "Seconds of work at speed 1: a factory part at speed 20 takes a twentieth of it";
+    time.addEventListener("change", () => {
+      const read = Number(time.value);
+      if (!Number.isFinite(read) || read < 0) return;
+      live().recipe!.time = read;
+      this.itemsChanged();
+    });
+    runs.append(
+      document.createTextNode("on a"),
+      this.dropdown(
+        FACTORY_KINDS.map((kind): [string, string] => [kind, kind === "ore" ? "ore factory" : kind]),
+        recipe.conditions.factory,
+        (value) => {
+          live().recipe!.conditions.factory = value as FactoryKind;
+          this.itemsChanged();
+        },
+      ),
+      document.createTextNode("for"),
+      time,
+      document.createTextNode("s of work"),
+    );
+    rows.push(runs);
+    recipe.inputs.forEach((ingredient, at) => {
       const row = document.createElement("div");
       row.className = "row";
       const choices = options();
       const shown = choices.some(([value]) => value === ingredient.item) ? choices : ([[ingredient.item, ingredient.item], ...choices] as [string, string][]);
       row.append(
         document.createTextNode("from"),
-        count(ingredient.n, (value) => (live().recipe!.from[at].n = value)),
+        count(ingredient.n, (value) => (live().recipe!.inputs[at].n = value)),
         this.dropdown(shown, ingredient.item, (value) => {
-          live().recipe!.from[at].item = value;
+          live().recipe!.inputs[at].item = value;
           this.itemsChanged();
         }),
         this.button(
           "×",
           () => {
-            live().recipe!.from.splice(at, 1);
+            live().recipe!.inputs.splice(at, 1);
             // A recipe with nothing to take in is no recipe.
-            if (live().recipe!.from.length === 0) delete live().recipe;
+            if (live().recipe!.inputs.length === 0) delete live().recipe;
             this.itemsChanged();
           },
           "danger",
@@ -1759,7 +1790,7 @@ export class HullDesigner {
     if (first) {
       rows.push(
         this.button("+ input", () => {
-          live().recipe!.from.push({ item: first[0], n: 1 });
+          live().recipe!.inputs.push({ item: first[0], n: 1 });
           this.itemsChanged();
         }),
       );

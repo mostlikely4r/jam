@@ -1,7 +1,7 @@
 # Recipes, factories and holes plan (spec B1)
 
 Written 2026-11-27, from a product talk with the user (roadmap steps 3–4, `docs/roadmap.md`).
-Nothing here is built yet. Items marked *decided* are the user's calls; the rest is proposal, open
+Slice 1 (steps 1–2) is built (2026-11-28); slice 2 is not. Items marked *decided* are the user's calls; the rest is proposal, open
 to veto. The words (frame, mount, part, capability) are in `docs/framework.md`. This plan builds on
 spec A, `docs/station-frames-plan.md` (Q-51), which turns stations into frames with parts, gives
 every entity an owner and an account, and adds storage and trade point parts.
@@ -179,7 +179,7 @@ Two slices. Each step plays and is committed on its own.
 
 ### Slice 1: the recipe shape, the factory part, the super factory
 
-**1. The recipe shape.** In `src/items.ts`, `Recipe` becomes inputs (today's `from`), conditions,
+**1. The recipe shape.** *Built 2026-11-28.* In `src/items.ts`, `Recipe` becomes inputs (today's `from`), conditions,
 yields and `time` (seconds of work at speed 1). `from` is still read from old files. In B1,
 conditions are `factory` (what kind of factory part may run it) and `blueprint` (an item id the
 station must hold). Defaults read from today's data: a module's recipe has the condition
@@ -189,7 +189,7 @@ recipe has `factory: ore` and 2 s per item. The hull designer's recipe editor
 `SALE_RECIPES` become one list of recipes, filtered by the factory that asks. Programs keep their
 own path until Q-32.
 
-**2. The factory part and the super factory.** A new part kind on spec A's parts: `factory`, with
+**2. The factory part and the super factory.** *Built 2026-11-28.* A new part kind on spec A's parts: `factory`, with
 data `{ kind, speed, mode: "stock" | "order", targets? }`, a store of its current job (recipe,
 time left) that saves, and a state (working, waiting with what's missing, idle). A system in
 `src/sim.ts` ticks every factory part. Each of today's three stations gets a `workshop` factory at
@@ -202,6 +202,34 @@ or hull in store as a whole is still handed over at once. Leaving the dock mid-o
 the order finishes and the item waits in the station's locker for you. AI buyers (traffic,
 `attempt`) skip the bar and get the item at once, so their behaviour doesn't change. The dev card
 (chart, `?dev`) shows the workshop and its state.
+
+**What changed from the plan in slice 1** (built 2026-11-28):
+
+- **Recipe time: 12 s per input item for a module, not 10 s per 5 part A.** The step said 10 s per
+  5 part A, but the Why and the Try it line both want a gun 1 to take about 3 s at speed 20, so a
+  gun 1 is 60 s of work. A nav computer (60 part A) is 36 s at the workshop: a number to tune.
+- **A hull's time** has no recipe to come from: 12 s for each part A its price spends
+  (`serviceCreditsPerPart`), so a 300-credit hull takes 9 s. One hull is on order at a time.
+- **The `blueprint` condition is left for step 3**, where blueprint items arrive. In slice 1 the
+  only condition is `factory`.
+- **The factory logic is its own module**, `src/factories.ts`, pure over a store, so it's tested
+  without a world. To-stock mode (pick the output furthest below its target, wait naming what's
+  missing, idle) is built and tested there, though nothing in the world uses it until step 5.
+- **The buy plans where a module lands** (mount, bay or locker) and holds that spot while the bar
+  runs, so a second buy plans round the first. Left the dock, the module waits in your locker
+  there. With no room even there, the station keeps it whole and pays you back. A hull finished
+  while you're away waits on the workshop until you're back in that dock.
+- **A station with no factory that runs a module's recipe can't make it**: the shop says "The
+  station needs a workshop to make it".
+- **Factory data is edited in `hulls.json`, not the designer**: the designer picks the part for a
+  mount, as for a dock, but has no fields for its data yet. Each station gets its workshop from
+  the station frame's new `workshop` mount (workshop, to order, speed 20).
+- **Tests that look at what they bought** go through `buyNow` / `buyHullNow` (`src/testing.ts`),
+  which hand the order over at once (`Sim.finishOrders`). The ledger books an order's inputs when
+  it starts and its output when it's done.
+- **A dev button**, "Dock at nearest station" in the dev panel's Parts section, for trying the
+  shop without the trip.
+- Saves are version 13. A version 12 save loads with its stations' factories idle.
 
 **Stop here for the user to try.** Does a few seconds of build feel right? Is the bar where the
 eye is? The numbers (time per recipe, speed 20) get tuned here, before anything depends on them.

@@ -763,7 +763,7 @@ storage and a trade point become parts, pulled by the second station. Words and 
 `docs/framework.md`. Spec A (Q-47).
 
 ## S-79 · One recipe for every item, factories and holes
-- status: specced
+- status: building
 - area: World
 - effort: L
 - plan: docs/recipes-factories-plan.md

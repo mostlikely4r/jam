@@ -15,8 +15,10 @@ import { PROGRAMS } from "./programs";
  * wear). `partOf` answers for every item, so the bay, a locker and a base's store hold one
  * without knowing the difference.
  *
- * Where a recipe runs follows the item's type: a part is made at the hub, off-screen, and a
- * module at the station that sells it, at the moment of sale. An ore has no recipe.
+ * A recipe has one shape for every item (`docs/recipes-factories-plan.md`): inputs, conditions,
+ * what it yields and its time. Where it runs is its condition, the kind of factory part that may
+ * run it: a module is made by a station's workshop when it's bought, and a part by an ore factory
+ * (until those exist, at the hub, off-screen). An ore has no recipe.
  */
 export const ITEM_TYPES = ["ore", "part", "module"] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
@@ -27,11 +29,41 @@ export interface Ingredient {
   n: number;
 }
 
-/** What an item is made from: the items it takes in, and how many it makes. */
+/** The kinds of factory part there are: what a recipe's `factory` condition names. */
+export const FACTORY_KINDS = ["workshop", "ore"] as const;
+export type FactoryKind = (typeof FACTORY_KINDS)[number];
+
+/** What a recipe needs that it doesn't use up. */
+export interface RecipeConditions {
+  /** The kind of factory part that may run it. */
+  factory: FactoryKind;
+}
+
+/**
+ * What an item is made from, one shape for every item: the items it takes in (used up), what it
+ * needs that isn't used up, how many it makes, and how long that takes.
+ */
 export interface Recipe {
-  from: Ingredient[];
+  inputs: Ingredient[];
+  conditions: RecipeConditions;
   /** How many it makes. Without one, 1. */
   yields?: number;
+  /** Seconds of work at speed 1: a factory part at speed 20 takes a twentieth of it. */
+  time: number;
+}
+
+/**
+ * A recipe's time when the file gives none: a module takes 12 s for each item it takes in (a
+ * gun 1, 5 part A, is a minute of work, 3 s at a workshop's speed 20), a part 2 s for each it makes.
+ */
+export function defaultRecipeTime(type: ItemType, inputs: Ingredient[], yields: number): number {
+  if (type === "module") return 12 * inputs.reduce((sum, each) => sum + each.n, 0);
+  return 2 * yields;
+}
+
+/** The factory that runs an item's recipe when the file names none: a module's workshop, anything else an ore factory. */
+export function defaultFactory(type: ItemType): FactoryKind {
+  return type === "module" ? "workshop" : "ore";
 }
 
 export interface ItemDef {
@@ -80,8 +112,7 @@ export const ITEMS: ItemDef[] = [];
 
 /** The items by id, and the recipes worked out from them: rebuilt whenever the file is read. */
 const BY_ID = new Map<string, ItemDef>();
-let HUB_RECIPES: AppliedRecipe[] = [];
-let SALE_RECIPES: AppliedRecipe[] = [];
+let RECIPES: AppliedRecipe[] = [];
 let ORE_ITEMS: ItemDef[] = [];
 
 /** The icon of an item whose own is missing or unreadable. */
@@ -104,16 +135,23 @@ function modulePart(id: string): Part | undefined {
   return part && part.kind !== "cockpit" ? part : undefined;
 }
 
-/** A recipe read from a file, or null when it takes in nothing real. */
-function readRecipe(raw: unknown, known: (id: string) => boolean): Recipe | null {
-  const data = raw as Partial<Recipe> | undefined;
-  if (!data || !Array.isArray(data.from) || data.from.length === 0) return null;
-  const from = data.from
+/**
+ * A recipe read from a file, or null when it takes in nothing real. An older file calls the
+ * inputs `from` and gives no time or conditions: those then come from the item's type.
+ */
+function readRecipe(raw: unknown, type: ItemType, known: (id: string) => boolean): Recipe | null {
+  const data = raw as { inputs?: unknown; from?: unknown; conditions?: { factory?: unknown }; yields?: unknown; time?: unknown } | undefined;
+  const list = Array.isArray(data?.inputs) ? (data!.inputs as Ingredient[]) : Array.isArray(data?.from) ? (data!.from as Ingredient[]) : null;
+  if (!list || list.length === 0) return null;
+  const inputs = list
     .filter((each): each is Ingredient => !!each && known(each.item) && Number.isInteger(each.n) && each.n >= 1)
     .map((each) => ({ item: each.item, n: each.n }));
-  if (from.length !== data.from.length) return null;
-  const yields = Number.isInteger(data.yields) && (data.yields as number) >= 1 ? (data.yields as number) : 1;
-  return { from, ...(yields > 1 ? { yields } : {}) };
+  if (inputs.length !== list.length) return null;
+  const yields = Number.isInteger(data!.yields) && (data!.yields as number) >= 1 ? (data!.yields as number) : 1;
+  const named = data!.conditions?.factory;
+  const factory = (FACTORY_KINDS as readonly unknown[]).includes(named) ? (named as FactoryKind) : defaultFactory(type);
+  const time = typeof data!.time === "number" && Number.isFinite(data!.time) && data!.time >= 0 ? data!.time : defaultRecipeTime(type, inputs, yields);
+  return { inputs, conditions: { factory }, ...(yields > 1 ? { yields } : {}), time };
 }
 
 /**
@@ -141,7 +179,7 @@ function readItem(raw: Partial<ItemDef> | undefined, taken: Set<string>, known: 
     price,
     blueprintPrice: Math.max(0, finite(raw.blueprintPrice, Math.round(price * 0.75))),
     icon: readIcon(raw.icon),
-    ...(raw.recipe ? { recipe: readRecipe(raw.recipe, known) ?? undefined } : {}),
+    ...(raw.recipe ? { recipe: readRecipe(raw.recipe, type, known) ?? undefined } : {}),
   };
 }
 
@@ -193,11 +231,7 @@ export function useItemsFile(data: Partial<ItemsFile> | undefined): void {
     if (part) applyToModule(part, item);
     else registerThing(asPart(item));
   }
-  const applied = (type: ItemType): AppliedRecipe[] =>
-    ITEMS.filter((item) => item.type === type && item.recipe)
-      .map((item) => ({ makes: item.id, from: item.recipe!.from, ...(item.recipe!.yields !== undefined ? { yields: item.recipe!.yields } : {}) }));
-  HUB_RECIPES = applied("part");
-  SALE_RECIPES = applied("module");
+  RECIPES = ITEMS.filter((item) => item.recipe).map((item) => applied(item.id, item.recipe!));
   ORE_ITEMS = itemsOf("ore");
 }
 
@@ -239,22 +273,23 @@ export function thingOf(id: PartId): Thing | undefined {
   return { id, label: part.label, description: part.description, shape: part.shape ?? { w: 1, h: 1 }, volume: volumeOf(id), price: part.price, icon: part.icon, isItem: false, type: null };
 }
 
+/** A recipe with what it makes. */
+function applied(makes: string, recipe: Recipe): AppliedRecipe {
+  return { makes, inputs: recipe.inputs, conditions: { ...recipe.conditions }, ...(recipe.yields !== undefined ? { yields: recipe.yields } : {}), time: recipe.time };
+}
+
 /** The recipe that makes an item, if there is one. */
 export function recipeFor(makes: string): AppliedRecipe | undefined {
   const item = itemDef(makes);
-  if (!item?.recipe) return undefined;
-  return { makes, from: item.recipe.from, ...(item.recipe.yields !== undefined ? { yields: item.recipe.yields } : {}) };
+  return item?.recipe ? applied(makes, item.recipe) : undefined;
 }
 
-
-/** The recipes the hub runs: the ones that make a part. */
-export function hubRecipes(): AppliedRecipe[] {
-  return HUB_RECIPES;
-}
-
-/** The recipes a station runs at the moment it sells: the ones that make a module. */
-export function saleRecipes(): AppliedRecipe[] {
-  return SALE_RECIPES;
+/**
+ * The recipes a kind of factory part may run: the ones whose `factory` condition names it. One
+ * list for every recipe, filtered by the factory that asks.
+ */
+export function recipesFor(factory: FactoryKind): AppliedRecipe[] {
+  return RECIPES.filter((recipe) => recipe.conditions.factory === factory);
 }
 
 /** The modules there are, as items. */

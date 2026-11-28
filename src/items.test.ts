@@ -4,7 +4,6 @@ import { shippedWorld } from "./designer/shipped";
 import { homeFields, homeSim, homeStations } from "./home";
 import { linkTo } from "./profile/world";
 import {
-  hubRecipes,
   itemDef,
   ITEMS,
   itemsFileNow,
@@ -12,7 +11,7 @@ import {
   moduleItems,
   oreItems,
   recipeFor,
-  saleRecipes,
+  recipesFor,
   SHIPPED_ITEMS,
   thingOf,
   useItemsFile,
@@ -24,6 +23,7 @@ import { roundTrip } from "./save";
 import { DEFAULTS } from "./tuning";
 import { type FieldSpec, type Loose, type Poi, type Ship, Sim, type StationSpec, TICK } from "./sim";
 import { placeParts } from "./frameParts";
+import { buyNow } from "./testing";
 
 type LooseStation = Parameters<typeof placeParts>[0];
 /** A spec with a station's settings named one by one, as they were before they were parts on its frame. */
@@ -61,7 +61,7 @@ describe("the items file", () => {
       expect(thingOf(item.id as PartId)!.volume).toBeGreaterThan(0);
       expect(item.price).toBeGreaterThanOrEqual(0);
       expect(item.blueprintPrice).toBeGreaterThanOrEqual(0);
-      for (const each of item.recipe?.from ?? []) {
+      for (const each of item.recipe?.inputs ?? []) {
         expect(ids).toContain(each.item);
         expect(each.n).toBeGreaterThanOrEqual(1);
       }
@@ -79,24 +79,27 @@ describe("the items file", () => {
     for (const item of moduleItems()) expect(partOf(item.id as PartId).kind).not.toBe("cockpit");
   });
 
-  it("keeps each recipe on what it makes, and runs it where its type says", () => {
-    expect(recipeFor("partB")).toEqual({ makes: "partB", from: [{ item: "oreB", n: 2 }] });
-    expect(recipeFor("partA")).toEqual({ makes: "partA", from: [{ item: "ore", n: 2 }] });
+  it("keeps each recipe on what it makes, and runs it on the factory its condition names", () => {
+    expect(recipeFor("partB")).toEqual({ makes: "partB", inputs: [{ item: "oreB", n: 2 }], conditions: { factory: "ore" }, time: 2 });
+    expect(recipeFor("partA")).toEqual({ makes: "partA", inputs: [{ item: "ore", n: 2 }], conditions: { factory: "ore" }, time: 2 });
     expect(recipeFor("oreB")).toBeUndefined();
     expect(itemDef("oreB")!.type).toBe("ore");
     expect(itemDef("partB")!.type).toBe("part");
-    expect(hubRecipes().map((recipe) => recipe.makes).sort()).toEqual(["partA", "partB"]);
+    expect(recipesFor("ore").map((recipe) => recipe.makes).sort()).toEqual(["partA", "partB"]);
     // A module is made where it's sold, from parts A, and the 360 also takes a part B.
     const tractor = recipeFor("tractorAll")!;
-    expect(tractor.from).toContainEqual({ item: PART_A, n: 30 });
-    expect(tractor.from).toContainEqual({ item: PART, n: 1 });
-    expect(saleRecipes().map((recipe) => recipe.makes)).toContain("tractorAll");
-    expect(saleRecipes().map((recipe) => recipe.makes)).not.toContain("partB");
+    expect(tractor.inputs).toContainEqual({ item: PART_A, n: 30 });
+    expect(tractor.inputs).toContainEqual({ item: PART, n: 1 });
+    expect(recipesFor("workshop").map((recipe) => recipe.makes)).toContain("tractorAll");
+    expect(recipesFor("workshop").map((recipe) => recipe.makes)).not.toContain("partB");
+    // A module takes 12 s of work for each item it is made from: a gun 1, 5 part A, a minute.
+    expect(recipeFor("gun1")!.time).toBe(60);
+    expect(tractor.time).toBe(12 * 31);
     // Every module's recipe is part A, in the count the plan works out, and never nothing.
     for (const id of MODULES) {
       const recipe = recipeFor(id)!;
       const proposed = Math.max(1, Math.ceil((itemDef(id)!.price * 1) / DEFAULTS.serviceCreditsPerPart));
-      expect(recipe.from.find((each) => each.item === PART_A)?.n, id).toBe(proposed);
+      expect(recipe.inputs.find((each) => each.item === PART_A)?.n, id).toBe(proposed);
     }
   });
 
@@ -151,14 +154,15 @@ describe("the items file", () => {
       useItemsFile({
         items: [
           { ...ore, id: "gun1" },
-          { ...ore, id: "same", recipe: { from: [{ item: "ghost", n: 1 }] } },
+          { ...ore, id: "same", recipe: { from: [{ item: "ghost", n: 1 }] } as never },
           { ...ore, id: "same" },
-          { ...ore, id: "other", recipe: { from: [{ item: "same", n: 3 }], yields: 2 } },
+          // An older file's recipe: `from` for its inputs, and no time or conditions.
+          { ...ore, id: "other", type: "part", recipe: { from: [{ item: "same", n: 3 }], yields: 2 } as never },
         ],
       });
       expect(ITEMS.map((item) => item.id)).toEqual(["same", "other"]);
       expect(ITEMS[0].recipe).toBeUndefined();
-      expect(ITEMS[1].recipe).toEqual({ from: [{ item: "same", n: 3 }], yields: 2 });
+      expect(ITEMS[1].recipe).toEqual({ inputs: [{ item: "same", n: 3 }], conditions: { factory: "ore" }, yields: 2, time: 4 });
       // A module can't be made up: only a module the code knows takes a module item's id.
       useItemsFile({ items: [{ ...ore, id: "notAModule", type: "module" } as never] });
       expect(ITEMS).toHaveLength(0);
@@ -177,7 +181,7 @@ describe("the items file", () => {
       forB.shape = { w: 2, h: 3 };
       forB.volume = 4.5;
       forB.price = 41;
-      forB.recipe = { from: [{ item: "oreB", n: 3 }], yields: 2 };
+      forB.recipe = { inputs: [{ item: "oreB", n: 3 }], conditions: { factory: "workshop" }, yields: 2, time: 7.5 };
       const oreB = edited.items.find((each) => each.id === "oreB")!;
       oreB.icon = { glyph: "star", primary: "#112233", secondary: "#445566", border: "#778899", mark: "Q", glow: "#abcdef" };
       useItemsFile(JSON.parse(JSON.stringify(edited)));
@@ -187,7 +191,7 @@ describe("the items file", () => {
       expect(itemsFileNow()).toEqual(edited);
       expect(partOf(ORE).icon.glow).toBe("#abcdef");
       expect(volumeOf(PART)).toBe(4.5);
-      expect(recipeFor("partB")).toEqual({ makes: "partB", from: [{ item: "oreB", n: 3 }], yields: 2 });
+      expect(recipeFor("partB")).toEqual({ makes: "partB", inputs: [{ item: "oreB", n: 3 }], conditions: { factory: "workshop" }, yields: 2, time: 7.5 });
       expect(oreItems().map((item) => item.id)).toEqual(["ore", "oreB"]);
     } finally {
       useItemsFile(keep);
@@ -629,7 +633,7 @@ describe("the hauler and the hub", () => {
     expect(untilBerthed(sim, base)).toBe(true);
     expect(untilLeft(sim, base)).toBe(true);
     const recipe = recipeFor("partB")!;
-    const n = recipe.from[0].n;
+    const n = recipe.inputs[0].n;
     const made = Math.floor(6 / n) * (recipe.yields ?? 1);
     expect(base.stock.get(ORE) ?? 0).toBe(0);
     expect(sim.hub.get(PART) ?? 0).toBe(made);
@@ -757,7 +761,7 @@ describe("the hauler and the hub", () => {
     ship.credits = 100000;
     dockAt(sim, ship, outpost);
     run(sim, 0.1);
-    expect(sim.buyPart(ship, "tractorAll")).toBe(true);
+    expect(buyNow(sim, ship, "tractorAll")).toBe(true);
     expect(base.stock.get(PART)).toBe(DEFAULTS.itemTarget - 1);
   });
 });
@@ -772,13 +776,13 @@ describe("the shop", () => {
     run(sim, 0.1);
     expect(sim.canSupply(base, "tractorAll")).toBe(false);
     expect(sim.missingFor(base, "tractorAll")).toContain(`1 ${itemDef("partB")!.name}`);
-    expect(sim.buyPart(ship, "tractorAll")).toBe(false);
+    expect(buyNow(sim, ship, "tractorAll")).toBe(false);
     expect(sim.buyRefused).toMatch(/needs 1/);
     expect(ship.parts.has("tractorAll")).toBe(false);
     sim.stockItem(base, PART, 2);
     expect(sim.canSupply(base, "tractorAll")).toBe(true);
     expect(sim.missingFor(base, "tractorAll")).toEqual([]);
-    expect(sim.buyPart(ship, "tractorAll")).toBe(true);
+    expect(buyNow(sim, ship, "tractorAll")).toBe(true);
     expect(base.stock.get(PART)).toBe(1);
     expect(ship.parts.has("tractorAll")).toBe(true);
   });
@@ -792,7 +796,7 @@ describe("the shop", () => {
     run(sim, 0.1);
     base.stock.set("tractorAll", 1);
     expect(sim.canSupply(base, "tractorAll")).toBe(true);
-    expect(sim.buyPart(ship, "tractorAll")).toBe(true);
+    expect(buyNow(sim, ship, "tractorAll")).toBe(true);
     expect(base.stock.get(PART) ?? 0).toBe(0);
   });
 
@@ -807,7 +811,7 @@ describe("the shop", () => {
     const before = ship.credits;
     const price = sim.partPrice("meters");
     expect(price).toBe(50);
-    expect(sim.buyPart(ship, "meters")).toBe(true);
+    expect(buyNow(sim, ship, "meters")).toBe(true);
     expect(ship.credits).toBe(before - price);
     expect(sim.partA(base)).toBe(parts);
     expect(ship.software.has("meters")).toBe(true);
@@ -888,15 +892,15 @@ describe("part A", () => {
     dockAt(sim, ship, outpost);
     run(sim, 0.1);
     const recipe = recipeFor("reverse")!;
-    expect(sim.buyPart(ship, "reverse")).toBe(true);
-    expect(sim.partA(base)).toBe(100 - recipe.from[0].n);
+    expect(buyNow(sim, ship, "reverse")).toBe(true);
+    expect(sim.partA(base)).toBe(100 - recipe.inputs[0].n);
   });
 
   it("runs a recipe that yields more than one whole, and puts the spare in the store", () => {
     const keep = itemsFileNow();
     const edited = JSON.parse(JSON.stringify(keep)) as ItemsFile;
     const reverse = edited.items.find((item) => item.id === "reverse")!;
-    reverse.recipe = { from: [{ item: PART_A, n: 3 }], yields: 2 };
+    reverse.recipe = { inputs: [{ item: PART_A, n: 3 }], conditions: { factory: "workshop" }, yields: 2, time: 36 };
     try {
       useItemsFile(edited);
       const { sim, outpost } = world({ stationStartParts: 100 }, { items: [] });
@@ -907,7 +911,7 @@ describe("part A", () => {
       run(sim, 0.1);
       const parts = counted(sim, PART_A);
       const partsFlow = sim.itemFlow.get(PART_A) ?? 0;
-      expect(sim.buyPart(ship, "reverse")).toBe(true);
+      expect(buyNow(sim, ship, "reverse")).toBe(true);
       // One run takes three part A and makes two: the buyer gets one, the store the other.
       expect(ship.parts.has("reverse")).toBe(true);
       expect(sim.partA(base)).toBe(100 - 3);
@@ -932,8 +936,8 @@ describe("the blueprint lists", () => {
     run(sim, 0.1);
     expect(sim.unlocked("gun2", base)).toBe(true);
     expect(sim.unlocked("reverse", base)).toBe(false);
-    expect(sim.buyPart(ship, "gun2")).toBe(true);
-    expect(sim.buyPart(ship, "reverse")).toBe(false);
+    expect(buyNow(sim, ship, "gun2")).toBe(true);
+    expect(buyNow(sim, ship, "reverse")).toBe(false);
     // Nothing can be paid toward a module the station doesn't want, whatever it may afford.
     expect(sim.fundBlueprint(ship, "strafe")).toBe(false);
     expect(sim.fundBlueprint(ship, "reverse")).toBe(true);
@@ -1061,7 +1065,7 @@ describe("conservation", () => {
           }
           if (bought === 0 && sim.canSupply(base, "tractorAll")) {
             ship.credits = Math.max(ship.credits, 700);
-            if (sim.buyPart(ship, "tractorAll")) bought++;
+            if (buyNow(sim, ship, "tractorAll")) bought++;
           }
         } else if (sim.ores.length > 0) {
           const target = sim.ores.find((each) => Math.hypot(each.x - field.poi.x, each.y - field.poi.y) < field.radius * 3);

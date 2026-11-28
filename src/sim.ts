@@ -1,11 +1,12 @@
 import { Chatter, type FaceKey } from "./chatter";
 import { type BayGrid, type BlueprintId, isGear, isItem, isProgram, isProject, PARTS, partOf, PROJECTS, TOW_BUY_ORDER, TRAFFIC_BUY_ORDER, volumeOf, type PartId, type ShipModel } from "./parts";
-import { hubRecipes, isOreItem, itemDef, oreItems, saleRecipes } from "./items";
+import { isOreItem, itemDef, oreItems, recipeFor, recipesFor, type AppliedRecipe, type FactoryKind } from "./items";
 import { copyPicks, pickOf, PROGRAMS, setPick as setTweakPick } from "./programs";
 import { computerSize, DAMAGED_AT, facing, fitPart, hullInfo, hullMax, hullMounts, isDecal, isTurretGun, mountTakes, mountsOf, thrustOf, tractorMounts, turretGunId, turretMounts, type Mount, type Fitting, type MountPlace, hullDefaults, install, shipModels, type Module, type MountId, mountsFor, mountsHolding, nearestMount, newFitting, owns, refresh, trimPrograms, unfit, uninstall, works, fullTanks, shareTanks, tankCapacity, tankMounts } from "./fitting";
 import { ClickPilot, DronePilot, FacePilot, FighterPilot, LOW_HULL, type TurnAway } from "./pilot";
 export { MAX_HULL } from "./fitting";
 import { pathAround } from "./route";
+import { newFactory, orderJobs, progressOf, tickFactory, type Factory, type FactoryData, type FactoryJob, type FactoryStore, type HullOrder, type ModuleOrder, type OrderPlan, type WorkOrder } from "./factories";
 import { frameMountSpot, partOn, partSpot, resolveParts, tradeNames, type FramePart, type FramePartData, type FramePartKind, type PartOverrides } from "./frameParts";
 import { closestApproach as closestMeeting, type Motion } from "./relative";
 import { addParts, constructionFromOld, finishConstruction, isBuilt, placeBlock as setBlockIn, startConstruction, type Construction } from "./construction";
@@ -269,6 +270,11 @@ export interface Spot {
   x: number;
   y: number;
   turned: boolean;
+}
+
+/** The spot a placed item sits at. */
+function spotOf(placed: Placed): Spot {
+  return { x: placed.x, y: placed.y, turned: placed.turned };
 }
 
 /** Where a bought part is put: a mount, a spot in the bay, or a spot in the locker where the ship is docked. */
@@ -837,6 +843,8 @@ export interface Base {
   refining: Refining | null;
   /** Blocks waiting at its pad, each one job to carry out to a project. */
   blocks: BlockJob[];
+  /** The work of each factory part it has, by the part's mount: see `src/factories.ts`. */
+  factories: Factory[];
 }
 
 /**
@@ -877,6 +885,7 @@ type BaseState = Pick<
   | "board"
   | "refining"
   | "blocks"
+  | "factories"
 >;
 
 /**
@@ -1548,8 +1557,8 @@ export class Sim {
       fighterRecords: this.fighters.map((each) => each.record),
 
       bases: this.bases.map(
-        ({ id, account, ore, partCarry, stock, hauler, haulerTimer, lostTraffic, blueprints, wanted, blueprintPaid, blueprintsOrdered, board, refining, blocks }): BaseState => ({
-          id, account, ore, partCarry, stock, hauler, haulerTimer, lostTraffic, blueprints, wanted, blueprintPaid, blueprintsOrdered, board, refining, blocks,
+        ({ id, account, ore, partCarry, stock, hauler, haulerTimer, lostTraffic, blueprints, wanted, blueprintPaid, blueprintsOrdered, board, refining, blocks, factories }): BaseState => ({
+          id, account, ore, partCarry, stock, hauler, haulerTimer, lostTraffic, blueprints, wanted, blueprintPaid, blueprintsOrdered, board, refining, blocks, factories,
         }),
       ),
       deposits: this.deposits,
@@ -1862,7 +1871,7 @@ export class Sim {
     );
     // And its parts A, which every service and every module's recipe uses.
     if (tuning.stationStartParts > 0) this.addTo(stock, PART_A, tuning.stationStartParts);
-    return {
+    const base: Base = {
       id,
       spec,
       body,
@@ -1881,7 +1890,10 @@ export class Sim {
       board: [],
       refining: null,
       blocks: [],
+      factories: [],
     };
+    this.syncFactories(base);
+    return base;
   }
 
   /** Gives a base what a loaded save held for it, if the save has it. Returns whether it did. */
@@ -1904,7 +1916,10 @@ export class Sim {
       board: saved.board ?? [],
       refining: saved.refining ?? null,
       blocks: saved.blocks ?? [],
+      // A save from before factories has none at work.
+      factories: saved.factories ?? [],
     });
+    this.syncFactories(base);
     return true;
   }
 
@@ -1971,6 +1986,7 @@ export class Sim {
 
   private fitBase(base: Base): void {
     this.fitBody(base.body, base.spec);
+    this.syncFactories(base);
   }
 
   /** Puts a place where its orbits say now, with its spec's carrying. */
@@ -2891,7 +2907,7 @@ export class Sim {
   needsItem(base: Base, id: PartId): boolean {
     if (id === PART_A) return this.partA(base) < this.tuning.stationPartsTarget;
     if (this.stockOf(base, id) >= this.tuning.itemTarget) return false;
-    return saleRecipes().some((recipe) => recipe.from.some((each) => each.item === id) && this.unlocked(recipe.makes as PartId, base));
+    return recipesFor("workshop").some((recipe) => recipe.inputs.some((each) => each.item === id) && this.unlocked(recipe.makes as PartId, base));
   }
 
   /**
@@ -2903,9 +2919,9 @@ export class Sim {
     const items = new Map<PartId, number>();
     const hauler = { items } as Hauler;
     const wanted = new Set<PartId>([PART_A]);
-    for (const recipe of saleRecipes()) {
+    for (const recipe of recipesFor("workshop")) {
       if (!this.unlocked(recipe.makes as PartId, base)) continue;
-      for (const each of recipe.from) wanted.add(each.item as PartId);
+      for (const each of recipe.inputs) wanted.add(each.item as PartId);
     }
     for (const id of wanted) {
       const target = id === PART_A ? tuning.stationPartsTarget : tuning.itemTarget;
@@ -2983,11 +2999,11 @@ export class Sim {
 
   /** Runs every hub recipe as long as the hub holds its inputs: n of one item becomes m of another. */
   feedHub(): void {
-    for (const recipe of hubRecipes()) {
+    for (const recipe of recipesFor("ore")) {
       const makes = recipe.makes as PartId;
       const yields = recipe.yields ?? 1;
-      while (recipe.from.every((each) => (this.hub.get(each.item as PartId) ?? 0) >= each.n)) {
-        for (const each of recipe.from) {
+      while (recipe.inputs.every((each) => (this.hub.get(each.item as PartId) ?? 0) >= each.n)) {
+        for (const each of recipe.inputs) {
           this.addTo(this.hub, each.item as PartId, -each.n);
           this.flow(each.item as PartId, -each.n);
         }
@@ -4318,26 +4334,31 @@ export class Sim {
     return this.hasStockFor(this.partPrice(id), base);
   }
 
-  /** The recipe a station runs to make a part when it sells one that isn't in its store as a whole module. */
-  private saleRecipe(id: PartId) {
-    return saleRecipes().find((recipe) => recipe.makes === id);
+  /** The recipe a station runs to make a module when it sells one that isn't in its store as a whole: the module's own. */
+  private saleRecipe(id: PartId): AppliedRecipe | undefined {
+    return itemDef(id)?.type === "module" ? recipeFor(id) : undefined;
   }
 
-  /** Whether a base holds what the recipe for a part needs: it has none, or the part itself in store, or every input. */
+  /**
+   * Whether a base holds what the recipe for a part needs: it has none, or the part itself in
+   * store, or a factory part that runs the recipe and every input.
+   */
   hasInputsFor(base: Base, id: PartId, count = partOf(id).set ?? 1): boolean {
     const recipe = this.saleRecipe(id);
     if (!recipe || this.stockOf(base, id) >= count) return true;
+    if (!this.factoryFor(base, recipe.conditions.factory)) return false;
     const runs = Math.ceil(count / (recipe.yields ?? 1));
-    return recipe.from.every((each) => this.stockOf(base, each.item as PartId) >= each.n * runs);
+    return recipe.inputs.every((each) => this.stockOf(base, each.item as PartId) >= each.n * runs);
   }
 
   /** What a base lacks to make a part, in words for the shop's tooltip: nothing when it lacks nothing. */
   missingFor(base: Base, id: PartId): string[] {
     const recipe = this.saleRecipe(id);
     if (!recipe || this.hasInputsFor(base, id)) return [];
+    if (!this.factoryFor(base, recipe.conditions.factory)) return [`a ${recipe.conditions.factory}`];
     // A sale is made in whole runs, so the recipe's inputs count once per run, not once per item.
     const runs = Math.ceil((partOf(id).set ?? 1) / (recipe.yields ?? 1));
-    return recipe.from
+    return recipe.inputs
       .filter((each) => this.stockOf(base, each.item as PartId) < each.n * runs)
       .map((each) => `${each.n * runs} ${partOf(each.item as PartId).label}`);
   }
@@ -4360,7 +4381,7 @@ export class Sim {
       // A recipe runs whole times, so the sale takes the whole run's inputs and the run's spare
       // output goes into the store, where the ledger counts it as made.
       const runs = Math.ceil(count / (recipe.yields ?? 1));
-      for (const each of recipe.from) {
+      for (const each of recipe.inputs) {
         this.addTo(base.stock, each.item as PartId, -each.n * runs);
         this.flow(each.item as PartId, -each.n * runs);
       }
@@ -4368,6 +4389,247 @@ export class Sim {
       this.flow(id, made);
       if (made > count) this.addTo(base.stock, id, made - count);
     } else this.spendPartA(base, this.stockFor(price));
+  }
+
+  /**
+   * Keeps a base's factories in step with its factory parts: one each, by the part's mount. The
+   * work of a part that's gone can't finish, so what the player paid for it is paid back.
+   */
+  private syncFactories(base: Base): void {
+    const mounts = base.body.parts.filter((part) => part.kind === "factory").map((part) => part.mount);
+    const kept: Factory[] = [];
+    for (const factory of base.factories) {
+      if (mounts.includes(factory.mount) && !kept.some((each) => each.mount === factory.mount)) kept.push(factory);
+      else for (const order of [...orderJobs(factory).map((job) => job.order!), ...factory.ready]) this.refundOrder(base, order);
+    }
+    for (const mount of mounts) if (!kept.some((each) => each.mount === mount)) kept.push(newFactory(mount));
+    base.factories = kept;
+  }
+
+  /** A factory's part data on its base, or null when the base has no factory part on that mount. */
+  factoryData(base: Base, factory: Factory): FactoryData | null {
+    const part = base.body.parts.find((each) => each.kind === "factory" && each.mount === factory.mount);
+    return part?.kind === "factory" ? part.data : null;
+  }
+
+  /** A base's first factory of a kind: where an order for a recipe that names the kind goes. */
+  factoryFor(base: Base, kind: FactoryKind): Factory | null {
+    return base.factories.find((factory) => this.factoryData(base, factory)?.kind === kind) ?? null;
+  }
+
+  /** A base's storage as its factories see it: what they take and put is booked in the ledger. */
+  private factoryStore(base: Base): FactoryStore {
+    return {
+      held: (id) => this.stockOf(base, id as PartId),
+      take: (id, n) => {
+        this.addTo(base.stock, id as PartId, -n);
+        this.flow(id as PartId, -n);
+      },
+      put: (id, n) => {
+        this.addTo(base.stock, id as PartId, n);
+        this.flow(id as PartId, n);
+      },
+      fits: (id, n) => this.storageFree(base) >= volumeOf(id as PartId) * n - 1e-9,
+      label: (id) => partOf(id as PartId).label,
+    };
+  }
+
+  /** Runs a base's factories for dt seconds, and hands over a hull that's done once the player is there to take it. */
+  private runFactories(base: Base, dt: number): void {
+    for (const factory of base.factories) {
+      const data = this.factoryData(base, factory);
+      if (!data) continue;
+      tickFactory(factory, data, dt, this.factoryStore(base), (job) => this.finishOrder(base, factory, job));
+      if (factory.ready.length > 0) factory.ready = factory.ready.filter((order) => !this.handOverHull(base, order));
+    }
+  }
+
+  /**
+   * The player's buy of a module, made to order: paid for and its inputs taken now, made by the
+   * station's workshop, and handed over when the bar fills. False, changing nothing, when it's
+   * handed over at once instead: a whole one in the store, no recipe, or no factory to run it.
+   */
+  private orderModule(account: { credits: number }, id: PartId, base: Base, plan: OrderPlan): boolean {
+    const count = partOf(id).set ?? 1;
+    if (this.stockOf(base, id) >= count) return false;
+    const recipe = this.saleRecipe(id);
+    const factory = recipe ? this.factoryFor(base, recipe.conditions.factory) : null;
+    if (!recipe || !factory) return false;
+    const paid = this.partPrice(id);
+    account.credits -= paid;
+    base.account.credits += paid;
+    // A recipe runs whole times, as a sale at once does: the inputs of every run go now.
+    const runs = Math.ceil(count / (recipe.yields ?? 1));
+    for (const each of recipe.inputs) {
+      this.addTo(base.stock, each.item as PartId, -each.n * runs);
+      this.flow(each.item as PartId, -each.n * runs);
+    }
+    const time = recipe.time * runs;
+    factory.queue.push({ makes: id, yields: runs * (recipe.yields ?? 1), left: time, total: time, order: { kind: "module", part: id, count, plan, paid } });
+    return true;
+  }
+
+  /** A job made to order is done: a module is made and handed over, a hull handed over or kept until the player is there. */
+  private finishOrder(base: Base, factory: Factory, job: FactoryJob): void {
+    const order = job.order!;
+    if (order.kind === "hull") {
+      if (!this.handOverHull(base, order)) factory.ready.push(order);
+      return;
+    }
+    this.flow(order.part, job.yields);
+    // A run's spare output goes into the store, as a sale at once does.
+    if (job.yields > order.count) this.addTo(base.stock, order.part, job.yields - order.count);
+    this.handOverModule(base, order);
+  }
+
+  /**
+   * Hands a finished module to the player: where the buy planned it if that's still free, else
+   * wherever a buy would put it now, while they're still in this dock. Gone from it, or with no
+   * room there, it waits in their locker here. With no room even there, the station keeps it in
+   * its store and pays them back.
+   */
+  private handOverModule(base: Base, order: ModuleOrder): void {
+    const ship = this.ship;
+    const id = order.part;
+    let plan: Exclude<BuyPlan, { refused: string }> | null = null;
+    const here = this.baseAt(ship) === base && this.atShop(ship);
+    if (here) {
+      const first: BuyInto = order.plan.where === "mount" ? { at: "mount", mount: order.plan.mounts[0] } : { at: order.plan.where, spot: spotOf(order.plan.spots[0]) };
+      const again = this.planBuy(ship, id, first);
+      const anywhere = "where" in again ? again : this.planBuy(ship, id);
+      if ("where" in anywhere) plan = anywhere;
+    }
+    if (!plan) {
+      const locker = this.lockerAt(base);
+      const modules: Module[] = Array.from({ length: order.count }, () => ({ part: id, wear: 0 }));
+      const spots = this.planSpots(this.lockerGrid(locker), [...locker.items, ...(this.reserved().lockers.get(base.id) ?? [])], modules, undefined, false);
+      if (spots) plan = { where: "locker", spots };
+    }
+    if (!plan) {
+      this.addTo(base.stock, id, order.count);
+      this.accountOf(ship).credits += order.paid;
+      base.account.credits -= order.paid;
+      if (here) this.buyRefused = `No room for the ${partOf(id).label}: the station keeps it and pays you back`;
+      return;
+    }
+    this.placeBought(ship, id, plan, base);
+  }
+
+  /** Puts gear the player bought where its plan says: on the mounts, in the bay, or in the locker at a base. */
+  private placeBought(ship: Ship, id: PartId, plan: Exclude<BuyPlan, { refused: string }>, base: Base | null): void {
+    if (plan.where === "mount") {
+      for (const mount of plan.mounts) ship.fit[mount] = { part: id, wear: 0 };
+      refresh(ship);
+      if (partOf(id).kind === "computer") trimPrograms(ship);
+    } else if (plan.where === "hold") ship.hold.push(...plan.spots);
+    else if (base) this.lockerAt(base).items.push(...plan.spots);
+  }
+
+  /**
+   * Hands a finished hull to the player, if they're in its dock: their ship becomes it, as a
+   * hull bought at once does. Returns whether it's settled: handed over, or paid back because
+   * the ship it was to replace isn't the one they fly any more. False keeps it waiting.
+   */
+  private handOverHull(base: Base, order: HullOrder): boolean {
+    const ship = this.ship;
+    if (this.down) return false;
+    if (ship.model !== order.from) {
+      this.refundOrder(base, order);
+      return true;
+    }
+    if (this.baseAt(ship) !== base || !this.atShop(ship)) return false;
+    const plan = this.planHull(ship, order.model, false, true);
+    if ("refused" in plan) {
+      this.buyRefused = `Your ${(hullInfo(order.model).name ?? order.model).toLowerCase()} hull is ready: ${plan.refused}`;
+      return false;
+    }
+    this.changeHull(ship, order.model, plan);
+    this.buyRefused = null;
+    this.events.push({ type: "sale", x: ship.x, y: ship.y });
+    return true;
+  }
+
+  /** Pays the player back for an order that can't be handed over: a module is kept whole in the store, a hull's parts go back. */
+  private refundOrder(base: Base, order: WorkOrder): void {
+    const account = this.accountOf(this.ship);
+    if (order.kind === "hull") {
+      this.chargeForService(account, -order.net, base);
+      return;
+    }
+    // Its inputs were taken: the module is made after all, and the store keeps it.
+    this.flow(order.part, order.count);
+    this.addTo(base.stock, order.part, order.count);
+    account.credits += order.paid;
+    base.account.credits -= order.paid;
+  }
+
+  /**
+   * Where the player's modules on order will go: the mounts, bay spots and locker spots they hold
+   * until they're handed over, so a second buy plans round the first.
+   */
+  private reserved(): { mounts: Set<MountId>; hold: Placed[]; lockers: Map<string, Placed[]> } {
+    const out = { mounts: new Set<MountId>(), hold: [] as Placed[], lockers: new Map<string, Placed[]>() };
+    for (const base of this.bases) {
+      for (const factory of base.factories) {
+        for (const job of orderJobs(factory)) {
+          const order = job.order!;
+          if (order.kind !== "module") continue;
+          if (order.plan.where === "mount") for (const mount of order.plan.mounts) out.mounts.add(mount);
+          else if (order.plan.where === "hold") out.hold.push(...order.plan.spots);
+          else out.lockers.set(base.id, [...(out.lockers.get(base.id) ?? []), ...order.plan.spots]);
+        }
+      }
+    }
+    return out;
+  }
+
+  /** Whether a hull is on order for the player anywhere: being built, in line, or done and waiting. */
+  hullOnOrder(): boolean {
+    return this.bases.some((base) => base.factories.some((factory) => factory.ready.length > 0 || orderJobs(factory).some((job) => job.order!.kind === "hull")));
+  }
+
+  /**
+   * The player's orders at a base, for the shop's bars: what each makes, how far along it is (0
+   * until it starts, 1 for a hull done and waiting for them) and the seconds until it's done.
+   */
+  ordersAt(base: Base): { makes: string; progress: number; seconds: number }[] {
+    const out: { makes: string; progress: number; seconds: number }[] = [];
+    for (const factory of base.factories) {
+      const speed = Math.max(1e-9, this.factoryData(base, factory)?.speed ?? 1);
+      let wait = 0;
+      for (const job of orderJobs(factory)) {
+        wait += job.left / speed;
+        out.push({ makes: job.makes, progress: progressOf(job), seconds: wait });
+      }
+      for (const order of factory.ready) if (order.kind === "hull") out.push({ makes: order.model, progress: 1, seconds: 0 });
+    }
+    return out;
+  }
+
+  /** How long a workshop works on a hull at speed 1: 12 s for each part A its price spends, as a module takes for each it's made from. */
+  hullWorkTime(model: ShipModel): number {
+    return 12 * this.stockFor(this.hullPrice(model));
+  }
+
+  /**
+   * Hands over every order at once, as if its bar had filled, in the order they'd have finished:
+   * for tests that buy and look at what they got, not at the wait.
+   */
+  finishOrders(): void {
+    for (const base of this.bases) {
+      for (const factory of base.factories) {
+        for (;;) {
+          const job = factory.job?.order ? factory.job : factory.queue.find((each) => each.order);
+          if (!job) break;
+          if (job === factory.job) factory.job = null;
+          else factory.queue.splice(factory.queue.indexOf(job), 1);
+          this.finishOrder(base, factory, job);
+        }
+        // A hull done while the player was away goes to them now, if they're in its dock.
+        factory.ready = factory.ready.filter((order) => !this.handOverHull(base, order));
+        if (!factory.job) factory.state = { is: "idle" };
+      }
+    }
   }
 
   /**
@@ -4600,15 +4862,17 @@ export class Sim {
 
   /**
    * Works out where gear the player buys would go, and changes nothing: on the mounts it
-   * takes, or all in the bay, or all in the locker here. With `into`, only that spot.
+   * takes, or all in the bay, or all in the locker here. With `into`, only that spot. What the
+   * player already has on order holds its spot until it's handed over.
    */
   private planBuy(ship: Ship, id: PartId, into?: BuyInto): BuyPlan {
     const modules: Module[] = Array.from({ length: partOf(id).set ?? 1 }, () => ({ part: id, wear: 0 }));
     const mounts = mountsFor(ship, id);
     const wrong = "That spot won't take it";
     const none = "No room on the ship or in your locker here";
+    const held = ship === this.ship ? this.reserved() : { mounts: new Set<MountId>(), hold: [], lockers: new Map<string, Placed[]>() };
     if (!into || into.at === "mount") {
-      const free = mounts.length > 0 && mounts.every((mount) => !ship.fit[mount]);
+      const free = mounts.length > 0 && mounts.every((mount) => !ship.fit[mount] && !held.mounts.has(mount));
       if (into && !(mounts.includes(into.mount) && free)) return { refused: wrong };
       if (free) return { where: "mount", mounts };
       if (into) return { refused: wrong };
@@ -4616,12 +4880,13 @@ export class Sim {
     const base = this.baseAt(ship);
     const bay = !into || into.at === "hold" ? this.bayGrid(ship) : null;
     if (bay) {
-      const spots = this.planSpots(bay, this.packed(ship), modules, into?.at === "hold" ? into.spot : undefined, true);
+      const spots = this.planSpots(bay, [...this.packed(ship), ...held.hold], modules, into?.at === "hold" ? into.spot : undefined, true);
       if (spots) return { where: "hold", spots };
     }
     if (base && (!into || into.at === "locker")) {
       const locker = this.lockerAt(base);
-      const spots = this.planSpots(this.lockerGrid(locker), locker.items, modules, into?.at === "locker" ? into.spot : undefined, false);
+      const there = [...locker.items, ...(held.lockers.get(base.id) ?? [])];
+      const spots = this.planSpots(this.lockerGrid(locker), there, modules, into?.at === "locker" ? into.spot : undefined, false);
       if (spots) return { where: "locker", spots };
     }
     return { refused: into ? wrong : none };
@@ -4663,17 +4928,21 @@ export class Sim {
    * With `free` (the dev panel's hull switch) it doesn't matter where you are, what the station
    * sells or what it costs, and a part with room in neither the locker nor the new bay is
    * dropped rather than refused.
+   *
+   * With `paid` (a hull the workshop has built, handed over) it is only the dock that matters:
+   * the money changed hands when it was ordered.
    */
-  planHull(ship: Ship, model: ShipModel, free = false): HullPlan | { refused: string } {
+  planHull(ship: Ship, model: ShipModel, free = false, paid = false): HullPlan | { refused: string } {
     const base = this.baseAt(ship);
     if (ship !== this.ship) return { refused: "Only you can buy a hull" };
     if (!free && (!base || !this.atShop(ship))) return { refused: "Only in a dock" };
-    if (!free && !this.hullsSold(base!).includes(model)) return { refused: "Not sold here" };
+    if (!free && !paid && !this.hullsSold(base!).includes(model)) return { refused: "Not sold here" };
     if (model === ship.model) return { refused: "You fly one already" };
+    if (!free && !paid && this.hullOnOrder()) return { refused: "A hull is on order already" };
     const price = free ? 0 : this.hullPrice(model);
     const tradeIn = free ? 0 : this.hullPrice(ship.model);
     const net = price - tradeIn;
-    if (net > 0 && this.accountOf(ship).credits < net) return { refused: "Not enough credits" };
+    if (!paid && net > 0 && this.accountOf(ship).credits < net) return { refused: "Not enough credits" };
 
     const own = hullDefaults(ship.model);
     const fit: Partial<Record<MountId, Module>> = {};
@@ -4766,7 +5035,7 @@ export class Sim {
     spare.sort((a, b) => cellCount(b) - cellCount(a));
     for (const module of [...spare, ...overflow]) {
       if (lockerNow && lockerGrid) {
-        const there = [...lockerNow.items, ...locker];
+        const there = [...lockerNow.items, ...(base ? this.reserved().lockers.get(base.id) ?? [] : []), ...locker];
         const inLocker = autoPlace(lockerGrid, there, module);
         if (inLocker && canPlace(lockerGrid, there, inLocker)) {
           locker.push(inLocker);
@@ -4808,7 +5077,9 @@ export class Sim {
 
   /**
    * Buys a hull for the player at the dock they're in, trading in the one they fly, as
-   * `planHull` lays out. Returns whether it went through; why not is in `buyRefused`.
+   * `planHull` lays out. Returns whether it went through; why not is in `buyRefused`. With a
+   * workshop at the station it is built to order: paid for now, and the ship becomes it when the
+   * bar fills, or when they're next in this dock.
    */
   buyHull(ship: Ship, model: ShipModel): boolean {
     const plan = this.planHull(ship, model);
@@ -4821,7 +5092,11 @@ export class Sim {
     // The yard builds the new hull from its parts and breaks the old one down into them.
     this.chargeForService(account, plan.price, base);
     this.chargeForService(account, -plan.tradeIn, base);
-    this.changeHull(ship, model, plan);
+    const workshop = this.factoryFor(base, "workshop");
+    if (workshop) {
+      const time = this.hullWorkTime(model);
+      workshop.queue.push({ makes: model, yields: 1, left: time, total: time, order: { kind: "hull", model, from: ship.model, net: plan.net } });
+    } else this.changeHull(ship, model, plan);
     this.buyRefused = null;
     this.events.push({ type: "sale", x: ship.x, y: ship.y });
     return true;
@@ -4893,13 +5168,11 @@ export class Sim {
     if (player && !isProgram(id)) {
       const plan = this.planBuy(ship, id, into);
       if (!("where" in plan)) return refuse(plan.refused);
-      this.supply(account, id, base);
-      if (plan.where === "mount") {
-        for (const mount of plan.mounts) ship.fit[mount] = { part: id, wear: 0 };
-        refresh(ship);
-        if (part.kind === "computer") trimPrograms(ship);
-      } else if (plan.where === "hold") ship.hold.push(...plan.spots);
-      else this.lockerAt(this.baseAt(ship)!).items.push(...plan.spots);
+      // Made to order at the workshop, and handed over when it's done; or handed over now.
+      if (!this.orderModule(account, id, base, plan)) {
+        this.supply(account, id, base);
+        this.placeBought(ship, id, plan, this.baseAt(ship));
+      }
     } else {
       // What it replaces has to find room in the player's locker.
       const bought = this.attempt(ship, base, () => {
@@ -5447,6 +5720,19 @@ export class Sim {
     return onBody(station, dockOf(station) ?? { x: 0, y: 0 }, previous);
   }
 
+  /** For the dev panel: the player's ship jumps into the dock of the nearest station, at rest. Returns the station's name. */
+  devDock(): string | null {
+    const ship = this.ship;
+    const near = [...this.bases].sort((a, b) => Math.hypot(a.body.x - ship.x, a.body.y - ship.y) - Math.hypot(b.body.x - ship.x, b.body.y - ship.y))[0];
+    if (!near) return null;
+    const dock = this.dockPoint(false, near.body);
+    ship.x = ship.px = dock.x;
+    ship.y = ship.py = dock.y;
+    ship.vx = ship.vy = 0;
+    this.clickPilot.cancel();
+    return this.baseName(near.id);
+  }
+
   /** A rock, shaped by the world's dice, or by `roll` when given (a fresh field's own). */
   makeRock(tier: number, x: number, y: number, vx: number, vy: number, roll: () => number = this.random): Rock {
     const points = 8 + Math.floor(roll() * 4);
@@ -5555,6 +5841,7 @@ export class Sim {
     this.spendPirateCredits();
     for (const base of this.bases) this.moveHauler(base, dt);
     for (const base of this.bases) this.refineBase(base, dt);
+    for (const base of this.bases) this.runFactories(base, dt);
     this.moveBlackMarket(dt);
     lap?.("economy");
     if (this.tuning.chatter) this.chatter.update(this, dt);

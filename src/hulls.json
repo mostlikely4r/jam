@@ -24,6 +24,7 @@
     "projects",
     "radio",
     "black market",
+    "factory",
     "refinery pad",
     "block pad",
     "berth"
@@ -1786,6 +1787,23 @@
           "y": 6,
           "angle": 0,
           "scale": 1
+        },
+        {
+          "id": "workshop",
+          "name": "Workshop",
+          "types": [
+            "factory"
+          ],
+          "x": 0,
+          "y": -12,
+          "angle": 0,
+          "scale": 1,
+          "framePart": "factory",
+          "data": {
+            "kind": "workshop",
+            "speed": 20,
+            "mode": "order"
+          }
         },
         {
           "id": "refineryPad",

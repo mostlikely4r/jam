@@ -4,10 +4,11 @@ import type { Sim } from "./sim";
  * Bump this whenever what a save holds changes shape, so an old save is turned away
  * rather than loaded into a world it no longer fits.
  */
-export const SAVE_VERSION = 12;
+export const SAVE_VERSION = 13;
 /**
  * The oldest save that still loads: `Sim.restore` reads saves from here on into today's shape.
  * Version 11 kept a project's parts and funding loose on it, before construction was generic.
+ * Version 12 had no factories at work (`docs/recipes-factories-plan.md`): its stations start idle.
  */
 export const OLDEST_SAVE = 11;
 

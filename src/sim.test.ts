@@ -8,6 +8,7 @@ import { bodyAt, type FieldSpec, MAX_HULL, type Poi, pullAt, SHIP_RADIUS, Sim, t
 import { partOf as partInfo } from "./parts";
 import { PROGRAM_PARTS } from "./programs";
 import { frameMountSpot } from "./frameParts";
+import { buyNow } from "./testing";
 
 /** Where the station frame's dock sits from its middle, along its own axis. */
 const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
@@ -1061,21 +1062,21 @@ describe("parts", () => {
     const sim = bareSim();
     const price = sim.partPrice("reverse");
     sim.ship.credits = price - 1;
-    expect(sim.buyPart(sim.ship, "reverse")).toBe(false);
+    expect(buyNow(sim, sim.ship, "reverse")).toBe(false);
     sim.ship.credits = price;
     sim.ship.x += 2000;
-    expect(sim.buyPart(sim.ship, "reverse")).toBe(false);
+    expect(buyNow(sim, sim.ship, "reverse")).toBe(false);
     sim.ship.x -= 2000;
-    expect(sim.buyPart(sim.ship, "reverse")).toBe(true);
+    expect(buyNow(sim, sim.ship, "reverse")).toBe(true);
     expect(sim.ship.credits).toBe(0);
     expect(sim.ship.parts.has("reverse")).toBe(true);
-    expect(sim.buyPart(sim.ship, "reverse")).toBe(false);
+    expect(buyNow(sim, sim.ship, "reverse")).toBe(false);
   });
 
   it("sells a part back at full price", () => {
     const sim = bareSim();
     sim.ship.credits = sim.partPrice("strafe");
-    sim.buyPart(sim.ship, "strafe");
+    buyNow(sim, sim.ship, "strafe");
     expect(sim.sellPart(sim.ship, "strafe")).toBe(true);
     expect(sim.ship.credits).toBe(sim.partPrice("strafe"));
     expect(sim.ship.parts.has("strafe")).toBe(false);
@@ -1290,7 +1291,7 @@ describe("repairs", () => {
   it("can't buy while in debt", () => {
     const sim = dockedSim();
     sim.ship.credits = -10;
-    expect(sim.buyPart(sim.ship, "meters")).toBe(false);
+    expect(buyNow(sim, sim.ship, "meters")).toBe(false);
     expect(sim.buyDrone(sim.ship)).toBeNull();
   });
 });
@@ -1805,7 +1806,7 @@ describe("the new ship", () => {
         sim.ship.credits = 1000;
         sim.ship.x = sim.station.x + DOCK_OFFSET;
         sim.ship.y = sim.station.y;
-        expect(sim.buyPart(sim.ship, "tractor")).toBe(true);
+        expect(buyNow(sim, sim.ship, "tractor")).toBe(true);
       }
     });
   });
@@ -2015,8 +2016,8 @@ describe("the new ship", () => {
     sim.ship.credits = 1000;
     sim.ship.x = sim.station.x + DOCK_OFFSET;
     sim.ship.y = sim.station.y;
-    expect(sim.buyPart(sim.ship, "gun2")).toBe(true);
-    expect(sim.buyPart(sim.ship, "clickMove")).toBe(true);
+    expect(buyNow(sim, sim.ship, "gun2")).toBe(true);
+    expect(buyNow(sim, sim.ship, "clickMove")).toBe(true);
     expect(sim.orderMove(sim.ship.x + 50, sim.ship.y)).toBe(true);
     sim.sellPart(sim.ship, "clickMove");
     expect(sim.clickPilot.active).toBe(false);

@@ -8,6 +8,7 @@ import { MAX_HULL, SHIP_RADIUS, STATION_HALF, Sim, TICK } from "./sim";
 import { ClickPilot } from "./pilot";
 import { partOf as partInfo } from "./parts";
 import { frameMountSpot } from "./frameParts";
+import { buyNow } from "./testing";
 
 /** Where the station frame's dock sits from its middle, along its own axis. */
 const DOCK_OFFSET = frameMountSpot("station", "dock")!.x;
@@ -1227,7 +1228,7 @@ describe("pirate and defender", () => {
       const dock = sim.dockPoint(false, sim.station);
       pin(pilot.ship, dock.x, dock.y);
       pilot.ship.credits = 100000;
-      expect(sim.buyPart(pilot.ship, "reverse")).toBe(true);
+      expect(buyNow(sim, pilot.ship, "reverse")).toBe(true);
       const heard = listen(sim, 2);
       const said = heard.find((line) => line.speaker === pilot.ship);
       expect(said?.text).toContain("reverse thruster");
@@ -1268,7 +1269,7 @@ describe("pirate and defender", () => {
       sim.ship.credits = 100000;
       expect(sim.unlocked("spinStabilizer")).toBe(true);
       expect(sim.unlocked("drone")).toBe(false);
-      expect(sim.buyPart(sim.ship, "reverse")).toBe(false);
+      expect(buyNow(sim, sim.ship, "reverse")).toBe(false);
       expect(sim.buyDrone(sim.ship)).toBeNull();
     });
 
@@ -1330,7 +1331,7 @@ describe("pirate and defender", () => {
       expect(sim.unlocked("tractor")).toBe(false);
       expect(sim.bases[0].blueprintsOrdered.has("tractor")).toBe(true);
       expect(sim.blueprintQueue(sim.bases[0])).not.toContain("tractor");
-      expect(sim.buyPart(sim.ship, "tractor")).toBe(false);
+      expect(buyNow(sim, sim.ship, "tractor")).toBe(false);
       expect(sim.fundBlueprint(sim.ship, "tractor")).toBe(false);
       expect(sim.ship.credits).toBe(paid);
 
@@ -1502,7 +1503,7 @@ describe("pirate and defender", () => {
       placeInDock(sim, sim.ship);
       sim.ship.credits = 100000;
       expect(sim.ship.model).toBe("racer");
-      expect(sim.buyPart(sim.ship, "turret")).toBe(false);
+      expect(buyNow(sim, sim.ship, "turret")).toBe(false);
     });
   });
 
@@ -2509,10 +2510,10 @@ describe("pirate and defender", () => {
         placeInDock(sim, sim.ship);
         sim.ship.credits = 10000;
         const id = "reverse";
-        expect(sim.buyPart(sim.ship, id)).toBe(false);
+        expect(buyNow(sim, sim.ship, id)).toBe(false);
         const ore = sim.stockFor(sim.partPrice(id));
         sim.bases[0].stock.set("partA", ore);
-        expect(sim.buyPart(sim.ship, id)).toBe(true);
+        expect(buyNow(sim, sim.ship, id)).toBe(true);
         expect(sim.partA(sim.bases[0])).toBe(0);
         expect(sim.sellPart(sim.ship, id)).toBe(true);
         expect(sim.partA(sim.bases[0])).toBe(0);

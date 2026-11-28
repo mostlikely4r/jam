@@ -584,7 +584,7 @@ A Targeting tweak for which target becomes main next (order, nearest, in front, 
 an Auto targeting program with a max range, so idle mining doesn't stop when the queue runs dry.
 
 ## S-64 · Nothing vanishes in view
-- status: specced
+- status: building
 - area: World
 - effort: M
 - plan: docs/in-view-plan.md

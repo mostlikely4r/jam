@@ -127,16 +127,17 @@ Knobs read by chatter, the new situation line kinds, the cast dealt to every bas
 Bumps `SAVE_VERSION`. Stops for the user to play.
 strong: changes the save format and widens Q-10's regulars record.
 
-## Q-30 · Nothing vanishes in view · build
+## Q-60 · Nothing vanishes in view, step 2: the in-view check on every rule · build
 - state: queued
 - who: strong
+- after: Q-30
 - backlog: S-64
 - plan: docs/in-view-plan.md
-- added: 2026-11-25
+- added: 2026-11-28
 
-Rests on a guess about where it was seen: step 1 (the camera as the viewer) stops for the user
-to try.
-strong: rests on a guess about where things are seen, so the ground is unclear.
+The reach check on each sleep, record and forget rule in the plan's table, and `farside.ts`'s
+list to match. Waits on the user trying step 1 (P-9): what they still see vanish may change it.
+strong: touches every out-of-view rule at once; parity must hold.
 
 ## Q-32 · Blueprints for programs and hulls · build
 - state: queued
@@ -285,6 +286,18 @@ the start menu cards to each hull's own outline (and its mounts) instead of a ra
 cheap: small and visible, with a clear outcome.
 
 ## Done
+
+## Q-30 · Nothing vanishes in view, step 1: the camera is the viewer · build
+- state: done
+- done: 2026-11-28
+- who: strong
+- backlog: S-64
+- plan: docs/in-view-plan.md
+- added: 2026-11-25
+
+Rests on a guess about where it was seen: step 1 (the camera as the viewer) stops for the user
+to try.
+strong: rests on a guess about where things are seen, so the ground is unclear.
 
 ## Q-39 · Face cast, step 1: the pool and the roll page · build
 - state: done

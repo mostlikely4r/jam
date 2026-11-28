@@ -1,6 +1,6 @@
 # In view plan
 
-Written 2026-11-25, from an inbox note (I-15). Nothing here is built yet.
+Written 2026-11-25, from an inbox note (I-15). Step 1 *built* 2026-11-28; step 2 waits on the user trying it.
 
 ## Why
 
@@ -46,6 +46,14 @@ every field it passes is asleep; or a hauler leaving a station they were watchin
 
 `setView` and `viewer()` as above, the main loop (`src/main.ts`, where it calls the renderer)
 handing over the renderer's view. Fields and traffic then wake and sleep around the camera.
+
+*Built* 2026-11-28. `Renderer.viewArea()` gives the last frame's camera centre and half-diagonal;
+the main loop hands it to `sim.setView` after each draw, and `viewer()` returns it (the ship when
+none is set; `reset` and `restore` clear it). Beyond the plan: a field's drifting-in rocks now
+start clear of the camera's whole screen rather than 2000 from the ship (`driftInto`, and the
+regrowth laid when a field wakes), so none appears in view of the pod or at the widest zoom. The
+rest of `reach` waits for step 2's checks. Tests: `records.test.ts` (traffic
+the camera watches stays flown), `sim.test.ts` (a field the camera is on stays awake).
 
 Stop here for the user to try: die near traffic and watch the pod fly home; fly fast past a
 field. Does anything still vanish in view?

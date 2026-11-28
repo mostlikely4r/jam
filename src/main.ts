@@ -1985,6 +1985,8 @@ function frame(now: number): void {
   // The mouse is passed along for the arrows' tooltips, which are drawn and so can't be hit
   // any other way: only while the game's own view is what's under the pointer.
   renderer.draw(sim, paused ? 1 : accumulator / TICK, paused ? 0 : seconds, paused || chart.isOpen ? null : mouse);
+  // The sim wakes and sleeps around what the camera shows: the wreck, the pod's ride, the lead.
+  sim.setView(renderer.viewArea());
   chart.draw(sim);
 
   hudTimer -= seconds;

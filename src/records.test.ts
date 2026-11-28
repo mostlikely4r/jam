@@ -61,6 +61,20 @@ describe("traffic out of view", () => {
     expect(sim.ships).toContain(ship);
   });
 
+  it("stays a flown ship while the camera watches it, wherever the player's ship is", () => {
+    const sim = homeSim(1, { ...QUIET });
+    // The ship is far out; the camera is on the field, where the traffic mines.
+    run(sim, 2, () => {
+      parkAway(sim);
+      sim.setView({ x: sim.field.x, y: sim.field.y, reach: 2700 });
+    });
+    expect(sim.traffic.some((pilot) => !pilot.record)).toBe(true);
+    // Once the camera is back with the ship, they're records again.
+    sim.setView(null);
+    run(sim, 2, () => parkAway(sim));
+    expect(sim.traffic.every((pilot) => pilot.record)).toBe(true);
+  });
+
   it("keeps mining, selling and shopping as a record", () => {
     const sim = homeSim(1, { ...QUIET });
     const rocks = () => sim.rocks.length + [...sim.sleeping.values()].reduce((sum, field) => sum + field.rocks.length, 0);

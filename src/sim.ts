@@ -1581,6 +1581,7 @@ export class Sim {
 
   /** Picks up from a snapshot. Anything a newer ship has that the saved one lacks starts as new. */
   restore(saved: unknown): void {
+    this.view = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data = saved as any;
     // Nothing may end up owning itself: a save where something does is turned away, unread.
@@ -1659,6 +1660,8 @@ export class Sim {
   }
 
   reset(seed: number): void {
+    // A new game's camera is on its new ship until the next frame says otherwise.
+    this.view = null;
     this.seed = seed >>> 0;
     this.randomState = { a: seed >>> 0 };
     this.lookState = { a: (seed ^ 0x5bd1e995) >>> 0 };
@@ -6875,11 +6878,31 @@ export class Sim {
   }
 
   /**
-   * Where the camera is. Today it's always on the player's ship; a camera switch or a jump
-   * would move it, and with it what's awake.
+   * What the player is watching, as of the last drawn frame: the camera's centre and the
+   * half-diagonal of the screen around it. The game sets it each frame; tests, no-player runs
+   * and the bots never do, and for them the viewer stays the ship.
+   */
+  private view: { x: number; y: number; reach: number } | null = null;
+
+  /** The game hands over what the camera shows, so what's awake follows it, not just the ship. */
+  setView(view: { x: number; y: number; reach: number } | null): void {
+    this.view = view;
+  }
+
+  /**
+   * Where the camera is: on the ship, or wherever the game says it is watching (the wreck, the
+   * pod riding home, the lead at speed). What's awake follows it.
    */
   viewer(): { x: number; y: number } {
-    return this.ship;
+    return this.view ?? this.ship;
+  }
+
+  /**
+   * How far a new thing must start from the viewer to be out of sight: clear of the player by
+   * the usual distance, and of the whole screen when the game has said what it shows.
+   */
+  private clearOfView(): number {
+    return Math.max(INFLOW_CLEAR_OF_PLAYER, (this.view?.reach ?? 0) + 200);
   }
 
   /**
@@ -6967,6 +6990,7 @@ export class Sim {
     const room = field.full - sleeping.rocks.length;
     const grown = Math.min(room, Math.floor(((this.clock - sleeping.since) * perMinute) / 60));
     const viewer = this.viewer();
+    const clear = this.clearOfView();
     for (let i = 0; i < grown; i++) {
       // Clear of the camera, should it have jumped right into the field.
       for (let attempt = 0; attempt < 8; attempt++) {
@@ -6974,7 +6998,7 @@ export class Sim {
         const dir = this.random() * Math.PI * 2;
         const x = poi.x + Math.cos(dir) * dist;
         const y = poi.y + Math.sin(dir) * dist;
-        if (Math.hypot(x - viewer.x, y - viewer.y) < INFLOW_CLEAR_OF_PLAYER) continue;
+        if (Math.hypot(x - viewer.x, y - viewer.y) < clear) continue;
         const speed = drift * this.random();
         const heading = this.random() * Math.PI * 2;
         this.rocks.push(this.makeRock(INFLOW_TIER, x, y, Math.cos(heading) * speed, Math.sin(heading) * speed));
@@ -6997,7 +7021,9 @@ export class Sim {
 
   /** One field's inflow. Returns the timer as it stands after. */
   private driftInto(field: { poi: Poi; radius: number }, perMinute: number, most: number, count: number, timer: number, dt: number): number {
-    const { ship } = this;
+    // Clear of the camera, wherever it is: a rock doesn't appear where the player is looking.
+    const ship = this.viewer();
+    const clear = this.clearOfView();
     if (perMinute <= 0 || count >= most) return timer;
     timer -= (dt * perMinute) / 60;
     if (timer > 0) return timer;
@@ -7007,7 +7033,7 @@ export class Sim {
       const dir = this.random() * Math.PI * 2;
       const x = field.poi.x + Math.cos(dir) * distance;
       const y = field.poi.y + Math.sin(dir) * distance;
-      if (Math.hypot(x - ship.x, y - ship.y) < INFLOW_CLEAR_OF_PLAYER) continue;
+      if (Math.hypot(x - ship.x, y - ship.y) < clear) continue;
       const rock = this.makeRock(
         INFLOW_TIER,
         x,

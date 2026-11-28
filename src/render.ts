@@ -257,6 +257,16 @@ export class Renderer {
     }
   }
 
+  /**
+   * What the last drawn frame showed: the camera's centre and how far the screen reaches from
+   * it to a corner, in world units. Before the first frame, nothing.
+   */
+  viewArea(): { x: number; y: number; reach: number } | null {
+    const { camX, camY, scale, width, height } = this.view;
+    if (width <= 0 || height <= 0) return null;
+    return { x: camX, y: camY, reach: Math.hypot(width, height) / 2 / scale };
+  }
+
   /** The world position under a point on the screen, as of the last drawn frame. */
   screenToWorld(clientX: number, clientY: number): { x: number; y: number } {
     const { camX, camY, scale, dpr, width, height } = this.view;

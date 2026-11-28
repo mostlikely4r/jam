@@ -556,6 +556,26 @@ describe("station", () => {
       expect(sim.sleeping.has("second:0")).toBe(false);
     });
 
+    it("wakes and stays awake where the camera is, though the ship is far off", () => {
+      const sim = withSecond();
+      const { poi } = sim.extraFields[1];
+      // The ship stays at the first field; the camera (the pod riding home, say) is at the second.
+      leaveSecond(sim);
+      sim.setView({ x: poi.x, y: poi.y, reach: 2700 });
+      sim.step();
+      expect(sim.sleeping.has("second:0")).toBe(false);
+      for (let i = 0; i < Math.round(5 / TICK); i++) {
+        leaveSecond(sim);
+        sim.setView({ x: poi.x, y: poi.y, reach: 2700 });
+        sim.step();
+      }
+      expect(sim.sleeping.has("second:0")).toBe(false);
+      // With no view, it's the ship again: the second field falls asleep.
+      sim.setView(null);
+      run(sim, 1);
+      expect(sim.sleeping.has("second:0")).toBe(true);
+    });
+
     it("carries to its own range", () => {
       const sim = withSecond({ carryFull: 0, carryNone: 1000 });
       expect(sim.carryRange(sim.extraFields[1].poi)).toEqual({ full: 0, none: 1000 });
